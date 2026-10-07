@@ -44,4 +44,5 @@ export interface SofiaApiConfig {
   runRetentionMs?: number;
   requestTimeoutMs?: number;
   maxConcurrentRunsPerKey?: number;
+  securityAdminScope?: string;
 }
