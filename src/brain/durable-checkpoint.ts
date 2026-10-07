@@ -61,6 +61,7 @@ export class DurableCheckpointManager implements CheckpointManager {
       const checkpoint = await this.store.load(checkpointId);
       if (!checkpoint) throw new Error("Unknown checkpoint");
       this.memory.set(checkpointId, checkpoint);
+      this.local.remember(checkpoint);
     }
 
     return this.local.rollback(checkpointId, signal);
