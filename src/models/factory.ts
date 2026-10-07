@@ -14,6 +14,7 @@ import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
+import { discoverProjectContext } from "../brain/project-context.js";
 
 function intEnv(name: string, fallback: number, minimum = 0): number {
   const value = Number(process.env[name]);
@@ -116,6 +117,7 @@ function createBrainFactory(
         tools: toolGateway,
         allowShell: dependencies.policy.allowShell,
         allowNetwork: dependencies.policy.allowNetwork,
+        projectContextLoader: () => discoverProjectContext(dependencies.runtime),
       },
       limits,
     });
