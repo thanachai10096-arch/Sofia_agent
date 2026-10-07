@@ -9,7 +9,7 @@ import type { RunStore } from "./run-store.js";
 export type JobStatus="queued"|"running"|"completed"|"failed"|"cancelled";
 export interface JobRecord{id:string;status:JobStatus;createdAt:string;updatedAt:string;task:string;ownerKeyId?:string;snapshot?:BrainRunSnapshot;result?:Awaited<ReturnType<SofiaBrain["run"]>>;error?:string;}
 export interface JobRuntime{
- submit(input:Omit<BrainRunInput,"signal"|"resume">):Promise<JobRecord>;
+ submit(input:Omit<BrainRunInput,"signal"|"resume"> & { ownerKeyId?: string }):Promise<JobRecord>;
  get(id:string):Promise<JobRecord|undefined>;
  resume(id:string,signal?:AbortSignal):Promise<JobRecord>;
  cancel(id:string):Promise<boolean>;
