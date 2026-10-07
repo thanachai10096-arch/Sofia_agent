@@ -70,7 +70,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           const result = await agent.run({
             task: input.task,
-            ...(input.context ? { context: input.context } : {}),
+            ...(input.context
+              ? {
+                  context:
+                    typeof input.context === "string"
+                      ? input.context
+                      : JSON.stringify(input.context),
+                }
+              : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             onEvent: (event) => send({ type: "event", runId: id, event }),
           });
@@ -91,7 +98,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           const result = await agent.run({
             task: input.task,
-            ...(input.context ? { context: input.context } : {}),
+            ...(input.context
+              ? {
+                  context:
+                    typeof input.context === "string"
+                      ? input.context
+                      : JSON.stringify(input.context),
+                }
+              : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           });
           const response: AgentRunResponse = { id, status: "completed", result };
