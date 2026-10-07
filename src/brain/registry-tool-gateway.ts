@@ -29,6 +29,7 @@ interface SnapshotRecord {
   id: string;
   revision: string;
   files: string[];
+  fingerprints: Record<string, string>;
 }
 
 export class RegistryToolGateway implements ToolGateway {
@@ -196,7 +197,16 @@ export class RegistryToolGateway implements ToolGateway {
     const revision = digest(revisionSource);
     const id = randomUUID();
 
-    this.snapshots.set(id, { id, revision, files });
+    const fingerprints: Record<string, string> = {};
+    for (const file of files) {
+      try {
+        fingerprints[file] = digest(await this.dependencies.runtime.readFile(file));
+      } catch {
+        fingerprints[file] = "<missing>";
+      }
+    }
+
+    this.snapshots.set(id, { id, revision, files, fingerprints });
 
     return {
       id,
@@ -215,13 +225,11 @@ export class RegistryToolGateway implements ToolGateway {
     if (!baseline) throw new Error("Unknown baseline snapshot");
 
     const current = await this.snapshot(signal);
-    const before = new Set(baseline.files);
-    const after = new Set(this.snapshots.get(current.id)!.files);
+    const currentRecord = this.snapshots.get(current.id);
+    if (!currentRecord) throw new Error("Current snapshot was not retained");
 
-    const names = (line: string) => line.length > 3 ? line.slice(3).trim() : line;
-    return [...new Set([...before, ...after])]
-      .filter((entry) => before.has(entry) !== after.has(entry))
-      .map(names)
-      .sort();
-  }
-}
+    const names = [...new Set([...baseline.files, ...currentRecord.files])].sort();
+    return names.filter((file) =>
+      baseline.fingerprints[file] !== currentRecord.fingerprints[file],
+    );
+  }}
