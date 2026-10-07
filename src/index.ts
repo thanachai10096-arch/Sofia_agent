@@ -26,3 +26,7 @@ export type * from "./review/code-review.js";
 
 export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
 export type * from "./brain/project-memory.js";
+
+export type * from "./experience/types.js";
+export { modeFor } from "./experience/types.js";
+export { progressFromAgentEvent } from "./experience/progress.js";
