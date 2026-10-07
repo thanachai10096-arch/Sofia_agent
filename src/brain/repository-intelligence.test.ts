@@ -23,5 +23,5 @@ test("repository intelligence builds files, symbols, dependencies and task relev
   assert.ok(map.relevantFiles.includes("src/auth/login.ts"));
   assert.ok(map.testMappings.some((item) => item.testPath === "src/auth/login.test.ts" && item.sourcePath === "src/auth/login.ts"));
   assert.ok(map.impactRanking.some((item) => item.path === "src/auth/login.ts"));
-  assert.ok(map.symbolReferences.some((item) => item.path === "src/auth/login.ts" && item.symbol === "login"));
+  assert.ok(map.symbolReferences.some((item) => item.fromPath === "src/auth/login.ts" && item.symbol === "login"));
 });
