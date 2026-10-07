@@ -12,6 +12,6 @@ test("execution trace keeps ordered bounded entries", () => {
   const entries = trace.snapshot();
   assert.equal(entries.length, 2);
   assert.deepEqual(entries.map((entry) => entry.sequence), [2, 3]);
-  assert.ok(entries[0].timestamp);
+  assert.ok(entries[0]?.timestamp);
   assert.equal(trace.size, 2);
 });
