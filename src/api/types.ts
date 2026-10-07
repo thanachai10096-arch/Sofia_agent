@@ -3,8 +3,10 @@ import type { AgentResult } from "../agent/types.js";
 export interface AgentRunInput {
   task: string;
   workspace?: string;
-  context?: Record<string, unknown>;
+  context?: Record<string, unknown>|string;
   maxSteps?: number;
+  stream?: boolean;
+  sessionId?: string;
 }
 
 export interface AgentRunResponse {
@@ -22,4 +24,6 @@ export interface ApiAuth {
 export interface SofiaApiConfig {
   apiKeys: Record<string, string[]>;
   maxBodyBytes?: number;
+  maxRunsPerKeyPerDay?: number;
+  maxToolCallsPerKeyPerDay?: number;
 }
