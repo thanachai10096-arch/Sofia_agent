@@ -12,6 +12,7 @@ export interface AgentRequest {
   task: string;
   context?: string;
   sessionId?: string;
+  principalId?: string;
   maxSteps?: number;
   acceptanceCriteria?: AcceptanceCriterion[];
   useBrain?: boolean;
