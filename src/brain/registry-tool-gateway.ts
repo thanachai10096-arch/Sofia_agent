@@ -3,7 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { ExecutionPolicy } from "../security/policy.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { ApprovalHandler } from "../agent/approval.js";
-import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, ToolCall } from "./types.js";
+import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, WorkspaceCheckpoint, ToolCall } from "./types.js";
+import { RuntimeCheckpointManager } from "./checkpoint.js";
 
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -37,12 +38,13 @@ interface SnapshotRecord {
 
 export class RegistryToolGateway implements ToolGateway {
   private readonly snapshots = new Map<string, SnapshotRecord>();
+  private readonly checkpoints: RuntimeCheckpointManager;
 
   constructor(
     private readonly dependencies: Pick<AgentDependencies, "runtime" | "tools">,
     private readonly policy: ExecutionPolicy,
     private readonly approval?: ApprovalHandler,
-  ) {}
+  ) {\n    this.checkpoints = new RuntimeCheckpointManager(dependencies.runtime);\n  }
 
   describe(name: string) {
     const tool = this.dependencies.tools.get(name);
