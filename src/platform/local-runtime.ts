@@ -44,6 +44,14 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
     async listFiles(p = ".") {
       return fs.readdir(resolve(p));
     },
+    async search(query, p = ".") {
+      const target = resolve(p);
+      const result = await run("rg", ["--line-number", "--hidden", "--glob", "!.git", query, "."], { cwd: target });
+      if (result.code === 0 || result.code === 1) {
+        return result.stdout.split(/\r?\n/).filter(Boolean);
+      }
+      return result.stderr ? [result.stderr] : [];
+    },
     run,
     git: (args, options) => run("git", args, options),
   };
