@@ -3,6 +3,7 @@ import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
 import { assertSafeStep, assertToolAllowed, loadExecutionPolicyFromEnv } from "../security/policy.js";
+import { progressFromAgentEvent } from "../experience/progress.js";
 
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
