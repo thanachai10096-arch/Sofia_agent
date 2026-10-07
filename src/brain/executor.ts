@@ -242,6 +242,8 @@ export class SofiaBrain {
   private projectContextLoaded = false;
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
+  private learnedSkills: Array<{ name: string; trigger: string; category: FailureCategory; strategy: Strategy; procedure: string[]; verification: string[] }> = [];
+  private learnedSkillsLoaded = false;
 
   constructor(
     private readonly dependencies: Dependencies,
@@ -350,8 +352,21 @@ export class SofiaBrain {
 
     if (!this.projectMemoryLoaded && this.dependencies.projectMemory) {
       this.projectMemoryLoaded = true;
-      try { this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.list()); }
-      catch { this.projectMemory = []; }
+      try {
+        this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.list());
+      } catch {
+        this.projectMemory = [];
+      }
+    }
+
+    if (!this.learnedSkillsLoaded && this.dependencies.skillLedger) {
+      this.learnedSkillsLoaded = true;
+      try {
+        const learned = await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.list()));
+        this.learnedSkills = [...learned];
+      } catch {
+        this.learnedSkills = [];
+      }
     }
 
     for (;;) {
@@ -366,6 +381,7 @@ export class SofiaBrain {
           decisions: this.decisions,
           projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined,
           projectMemory: this.projectMemory.slice(-12).map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, source: entry.source })),
+          learnedSkills: this.learnedSkills.slice(-8).map((skill) => ({ name: skill.name, trigger: skill.trigger, category: skill.category, strategy: skill.strategy, procedure: skill.procedure, verification: skill.verification })),
         },
       });
 
@@ -1099,7 +1115,7 @@ export class SofiaBrain {
         const last = this.diagnoses[this.diagnoses.length - 1]!;
         const strategy = this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation";
         const evidenceIds = verification.flatMap((item) => item.evidenceIds);
-        this.dependencies.skillLedger.record({
+        const learned = {
           name: "repair-" + last.category,
           trigger: last.message.slice(0, 240),
           category: last.category,
@@ -1107,7 +1123,9 @@ export class SofiaBrain {
           procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
           verification: verification.map((item) => item.criterionId),
           evidenceIds,
-        });
+        };
+        await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.record(learned)));
+        this.learnedSkills = [...this.learnedSkills.filter((item) => item.name !== learned.name), learned];
         if (this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
