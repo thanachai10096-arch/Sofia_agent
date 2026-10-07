@@ -12,6 +12,7 @@ import { runVerification } from "./verification.js";
 import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
 import { compactSkillContext, matchSkills } from "./skills.js";
 import type { SkillLedger } from "./learning.js";
+import { compactProjectContext, type ProjectContext } from "./project-context.js";
 
 import type {
   AcceptanceCriterion,
@@ -76,6 +77,8 @@ interface Dependencies {
   allowNetwork?: boolean;
   onEvent?: (event: BrainEvent) => void;
   skillLedger?: SkillLedger;
+  projectContext?: ProjectContext;
+  projectContextLoader?: () => Promise<ProjectContext>;
 }
 
 export interface BrainRunInput {
@@ -217,6 +220,8 @@ export class SofiaBrain {
   private readonly evidenceIndex: string[] = [];
   private readonly diagnoses: Diagnosis[] = [];
   private readonly decisions: Array<{ strategy: Strategy; reason: string }> = [];
+  private projectContext?: ProjectContext;
+  private projectContextLoaded = false;
 
   constructor(
     private readonly dependencies: Dependencies,
@@ -283,6 +288,11 @@ export class SofiaBrain {
     }
 
     const recent = this.observations.slice(-12);
+    if (!this.projectContextLoaded) {
+      this.projectContextLoaded = true;
+      if (this.dependencies.projectContextLoader) this.projectContext = await this.wait(this.dependencies.projectContextLoader);
+      else this.projectContext = this.dependencies.projectContext;
+    }
 
     for (;;) {
       this.signal.throwIfAborted();
@@ -294,6 +304,7 @@ export class SofiaBrain {
           observations: recent,
           diagnoses: this.diagnoses,
           decisions: this.decisions,
+          projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined,
         },
       });
 
