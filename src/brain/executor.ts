@@ -11,7 +11,7 @@ import {
 import { verificationCriteria } from "./verification.js";
 import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
 import { compactSkillContext, matchSkills } from "./skills.js";
-import type { SkillLedger } from "./learning.js";
+import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
@@ -242,7 +242,7 @@ export class SofiaBrain {
   private projectContextLoaded = false;
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
-  private learnedSkills: Array<{ name: string; trigger: string; category: FailureCategory; strategy: Strategy; procedure: string[]; verification: string[] }> = [];
+  private learnedSkills: LearnedSkillCandidate[] = [];
   private learnedSkillsLoaded = false;
 
   constructor(
@@ -797,6 +797,9 @@ export class SofiaBrain {
     });
 
     const skills = matchSkills(diagnosis.category, diagnosis.message);
+    const learned = this.dependencies.skillLedger?.rank
+      ? await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.rank!(diagnosis.category, diagnosis.message, 5)))
+      : [];
     const value = await this.infer("replan", {
       task,
       understanding,
@@ -804,6 +807,16 @@ export class SofiaBrain {
       diagnosis,
       strategy,
       matchedSkills: compactSkillContext(skills),
+      learnedSkills: learned.map((item) => ({
+        name: item.skill.name,
+        score: Math.round(item.score),
+        confidence: item.skill.confidence,
+        successes: item.skill.successes ?? 0,
+        attempts: item.skill.attempts ?? 0,
+        reasons: item.reasons,
+        procedure: item.skill.procedure,
+        verification: item.skill.verification,
+      })),
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
 
@@ -1087,6 +1100,22 @@ export class SofiaBrain {
           this.move("diagnosing");
           const diagnosis = this.diagnose(error);
 
+          if (this.dependencies.skillLedger?.recordFailure) {
+            const now = new Date().toISOString();
+            await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.recordFailure!({
+              id: "failure:" + diagnosis.fingerprint,
+              fingerprint: diagnosis.fingerprint,
+              category: diagnosis.category,
+              message: diagnosis.message.slice(0, 2000),
+              strategy: diagnosis.attemptedStrategies[diagnosis.attemptedStrategies.length - 1],
+              attempts: diagnosis.repeated,
+              resolved: false,
+              evidenceIds: this.observations.slice(-6).map((item) => item.evidenceId),
+              createdAt: now,
+              updatedAt: now,
+            })));
+          }
+
           const specialist = await this.delegateSubagent(
             input.task,
             {
@@ -1169,7 +1198,7 @@ export class SofiaBrain {
         const last = this.diagnoses[this.diagnoses.length - 1]!;
         const strategy = this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation";
         const evidenceIds = verification.flatMap((item) => item.evidenceIds);
-        const learned = {
+        const learned: LearnedSkillCandidate = {
           name: "repair-" + last.category,
           trigger: last.message.slice(0, 240),
           category: last.category,
@@ -1177,9 +1206,35 @@ export class SofiaBrain {
           procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
           verification: verification.map((item) => item.criterionId),
           evidenceIds,
+          source: "agent",
         };
         await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.record(learned)));
-        this.learnedSkills = [...this.learnedSkills.filter((item) => item.name !== learned.name), learned];
+        if (this.dependencies.skillLedger?.recordOutcome) {
+          await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.recordOutcome!({
+            skillName: learned.name,
+            success: true,
+            evidenceIds,
+            category: learned.category,
+            strategy: learned.strategy,
+            message: last.message,
+          })));
+        }
+        this.learnedSkills = [...(await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.list())))];
+        if (this.dependencies.skillLedger?.recordFailure) {
+          await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.recordFailure!({
+            id: "failure:" + last.fingerprint,
+            fingerprint: last.fingerprint,
+            category: last.category,
+            message: last.message.slice(0, 2000),
+            strategy: learned.strategy,
+            skillName: learned.name,
+            attempts: last.repeated,
+            resolved: true,
+            evidenceIds,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })));
+        }
         if (this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
