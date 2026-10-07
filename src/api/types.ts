@@ -7,11 +7,15 @@ export interface AgentRunInput {
   maxSteps?: number;
   stream?: boolean;
   sessionId?: string;
+  acceptanceCriteria?: Array<{ id: string; description: string; probe: { tool: string; input: Record<string, unknown> } }>;
+  priority?: "normal" | "high";
 }
 
 export interface AgentRunResponse {
   id: string;
-  status: "completed" | "failed";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  createdAt?: string;
+  updatedAt?: string;
   result?: AgentResult;
   error?: string;
 }
