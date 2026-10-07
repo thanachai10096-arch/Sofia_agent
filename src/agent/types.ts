@@ -45,6 +45,7 @@ export interface AgentResult {
   kind: TaskKind;
   steps: number;
   events: AgentEvent[];
+  progress?: import("../experience/types.js").SofiaProgress[];
   brainReport?: CompletionReport;
 }
 
