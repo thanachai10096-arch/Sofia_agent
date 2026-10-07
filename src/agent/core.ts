@@ -116,11 +116,11 @@ export class SofiaAgent {
 
     const messages: ChatMessage[] = [
       {
-        role: "system",
+        role: "system" as const,
         content:
           "You are Sofia. Complete the user's task by reasoning and using tools. Work inside the provided workspace. Do not claim a change was made unless a tool confirms it.",
       },
-      { role: "user", content: request.task },
+      { role: "user" as const, content: request.task },
       ...(request.context
         ? [{ role: "user" as const, content: `Workspace context:\n${request.context}` }]
         : []),
