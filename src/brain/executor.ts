@@ -325,7 +325,7 @@ export class SofiaBrain {
   }
 
   private async infer(
-    phase: "understand" | "plan" | "replan" | "subagent",
+    phase: "understand" | "plan" | "replan" | "subagent" | "review",
     payload: Record<string, unknown>,
   ): Promise<unknown> {
     if (this.usage.modelCalls >= this.limits.maxModelCalls) {
@@ -543,6 +543,44 @@ export class SofiaBrain {
       call: { tool: proposal.tool, input: proposal.input },
       successCriteria: proposal.reason,
     });
+  }
+
+  private async aiReview(input: {
+    task: string;
+    changedFiles: string[];
+    verification: VerificationResult[];
+    diff?: string;
+  }): Promise<{ approved: boolean; reason: string; repairCategory?: FailureCategory }> {
+    const value = await this.infer("review", {
+      instruction:
+        "Act as Sofia's final code reviewer. Review only supplied evidence. Return JSON with approved:boolean, reason:string, and optional repairCategory. Reject incomplete, unsafe, out-of-scope, or unverified changes. Do not invent failures.",
+      ...input,
+    });
+
+    if (!value || typeof value !== "object") {
+      throw new RecoverableFailure("incomplete_solution", "AI reviewer returned an invalid review result.");
+    }
+
+    const result = value as Record<string, unknown>;
+    if (typeof result.approved !== "boolean" || typeof result.reason !== "string") {
+      throw new RecoverableFailure("incomplete_solution", "AI reviewer returned an invalid review contract.");
+    }
+
+    const category =
+      typeof result.repairCategory === "string" &&
+      [
+        "syntax_error", "type_error", "runtime_error", "dependency_error",
+        "permission_error", "network_error", "tool_error", "wrong_assumption",
+        "incomplete_solution", "environment_error", "unknown",
+      ].includes(result.repairCategory)
+        ? result.repairCategory as FailureCategory
+        : undefined;
+
+    return {
+      approved: result.approved,
+      reason: result.reason.slice(0, 2000),
+      ...(category ? { repairCategory: category } : {}),
+    };
   }
 
   private async plan(
@@ -1003,15 +1041,36 @@ export class SofiaBrain {
                 (criterion) => criterion.description,
               ),
             });
-            this.emit({
-              type: "brain.review.completed",
-              passed: review.approved,
-              count: codingIteration,
-            });
+
             if (!review.approved) {
+              this.emit({
+                type: "brain.review.completed",
+                passed: false,
+                count: codingIteration,
+              });
               throw new RecoverableFailure(
                 review.repairCategory ?? "incomplete_solution",
                 review.reason,
+              );
+            }
+
+            const aiReview = await this.aiReview({
+              task: input.task,
+              changedFiles,
+              verification,
+              ...(diff ? { diff } : {}),
+            });
+
+            this.emit({
+              type: "brain.review.completed",
+              passed: aiReview.approved,
+              count: codingIteration,
+            });
+
+            if (!aiReview.approved) {
+              throw new RecoverableFailure(
+                aiReview.repairCategory ?? "incomplete_solution",
+                aiReview.reason,
               );
             }
 
