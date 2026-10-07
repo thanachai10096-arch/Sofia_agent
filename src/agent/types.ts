@@ -2,7 +2,7 @@ import type { ModelProvider, ModelRoute, TaskKind, ToolCall } from "../models/ty
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import type { ExecutionPolicy } from "../security/policy.js";
 import type { ToolRegistry } from "../tools/types.js";
-import type { AcceptanceCriterion, CompletionReport } from "../brain/types.js";
+import type { AcceptanceCriterion, BrainEvent, CompletionReport } from "../brain/types.js";
 import type { SofiaBrain } from "../brain/executor.js";
 import type { SofiaExperienceOptions, SofiaProgress } from "../experience/types.js";
 
@@ -66,7 +66,7 @@ export interface AgentDependencies {
   tools?: ToolRegistry;
   policy?: ExecutionPolicy;
   approval?: import("./approval.js").ApprovalHandler;
-  brainFactory?: (options: { signal?: AbortSignal; maxSteps?: number }) => SofiaBrain;
+  brainFactory?: (options: { signal?: AbortSignal; maxSteps?: number; onEvent?: (event: BrainEvent) => void }) => SofiaBrain;
 }
 
 export type { ToolCall };

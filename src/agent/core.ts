@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
+import type { BrainEvent } from "../brain/types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
 import { assertSafeStep, assertToolAllowed, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { progressFromAgentEvent } from "../experience/progress.js";
@@ -29,11 +30,25 @@ export class SofiaAgent {
     const emit = (event: AgentEvent) => {
       events.push(event);
       request.onEvent?.(event);
+      const next = progressFromAgentEvent(event);
+      if (next && (request.experience?.explainProgress !== false || request.onProgress)) {
+        progress.push(next);
+        request.onProgress?.(next);
+      }
     };
 
     const brain = this.deps.brainFactory!({
       ...(request.signal ? { signal: request.signal } : {}),
       ...(request.maxSteps !== undefined ? { maxSteps: request.maxSteps } : {}),
+      onEvent: (event: BrainEvent) => {
+        if (event.type === "brain.verification.completed") {
+          emit({ type: "review.completed", message: event.passed === false ? "Sofia found something to fix." : "Sofia finished a verification check.", metadata: { approved: event.passed === true } });
+        } else if (event.type === "brain.diagnosis.created") {
+          emit({ type: "retry", message: "Sofia found a problem and is working on a fix.", metadata: { category: event.category } });
+        } else if (event.type === "brain.learning.recorded") {
+          emit({ type: "review.completed", message: "Sofia learned from the verified repair.", metadata: { approved: true } });
+        }
+      },
     });
 
     emit({ type: "run.started", message: "Sofia Brain run started." });
@@ -96,6 +111,11 @@ export class SofiaAgent {
     const emit = (event: AgentEvent) => {
       events.push(event);
       request.onEvent?.(event);
+      const next = progressFromAgentEvent(event);
+      if (next && (request.experience?.explainProgress !== false || request.onProgress)) {
+        progress.push(next);
+        request.onProgress?.(next);
+      }
     };
 
     emit({ type: "run.started", message: "Sofia run started." });

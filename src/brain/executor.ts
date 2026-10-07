@@ -1051,7 +1051,7 @@ export class SofiaBrain {
               changedFiles,
               verification,
               diff,
-              acceptanceCriteria: (input.acceptanceCriteria ?? []).map(
+              acceptanceCriteria: activeAcceptanceCriteria.map(
                 (criterion) => criterion.description,
               ),
             });
@@ -1108,7 +1108,7 @@ export class SofiaBrain {
 
           if (this.dependencies.skillLedger?.recordFailure) {
             const now = new Date().toISOString();
-            await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.recordFailure!({
+            const failureRecord: FailureMemory = {
               id: "failure:" + diagnosis.fingerprint,
               fingerprint: diagnosis.fingerprint,
               category: diagnosis.category,
@@ -1119,7 +1119,12 @@ export class SofiaBrain {
               evidenceIds: this.observations.slice(-6).map((item) => item.evidenceId),
               createdAt: now,
               updatedAt: now,
-            })));
+            };
+            await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.recordFailure!(failureRecord)));
+            this.failureMemory = [
+              ...this.failureMemory.filter((item) => item.fingerprint !== failureRecord.fingerprint),
+              failureRecord,
+            ].slice(-40);
           }
 
           const specialist = await this.delegateSubagent(

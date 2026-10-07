@@ -58,7 +58,7 @@ function createBrainFactory(
   const projectMemory = new FileProjectMemoryStore(workspace);
   const skillLedger = new PersistentSkillLedger(projectMemory);
 
-  return ({ signal, maxSteps }) => {
+  return ({ signal, maxSteps, onEvent }) => {
     const runLimit: BudgetLimit = {
       maxTokens: intEnv("SOFIA_BRAIN_MAX_TOKENS", 60_000, 1),
       maxCostNanoUsd: bigintEnv("SOFIA_BRAIN_MAX_COST_NANO_USD", NO_COST_CAP),
@@ -135,6 +135,7 @@ function createBrainFactory(
         runStore,
         projectMemory,
         skillLedger,
+        ...(onEvent ? { onEvent } : {}),
       },
       limits,
     });
