@@ -1,4 +1,5 @@
 import type { FailureCategory, Strategy } from "./types.js";
+import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 
 export interface SofiaSkill {
   id: string;
@@ -44,13 +45,34 @@ const BUILTIN_SKILLS: readonly SofiaSkill[] = [
   },
 ];
 
+function learnedToSkill(skill: LearnedSkillCandidate): SofiaSkill {
+  return {
+    id: `learned:${skill.name}:${skill.category}`,
+    name: skill.name,
+    description: "Learned from a previously verified repair.",
+    triggers: [skill.trigger],
+    categories: [skill.category],
+    strategy: skill.strategy,
+    procedure: skill.procedure,
+    verification: skill.verification.filter(
+      (item): item is "typecheck" | "test" | "build" =>
+        item === "typecheck" || item === "test" || item === "build",
+    ),
+  };
+}
+
 export function matchSkills(
   category: FailureCategory,
   message: string,
   limit = 3,
+  ledger?: SkillLedger,
 ): SofiaSkill[] {
   const lower = message.toLowerCase();
-  return BUILTIN_SKILLS
+  const all = [
+    ...BUILTIN_SKILLS,
+    ...(ledger?.list() ?? []).map(learnedToSkill),
+  ];
+  return all
     .map((skill) => ({
       skill,
       score:
