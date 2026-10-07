@@ -748,7 +748,12 @@ export class SofiaBrain {
       count: this.usage.replans,
     });
 
-    let skills = matchSkills(diagnosis.category, diagnosis.message, 5, this.dependencies.skillLedger);\n    if (this.dependencies.evolution) {\n      const ranking = new Map(this.dependencies.evolution.rank(skills.map(skill => skill.id)).map(item => [item.id, item.score]));\n      skills = [...skills].sort((a, b) => (ranking.get(b.id) ?? 0) - (ranking.get(a.id) ?? 0));\n      if (skills[0]) this.selectedSkillIds.add(skills[0].id);\n    } else if (skills[0]) {\n      this.selectedSkillIds.add(skills[0].id);\n    }\n    const value = await this.infer("replan", {
+    let skills = matchSkills(diagnosis.category, diagnosis.message, 5, this.dependencies.skillLedger);
+    if (this.dependencies.evolution) {\n      const ranking = new Map(this.dependencies.evolution.rank(skills.map(skill => skill.id)).map(item => [item.id, item.score]));
+      skills = [...skills].sort((a, b) => (ranking.get(b.id) ?? 0) - (ranking.get(a.id) ?? 0));
+      if (skills[0]) this.selectedSkillIds.add(skills[0].id);
+    } else if (skills[0]) {\n      this.selectedSkillIds.add(skills[0].id);
+    }\n    const value = await this.infer("replan", {
       task,
       understanding,
       previousPlan,
