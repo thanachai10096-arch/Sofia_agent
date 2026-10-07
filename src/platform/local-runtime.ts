@@ -46,11 +46,37 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
     },
     async search(query, p = ".") {
       const target = resolve(p);
-      const result = await run("rg", ["--line-number", "--hidden", "--glob", "!.git", query, "."], { cwd: target });
-      if (result.code === 0 || result.code === 1) {
-        return result.stdout.split(/\r?\n/).filter(Boolean);
-      }
-      return result.stderr ? [result.stderr] : [];
+      const pattern = new RegExp(query);
+      const matches: string[] = [];
+      const ignored = new Set([".git", "node_modules", "dist", ".next", "coverage"]);
+
+      const walk = async (directory: string, relative: string): Promise<void> => {
+        for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+          if (ignored.has(entry.name)) continue;
+          const absolute = path.join(directory, entry.name);
+          const rel = relative ? path.join(relative, entry.name) : entry.name;
+
+          if (entry.isDirectory()) {
+            await walk(absolute, rel);
+            continue;
+          }
+
+          try {
+            const content = await fs.readFile(absolute, "utf8");
+            content.split(/\r?\n/).forEach((line, index) => {
+              if (pattern.test(line)) {
+                pattern.lastIndex = 0;
+                matches.push(rel + ":" + (index + 1) + ":" + line);
+              }
+            });
+          } catch {
+            // Binary/unreadable files are intentionally skipped.
+          }
+        }
+      };
+
+      await walk(target, "");
+      return matches;
     },
     run,
     git: (args, options) => run("git", args, options),
