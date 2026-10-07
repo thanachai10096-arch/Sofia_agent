@@ -33,7 +33,9 @@ export function canonicalJson(value: unknown): string {
 }
 
 export function actionHash(runId: string, toolName: string, input: Record<string, unknown>): string {
-  return createHash("sha256").update(runId + "\n" + toolName + "\n" + canonicalJson(input)).digest("hex");
+  return createHash("sha256").update(runId + "
+" + toolName + "
+" + canonicalJson(input)).digest("hex");
 }
 
 export function riskFor(effects: readonly ToolEffect[], input: Record<string, unknown>): RiskLevel {
@@ -68,7 +70,14 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
 
 export function assessAction(action: Omit<SecurityAction, "actionHash">, blockedPaths: readonly string[] = [], allowedHosts: readonly string[] = []): SecurityDecision {
   const hash = actionHash(action.runId, action.toolName, action.input);
-  const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;\n  if (action.effects.includes("network") || action.effects.includes("browser")) {\n    const url = typeof action.input.url === "string" ? action.input.url : undefined;\n    if (url) {\n      let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch { return { allowed:false,risk:"critical",requireApproval:true,reason:"Invalid network URL.",actionHash:hash }; }\n      if (allowedHosts.length === 0 || !allowedHosts.some(allowed => host === allowed || host.endsWith("." + allowed))) return { allowed:false,risk:"critical",requireApproval:true,reason:"Network host is not allowlisted.",actionHash:hash };\n    }\n  }
+  const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;
+  if (action.effects.includes("network") || action.effects.includes("browser")) {
+    const url = typeof action.input.url === "string" ? action.input.url : undefined;
+    if (url) {
+      let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch { return { allowed:false,risk:"critical",requireApproval:true,reason:"Invalid network URL.",actionHash:hash }; }
+      if (allowedHosts.length === 0 || !allowedHosts.some(allowed => host === allowed || host.endsWith("." + allowed))) return { allowed:false,risk:"critical",requireApproval:true,reason:"Network host is not allowlisted.",actionHash:hash };
+    }
+  }
   if (pathValue) assertSafePath(pathValue, blockedPaths);
 
   // Treat command/URL/query text as untrusted control input. Content being written is
