@@ -303,6 +303,7 @@ export class SofiaAgent {
             kind,
             steps: step,
             events,
+            progress,
           };
         }
 
