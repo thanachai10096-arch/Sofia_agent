@@ -10,7 +10,7 @@ function digest(value: string): string {
 }
 
 function classifyEffects(name: string) {
-  if (name === "workspace.read_file" || name === "workspace.list_files") {
+  if (name === "workspace.read_file" || name === "workspace.list_files" || name === "workspace.search" || name === "git.diff") {
     return ["read"] as const;
   }
   if (name === "workspace.write_file") {
