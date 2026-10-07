@@ -107,6 +107,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
         run.result = await agent.run({
+          principalId: run.ownerKeyId,
           task: input.task,
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -227,6 +228,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           run.status = "running";
           run.result = await agent.run({
+            principalId: auth.keyId,
             task: input.task,
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -298,6 +300,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         try {
           const result = await agent.run({
+            principalId: auth.keyId,
             task: input.task,
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
