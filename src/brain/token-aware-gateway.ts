@@ -14,7 +14,8 @@ export type BrainPhase =
   | "implement"
   | "diagnose"
   | "review"
-  | "finalize";
+  | "finalize"
+  | "subagent";
 
 export interface PromptCore {
   instructions: string;
@@ -108,6 +109,7 @@ const PHASE_CAPS: Record<BrainPhase, PhaseCap> = {
   diagnose: { input: 7_000, output: 900 },
   review: { input: 10_000, output: 1_100 },
   finalize: { input: 4_000, output: 600 },
+  subagent: { input: 12_000, output: 1_200 },
 };
 
 function validateCount(prepared: PreparedCall): PreparedCall {
