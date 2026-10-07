@@ -228,3 +228,105 @@ test("Brain feeds a failed verification into a specialist and executes its valid
   assert.ok(trace.some((entry) => entry.type === "brain.subagent.completed"));
   assert.ok(trace.some((entry) => entry.type === "brain.verification.completed"));
 });
+
+
+test("Brain can resume from a saved run snapshot without repeating completed steps", async () => {
+  let writes = 0;
+  const controller = new AbortController();
+  let saved: import("./run-state.js").BrainRunSnapshot | undefined;
+
+  const tools = makeTools();
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.write_file") writes += 1;
+    return originalExecute(call, context);
+  };
+
+  const first = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+      onRunSnapshot(snapshot) {
+        if (snapshot.completedStepIds.length > 0) {
+          saved = snapshot;
+          controller.abort(new Error("simulated worker restart"));
+        }
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const cancelled = await first.run({
+    task: "Create hello.txt",
+    signal: controller.signal,
+    acceptanceCriteria: [
+      {
+        id: "file-exists",
+        description: "hello.txt exists",
+        probe: { tool: "workspace.list_files", input: { path: "." } },
+        evaluate(data) {
+          return {
+            passed: Array.isArray(data) && data.includes("hello.txt"),
+            detail: "hello.txt exists",
+          };
+        },
+      },
+    ],
+  });
+
+  assert.equal(cancelled.completed, false);
+  assert.ok(saved);
+  assert.equal(writes, 1);
+
+  const resumed = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await resumed.run({
+    task: "Create hello.txt",
+    resume: saved,
+    acceptanceCriteria: [
+      {
+        id: "file-exists",
+        description: "hello.txt exists",
+        probe: { tool: "workspace.list_files", input: { path: "." } },
+        evaluate(data) {
+          return {
+            passed: Array.isArray(data) && data.includes("hello.txt"),
+            detail: "hello.txt exists",
+          };
+        },
+      },
+    ],
+  });
+
+  assert.equal(report.completed, true);
+  assert.equal(report.state, "completed");
+  assert.equal(writes, 1);
+});
