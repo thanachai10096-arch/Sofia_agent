@@ -25,6 +25,7 @@ export class SofiaAgent {
       assertToolAllowed(policy,call.name); const tool=this.deps.tools.get(call.name);
       if(!tool) throw new Error(`Unknown tool: ${call.name}`);
       emit({type:"tool.started",message:`Running ${call.name}.`,step,metadata:{tool:call.name}});
+      if(this.deps.approval){const approved=await this.deps.approval({runId,toolName:call.name,input:call.input});if(!approved){emit({type:"tool.approval_required",message:`Tool ${call.name} was not approved.`,step,metadata:{tool:call.name}});messages.push({role:"tool",content:JSON.stringify({error:"Tool execution not approved"}),toolCallId:call.id});continue;}}
       try{
        const result=await tool.execute(call.input,{runtime:this.deps.runtime});
        const content=JSON.stringify(result); messages.push({role:"tool",content,toolCallId:call.id});
