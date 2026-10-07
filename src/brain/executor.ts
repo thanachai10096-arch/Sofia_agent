@@ -805,6 +805,20 @@ export class SofiaBrain {
           ? "Task completed and all acceptance criteria passed."
           : "Task completed.";
 
+      if (this.dependencies.skillLedger && this.diagnoses.length > 0 && verification.every((item) => item.passed)) {
+        const last = this.diagnoses[this.diagnoses.length - 1]!;
+        this.dependencies.skillLedger.record({
+          name: "repair-" + last.category,
+          trigger: last.message.slice(0, 240),
+          category: last.category,
+          strategy: this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation",
+          procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
+          verification: verification.map((item) => item.criterionId),
+          evidenceIds: verification.flatMap((item) => item.evidenceIds),
+        });
+        this.emit({ type: "brain.learning.recorded" });
+      }
+
       return this.report(
         true,
         summary,
@@ -838,20 +852,6 @@ export class SofiaBrain {
         type: "brain.failed",
         state: "failed",
       });
-
-      if (this.dependencies.skillLedger && this.diagnoses.length > 0) {
-        const last = this.diagnoses[this.diagnoses.length - 1]!;
-        this.dependencies.skillLedger.record({
-          name: "repair-" + last.category,
-          trigger: last.message.slice(0, 240),
-          category: last.category,
-          strategy: this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation",
-          procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
-          verification: verification.map((item) => item.criterionId),
-          evidenceIds: verification.flatMap((item) => item.evidenceIds),
-        });
-        this.emit({ type: "brain.learning.recorded" });
-      }
 
       return this.report(
         false,
