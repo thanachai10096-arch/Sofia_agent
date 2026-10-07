@@ -27,9 +27,10 @@ export interface AgentDependencies {
  provider:ModelProvider;
  router:{select(kind:TaskKind):ModelRoute;markUnhealthy(id:string):void};
  reviewer:{review(task:string,output:string):Promise<{approved:boolean;reason:string}>};
- runtime:WorkspaceRuntime;
- tools:ToolRegistry;
- policy:ExecutionPolicy;
+ runtime?:WorkspaceRuntime;
+ tools?:ToolRegistry;
+ policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
+ brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number})=>SofiaBrain;
 }
 export type { ToolCall };
