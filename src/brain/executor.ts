@@ -15,6 +15,7 @@ import type { SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
+import type { BrainRunSnapshot } from "./run-state.js";
 
 import type {
   AcceptanceCriterion,
@@ -82,6 +83,7 @@ interface Dependencies {
   projectContext?: ProjectContext;
   projectContextLoader?: () => Promise<ProjectContext>;
   subagents?: SubagentRuntime;
+  onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
 }
 
 export interface BrainRunInput {
@@ -91,6 +93,7 @@ export interface BrainRunInput {
   acceptanceCriteria?: AcceptanceCriterion[];
   signal?: AbortSignal;
   rollbackOnFailure?: boolean;
+  resume?: BrainRunSnapshot;
 }
 
 export interface BrainRunOptions {
@@ -258,6 +261,25 @@ export class SofiaBrain {
 
   getExecutionTrace(): ExecutionTraceEntry[] {
     return this.trace.snapshot();
+  }
+
+  getRunSnapshot(): BrainRunSnapshot | undefined {
+    return this.latestRunSnapshot;
+  }
+
+  private latestRunSnapshot?: BrainRunSnapshot;
+
+  private saveRunSnapshot(snapshot: BrainRunSnapshot): void {
+    this.latestRunSnapshot = snapshot;
+    this.emit({ type: "brain.run.checkpointed" });
+    try {
+      const result = this.dependencies.onRunSnapshot?.(snapshot);
+      if (result && typeof (result as Promise<void>).then === "function") {
+        void Promise.resolve(result).catch(() => undefined);
+      }
+    } catch {
+      // Persistence must never alter execution semantics.
+    }
   }
 
   private move(next: BrainState): void {
@@ -762,34 +784,80 @@ export class SofiaBrain {
     let currentPlan: ExecutionPlan | undefined;
     let recoveryRounds = 0;
     const recoveryFingerprints = new Set<string>();
+    const resumed = input.resume;
+    let understanding: TaskUnderstanding;
+    let completedStepIds = new Set<string>();
+
+    const checkpointState = (plan: ExecutionPlan | undefined): void => {
+      if (!plan || !checkpointId) return;
+      this.saveRunSnapshot({
+        version: 1,
+        runId: this.runId,
+        task: input.task,
+        understanding,
+        plan,
+        acceptanceCriteria: input.acceptanceCriteria ?? [],
+        completedStepIds: [...completedStepIds],
+        checkpointId,
+        baselineSnapshotId: baselineId,
+        usage: { ...this.usage },
+        observations: [...this.observations],
+        diagnoses: [...this.diagnoses],
+        decisions: [...this.decisions],
+        recoveryRounds,
+        trace: this.trace.snapshot(),
+      });
+    };
 
     try {
       this.emit({ type: "brain.started", state: "idle" });
-      this.move("understanding");
 
-      const understanding = await this.understand(input);
+      if (resumed) {
+        if (resumed.version !== 1) throw new Stop("Unsupported run snapshot version");
+        if (resumed.task !== input.task) throw new Stop("Run snapshot task mismatch");
+        understanding = resumed.understanding;
+        currentPlan = this.validatePlan(resumed.plan);
+        checkpointId = resumed.checkpointId;
+        baselineId = resumed.baselineSnapshotId;
+        completedStepIds = new Set(resumed.completedStepIds);
+        this.observations = [...resumed.observations];
+        this.diagnoses.push(...resumed.diagnoses);
+        this.decisions.push(...resumed.decisions);
+        recoveryRounds = resumed.recoveryRounds;
+        this.usage.steps = resumed.usage.steps;
+        this.usage.toolCalls = resumed.usage.toolCalls;
+        this.usage.modelCalls = resumed.usage.modelCalls;
+        this.usage.reservedOrUsedTokens = resumed.usage.reservedOrUsedTokens;
+        this.usage.replans = resumed.usage.replans;
+        this.emit({ type: "brain.run.resumed" });
+      } else {
+        this.move("understanding");
+        understanding = await this.understand(input);
 
-      this.emit({
-        type: "brain.understanding.completed",
-      });
+        this.emit({
+          type: "brain.understanding.completed",
+        });
 
-      baselineId = (
-        await this.io(() => this.dependencies.tools.snapshot(this.signal))
-      ).id;
-      checkpointId = (
-        await this.io(() => this.dependencies.tools.checkpoint(this.signal))
-      ).id;
-      this.emit({ type: "brain.checkpoint.created" });
+        baselineId = (
+          await this.io(() => this.dependencies.tools.snapshot(this.signal))
+        ).id;
+        checkpointId = (
+          await this.io(() => this.dependencies.tools.checkpoint(this.signal))
+        ).id;
+        this.emit({ type: "brain.checkpoint.created" });
 
-      this.move("planning");
-      currentPlan = await this.plan(input, understanding);
+        this.move("planning");
+        currentPlan = await this.plan(input, understanding);
 
-      this.decisions.push({
-        strategy: currentPlan.strategy,
-        reason: currentPlan.reason,
-      });
+        this.decisions.push({
+          strategy: currentPlan.strategy,
+          reason: currentPlan.reason,
+        });
 
-      this.emit({ type: "brain.plan.created" });
+        this.emit({ type: "brain.plan.created" });
+      }
+
+      checkpointState(currentPlan);
 
       let completed = false;
 
@@ -803,6 +871,11 @@ export class SofiaBrain {
 
         try {
           for (const step of ordered) {
+            if (completedStepIds.has(step.id)) {
+              done.add(step.id);
+              continue;
+            }
+
             for (const dependency of step.dependencies) {
               if (!done.has(dependency)) {
                 throw new Stop(
@@ -813,6 +886,8 @@ export class SofiaBrain {
 
             await this.executeStep(step);
             done.add(step.id);
+            completedStepIds.add(step.id);
+            checkpointState(currentPlan);
           }
 
           this.move("observing");
@@ -896,6 +971,8 @@ export class SofiaBrain {
               reason: "Verify specialist recovery before replanning.",
               steps: [],
             };
+            completedStepIds = new Set<string>();
+            checkpointState(currentPlan);
             continue;
           }
 
