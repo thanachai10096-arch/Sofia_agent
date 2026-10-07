@@ -1,112 +1,16 @@
-import { randomUUID } from "node:crypto";
 import type { BrainRunInput, BrainRunOptions } from "./executor.js";
-import { createSofiaBrain, type SofiaBrain } from "./executor.js";
-import type { BrainRunSnapshot } from "./run-state.js";
 import type { RunStore } from "./run-store.js";
+import { DurableJobRuntime, type JobRecord, type JobRuntime } from "./job-runtime.js";
 
-export interface ManagedRun {
-  id: string;
-  status: "running" | "completed" | "failed" | "cancelled";
-  createdAt: string;
-  updatedAt: string;
-  task: string;
-  snapshot?: BrainRunSnapshot;
-  result?: Awaited<ReturnType<SofiaBrain["run"]>>;
-}
+export type ManagedRun = JobRecord;
+export interface RunManager extends JobRuntime {}
 
-export interface RunManager {
-  create(input: Omit<BrainRunInput, "signal" | "resume">): Promise<ManagedRun>;
-  get(runId: string): Promise<ManagedRun | undefined>;
-  resume(runId: string, signal?: AbortSignal): Promise<ManagedRun>;
-  cancel(runId: string): Promise<boolean>;
-  list(): Promise<ManagedRun[]>;
-}
-
-export class InMemoryRunManager implements RunManager {
-  private readonly runs = new Map<string, ManagedRun>();
-  private readonly controllers = new Map<string, AbortController>();
-
-  constructor(private readonly brainOptions: BrainRunOptions, private readonly runStore?: RunStore) {}
+export class InMemoryRunManager extends DurableJobRuntime implements RunManager {
+  constructor(brainOptions: BrainRunOptions, runStore?: RunStore) {
+    super(brainOptions, runStore);
+  }
 
   async create(input: Omit<BrainRunInput, "signal" | "resume">): Promise<ManagedRun> {
-    const id = randomUUID();
-    const now = new Date().toISOString();
-    const record: ManagedRun = { id, status: "running", createdAt: now, updatedAt: now, task: input.task };
-    this.runs.set(id, record);
-    void this.execute(record, input);
-    return record;
-  }
-
-  async get(runId: string): Promise<ManagedRun | undefined> {
-    const existing = this.runs.get(runId);
-    if (existing) return { ...existing };
-    const snapshot = await this.runStore?.load(runId);
-    if (!snapshot) return undefined;
-    return {
-      id: runId,
-      status: "running",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      task: snapshot.task,
-      snapshot,
-    };
-  }
-
-  async resume(runId: string, signal?: AbortSignal): Promise<ManagedRun> {
-    const record = this.runs.get(runId);
-    if (!record) throw new Error("Unknown run");
-    if (!record.snapshot) throw new Error("Run has no resumable snapshot");
-    if (record.status === "completed") return record;
-
-    await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
-    return record;
-  }
-
-  async cancel(runId: string): Promise<boolean> {
-    const controller = this.controllers.get(runId);
-    if (!controller) return false;
-    controller.abort(new Error("Run cancelled by caller"));
-    return true;
-  }
-
-  async list(): Promise<ManagedRun[]> {
-    return [...this.runs.values()].map((run) => ({ ...run }));
-  }
-
-  private async execute(
-    record: ManagedRun,
-    input: Omit<BrainRunInput, "signal" | "resume">,
-    externalSignal?: AbortSignal,
-    resume?: BrainRunSnapshot,
-  ): Promise<void> {
-    const controller = new AbortController();
-    this.controllers.set(record.id, controller);
-
-    if (externalSignal) {
-      if (externalSignal.aborted) controller.abort(externalSignal.reason);
-      else externalSignal.addEventListener("abort", () => controller.abort(externalSignal.reason), { once: true });
-    }
-
-    const onSnapshot = async (snapshot: BrainRunSnapshot) => {
-      record.snapshot = snapshot;
-      record.updatedAt = new Date().toISOString();
-      await this.runStore?.save(snapshot);
-    };
-
-    try {
-      const brain = createSofiaBrain({
-        ...this.brainOptions,
-        dependencies: {
-          ...this.brainOptions.dependencies,
-          onRunSnapshot: onSnapshot,
-        },
-      });
-      const result = await brain.run({ ...input, signal: controller.signal, resume });
-      record.result = result;
-      record.status = result.completed ? "completed" : result.state === "cancelled" ? "cancelled" : "failed";
-      record.updatedAt = new Date().toISOString();
-    } finally {
-      this.controllers.delete(record.id);
-    }
+    return this.submit(input);
   }
 }
