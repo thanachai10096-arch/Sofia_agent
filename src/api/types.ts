@@ -5,7 +5,6 @@ export interface AgentRunInput {
   task: string;
   workspace?: string;
   context?: Record<string, unknown> | string;
-  acceptanceCriteria?: AcceptanceCriterion[];
   maxSteps?: number;
   stream?: boolean;
   sessionId?: string;
@@ -14,11 +13,7 @@ export interface AgentRunInput {
    * the server so the client can reconnect and poll for the result.
    */
   async?: boolean;
-  acceptanceCriteria?: Array<{
-    id: string;
-    description: string;
-    probe: { tool: string; input: Record<string, unknown> };
-  }>;
+  acceptanceCriteria?: AcceptanceCriterion[];
   priority?: "normal" | "high";
 }
 
