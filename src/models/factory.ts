@@ -23,8 +23,9 @@ import { FileRunStore } from "../brain/run-store.js";
 import { DurableJobRuntime } from "../brain/job-runtime.js";
 import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
+import { EvolutionEngine } from "../brain/evolution.js";
 
-function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
+function pathJoin(...parts:string[]){return parts.join(process.platform==="win32"?"\\\\":"/");}\n\nfunction intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
@@ -34,6 +35,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
+  const evolution=new EvolutionEngine(pathJoin(workspace, ".sofia", "evolution.json"));
 
   return ({signal,maxSteps,onRunSnapshot})=>{
     const runLimit:BudgetLimit={maxTokens:intEnv("SOFIA_BRAIN_MAX_TOKENS",60000,1),maxCostNanoUsd:bigintEnv("SOFIA_BRAIN_MAX_COST_NANO_USD",NO_COST_CAP),maxCalls:intEnv("SOFIA_BRAIN_MAX_MODEL_CALLS",12,1),maxInFlight:intEnv("SOFIA_BRAIN_MAX_IN_FLIGHT",1,1)};
