@@ -15,6 +15,7 @@ import { createToolRegistry } from "../tools/registry.js";
 import { loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { discoverProjectContext } from "../brain/project-context.js";
+import { createSubagentRuntime } from "../brain/subagents.js";
 
 function intEnv(name: string, fallback: number, minimum = 0): number {
   const value = Number(process.env[name]);
@@ -100,6 +101,8 @@ function createBrainFactory(
       dependencies.approval,
     );
 
+    const subagents = createSubagentRuntime(reasoner, toolGateway);
+
     const limits: Partial<BrainLimits> = {
       maxSteps: maxSteps ?? dependencies.policy.maxSteps,
       maxToolCalls: intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS", 100, 1),
@@ -115,6 +118,7 @@ function createBrainFactory(
       dependencies: {
         reasoner,
         tools: toolGateway,
+        subagents,
         allowShell: dependencies.policy.allowShell,
         allowNetwork: dependencies.policy.allowNetwork,
         projectContextLoader: () => discoverProjectContext(dependencies.runtime),
