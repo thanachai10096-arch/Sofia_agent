@@ -12,6 +12,7 @@ export interface GatewayProviderConfig {
   apiKey: string;
   model: string;
   headers?: Record<string, string>;
+  maxConcurrent?: number;
 }
 
 interface ChatResponse {
@@ -31,10 +32,25 @@ interface ChatResponse {
   };
 }
 
+class ConcurrencyGate {
+  private active = 0;
+  private readonly waiters: Array<() => void> = [];
+  constructor(private readonly limit: number) {}
+  async run<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.active >= this.limit) await new Promise<void>((resolve) => this.waiters.push(resolve));
+    this.active++;
+    try { return await operation(); } finally { this.active--; this.waiters.shift()?.(); }
+  }
+}
+
 export class SofiaModelGateway implements ModelProvider {
+  private readonly gates = new Map<string, ConcurrencyGate>();
+
   constructor(
     private readonly providers: Record<string, GatewayProviderConfig>,
-  ) {}
+  ) {
+    for (const [id, config] of Object.entries(providers)) this.gates.set(id, new ConcurrencyGate(Math.max(1, config.maxConcurrent ?? 8)));
+  }
 
   async generate(
     request: ModelRequest,
@@ -78,12 +94,14 @@ export class SofiaModelGateway implements ModelProvider {
         : {}),
     };
 
-    const response = await fetch(
-      `${config.baseUrl.replace(/\/$/, "")}/chat/completions`,
+    const providerId = route.providerId ?? route.id;
+    const gate = this.gates.get(providerId);
+    const execute = () => fetch(
+      config.baseUrl.replace(/\/$/, "") + "/chat/completions",
       {
         method: "POST",
         headers: {
-          authorization: `Bearer ${config.apiKey}`,
+          authorization: "Bearer " + config.apiKey,
           "content-type": "application/json",
           ...config.headers,
         },
@@ -91,6 +109,7 @@ export class SofiaModelGateway implements ModelProvider {
         ...(options.signal ? { signal: options.signal } : {}),
       },
     );
+    const response = await (gate ? gate.run(execute) : execute());
 
     if (!response.ok) {
       const detail = await response.text();
