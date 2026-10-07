@@ -492,6 +492,7 @@ export class SofiaBrain {
       "git.diff",
       "project.verify",
       "workspace.write_file",
+      "workspace.apply_patch",
     ]);
     if (!permitted.has(proposal.tool)) {
       throw new RecoverableFailure("tool_error", "Delegated tool is outside Brain scope");
@@ -726,6 +727,7 @@ export class SofiaBrain {
       diagnosis,
       strategy,
       matchedSkills: compactSkillContext(skills),
+      repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
 
     const plan = this.validatePlan(
