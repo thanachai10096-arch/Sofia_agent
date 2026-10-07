@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { ExecutionPolicy } from "../security/policy.js";
 import type { AgentDependencies } from "../agent/types.js";
+import type { ApprovalHandler } from "../agent/approval.js";
 import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, ToolCall } from "./types.js";
 
 function digest(value: string): string {
@@ -36,6 +37,7 @@ export class RegistryToolGateway implements ToolGateway {
   constructor(
     private readonly dependencies: Pick<AgentDependencies, "runtime" | "tools">,
     private readonly policy: ExecutionPolicy,
+    private readonly approval?: ApprovalHandler,
   ) {}
 
   describe(name: string) {
@@ -111,16 +113,35 @@ export class RegistryToolGateway implements ToolGateway {
       descriptor.effects.includes("destructive");
 
     if (requiresApproval && context.requireApproval) {
+      if (!this.approval) {
+        return {
+          ok: false,
+          data: null,
+          evidenceId: randomUUID(),
+          error: {
+            category: "permission_error",
+            message: "Approval is required for this tool.",
+          },
+        };
+      }
+
       context.notifyApproval(true);
       try {
-        // Approval is deliberately controlled by the host integration.
-        // A denied approval is represented by policy at this boundary.
-        if (!context.requireApproval) {
+        const approved = await this.approval({
+          runId: context.runId,
+          toolName: call.tool,
+          input: call.input,
+        });
+
+        if (!approved) {
           return {
             ok: false,
             data: null,
             evidenceId: randomUUID(),
-            error: { category: "permission_error", message: "Tool approval denied." },
+            error: {
+              category: "permission_error",
+              message: "Tool execution was not approved.",
+            },
           };
         }
       } finally {
@@ -195,10 +216,12 @@ export class RegistryToolGateway implements ToolGateway {
 
     const current = await this.snapshot(signal);
     const before = new Set(baseline.files);
-    const after = new Set(current.id ? this.snapshots.get(current.id)!.files : []);
+    const after = new Set(this.snapshots.get(current.id)!.files);
 
+    const names = (line: string) => line.length > 3 ? line.slice(3).trim() : line;
     return [...new Set([...before, ...after])]
-      .filter((file) => before.has(file) !== after.has(file))
+      .filter((entry) => before.has(entry) !== after.has(entry))
+      .map(names)
       .sort();
   }
 }
