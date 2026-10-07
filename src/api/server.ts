@@ -60,6 +60,27 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" });
 
+      if (req.method === "POST" && req.url === "/v1/agent/runs/stream") {
+        const input = (await body(req, maxBytes)) as AgentRunInput;
+        if (!input.task?.trim()) return json(res, 400, { error: "task_required" });
+        const id = randomUUID();
+        res.writeHead(200, { ...headers(), "content-type": "text/event-stream; charset=utf-8", "connection": "keep-alive" });
+        const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\\n\\n`);
+        try {
+          const result = await agent.run({
+            task: input.task,
+            ...(input.context ? { context: input.context } : {}),
+            ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
+            onEvent: (event) => send({ type: "event", runId: id, event }),
+          });
+          send({ type: "result", runId: id, status: "completed", result });
+        } catch (error) {
+          send({ type: "error", runId: id, status: "failed", error: error instanceof Error ? error.message : "Agent failed" });
+        }
+        send({ type: "done", runId: id });
+        return res.end();
+      }
+
       if (req.method === "POST" && req.url === "/v1/agent/runs") {
         const input = (await body(req, maxBytes)) as AgentRunInput;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" });
