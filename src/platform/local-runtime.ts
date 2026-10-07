@@ -10,7 +10,14 @@ export function createNodeWorkspaceRuntime(root=process.cwd()):WorkspaceRuntime{
   const platform=detectPlatform();
   const resolve=(p=".")=>{const absolute=path.resolve(root,p);const base=path.resolve(root);if(absolute!==base&&!absolute.startsWith(base+path.sep))throw new Error("Workspace path escapes the configured root.");return absolute;};
   const run=async(command:string,args:string[]=[],options:{cwd?:string;timeoutMs?:number}={})=>{
-    try{const result=await execFileAsync(command,args,{cwd:options.cwd?resolve(options.cwd):root,windowsHide:true,maxBuffer:8*1024*1024,timeout:options.timeoutMs??60_000,env:safeEnv()});return{stdout:result.stdout,stderr:result.stderr,code:0};}
+    try{
+      const sandbox=process.env.SOFIA_SANDBOX_MODE==="docker";
+      const image=process.env.SOFIA_SANDBOX_IMAGE||"node:22-alpine";
+      const execCommand=sandbox?"docker":command;
+      const execArgs=sandbox?["run","--rm","--network","none","--cap-drop","ALL","--security-opt","no-new-privileges","--pids-limit","128","--memory","512m","--cpus","1","-v",root+":/workspace:rw","-w","/workspace",image,command,...args]:args;
+      const result=await execFileAsync(execCommand,execArgs,{cwd:options.cwd?resolve(options.cwd):root,windowsHide:true,maxBuffer:8*1024*1024,timeout:options.timeoutMs??60_000,env:sandbox?{PATH:process.env.PATH??""}:safeEnv()});
+      return{stdout:result.stdout,stderr:result.stderr,code:0};
+    }
     catch(error){const e=error as{stdout?:string;stderr?:string;code?:number;signal?:string};return{stdout:e.stdout??"",stderr:e.stderr??String(error),code:e.code??(e.signal?124:1)};}
   };
   return{
