@@ -217,4 +217,14 @@ test("Brain feeds a failed verification into a specialist and executes its valid
   assert.ok(events.includes("brain.subagent.completed"));
   assert.equal(events.includes("brain.replan.started"), false);
   assert.ok(events.includes("brain.verification.completed"));
+
+  const trace = brain.getExecutionTrace();
+  assert.ok(trace.length > 0);
+  assert.equal(trace[0]?.runId, brain.runId);
+  assert.deepEqual(
+    trace.map((entry) => entry.sequence),
+    trace.map((entry) => entry.sequence).slice().sort((a, b) => a - b),
+  );
+  assert.ok(trace.some((entry) => entry.type === "brain.subagent.completed"));
+  assert.ok(trace.some((entry) => entry.type === "brain.verification.completed"));
 });
