@@ -43,7 +43,7 @@ export class DurableJobRuntime implements JobRuntime{
  private readonly state:FileJobStateStore;
 
  constructor(
-  private readonly brainFactory:(options:{signal?:AbortSignal;maxSteps?:number})=>SofiaBrain,
+  private readonly brainFactory:(options:{signal?:AbortSignal;maxSteps?:number;onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>})=>SofiaBrain,
   private readonly runStore?:RunStore,
   namespace=process.cwd(),
  ){this.state=new FileJobStateStore(namespace);}
