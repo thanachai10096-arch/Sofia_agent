@@ -3,19 +3,22 @@ import type { AgentResult } from "../agent/types.js";
 export interface AgentRunInput {
   task: string;
   workspace?: string;
-  context?: Record<string, unknown>|string;
+  context?: Record<string, unknown> | string;
   maxSteps?: number;
   stream?: boolean;
   sessionId?: string;
-  acceptanceCriteria?: Array<{ id: string; description: string; probe: { tool: string; input: Record<string, unknown> } }>;
-  priority?: "normal" | "high";
+  /**
+   * Mobile-friendly mode: return immediately and keep the agent running on
+   * the server so the client can reconnect and poll for the result.
+   */
+  async?: boolean;
 }
+
+export type AgentRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface AgentRunResponse {
   id: string;
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
-  createdAt?: string;
-  updatedAt?: string;
+  status: AgentRunStatus;
   result?: AgentResult;
   error?: string;
 }
@@ -30,4 +33,10 @@ export interface SofiaApiConfig {
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
+  /**
+   * Allowed browser origins. Defaults to "*" for the model-agnostic API.
+   * Keep the master API key on a trusted server; do not ship it in a browser.
+   */
+  allowedOrigins?: string[];
+  runRetentionMs?: number;
 }
