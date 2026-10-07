@@ -13,6 +13,7 @@ interface ActiveRun {
   controller: AbortController;
   createdAt: number;
   updatedAt: number;
+  ownerKeyId: string;
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -137,7 +138,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const id = pathId(req.url);
       if (id && req.method === "GET") {
         const run = runs.get(id);
-        if (!run) return json(res, 404, { error: "run_not_found" }, origin, config);
+        if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
         return json(res, 200, publicResponse(run), origin, config);
       }
 
@@ -160,7 +161,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         const runId = randomUUID();
         const controller = new AbortController();
-        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now() };
+        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId };
         runs.set(runId, run);
         res.writeHead(200, {
           ...headers(origin, config),
@@ -209,6 +210,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             controller: new AbortController(),
             createdAt: Date.now(),
             updatedAt: Date.now(),
+            ownerKeyId: auth.keyId,
           };
           runs.set(runId, run);
           startRun(run, input);
