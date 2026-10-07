@@ -78,6 +78,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, allowedOrigin);
         try { usage.consume(auth.keyId); } catch (error) { return json(res, 429, { error: "quota_exceeded" }, allowedOrigin); }
         const id = randomUUID();
+        const controller = new AbortController();
+        req.on("aborted", () => controller.abort(new Error("Client disconnected.")));
+        res.on("close", () => {
+          if (!res.writableEnded) controller.abort(new Error("Client disconnected."));
+        });
         res.writeHead(200, { ...headers(), "content-type": "text/event-stream; charset=utf-8", "connection": "keep-alive" });
         const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
         try {
@@ -92,6 +97,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
                 }
               : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
+            signal: controller.signal,
             onEvent: (event) => send({ type: "event", runId: id, event }),
           });
           send({ type: "result", runId: id, status: "completed", result });
@@ -107,6 +113,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, allowedOrigin);
 
         const id = randomUUID();
+        const controller = new AbortController();
+        req.on("aborted", () => controller.abort(new Error("Client disconnected.")));
+        res.on("close", () => {
+          if (!res.writableEnded) controller.abort(new Error("Client disconnected."));
+        });
         try { usage.consume(auth.keyId); } catch (error) { return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, allowedOrigin); }
         try {
           const result = await agent.run({
@@ -120,6 +131,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
                 }
               : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
+            signal: controller.signal,
           });
           const response: AgentRunResponse = { id, status: "completed", result };
           return json(res, 200, response, allowedOrigin);
