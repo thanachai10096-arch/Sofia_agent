@@ -21,3 +21,5 @@ export type * from "./models/types.js";
 export type * from "./api/types.js";
 export type * from "./platform/runtime.js";
 export type * from "./tools/types.js";
+export { reviewCodeChange } from "./review/code-review.js";
+export type * from "./review/code-review.js";
