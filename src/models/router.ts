@@ -10,36 +10,53 @@ const capabilityFor: Record<TaskKind, string[]> = {
 };
 
 export class ModelRouter {
-  constructor(private readonly routes: ModelRoute[]) {}
+  private readonly winners = new Map<TaskKind, ModelRoute>();
 
-  select(kind: TaskKind): ModelRoute {
-    const required = capabilityFor[kind];
+  constructor(private readonly routes: ModelRoute[]) {
+    this.rebuild();
+  }
 
-    const candidates = this.routes
-      .filter((route) => route.healthy)
-      .map((route) => {
-        const capabilityScore = required.reduce(
-          (score, capability) => score + (route.capabilities.includes(capability as never) ? 3 : 0),
-          0,
-        );
-
+  private rebuild(): void {
+    this.winners.clear();
+    for (const kind of Object.keys(capabilityFor) as TaskKind[]) {
+      const required = capabilityFor[kind];
+      let winner: ModelRoute | undefined;
+      let best = -Infinity;
+      for (const route of this.routes) {
+        if (!route.healthy) continue;
+        let capabilityScore = 0;
+        for (const capability of required) {
+          if (route.capabilities.includes(capability as never)) capabilityScore += 3;
+        }
         const score =
           capabilityScore +
           route.qualityWeight * 0.8 -
           route.costWeight * 0.2 -
           route.latencyWeight * 0.15;
+        if (score > best) {
+          best = score;
+          winner = route;
+        }
+      }
+      if (winner) this.winners.set(kind, winner);
+    }
+  }
 
-        return { route, score };
-      })
-      .sort((a, b) => b.score - a.score);
-
-    const winner = candidates[0]?.route;
-    if (!winner) throw new Error("No healthy model route is available");
-    return winner;
+  select(kind: TaskKind): ModelRoute {
+    const winner = this.winners.get(kind);
+    if (!winner || !winner.healthy) {
+      this.rebuild();
+    }
+    const route = this.winners.get(kind);
+    if (!route) throw new Error("No healthy model route is available");
+    return route;
   }
 
   markUnhealthy(id: string): void {
     const route = this.routes.find((item) => item.id === id);
-    if (route) route.healthy = false;
+    if (route) {
+      route.healthy = false;
+      this.rebuild();
+    }
   }
 }
