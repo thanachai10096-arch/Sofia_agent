@@ -5,7 +5,7 @@ export type SecurityAuditEvent = {
   id: string;
   at: string;
   runId: string;
-  principalId?: string;
+  principalId?: string | undefined;
   toolName: string;
   actionHash: string;
   risk: RiskLevel;
