@@ -3,7 +3,7 @@ import type { AgentResult } from "../agent/types.js";
 export interface AgentRunInput {
   task: string;
   workspace?: string;
-  context?: Record<string, unknown> | string;
+  context?: string;
   maxSteps?: number;
   stream?: boolean;
   sessionId?: string;
