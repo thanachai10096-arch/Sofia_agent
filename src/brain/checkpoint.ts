@@ -119,7 +119,7 @@ export class RuntimeCheckpointManager implements CheckpointManager {
 
     for (const file of checkpoint.untrackedFiles) {
       signal.throwIfAborted();
-      const content = checkpoint.files[file];
+      const content = checkpoint.files[file] ?? null;
       if (content === null) {
         await this.runtime.git(["clean", "-f", "--", file]);
       } else {
