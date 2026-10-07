@@ -33,10 +33,8 @@ export function canonicalJson(value: unknown): string {
   return "{" + Object.keys(record).sort().map(key => JSON.stringify(key) + ":" + canonicalJson(record[key])).join(",") + "}";
 }
 
-export function actionHash(runId: string, toolName: string, input: Record<string, unknown>): string {
-  return createHash("sha256").update(runId + "
-" + toolName + "
-" + canonicalJson(input)).digest("hex");
+export function actionHash(runId: string, toolName: string, input: Record<string, unknown>, principalId?: string): string {
+  return createHash("sha256").update((principalId ?? "") + "\n" + runId + "\n" + toolName + "\n" + canonicalJson(input)).digest("hex");
 }
 
 export function riskFor(effects: readonly ToolEffect[], input: Record<string, unknown>): RiskLevel {
