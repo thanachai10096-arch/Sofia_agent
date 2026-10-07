@@ -20,6 +20,8 @@ function intEnv(name: string, fallback: number, minimum = 0): number {
   return Number.isSafeInteger(value) && value >= minimum ? value : fallback;
 }
 
+const NO_COST_CAP = 9_000_000_000_000_000_000n;
+
 function bigintEnv(name: string, fallback: bigint): bigint {
   const value = process.env[name];
   if (!value) return fallback;
@@ -49,7 +51,7 @@ function createBrainFactory(
   return ({ signal, maxSteps }) => {
     const runLimit: BudgetLimit = {
       maxTokens: intEnv("SOFIA_BRAIN_MAX_TOKENS", 60_000, 1),
-      maxCostNanoUsd: bigintEnv("SOFIA_BRAIN_MAX_COST_NANO_USD", 0n),
+      maxCostNanoUsd: bigintEnv("SOFIA_BRAIN_MAX_COST_NANO_USD", NO_COST_CAP),
       maxCalls: intEnv("SOFIA_BRAIN_MAX_MODEL_CALLS", 12, 1),
       maxInFlight: intEnv("SOFIA_BRAIN_MAX_IN_FLIGHT", 1, 1),
     };
