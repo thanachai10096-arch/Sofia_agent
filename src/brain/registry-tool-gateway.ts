@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ExecutionPolicy, ToolEffect } from "../security/policy.js";
+import type { WorkspaceRuntime } from "../platform/runtime.js";
+import type { ToolRegistry } from "../tools/types.js";
 import { toolPermission, riskRank } from "../security/policy.js";
 import { assessAction, type RiskLevel } from "../security/guard.js";
 import type { AgentDependencies } from "../agent/types.js";
@@ -24,7 +26,7 @@ export class RegistryToolGateway implements ToolGateway {
   private readonly snapshots=new Map<string,SnapshotRecord>();
   private readonly checkpoints:CheckpointManager;
   constructor(
-    private readonly dependencies:Pick<AgentDependencies,"runtime"|"tools">,
+    private readonly dependencies:{runtime:WorkspaceRuntime;tools:ToolRegistry},
     private readonly policy:ExecutionPolicy,
     private readonly approval?:ApprovalHandler,
     checkpoints?:CheckpointManager,
