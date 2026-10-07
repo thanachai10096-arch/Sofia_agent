@@ -11,6 +11,7 @@ function phaseFromRequest(request: string): BrainPhase {
     switch (parsed.phase) {
       case "understand":
       case "plan":
+      case "replan":
       case "implement":
       case "diagnose":
       case "review":
