@@ -2,7 +2,8 @@ import type { ModelProvider, ModelRoute, TaskKind, ToolCall } from "../models/ty
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import type { ExecutionPolicy } from "../security/policy.js";
 import type { ToolRegistry } from "../tools/types.js";
-import type { AcceptanceCriterion, CompletionReport, SofiaBrain } from "../brain/executor.js";
+import type { AcceptanceCriterion, CompletionReport } from "../brain/types.js";
+import type { SofiaBrain } from "../brain/executor.js";
 export interface AgentRequest {
   task: string;
   context?: string;
