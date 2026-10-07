@@ -10,6 +10,7 @@ import {
 export type BrainPhase =
   | "understand"
   | "plan"
+  | "replan"
   | "implement"
   | "diagnose"
   | "review"
@@ -102,6 +103,7 @@ interface PhaseCap {
 const PHASE_CAPS: Record<BrainPhase, PhaseCap> = {
   understand: { input: 5_000, output: 700 },
   plan: { input: 8_000, output: 1_400 },
+  replan: { input: 9_000, output: 1_800 },
   implement: { input: 14_000, output: 4_000 },
   diagnose: { input: 7_000, output: 900 },
   review: { input: 10_000, output: 1_100 },
