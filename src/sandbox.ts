@@ -10,10 +10,12 @@ export class PolicySandbox implements Sandbox {
 }
 
 /** Process isolation with bounded lifetime/output. It is not a container and does not claim kernel-level filesystem/network isolation. */
+function safeEnv(){const blocked=/(?:TOKEN|SECRET|PASSWORD|PRIVATE.?KEY|API.?KEY|AUTHORIZATION|AWS_ACCESS_KEY|AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN)/i;return Object.fromEntries(Object.entries(process.env).filter(([key])=>!blocked.test(key)));}
+
 export class ProcessSandbox implements Sandbox {
   readonly isolation="process" as const;
   async run(command:string,args:string[],limits:SandboxLimits,signal?:AbortSignal){
-    const child=spawn(command,args,{cwd:limits.workspaceRoot,shell:false,env:process.env});
+    const child=spawn(command,args,{cwd:limits.workspaceRoot,shell:false,env:safeEnv()});
     let stdout="",stderr="";
     const append=(current:string,value:Buffer|string)=>{const next=current+value.toString();return next.length>limits.maxOutputBytes?next.slice(0,limits.maxOutputBytes):next;};
     const onAbort=()=>child.kill("SIGTERM");
