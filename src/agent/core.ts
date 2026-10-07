@@ -122,7 +122,7 @@ export class SofiaAgent {
       },
       { role: "user", content: request.task },
       ...(request.context
-        ? [{ role: "user", content: `Workspace context:\n${request.context}` }]
+        ? [{ role: "user" as const, content: `Workspace context:\n${request.context}` }]
         : []),
     ];
 
