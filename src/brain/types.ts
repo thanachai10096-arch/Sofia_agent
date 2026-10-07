@@ -70,6 +70,7 @@ export interface ToolResult {
 
 export interface ToolExecutionContext {
   runId: string;
+  principalId?: string;
   signal: AbortSignal;
   requireApproval: boolean;
   notifyApproval(waiting: boolean): void;
