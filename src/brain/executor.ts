@@ -856,6 +856,7 @@ export class SofiaBrain {
         this.emit({ type: "brain.plan.created" });
       }
 
+      if (!understanding || !currentPlan) throw new Stop("Run state is incomplete");
       checkpointState(currentPlan);
 
       let completed = false;
