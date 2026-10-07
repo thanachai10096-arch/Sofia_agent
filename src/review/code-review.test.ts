@@ -25,7 +25,7 @@ test("code review rejects failed verification", () => {
   const result = reviewCodeChange({
     task: "Fix the feature",
     changedFiles: ["src/feature.ts"],
-    verification: [{ ...verification[0], passed: false, detail: "Tests failed" }],
+    verification: [{ ...verification[0]!, passed: false, detail: "Tests failed" }],
   });
   assert.equal(result.approved, false);
   assert.equal(result.repairCategory, "incomplete_solution");
