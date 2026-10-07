@@ -66,9 +66,9 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
   }
 }
 
-export function assessAction(action: Omit<SecurityAction, "actionHash">, blockedPaths: readonly string[] = []): SecurityDecision {
+export function assessAction(action: Omit<SecurityAction, "actionHash">, blockedPaths: readonly string[] = [], allowedHosts: readonly string[] = []): SecurityDecision {
   const hash = actionHash(action.runId, action.toolName, action.input);
-  const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;
+  const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;\n  if (action.effects.includes("network") || action.effects.includes("browser")) {\n    const url = typeof action.input.url === "string" ? action.input.url : undefined;\n    if (url) {\n      let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch { return { allowed:false,risk:"critical",requireApproval:true,reason:"Invalid network URL.",actionHash:hash }; }\n      if (allowedHosts.length === 0 || !allowedHosts.some(allowed => host === allowed || host.endsWith("." + allowed))) return { allowed:false,risk:"critical",requireApproval:true,reason:"Network host is not allowlisted.",actionHash:hash };\n    }\n  }
   if (pathValue) assertSafePath(pathValue, blockedPaths);
 
   // Treat command/URL/query text as untrusted control input. Content being written is
