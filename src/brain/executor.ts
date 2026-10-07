@@ -14,6 +14,7 @@ import { compactSkillContext, matchSkills } from "./skills.js";
 import type { SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
+import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 
 import type {
   AcceptanceCriterion,
@@ -210,6 +211,7 @@ export class SofiaBrain {
   private started = false;
   private signal!: AbortSignal;
   private readonly limits: BrainLimits;
+  private readonly trace = new ExecutionTrace();
 
   private readonly usage = {
     steps: 0,
@@ -245,11 +247,17 @@ export class SofiaBrain {
   }
 
   private emit(event: Omit<BrainEvent, "runId">): void {
+    const fullEvent = { ...event, runId: this.runId };
+    this.trace.append(fullEvent);
     try {
-      this.dependencies.onEvent?.({ ...event, runId: this.runId });
+      this.dependencies.onEvent?.(fullEvent);
     } catch {
       // Telemetry must never alter execution semantics.
     }
+  }
+
+  getExecutionTrace(): ExecutionTraceEntry[] {
+    return this.trace.snapshot();
   }
 
   private move(next: BrainState): void {
