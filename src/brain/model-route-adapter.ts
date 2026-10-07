@@ -18,7 +18,7 @@ function taskKindForPhase(phase: string): TaskKind {
     case "understand":
     case "plan":
     case "review":
-      return "reasoning";
+      return "analysis";
     default:
       return "general";
   }
