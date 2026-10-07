@@ -20,6 +20,7 @@ import type { RepositoryMap } from "./repository-intelligence.js";
 import { compactRepositoryMap } from "./repository-intelligence.js";
 import { reviewCodeChange } from "../review/code-review.js";
 import type { RunStore } from "./run-store.js";
+import type { ProjectMemoryEntry, ProjectMemoryStore } from "./project-memory.js";
 
 import type {
   AcceptanceCriterion,
@@ -91,6 +92,7 @@ interface Dependencies {
   subagents?: SubagentRuntime;
   onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
   runStore?: RunStore;
+  projectMemory?: ProjectMemoryStore;
 }
 
 export interface BrainRunInput {
@@ -238,6 +240,8 @@ export class SofiaBrain {
   private projectContext?: ProjectContext;
   private repositoryMap?: RepositoryMap;
   private projectContextLoaded = false;
+  private projectMemory: ProjectMemoryEntry[] = [];
+  private projectMemoryLoaded = false;
 
   constructor(
     private readonly dependencies: Dependencies,
@@ -333,6 +337,12 @@ export class SofiaBrain {
       else this.projectContext = this.dependencies.projectContext;
     }
 
+    if (!this.projectMemoryLoaded && this.dependencies.projectMemory) {
+      this.projectMemoryLoaded = true;
+      try { this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.list()); }
+      catch { this.projectMemory = []; }
+    }
+
     for (;;) {
       this.signal.throwIfAborted();
 
@@ -344,6 +354,7 @@ export class SofiaBrain {
           diagnoses: this.diagnoses,
           decisions: this.decisions,
           projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined,
+          projectMemory: this.projectMemory.slice(-12).map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, source: entry.source })),
         },
       });
 
@@ -1075,15 +1086,24 @@ export class SofiaBrain {
 
       if (this.dependencies.skillLedger && this.diagnoses.length > 0 && verification.every((item) => item.passed)) {
         const last = this.diagnoses[this.diagnoses.length - 1]!;
+        const strategy = this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation";
+        const evidenceIds = verification.flatMap((item) => item.evidenceIds);
         this.dependencies.skillLedger.record({
           name: "repair-" + last.category,
           trigger: last.message.slice(0, 240),
           category: last.category,
-          strategy: this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation",
+          strategy,
           procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
           verification: verification.map((item) => item.criterionId),
-          evidenceIds: verification.flatMap((item) => item.evidenceIds),
+          evidenceIds,
         });
+        if (this.dependencies.projectMemory && this.projectContext) {
+          const now = new Date().toISOString();
+          const id = "repair:" + last.fingerprint;
+          const entry: ProjectMemoryEntry = { id, project: this.projectContext.root, kind: "repair", content: "Failure: " + last.category + "\nStrategy: " + strategy + "\nResolution: " + last.message.slice(0, 1200), source: "brain-recovery", confidence: 0.85, createdAt: now, updatedAt: now, uses: 0 };
+          await this.wait(() => this.dependencies.projectMemory!.save(entry));
+          this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
+        }
         this.emit({ type: "brain.learning.recorded" });
       }
 
