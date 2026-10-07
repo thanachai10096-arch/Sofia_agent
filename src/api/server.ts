@@ -170,6 +170,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         const runId = randomUUID();
         const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId };
         runs.set(runId, run);
         res.writeHead(200, {
@@ -199,6 +200,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         send({ type: "done", runId });
         run.updatedAt = Date.now();
+        clearTimeout(timer);
         return res.end();
       }
 
