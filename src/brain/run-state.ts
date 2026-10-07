@@ -3,6 +3,7 @@ import type {
   ExecutionPlan,
   Observation,
   TaskUnderstanding,
+  AcceptanceCriterion,
 } from "./types.js";
 import type { ExecutionTraceEntry } from "./execution-trace.js";
 
@@ -20,6 +21,7 @@ export interface BrainRunSnapshot {
   task: string;
   understanding: TaskUnderstanding;
   plan: ExecutionPlan;
+  acceptanceCriteria: AcceptanceCriterion[];
   completedStepIds: string[];
   checkpointId: string;
   baselineSnapshotId?: string;
