@@ -4,6 +4,7 @@ import type { ExecutionPolicy } from "../security/policy.js";
 import type { ToolRegistry } from "../tools/types.js";
 import type { AcceptanceCriterion, CompletionReport } from "../brain/types.js";
 import type { SofiaBrain } from "../brain/executor.js";
+import type { SofiaExperienceOptions, SofiaProgress } from "../experience/types.js";
 
 export interface AgentRequest {
   task: string;
@@ -14,6 +15,8 @@ export interface AgentRequest {
   useBrain?: boolean;
   signal?: AbortSignal;
   onEvent?: (event: AgentEvent) => void;
+  experience?: SofiaExperienceOptions;
+  onProgress?: (progress: SofiaProgress) => void;
 }
 
 export interface AgentEvent {
