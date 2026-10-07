@@ -19,7 +19,7 @@ import { createSubagentRuntime } from "../brain/subagents.js";
 import { DurableCheckpointManager } from "../brain/durable-checkpoint.js";
 import { FileRunStore } from "../brain/run-store.js";
 import { buildRepositoryMap } from "../brain/repository-intelligence.js";
-import { FileProjectMemoryStore } from "../brain/project-memory.js";
+import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
 
 function intEnv(name: string, fallback: number, minimum = 0): number {
   const value = Number(process.env[name]);
@@ -56,6 +56,7 @@ function createBrainFactory(
   const checkpointManager = new DurableCheckpointManager(dependencies.runtime, workspace);
   const runStore = new FileRunStore(workspace);
   const projectMemory = new FileProjectMemoryStore(workspace);
+  const skillLedger = new PersistentSkillLedger(projectMemory);
 
   return ({ signal, maxSteps }) => {
     const runLimit: BudgetLimit = {
@@ -133,6 +134,7 @@ function createBrainFactory(
         repositoryMapLoader: (task) => buildRepositoryMap(dependencies.runtime, task),
         runStore,
         projectMemory,
+        skillLedger,
       },
       limits,
     });
