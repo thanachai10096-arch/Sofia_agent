@@ -16,6 +16,8 @@ import { compactProjectContext, type ProjectContext } from "./project-context.js
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 import type { BrainRunSnapshot } from "./run-state.js";
+import type { RepositoryMap } from "./repository-intelligence.js";
+import { compactRepositoryMap } from "./repository-intelligence.js";
 import type { RunStore } from "./run-store.js";
 
 import type {
@@ -83,6 +85,8 @@ interface Dependencies {
   skillLedger?: SkillLedger;
   projectContext?: ProjectContext;
   projectContextLoader?: () => Promise<ProjectContext>;
+  repositoryMap?: RepositoryMap;
+  repositoryMapLoader?: (task: string) => Promise<RepositoryMap>;
   subagents?: SubagentRuntime;
   onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
   runStore?: RunStore;
