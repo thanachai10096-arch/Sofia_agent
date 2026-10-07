@@ -8,7 +8,10 @@ export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
 
   async run(request: AgentRequest): Promise<AgentResult> {
-    if (request.useBrain && this.deps.brainFactory) {
+    const shouldUseBrain =
+      this.deps.brainFactory !== undefined &&
+      (request.useBrain === true || request.acceptanceCriteria?.length);
+    if (shouldUseBrain) {
       return this.runBrain(request);
     }
 
