@@ -868,8 +868,15 @@ export class SofiaBrain {
       await checkpointState(currentPlan);
 
       let completed = false;
+      let codingIteration = 0;
+      this.emit({ type: "brain.coding.loop.started", count: 0 });
 
       while (!completed) {
+        codingIteration += 1;
+        this.emit({ type: "brain.coding.loop.iteration", count: codingIteration });
+        if (codingIteration > this.limits.maxReplans + 2) {
+          throw new Stop("Coding loop iteration budget exhausted");
+        }
         this.signal.throwIfAborted();
 
         this.move("executing");
@@ -916,6 +923,11 @@ export class SofiaBrain {
               type: "brain.verification.completed",
               passed: verification.every((item) => item.passed),
             });
+            this.emit({
+              type: "brain.coding.loop.verification",
+              count: codingIteration,
+              passed: verification.every((item) => item.passed),
+            });
           } else {
             verification = await this.verify(criteria);
           }
@@ -927,6 +939,7 @@ export class SofiaBrain {
           }
 
           const failure = failureEvidenceFromVerification(verification);
+          this.emit({ type: "brain.coding.loop.repair_needed", count: codingIteration, passed: false });
           throw new RecoverableFailure(
             failure?.category ?? "incomplete_solution",
             failure?.message ?? "Acceptance criteria failed",
@@ -974,6 +987,7 @@ export class SofiaBrain {
             await this.applySubagentProposal(specialist.proposedAction);
             this.move("observing");
 
+            this.emit({ type: "brain.coding.loop.repaired", count: recoveryRounds });
             currentPlan = {
               strategy: "inspect-evidence",
               reason: "Verify specialist recovery before replanning.",
@@ -998,6 +1012,8 @@ export class SofiaBrain {
           );
         }
       }
+
+      this.emit({ type: "brain.coding.loop.completed", count: codingIteration, passed: true });
 
       const changedFiles = baselineId
         ? await this.io(() =>
