@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { createSofiaBrain } from "./executor.js";
 import type { BrainReasoner, ToolGateway, ToolResult } from "./types.js";
+import type { SubagentRuntime } from "./subagents.js";
 
 const plan = {
   strategy: "initial",
@@ -77,6 +78,12 @@ function makeTools(): ToolGateway {
     async changedFiles() {
       return ["hello.txt"];
     },
+    async checkpoint() {
+      return { id: "cp-1", revision: "0" };
+    },
+    async rollback() {
+      return [];
+    },
   };
 }
 
@@ -122,4 +129,75 @@ test("Brain completes a coding loop only after trusted verification", async () =
   assert.deepEqual(report.changedFiles, ["hello.txt"]);
   assert.equal(report.verification[0]?.passed, true);
   assert.equal(report.usage.modelCalls, 2);
+});
+
+
+test("Brain feeds a failed verification into a specialist and executes its validated proposal", async () => {
+  let writes = 0;
+  const events: string[] = [];
+
+  const tools = makeTools();
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.write_file") {
+      writes += 1;
+      if (writes === 1) {
+        return {
+          ok: false,
+          data: null,
+          evidenceId: "failure-1",
+          error: { category: "tool_error", message: "initial write failed" },
+        };
+      }
+    }
+    return originalExecute(call, context);
+  };
+
+  const subagents: SubagentRuntime = {
+    async run(request) {
+      assert.equal(request.role, "debugger");
+      assert.equal(request.context && typeof request.context === "object", true);
+      return {
+        role: "debugger",
+        summary: "Retry the file write.",
+        output: "validated recovery proposal",
+        proposedAction: {
+          tool: "workspace.write_file",
+          input: { path: "hello.txt", content: "hello" },
+          reason: "The write failure is recoverable; retry the same bounded action.",
+        },
+      };
+    },
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      subagents,
+      allowShell: false,
+      allowNetwork: false,
+      onEvent(event) {
+        events.push(event.type);
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 20,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({ task: "Create hello.txt" });
+
+  assert.equal(report.completed, true);
+  assert.equal(report.state, "completed");
+  assert.equal(writes, 2);
+  assert.ok(events.includes("brain.subagent.completed"));
+  assert.ok(events.includes("brain.verification.completed"));
 });
