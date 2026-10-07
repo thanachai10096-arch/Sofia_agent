@@ -133,6 +133,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             signal: controller.signal,
+            ...(input.acceptanceCriteria ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
           });
           const response: AgentRunResponse = { id, status: "completed", result };
           return json(res, 200, response, allowedOrigin);
