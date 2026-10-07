@@ -441,10 +441,7 @@ export class SofiaBrain {
       }),
     );
 
-    this.emit({
-      type: "brain.subagent.completed",
-      category: role,
-    });
+    this.emit({ type: "brain.subagent.completed" });
 
     return result;
   }
