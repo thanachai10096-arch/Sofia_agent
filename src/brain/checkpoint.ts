@@ -92,10 +92,25 @@ export class RuntimeCheckpointManager implements CheckpointManager {
 
     const baselineDirty = new Set(Object.keys(checkpoint.files));
     const restoreTracked = currentPaths.filter((file) => !checkpoint.untrackedFiles.includes(file));
-    if (restoreTracked.length > 0) {
-      const result = await this.runtime.git(["restore", "--worktree", "--staged", "--", ...restoreTracked]);
+    const baselineDirtyTracked = restoreTracked.filter((file) => Object.prototype.hasOwnProperty.call(checkpoint.files, file) && !checkpoint.untrackedFiles.includes(file));
+    const cleanOrNewTracked = restoreTracked.filter((file) => !baselineDirtyTracked.includes(file));
+
+    if (cleanOrNewTracked.length > 0) {
+      const result = await this.runtime.git(["restore", "--worktree", "--staged", "--", ...cleanOrNewTracked]);
       if (result.code !== 0) throw new Error(result.stderr || "Unable to restore tracked files");
-      restoredFiles.push(...restoreTracked);
+      restoredFiles.push(...cleanOrNewTracked);
+    }
+
+    for (const file of baselineDirtyTracked) {
+      const content = checkpoint.files[file];
+      if (content === null) {
+        const result = await this.runtime.git(["restore", "--worktree", "--staged", "--", file]);
+        if (result.code !== 0) throw new Error(result.stderr || "Unable to restore missing tracked file");
+      } else {
+        await this.runtime.writeFile(file, content);
+        await this.runtime.git(["restore", "--staged", "--", file]);
+      }
+      restoredFiles.push(file);
     }
 
     for (const file of checkpoint.untrackedFiles) {
