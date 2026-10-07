@@ -16,7 +16,7 @@ import { loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { discoverProjectContext } from "../brain/project-context.js";
 import { createSubagentRuntime } from "../brain/subagents.js";
-import { RuntimeCheckpointManager } from "../brain/checkpoint.js";
+import { DurableCheckpointManager } from "../brain/durable-checkpoint.js";
 import { FileRunStore } from "../brain/run-store.js";
 
 function intEnv(name: string, fallback: number, minimum = 0): number {
@@ -51,7 +51,7 @@ function createBrainFactory(
   const routeAdapters = config.routes.map((route) =>
     createInternalRoute({ modelProvider: provider, route }),
   );
-  const checkpointManager = new RuntimeCheckpointManager(dependencies.runtime);
+  const checkpointManager = new DurableCheckpointManager(dependencies.runtime, workspace);
   const runStore = new FileRunStore(workspace);
 
   return ({ signal, maxSteps }) => {
