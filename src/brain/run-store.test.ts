@@ -14,6 +14,7 @@ test("FileRunStore survives a new store instance", async () => {
       task: "test",
       understanding: { goal: "test", constraints: [], likelyFiles: [], risks: [] },
       plan: { strategy: "initial" as const, reason: "test", steps: [] },
+      acceptanceCriteria: [],
       completedStepIds: [],
       checkpointId: "checkpoint-1",
       usage: { steps: 1, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
