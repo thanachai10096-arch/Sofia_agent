@@ -98,6 +98,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             signal: controller.signal,
+            ...(input.acceptanceCriteria ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
             onEvent: (event) => send({ type: "event", runId: id, event }),
           });
           send({ type: "result", runId: id, status: "completed", result });
