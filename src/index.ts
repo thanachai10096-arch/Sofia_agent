@@ -23,3 +23,6 @@ export type * from "./platform/runtime.js";
 export type * from "./tools/types.js";
 export { reviewCodeChange } from "./review/code-review.js";
 export type * from "./review/code-review.js";
+
+export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
+export type * from "./brain/project-memory.js";
