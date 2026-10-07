@@ -1,4 +1,5 @@
 import type { AgentResult } from "../agent/types.js";
+import type { AcceptanceCriterion } from "../brain/types.js";
 
 export interface AgentRunInput {
   task: string;
@@ -7,6 +8,7 @@ export interface AgentRunInput {
   maxSteps?: number;
   stream?: boolean;
   sessionId?: string;
+  acceptanceCriteria?: AcceptanceCriterion[];
 }
 
 export interface AgentRunResponse {
