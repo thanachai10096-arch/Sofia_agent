@@ -10,3 +10,6 @@ export type * from "./agent/types.js";
 export type * from "./models/types.js";
 export type * from "./api/types.js";
 export type * from "./platform/runtime.js";
+export { SofiaModelGateway } from "./models/gateway.js";
+export { loadModelConfigFromEnv } from "./models/config.js";
+export { createSofiaAgentDependencies } from "./models/factory.js";
