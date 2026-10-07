@@ -12,6 +12,12 @@ export interface AgentRunInput {
    * the server so the client can reconnect and poll for the result.
    */
   async?: boolean;
+  acceptanceCriteria?: Array<{
+    id: string;
+    description: string;
+    probe: { tool: string; input: Record<string, unknown> };
+  }>;
+  priority?: "normal" | "high";
 }
 
 export type AgentRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
