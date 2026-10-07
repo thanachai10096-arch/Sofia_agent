@@ -44,7 +44,10 @@ export class RegistryToolGateway implements ToolGateway {
     private readonly dependencies: Pick<AgentDependencies, "runtime" | "tools">,
     private readonly policy: ExecutionPolicy,
     private readonly approval?: ApprovalHandler,
-  ) {\n    this.checkpoints = new RuntimeCheckpointManager(dependencies.runtime);\n  }
+    checkpoints?: CheckpointManager,
+  ) {
+    this.checkpoints = checkpoints ?? new RuntimeCheckpointManager(dependencies.runtime);
+  }
 
   describe(name: string) {
     const tool = this.dependencies.tools.get(name);
@@ -238,3 +241,15 @@ export class RegistryToolGateway implements ToolGateway {
       baseline.fingerprints[file] !== currentRecord.fingerprints[file],
     );
   }}
+
+
+  async checkpoint(signal: AbortSignal): Promise<WorkspaceCheckpoint> {
+    const checkpoint = await this.checkpoints.create(signal);
+    return { id: checkpoint.id, revision: checkpoint.revision };
+  }
+
+  async rollback(checkpointId: string, signal: AbortSignal): Promise<string[]> {
+    const result = await this.checkpoints.rollback(checkpointId, signal);
+    return result.restoredFiles;
+  }
+}
