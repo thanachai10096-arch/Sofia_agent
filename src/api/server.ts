@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } from "./types.js";
@@ -56,7 +56,7 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   const header = req.headers.authorization ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!token || !config.apiKeys[token]) return null;
-  return { keyId: token, scopes: config.apiKeys[token] };
+  return { keyId: createHash("sha256").update(token).digest("hex").slice(0, 32), scopes: config.apiKeys[token] };
 }
 
 function normalizeContext(context: AgentRunInput["context"]): string | undefined {
@@ -160,6 +160,32 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
+
+      const adminScope = config.securityAdminScope ?? "security:admin";
+      const isSecurityAdmin = auth.scopes.includes(adminScope);
+      if (req.method === "GET" && req.url === "/v1/security/status") {
+        if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
+        return json(res, 200, {
+          ...deps.securityController?.status?.(),
+          auditEvents: deps.securityAudit && "list" in deps.securityAudit ? (deps.securityAudit as { list: () => unknown[] }).list().length : 0,
+        }, origin, config);
+      }
+      if (req.method === "POST" && req.url === "/v1/security/kill") {
+        if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
+        const input = (await body(req, maxBytes)) as { reason?: unknown };
+        deps.securityController?.kill(typeof input.reason === "string" && input.reason.trim() ? input.reason.trim() : "Security administrator activated kill switch.");
+        return json(res, 202, { ok: true, status: deps.securityController?.status?.() }, origin, config);
+      }
+      if (req.method === "POST" && req.url === "/v1/security/revive") {
+        if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
+        deps.securityController?.revive();
+        return json(res, 200, { ok: true, status: deps.securityController?.status?.() }, origin, config);
+      }
+      if (req.method === "GET" && req.url === "/v1/security/audit") {
+        if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
+        const events = deps.securityAudit && "list" in deps.securityAudit ? (deps.securityAudit as { list: () => unknown[] }).list() : [];
+        return json(res, 200, { events }, origin, config);
+      }
 
       const id = pathId(req.url);
       if (id && req.method === "GET") {
