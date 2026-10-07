@@ -9,6 +9,9 @@ import {
 } from "./planner.js";
 
 import { runVerification } from "./verification.js";
+import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
+import { compactSkillContext, matchSkills } from "./skills.js";
+import type { SkillLedger } from "./learning.js";
 
 import type {
   AcceptanceCriterion,
@@ -72,6 +75,7 @@ interface Dependencies {
   allowShell?: boolean;
   allowNetwork?: boolean;
   onEvent?: (event: BrainEvent) => void;
+  skillLedger?: SkillLedger;
 }
 
 export interface BrainRunInput {
@@ -566,44 +570,12 @@ export class SofiaBrain {
   private diagnose(error: unknown): Diagnosis {
     const category = failureCategory(error);
     const message = errorMessage(error);
-
-    const fingerprint = digest({
-      category,
-      message: message
-        .toLowerCase()
-        .replace(/\b0x[a-f0-9]+\b/g, "0x?")
-        .replace(/\b\d+\b/g, "#")
-        .replace(/\s+/g, " ")
-        .trim(),
-      recent: this.observations.slice(-3).map((item) => ({
-        stepId: item.stepId,
-        tool: item.tool,
-      })),
-    });
-
-    const repeated =
-      this.diagnoses.filter((item) => item.fingerprint === fingerprint).length + 1;
-
-    const attemptedStrategies = [
-      ...new Set(this.decisions.map((decision) => decision.strategy)),
-    ];
-
-    const diagnosis: Diagnosis = {
-      category,
-      fingerprint,
-      repeated,
-      message,
-      attemptedStrategies,
-    };
-
+    const diagnosis = diagnosisFromFailure(
+      { category, message, source: "tool", files: this.observations.slice(-6).map((item) => item.tool) },
+      this.diagnoses,
+    );
     this.diagnoses.push(diagnosis);
-
-    this.emit({
-      type: "brain.diagnosis.created",
-      category,
-      count: repeated,
-    });
-
+    this.emit({ type: "brain.diagnosis.created", category: diagnosis.category, count: diagnosis.repeated });
     return diagnosis;
   }
 
@@ -620,13 +592,7 @@ export class SofiaBrain {
     this.usage.replans += 1;
     this.move("replanning");
 
-    const strategy: Strategy =
-      diagnosis.category === "environment_error" ||
-      diagnosis.category === "dependency_error"
-        ? "fix-environment"
-        : diagnosis.attemptedStrategies.includes("fix-implementation")
-          ? "alternative-tool"
-          : "fix-implementation";
+    const strategy: Strategy = preferredStrategy(diagnosis.category, diagnosis.attemptedStrategies);
 
     const reason = `Replanning after ${diagnosis.category}: ${diagnosis.message}`;
 
@@ -637,12 +603,14 @@ export class SofiaBrain {
       count: this.usage.replans,
     });
 
+    const skills = matchSkills(diagnosis.category, diagnosis.message);
     const value = await this.infer("replan", {
       task,
       understanding,
       previousPlan,
       diagnosis,
       strategy,
+      matchedSkills: compactSkillContext(skills),
     });
 
     const plan = this.validatePlan(
@@ -782,12 +750,10 @@ export class SofiaBrain {
             break;
           }
 
+          const failure = failureEvidenceFromVerification(verification);
           throw new RecoverableFailure(
-            "incomplete_solution",
-            verification
-              .filter((item) => !item.passed)
-              .map((item) => item.detail)
-              .join("; ") || "Acceptance criteria failed",
+            failure?.category ?? "incomplete_solution",
+            failure?.message ?? "Acceptance criteria failed",
           );
         } catch (error) {
           if (this.signal.aborted) throw error;
@@ -858,6 +824,20 @@ export class SofiaBrain {
         type: "brain.failed",
         state: "failed",
       });
+
+      if (this.dependencies.skillLedger && this.diagnoses.length > 0) {
+        const last = this.diagnoses[this.diagnoses.length - 1]!;
+        this.dependencies.skillLedger.record({
+          name: "repair-" + last.category,
+          trigger: last.message.slice(0, 240),
+          category: last.category,
+          strategy: last.attemptedStrategies[last.attemptedStrategies.length - 1] ?? "fix-implementation",
+          procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
+          verification: verification.map((item) => item.criterionId),
+          evidenceIds: verification.flatMap((item) => item.evidenceIds),
+        });
+        this.emit({ type: "brain.learning.recorded" });
+      }
 
       return this.report(
         false,
