@@ -25,12 +25,14 @@ import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
 import { EvolutionEngine } from "../brain/evolution.js";
 import path from "node:path";
+import { SecurityController } from "../security/controller.js";
+import { MemorySecurityAudit } from "../security/audit.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"]}):AgentDependencies["brainFactory"]{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:MemorySecurityAudit}):AgentDependencies["brainFactory"]{
   const routeAdapters=config.routes.map(route=>createInternalRoute({modelProvider:provider,route}));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
@@ -44,7 +46,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const budget=new TokenBudget(runLimit,models);
     const gateway=new TokenAwareGateway(budget,routeAdapters,intEnv("SOFIA_BRAIN_MODEL_TIMEOUT_MS",45000,1));
     const reasoner=new TokenAwareBrainReasoner(gateway);
-    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:dependencies.tools},dependencies.policy,dependencies.approval,checkpointManager);
+    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:dependencies.tools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const subagents=createSubagentRuntime(reasoner,toolGateway);
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
     return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,onRunSnapshot},limits});
@@ -52,11 +54,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
 }
 
 export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
-  const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv();
+  const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); const security=new SecurityController(); const audit=new MemorySecurityAudit();
   const browserTools=policy.allowBrowser?createBrowserTools(new PlaywrightBrowserRuntime()):[];
   const tools=createToolRegistry([...createBuiltinTools(),...browserTools]);
   const provider=new SofiaModelGateway(config.providers);
-  const brainFactory=createBrainFactory(config,provider,workspace,{runtime,tools,policy,approval});
+  const brainFactory=createBrainFactory(config,provider,workspace,{runtime,tools,policy,approval,security,audit});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime};
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:audit};
 }
