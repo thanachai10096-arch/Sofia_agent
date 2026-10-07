@@ -15,6 +15,6 @@ export function issueCapability(input:{principalId:string;runId:string;tool:stri
 }
 export function verifyCapability(cap:Capability, expected:{principalId:string;runId:string;tool:string},secret:string):boolean{
   if(cap.principalId!==expected.principalId||cap.runId!==expected.runId||cap.tool!==expected.tool||cap.expiresAt<Date.now())return false;
-  const expectedSig=createHash("sha256").update(secret+"\n"+payload({...cap,signature:undefined} as Omit<Capability,"signature">)).digest("hex");
+  const {signature:_signature,...unsigned}=cap; const expectedSig=createHash("sha256").update(secret+"\n"+payload(unsigned)).digest("hex");
   return expectedSig===cap.signature;
 }
