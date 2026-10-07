@@ -237,7 +237,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      const jobMatch = req.url.match(/^\\/v1\\/jobs\\/([^/]+)(?:\\/(resume|cancel))?$/);
+      const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
       if (jobMatch && deps.jobRuntime) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
