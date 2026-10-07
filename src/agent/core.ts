@@ -22,7 +22,7 @@ export class SofiaAgent {
     let lastError: unknown = null;
     const maxSteps = Math.min(request.maxSteps ?? defaultPolicy.maxSteps, defaultPolicy.maxSteps);
 
-    for (let attempt = 0; attempt <= 2; attempt++) {
+    for (let attempt = 0; attempt < Math.min(3, maxSteps); attempt++) {
       try {
         assertSafeStep(defaultPolicy, attempt + 1);
         const route = this.deps.router.select(kind);
@@ -34,15 +34,13 @@ export class SofiaAgent {
           step: attempt + 1,
         });
 
-        const response = await this.deps.provider.generate(
-          {
-            task: request.task,
-            kind,
-            context: request.context,
-            step: attempt + 1,
-          },
-          route,
-        );
+        const modelRequest = {
+          task: request.task,
+          kind,
+          ...(request.context ? { context: request.context } : {}),
+          step: attempt + 1,
+        };
+        const response = await this.deps.provider.generate(modelRequest, route);
 
         events.push({
           type: "model.completed",
