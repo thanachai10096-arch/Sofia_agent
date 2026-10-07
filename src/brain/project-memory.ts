@@ -39,7 +39,7 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
       .filter(x=>x.score>0).sort((a,b)=>b.score-a.score||b.entry.updatedAt.localeCompare(a.entry.updatedAt)).map(x=>x.entry).slice(0,12);
   }
   readSync(): ProjectMemoryEntry[] {
-    try { return JSON.parse(readFileSync(this.file,"utf8")) as ProjectMemoryEntry[]; }
+    try { const entries=JSON.parse(readFileSync(this.file,"utf8")) as ProjectMemoryEntry[]; return entries.filter(entry=>!containsPromptInjection(entry.content)); }
     catch { return []; }
   }
 }
