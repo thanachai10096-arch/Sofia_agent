@@ -1,255 +1,77 @@
 import { createHash, randomUUID } from "node:crypto";
-
-import type { ExecutionPolicy } from "../security/policy.js";
+import type { ExecutionPolicy, ToolEffect } from "../security/policy.js";
+import { toolPermission } from "../security/policy.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { ApprovalHandler } from "../agent/approval.js";
 import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, WorkspaceCheckpoint, ToolCall } from "./types.js";
 import { RuntimeCheckpointManager, type CheckpointManager } from "./checkpoint.js";
 
-function digest(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+function digest(value:string){return createHash("sha256").update(value).digest("hex");}
+function classifyEffects(name:string): ToolEffect[] {
+  if(name.startsWith("browser.")) return ["browser","network"];
+  if(name==="workspace.read_file"||name==="workspace.list_files"||name==="workspace.search"||name==="git.diff"||name==="project.verify") return ["read"];
+  if(name==="workspace.write_file"||name==="workspace.apply_patch") return ["write"];
+  if(name==="terminal.run") return ["shell"];
+  if(name==="git.run") return ["read","write"];
+  return ["read"];
 }
-
-function classifyEffects(name: string) {
-  if (name === "workspace.read_file" || name === "workspace.list_files" || name === "workspace.search" || name === "git.diff") {
-    return ["read"] as const;
-  }
-  if (name === "workspace.write_file" || name === "workspace.apply_patch") {
-    return ["write"] as const;
-  }
-  if (name === "project.verify" || name === "git.diff") {
-    return ["read"] as const;
-  }
-  if (name === "terminal.run") {
-    return ["shell"] as const;
-  }
-  if (name === "git.run") {
-    return ["read", "write"] as const;
-  }
-  return ["read"] as const;
-}
-
-interface SnapshotRecord {
-  id: string;
-  revision: string;
-  files: string[];
-  fingerprints: Record<string, string>;
-}
+interface SnapshotRecord{id:string;revision:string;files:string[];fingerprints:Record<string,string>}
 
 export class RegistryToolGateway implements ToolGateway {
-  private readonly snapshots = new Map<string, SnapshotRecord>();
-  private readonly checkpoints: CheckpointManager;
-
+  private readonly snapshots=new Map<string,SnapshotRecord>();
+  private readonly checkpoints:CheckpointManager;
   constructor(
-    private readonly dependencies: Pick<AgentDependencies, "runtime" | "tools">,
-    private readonly policy: ExecutionPolicy,
-    private readonly approval?: ApprovalHandler,
-    checkpoints?: CheckpointManager,
-  ) {
-    this.checkpoints = checkpoints ?? new RuntimeCheckpointManager(dependencies.runtime);
+    private readonly dependencies:Pick<AgentDependencies,"runtime"|"tools">,
+    private readonly policy:ExecutionPolicy,
+    private readonly approval?:ApprovalHandler,
+    checkpoints?:CheckpointManager,
+  ){this.checkpoints=checkpoints??new RuntimeCheckpointManager(dependencies.runtime);}
+
+  describe(name:string){
+    const tool=this.dependencies.tools.get(name); if(!tool) return undefined;
+    return {effects:classifyEffects(name)};
   }
 
-  describe(name: string) {
-    const tool = this.dependencies.tools.get(name);
-    if (!tool) return undefined;
-
-    const effects = classifyEffects(name);
-    return { effects };
-  }
-
-  async execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolResult> {
+  async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{
     context.signal.throwIfAborted();
-
-    const descriptor = this.describe(call.tool);
-    if (!descriptor) {
-      return {
-        ok: false,
-        data: null,
-        evidenceId: randomUUID(),
-        error: { category: "tool_error", message: `Unknown tool: ${call.tool}` },
-      };
-    }
-
-    if (!this.policy.allowTools) {
-      return {
-        ok: false,
-        data: null,
-        evidenceId: randomUUID(),
-        error: { category: "permission_error", message: "Tool execution is disabled by policy." },
-      };
-    }
-
-    if (descriptor.effects.includes("shell") && !this.policy.allowShell) {
-      return {
-        ok: false,
-        data: null,
-        evidenceId: randomUUID(),
-        error: { category: "permission_error", message: "Shell execution is disabled by policy." },
-      };
-    }
-
-    if (descriptor.effects.includes("write") && !this.policy.allowFileWrite) {
-      return {
-        ok: false,
-        data: null,
-        evidenceId: randomUUID(),
-        error: { category: "permission_error", message: "File writes are disabled by policy." },
-      };
-    }
-
-    if (descriptor.effects.includes("network") && !this.policy.allowNetwork) {
-      return {
-        ok: false,
-        data: null,
-        evidenceId: randomUUID(),
-        error: { category: "network_error", message: "Network access is disabled by policy." },
-      };
-    }
-
-    const tool = this.dependencies.tools.get(call.tool);
-    if (!tool) {
-      return {
-        ok: false,
-        data: null,
-        evidenceId: randomUUID(),
-        error: { category: "tool_error", message: "Tool disappeared during execution." },
-      };
-    }
-
-    const requiresApproval =
-      descriptor.effects.includes("write") ||
-      descriptor.effects.includes("shell") ||
-      descriptor.effects.includes("destructive");
-
-    if (requiresApproval && context.requireApproval) {
-      if (!this.approval) {
-        return {
-          ok: false,
-          data: null,
-          evidenceId: randomUUID(),
-          error: {
-            category: "permission_error",
-            message: "Approval is required for this tool.",
-          },
-        };
-      }
-
+    const descriptor=this.describe(call.tool);
+    if(!descriptor)return{ok:false,data:null,evidenceId:randomUUID(),error:{category:"tool_error",message:`Unknown tool: ${call.tool}`}};
+    if(!this.policy.allowTools)return{ok:false,data:null,evidenceId:randomUUID(),error:{category:"permission_error",message:"Tool execution is disabled by policy."}};
+    const permission=toolPermission(this.policy,call.tool,descriptor.effects);
+    if(permission.allow===false)return{ok:false,data:null,evidenceId:randomUUID(),error:{category:"permission_error",message:`Tool execution is disabled by policy: ${call.tool}`}};
+    const tool=this.dependencies.tools.get(call.tool);
+    if(!tool)return{ok:false,data:null,evidenceId:randomUUID(),error:{category:"tool_error",message:"Tool disappeared during execution."}};
+    const requiresApproval=permission.requireApproval===true||descriptor.effects.some(x=>x==="write"||x==="shell"||x==="destructive"||x==="browser");
+    if(requiresApproval&&context.requireApproval){
+      if(!this.approval)return{ok:false,data:null,evidenceId:randomUUID(),error:{category:"permission_error",message:"Approval is required for this tool."}};
       context.notifyApproval(true);
-      try {
-        const approved = await this.approval({
-          runId: context.runId,
-          toolName: call.tool,
-          input: call.input,
-        });
-
-        if (!approved) {
-          return {
-            ok: false,
-            data: null,
-            evidenceId: randomUUID(),
-            error: {
-              category: "permission_error",
-              message: "Tool execution was not approved.",
-            },
-          };
-        }
-      } finally {
-        context.notifyApproval(false);
-      }
+      try{
+        if(!await this.approval({runId:context.runId,toolName:call.tool,input:call.input}))return{ok:false,data:null,evidenceId:randomUUID(),error:{category:"permission_error",message:"Tool execution was not approved."}};
+      }finally{context.notifyApproval(false);}
     }
-
-    try {
-      const data = await tool.execute(call.input, {
-        runtime: this.dependencies.runtime,
-        signal: context.signal,
-      });
-
-      return {
-        ok: true,
-        data,
-        evidenceId: randomUUID(),
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        data: null,
-        evidenceId: randomUUID(),
-        error: {
-          category: "tool_error",
-          message: error instanceof Error ? error.message : String(error),
-        },
-      };
+    try{
+      const data=await tool.execute(call.input,{runtime:this.dependencies.runtime,signal:context.signal});
+      return{ok:true,data,evidenceId:randomUUID()};
+    }catch(error){
+      return{ok:false,data:null,evidenceId:randomUUID(),error:{category:descriptor.effects.includes("network")?"network_error":"tool_error",message:error instanceof Error?error.message:String(error)}};
     }
   }
 
-  async snapshot(signal: AbortSignal): Promise<WorkspaceSnapshot> {
+  async snapshot(signal:AbortSignal):Promise<WorkspaceSnapshot>{
     signal.throwIfAborted();
-
-    const result = await this.dependencies.runtime.git(
-      ["status", "--porcelain", "--untracked-files=all"],
-    );
-
-    const files = result.code === 0
-      ? result.stdout
-          .split(/\r?\n/)
-          .map((line) => line.slice(3).trim())
-          .filter(Boolean)
-          .sort()
-      : [];
-
-    const revisionSource =
-      result.code === 0
-        ? result.stdout
-        : `non-git:${await this.dependencies.runtime.cwd()}`;
-
-    const revision = digest(revisionSource);
-    const id = randomUUID();
-
-    const fingerprints: Record<string, string> = {};
-    for (const file of files) {
-      try {
-        fingerprints[file] = digest(await this.dependencies.runtime.readFile(file));
-      } catch {
-        fingerprints[file] = "<missing>";
-      }
-    }
-
-    this.snapshots.set(id, { id, revision, files, fingerprints });
-
-    return {
-      id,
-      revision,
-      evidenceId: randomUUID(),
-    };
+    const result=await this.dependencies.runtime.git(["status","--porcelain","--untracked-files=all"]);
+    const files=result.code===0?result.stdout.split(/\r?\n/).map(x=>x.slice(3).trim()).filter(Boolean).sort():[];
+    const revision=digest(result.code===0?result.stdout:`non-git:${await this.dependencies.runtime.cwd()}`);
+    const id=randomUUID(); const fingerprints:Record<string,string>={};
+    for(const file of files){try{fingerprints[file]=digest(await this.dependencies.runtime.readFile(file));}catch{fingerprints[file]="<missing>";}}
+    this.snapshots.set(id,{id,revision,files,fingerprints}); return{id,revision,evidenceId:randomUUID()};
   }
 
-  async changedFiles(
-    baselineSnapshotId: string,
-    signal: AbortSignal,
-  ): Promise<string[]> {
-    signal.throwIfAborted();
-
-    const baseline = this.snapshots.get(baselineSnapshotId);
-    if (!baseline) throw new Error("Unknown baseline snapshot");
-
-    const current = await this.snapshot(signal);
-    const currentRecord = this.snapshots.get(current.id);
-    if (!currentRecord) throw new Error("Current snapshot was not retained");
-
-    const names = [...new Set([...baseline.files, ...currentRecord.files])].sort();
-    return names.filter((file) =>
-      baseline.fingerprints[file] !== currentRecord.fingerprints[file],
-    );
-  }}
-
-
-  async checkpoint(signal: AbortSignal): Promise<WorkspaceCheckpoint> {
-    const checkpoint = await this.checkpoints.create(signal);
-    return { id: checkpoint.id, revision: checkpoint.revision };
+  async changedFiles(baselineSnapshotId:string,signal:AbortSignal):Promise<string[]>{
+    signal.throwIfAborted(); const baseline=this.snapshots.get(baselineSnapshotId); if(!baseline)throw new Error("Unknown baseline snapshot");
+    const current=await this.snapshot(signal); const record=this.snapshots.get(current.id)!;
+    return [...new Set([...baseline.files,...record.files])].sort().filter(file=>baseline.fingerprints[file]!==record.fingerprints[file]);
   }
-
-  async rollback(checkpointId: string, signal: AbortSignal): Promise<string[]> {
-    const result = await this.checkpoints.rollback(checkpointId, signal);
-    return result.restoredFiles;
-  }
+  async checkpoint(signal:AbortSignal):Promise<WorkspaceCheckpoint>{const c=await this.checkpoints.create(signal);return{id:c.id,revision:c.revision};}
+  async rollback(id:string,signal:AbortSignal):Promise<string[]>{return(await this.checkpoints.rollback(id,signal)).restoredFiles;}
 }
