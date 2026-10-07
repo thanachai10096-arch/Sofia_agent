@@ -1,22 +1,23 @@
-import { describe, expect, it } from "vitest";
+import assert from "node:assert/strict";
+import test from "node:test";
 import { createSubagentRuntime, roleForTask } from "./subagents.js";
 
-describe("subagent routing", () => {
-  it("routes coding failures to debugger", () => {
-    expect(roleForTask("fix the broken TypeScript build", "type_error")).toBe("debugger");
+test("subagent routing", () => {
+  test("routes coding failures to debugger", () => {
+    assert.equal(roleForTask("fix the broken TypeScript build", "type_error"), "debugger");
   });
 
-  it("routes security work internally", () => {
-    expect(roleForTask("review authentication and token handling")).toBe("security");
+  test("routes security work internally", () => {
+    assert.equal(roleForTask("review authentication and token handling"), "security");
   });
 
-  it("routes verification work to tester", () => {
-    expect(roleForTask("verify the regression tests")).toBe("tester");
+  test("routes verification work to tester", () => {
+    assert.equal(roleForTask("verify the regression tests"), "tester");
   });
 });
 
-describe("subagent runtime", () => {
-  it("executes a bounded internal role without exposing model selection", async () => {
+test("subagent runtime executes a bounded internal role without exposing model selection", async () => {
+  
     const runtime = createSubagentRuntime({
       async prepare() {
         return {
@@ -37,7 +38,7 @@ describe("subagent runtime", () => {
       signal: new AbortController().signal,
     });
 
-    expect(result.role).toBe("explorer");
-    expect(result.output).toEqual({ finding: "inspect package boundaries" });
+    assert.equal(result.role, "explorer");
+    assert.deepEqual(result.output, { finding: "inspect package boundaries" });
   });
 });
