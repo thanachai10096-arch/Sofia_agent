@@ -302,9 +302,9 @@ export class SofiaBrain {
         throw new Stop("Invalid inference token estimate");
       }
 
-      const reservation = prepared.inputTokens + this.limits.maxOutputTokens;
+      const estimatedContext = prepared.inputTokens + this.limits.maxOutputTokens;
 
-      if (reservation > this.limits.maxContextTokens) {
+      if (estimatedContext > this.limits.maxContextTokens) {
         if (recent.length === 0) {
           throw new Stop("Required context exceeds capacity");
         }
