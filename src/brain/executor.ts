@@ -13,7 +13,7 @@ import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrateg
 import { compactSkillContext, matchSkills } from "./skills.js";
 import type { SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
-import { roleForTask, type SubagentRuntime } from "./subagents.js";
+import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 
 import type {
   AcceptanceCriterion,
@@ -416,6 +416,37 @@ export class SofiaBrain {
     });
 
     return parseUnderstanding(value);
+  }
+
+  private async delegateSubagent(
+    task: string,
+    context: Record<string, unknown>,
+    failureCategory?: string,
+  ): Promise<SubagentResult | undefined> {
+    const runtime = this.dependencies.subagents;
+    if (!runtime) return undefined;
+
+    if (this.usage.modelCalls >= this.limits.maxModelCalls) {
+      throw new Stop("Model-call budget exhausted");
+    }
+
+    this.usage.modelCalls += 1;
+    const role = roleForTask(task, failureCategory);
+    const result = await this.wait(() =>
+      runtime.run({
+        role,
+        task,
+        context,
+        signal: this.signal,
+      }),
+    );
+
+    this.emit({
+      type: "brain.subagent.completed",
+      category: role,
+    });
+
+    return result;
   }
 
   private async plan(
