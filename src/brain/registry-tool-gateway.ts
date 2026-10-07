@@ -4,7 +4,7 @@ import type { ExecutionPolicy } from "../security/policy.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { ApprovalHandler } from "../agent/approval.js";
 import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, WorkspaceCheckpoint, ToolCall } from "./types.js";
-import { RuntimeCheckpointManager, type CheckpointManager } from "./checkpoint.js";
+import type { CheckpointManager } from "./checkpoint.js";
 
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -14,7 +14,7 @@ function classifyEffects(name: string) {
   if (name === "workspace.read_file" || name === "workspace.list_files" || name === "workspace.search" || name === "git.diff") {
     return ["read"] as const;
   }
-  if (name === "workspace.write_file") {
+  if (name === "workspace.write_file" || name === "workspace.apply_patch") {
     return ["write"] as const;
   }
   if (name === "project.verify" || name === "git.diff") {
