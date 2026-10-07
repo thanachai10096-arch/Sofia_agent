@@ -18,6 +18,7 @@ import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 import type { BrainRunSnapshot } from "./run-state.js";
 import type { RepositoryMap } from "./repository-intelligence.js";
 import { compactRepositoryMap } from "./repository-intelligence.js";
+import { reviewCodeChange } from "../review/code-review.js";
 import type { RunStore } from "./run-store.js";
 
 import type {
@@ -935,6 +936,47 @@ export class SofiaBrain {
           }
 
           if (verification.every((item) => item.passed)) {
+            const changedFiles = baselineId
+              ? await this.io(() =>
+                  this.dependencies.tools.changedFiles(baselineId!, this.signal),
+                )
+              : [];
+            const diffResult = await this.io(() =>
+              this.dependencies.tools.execute(
+                { tool: "git.diff", input: {} },
+                {
+                  runId: this.runId,
+                  signal: this.signal,
+                  requireApproval: false,
+                  notifyApproval: () => {},
+                },
+              ),
+            );
+            const diff =
+              diffResult.ok && diffResult.data
+                ? JSON.stringify(diffResult.data)
+                : undefined;
+            const review = reviewCodeChange({
+              task: input.task,
+              changedFiles,
+              verification,
+              diff,
+              acceptanceCriteria: (input.acceptanceCriteria ?? []).map(
+                (criterion) => criterion.description,
+              ),
+            });
+            this.emit({
+              type: "brain.review.completed",
+              passed: review.approved,
+              count: codingIteration,
+            });
+            if (!review.approved) {
+              throw new RecoverableFailure(
+                review.repairCategory ?? "incomplete_solution",
+                review.reason,
+              );
+            }
+
             this.move("completed");
             completed = true;
             break;
