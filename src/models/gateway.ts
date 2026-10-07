@@ -11,7 +11,11 @@ interface ChatResponse {
 }
 export class SofiaModelGateway implements ModelProvider {
  constructor(private readonly providers:Record<string,GatewayProviderConfig>){}
- async generate(request:ModelRequest,route:ModelRoute):Promise<ModelResponse>{
+ async generate(
+  request:ModelRequest,
+  route:ModelRoute,
+  options: { signal?: AbortSignal; maxOutputTokens?: number } = {},
+ ):Promise<ModelResponse>{
   const config=this.providers[route.providerId??route.id]; if(!config) throw new Error(`No provider configuration for route ${route.id}`);
   const messages:ChatMessage[]=request.messages?.length?request.messages:[
    {role:"system",content:"You are Sofia, a general-purpose software agent. Use available tools when they help accomplish the task. Never reveal internal model routing."},
