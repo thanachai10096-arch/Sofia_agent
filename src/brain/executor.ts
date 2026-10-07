@@ -8,6 +8,8 @@ import {
   topologicalOrder,
 } from "./planner.js";
 
+import { runVerification } from "./verification.js";
+
 import type {
   AcceptanceCriterion,
   BrainEvent,
@@ -756,13 +758,17 @@ export class SofiaBrain {
 
           const criteria = input.acceptanceCriteria ?? [];
           if (criteria.length === 0) {
-            throw new RecoverableFailure(
-              "incomplete_solution",
-              "No trusted acceptance criteria were provided.",
+            // A coding task gets a bounded trusted verification pipeline by default.
+            // Custom acceptance criteria still take precedence for domain-specific work.
+            verification = await runVerification(
+              this.dependencies.tools,
+              ["typecheck", "test", "build"],
+              this.signal,
+              this.runId,
             );
+          } else {
+            verification = await this.verify(criteria);
           }
-
-          verification = await this.verify(criteria);
 
           if (verification.every((item) => item.passed)) {
             this.move("completed");
