@@ -752,6 +752,8 @@ export class SofiaBrain {
     let checkpointId: string | undefined;
     let verification: VerificationResult[] = [];
     let currentPlan: ExecutionPlan | undefined;
+    let recoveryRounds = 0;
+    const recoveryFingerprints = new Set<string>();
 
     try {
       this.emit({ type: "brain.started", state: "idle" });
@@ -861,13 +863,26 @@ export class SofiaBrain {
           );
 
           if (specialist?.proposedAction) {
+            recoveryRounds += 1;
+            if (recoveryRounds > this.limits.maxReplans + 1) {
+              throw new Stop("Recovery round budget exhausted");
+            }
+
+            if (recoveryFingerprints.has(diagnosis.fingerprint)) {
+              throw new Stop(
+                `Recovery repeated the same failure: ${diagnosis.fingerprint}`,
+              );
+            }
+            recoveryFingerprints.add(diagnosis.fingerprint);
+
+            // Recovery actions still flow through the Brain state machine and
+            // the main ToolGateway. After the specialist proposes a repair,
+            // verify it immediately instead of paying for an unnecessary plan.
+            this.move("replanning");
+            this.move("executing");
             await this.applySubagentProposal(specialist.proposedAction);
             this.move("observing");
 
-            // A specialist action is already an executed recovery attempt.
-            // Do not immediately duplicate the old plan. Run verification
-            // against the recovered workspace first; only a failed verification
-            // should consume a replan.
             currentPlan = {
               strategy: "inspect-evidence",
               reason: "Verify specialist recovery before replanning.",
