@@ -234,6 +234,48 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
+      const jobMatch = req.url.match(/^\\/v1\\/jobs\\/([^/]+)(?:\\/(resume|cancel))?$/);
+      if (jobMatch && deps.jobRuntime) {
+        const jobId = jobMatch[1];
+        const action = jobMatch[2];
+        if (req.method === "GET" && !action) {
+          const job = await deps.jobRuntime.get(jobId);
+          return job ? json(res, 200, job, origin, config) : json(res, 404, { error: "job_not_found" }, origin, config);
+        }
+        if (req.method === "POST" && action === "resume") {
+          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
+          catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
+        }
+        if (req.method === "POST" && action === "cancel") {
+          const cancelled = await deps.jobRuntime.cancel(jobId);
+          return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
+        }
+      }
+
+      if (req.method === "GET" && req.url === "/v1/jobs") {
+        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+        return json(res, 200, { jobs: await deps.jobRuntime.list() }, origin, config);
+      }
+
+      if (req.method === "POST" && req.url === "/v1/jobs") {
+        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+        const input = (await body(req, maxBytes)) as AgentRunInput;
+        if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
+        try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
+        try {
+          const job = await deps.jobRuntime.submit({
+            task: input.task,
+            ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: input.acceptanceCriteria.map((x) => ({
+              id: x.id, description: x.description, probe: x.probe,
+              evaluate: (value: unknown) => ({ passed: Boolean((value as { passed?: unknown })?.passed), detail: "API acceptance probe" }),
+            })) } : {}),
+          });
+          return json(res, 202, job, origin, config);
+        } catch (error) {
+          return json(res, 502, { error: "job_submit_failed", message: error instanceof Error ? error.message : "Job submission failed" }, origin, config);
+        }
+      }
+
       if (req.method === "GET" && req.url.startsWith("/v1/usage")) {
         return json(res, 200, usage.get(auth.keyId), origin, config);
       }
