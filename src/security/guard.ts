@@ -67,7 +67,7 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
   }
 }
 
-export function assessAction(action: Omit<SecurityAction, "actionHash">, blockedPaths: readonly string[] = [], allowedHosts: readonly string[] = []): SecurityDecision {
+export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">, blockedPaths: readonly string[] = [], allowedHosts: readonly string[] = []): SecurityDecision {
   const hash = actionHash(action.runId, action.toolName, action.input, action.principalId);
   const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;
   if (action.effects.includes("network") || action.effects.includes("browser")) {
