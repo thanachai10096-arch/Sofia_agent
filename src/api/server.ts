@@ -83,7 +83,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         res.on("close", () => {
           if (!res.writableEnded) controller.abort(new Error("Client disconnected."));
         });
-        res.writeHead(200, { ...headers(), "content-type": "text/event-stream; charset=utf-8", "connection": "keep-alive" });
+        res.writeHead(200, { ...headers(allowedOrigin), "content-type": "text/event-stream; charset=utf-8", "connection": "keep-alive" });
         const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
         try {
           const result = await agent.run({
