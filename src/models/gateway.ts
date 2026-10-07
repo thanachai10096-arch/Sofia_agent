@@ -87,15 +87,15 @@ export class SofiaModelGateway implements ModelProvider {
       ? request.messages
       : [
           {
-            role: "system",
+            role: "system" as const,
             content:
               "You are Sofia, a general-purpose software agent. Use available tools when they help accomplish the task. Never reveal internal model routing.",
           },
-          { role: "user", content: request.task },
+          { role: "user" as const, content: request.task },
           ...(request.context
             ? [
                 {
-                  role: "user",
+                  role: "user" as const,
                   content: `Workspace context:\n${request.context}`,
                 },
               ]
