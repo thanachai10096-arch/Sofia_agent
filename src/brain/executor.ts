@@ -335,6 +335,17 @@ export class SofiaBrain {
       this.projectContextLoaded = true;
       if (this.dependencies.projectContextLoader) this.projectContext = await this.wait(this.dependencies.projectContextLoader);
       else this.projectContext = this.dependencies.projectContext;
+      if (this.dependencies.projectMemory && this.projectContext) {
+        const instructionFiles = new Set(["SOFIA.md", "Sofia.md", "AGENTS.md", "CLAUDE.md"]);
+        for (const file of this.projectContext.files) {
+          if (!instructionFiles.has(file.path)) continue;
+          const now = new Date().toISOString();
+          const id = "convention:" + this.projectContext.root + ":" + file.path;
+          const entry: ProjectMemoryEntry = { id, project: this.projectContext.root, kind: "convention", content: file.content.slice(0, 4000), source: file.path, confidence: 0.95, createdAt: now, updatedAt: now, uses: 0 };
+          try { await this.wait(() => this.dependencies.projectMemory!.save(entry)); }
+          catch { /* Memory persistence is best-effort. */ }
+        }
+      }
     }
 
     if (!this.projectMemoryLoaded && this.dependencies.projectMemory) {
