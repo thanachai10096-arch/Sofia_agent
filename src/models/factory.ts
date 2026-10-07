@@ -16,6 +16,7 @@ import { loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { discoverProjectContext } from "../brain/project-context.js";
 import { createSubagentRuntime } from "../brain/subagents.js";
+import { RuntimeCheckpointManager } from "../brain/checkpoint.js";
 
 function intEnv(name: string, fallback: number, minimum = 0): number {
   const value = Number(process.env[name]);
@@ -49,6 +50,7 @@ function createBrainFactory(
   const routeAdapters = config.routes.map((route) =>
     createInternalRoute({ modelProvider: provider, route }),
   );
+  const checkpointManager = new RuntimeCheckpointManager(dependencies.runtime);
 
   return ({ signal, maxSteps }) => {
     const runLimit: BudgetLimit = {
@@ -99,6 +101,7 @@ function createBrainFactory(
       },
       dependencies.policy,
       dependencies.approval,
+      checkpointManager,
     );
 
     const subagents = createSubagentRuntime(reasoner, toolGateway);
