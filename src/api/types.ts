@@ -26,4 +26,5 @@ export interface SofiaApiConfig {
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
+  allowedOrigins?: string[];
 }
