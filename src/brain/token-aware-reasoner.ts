@@ -87,19 +87,14 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
         1,
       ),
       invoke: async (invokeOptions) => {
-        const value = await this.gateway.generate(
+        const result = await this.gateway.generateMetered(
           input,
           invokeOptions.signal,
         );
 
         return {
-          value,
-          usage: {
-            // The gateway has already performed authoritative accounting.
-            // These fields are retained for the BrainReasoner contract only.
-            inputTokens: 0,
-            outputTokens: 0,
-          },
+          value: result.value,
+          usage: result.usage,
         };
       },
     };
