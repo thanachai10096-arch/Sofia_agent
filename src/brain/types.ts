@@ -89,7 +89,7 @@ export interface WorkspaceSnapshot {
 
 export interface ToolGateway {
   describe(name: string): {
-    effects: readonly ("read" | "write" | "shell" | "network" | "destructive")[];
+    effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[];
   } | undefined;
   execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolResult>;
   snapshot(signal: AbortSignal): Promise<WorkspaceSnapshot>;
