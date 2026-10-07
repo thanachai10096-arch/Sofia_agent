@@ -69,6 +69,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const maxBytes = config.maxBodyBytes ?? 1_000_000;
   const usage = new UsageLimiter(config.maxRunsPerKeyPerDay ?? 100, config.maxToolCallsPerKeyPerDay ?? 1000);
   const runs = new Map<string, ActiveRun>();
+  const idempotency = new Map<string, string>();
+  const activeByKey = new Map<string, number>();
+  const requestTimeoutMs = config.requestTimeoutMs ?? 120_000;
+  const maxConcurrentRunsPerKey = config.maxConcurrentRunsPerKey ?? 4;
   const retention = config.runRetentionMs ?? 24 * 60 * 60 * 1000;
   let lastPruneAt = 0;
 
@@ -83,6 +87,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
+      const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
         run.result = await agent.run({
           task: input.task,
@@ -100,7 +105,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.error = error instanceof Error ? error.message : "Agent failed";
         }
       } finally {
+        clearTimeout(timer);
         run.updatedAt = Date.now();
+        const current = activeByKey.get(run.ownerKeyId) ?? 1;
+        if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
       }
     })();
   };
@@ -176,8 +184,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.status = "running";
           run.result = await agent.run({
             task: input.task,
-            ...(input.context ? { context: input.context } : {}),
+            ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
+            ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
             signal: controller.signal,
             onEvent: (event) => send({ type: "event", runId, event }),
           });
@@ -204,6 +213,19 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         // Async mode is the reliable path for phones: the browser may sleep,
         // change networks, or be backgrounded while Sofia continues server-side.
         if (input.async) {
+          const header = req.headers["idempotency-key"];
+          const idempotencyKey = Array.isArray(header) ? header[0] : header;
+          const idempotencyId = idempotencyKey ? `${auth.keyId}:${idempotencyKey}` : undefined;
+          if (idempotencyId) {
+            const existing = idempotency.get(idempotencyId);
+            const existingRun = existing ? runs.get(existing) : undefined;
+            if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
+          }
+          const active = activeByKey.get(auth.keyId) ?? 0;
+          if (active >= maxConcurrentRunsPerKey) {
+            res.setHeader("retry-after", "2");
+            return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
+          }
           const runId = randomUUID();
           const run: ActiveRun = {
             id: runId,
@@ -214,11 +236,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ownerKeyId: auth.keyId,
           };
           runs.set(runId, run);
-          startRun(run, input);
+          if (idempotencyId) idempotency.set(idempotencyId, runId);
+          activeByKey.set(auth.keyId, active + 1);
+          startRun(run, {
+            ...input,
+            ...(input.context !== undefined
+              ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) }
+              : {}),
+            ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
+          });
           return json(res, 202, publicResponse(run), origin, config);
         }
 
         const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const runId = randomUUID();
         try {
           const result = await agent.run({
@@ -232,8 +263,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 502, {
             id: runId,
             status: "failed",
-            error: error instanceof Error ? error.message : "Agent failed",
+            error: controller.signal.aborted ? "Request timed out or was cancelled." : error instanceof Error ? error.message : "Agent failed",
           }, origin, config);
+        } finally {
+          clearTimeout(timer);
         }
       }
 
