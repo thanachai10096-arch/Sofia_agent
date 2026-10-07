@@ -1,6 +1,14 @@
 import type { ChatMessage, ModelProvider, ModelRequest, ModelResponse, ModelRoute, ToolDefinition } from "./types.js";
 export interface GatewayProviderConfig { baseUrl:string; apiKey:string; model:string; headers?:Record<string,string>; }
-interface ChatResponse { choices?:Array<{message?:{content?:string|null;tool_calls?:Array<{id?:string;function?:{name?:string;arguments?:string}}>}}>; }
+interface ChatResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+      tool_calls?: Array<{id?: string; function?: {name?: string; arguments?: string}}>;
+    };
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+}
 export class SofiaModelGateway implements ModelProvider {
  constructor(private readonly providers:Record<string,GatewayProviderConfig>){}
  async generate(request:ModelRequest,route:ModelRoute):Promise<ModelResponse>{
@@ -21,6 +29,22 @@ export class SofiaModelGateway implements ModelProvider {
   const calls=(message.tool_calls??[]).map((call,i)=>({id:call.id??`call-${request.step}-${i}`,name:call.function?.name??"",input:JSON.parse(call.function?.arguments??"{}") as Record<string,unknown>}));
   const text=message.content?.trim()??"";
   if(!text&&!calls.length) throw new Error("Model gateway returned an empty response.");
-  return {text,toolCalls:calls.length?calls:undefined,assistantMessage:{role:"assistant",content:text,toolCalls:calls.map(c=>({id:c.id,name:c.name,arguments:JSON.stringify(c.input)}))}};
+  const usage = data.usage;
+  const inputTokens = usage?.prompt_tokens;
+  const outputTokens = usage?.completion_tokens;
+  return {
+    text,
+    toolCalls: calls.length ? calls : undefined,
+    assistantMessage: {
+      role: "assistant",
+      content: text,
+      toolCalls: calls.map(c => ({id:c.id,name:c.name,arguments:JSON.stringify(c.input)})),
+    },
+    usage:
+      Number.isSafeInteger(inputTokens) && inputTokens >= 0 &&
+      Number.isSafeInteger(outputTokens) && outputTokens >= 0
+        ? { inputTokens, outputTokens }
+        : undefined,
+  };
  }
 }
