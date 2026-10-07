@@ -17,6 +17,7 @@ import { createBuiltinTools } from "../tools/builtin.js";
 import { discoverProjectContext } from "../brain/project-context.js";
 import { createSubagentRuntime } from "../brain/subagents.js";
 import { RuntimeCheckpointManager } from "../brain/checkpoint.js";
+import { FileRunStore } from "../brain/run-store.js";
 
 function intEnv(name: string, fallback: number, minimum = 0): number {
   const value = Number(process.env[name]);
@@ -51,6 +52,7 @@ function createBrainFactory(
     createInternalRoute({ modelProvider: provider, route }),
   );
   const checkpointManager = new RuntimeCheckpointManager(dependencies.runtime);
+  const runStore = new FileRunStore(workspace);
 
   return ({ signal, maxSteps }) => {
     const runLimit: BudgetLimit = {
@@ -125,6 +127,7 @@ function createBrainFactory(
         allowShell: dependencies.policy.allowShell,
         allowNetwork: dependencies.policy.allowNetwork,
         projectContextLoader: () => discoverProjectContext(dependencies.runtime),
+        runStore,
       },
       limits,
     });
