@@ -4,12 +4,13 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { detectPlatform, type WorkspaceRuntime } from "./runtime.js";
 const execFileAsync=promisify(execFile);
+function safeEnv(){const blocked=/(?:TOKEN|SECRET|PASSWORD|PRIVATE.?KEY|API.?KEY|AUTHORIZATION|AWS_ACCESS_KEY|AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN)/i;return Object.fromEntries(Object.entries(process.env).filter(([key])=>!blocked.test(key)));}
 
 export function createNodeWorkspaceRuntime(root=process.cwd()):WorkspaceRuntime{
   const platform=detectPlatform();
   const resolve=(p=".")=>{const absolute=path.resolve(root,p);const base=path.resolve(root);if(absolute!==base&&!absolute.startsWith(base+path.sep))throw new Error("Workspace path escapes the configured root.");return absolute;};
   const run=async(command:string,args:string[]=[],options:{cwd?:string;timeoutMs?:number}={})=>{
-    try{const result=await execFileAsync(command,args,{cwd:options.cwd?resolve(options.cwd):root,windowsHide:true,maxBuffer:8*1024*1024,timeout:options.timeoutMs??60_000});return{stdout:result.stdout,stderr:result.stderr,code:0};}
+    try{const result=await execFileAsync(command,args,{cwd:options.cwd?resolve(options.cwd):root,windowsHide:true,maxBuffer:8*1024*1024,timeout:options.timeoutMs??60_000,env:safeEnv()});return{stdout:result.stdout,stderr:result.stderr,code:0};}
     catch(error){const e=error as{stdout?:string;stderr?:string;code?:number;signal?:string};return{stdout:e.stdout??"",stderr:e.stderr??String(error),code:e.code??(e.signal?124:1)};}
   };
   return{
