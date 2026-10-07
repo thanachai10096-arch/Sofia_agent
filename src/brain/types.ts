@@ -75,6 +75,11 @@ export interface ToolExecutionContext {
   notifyApproval(waiting: boolean): void;
 }
 
+export interface WorkspaceCheckpoint {
+  id: string;
+  revision: string;
+}
+
 export interface WorkspaceSnapshot {
   id: string;
   revision: string;
@@ -88,6 +93,8 @@ export interface ToolGateway {
   execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolResult>;
   snapshot(signal: AbortSignal): Promise<WorkspaceSnapshot>;
   changedFiles(baselineSnapshotId: string, signal: AbortSignal): Promise<string[]>;
+  checkpoint(signal: AbortSignal): Promise<WorkspaceCheckpoint>;
+  rollback(checkpointId: string, signal: AbortSignal): Promise<string[]>;
 }
 
 export interface PreparedInference {
