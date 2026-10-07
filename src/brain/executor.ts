@@ -484,6 +484,10 @@ export class SofiaBrain {
       { understanding, projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined },
     );
 
+    if (subagent?.proposedAction) {
+      await this.applySubagentProposal(subagent.proposedAction);
+    }
+
     const value = await this.infer("plan", {
       task: input.task,
       understanding,
