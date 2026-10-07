@@ -44,22 +44,22 @@ export class RegistryToolGateway implements ToolGateway {
     if(permission.allow===false)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:`Tool execution is disabled by policy: ${call.tool}`}};
     const assessment=assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:call.input,effects:descriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts);
     if(!assessment.allowed){
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:assessment.reason,input:call.input});
+      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:assessment.reason,input:call.input});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:assessment.reason??"Security policy denied the action."}};
     }
     if(riskRank[assessment.risk]>riskRank[this.policy.maxRisk]){
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:"Risk exceeds policy maximum.",input:call.input});
+      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:"Risk exceeds policy maximum.",input:call.input});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Action risk exceeds Sofia security policy."}};
     }
     const requiresApproval=permission.requireApproval===true||assessment.requireApproval||descriptor.effects.some(x=>x==="write"||x==="shell"||x==="destructive"||x==="browser");
-    await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:requiresApproval?"approval_required":"allow",input:call.input});
+    await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:requiresApproval?"approval_required":"allow",input:call.input});
     if(requiresApproval&&context.requireApproval){
       if(!this.approval)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is required for this tool."}};
       context.notifyApproval(true);
       try{
         const approved=await this.approval({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:call.input,actionHash:assessment.actionHash,risk:assessment.risk});
         if(!approved){
-          await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:call.input});
+          await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:call.input});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
         }
       }finally{context.notifyApproval(false);}
@@ -69,11 +69,11 @@ export class RegistryToolGateway implements ToolGateway {
       const tool=this.dependencies.tools.get(call.tool);
       if(!tool)return{ok:false,data:null,evidenceId,error:{category:"tool_error",message:"Tool disappeared during execution."}};
       const data=await tool.execute(call.input,{runtime:this.dependencies.runtime,signal:context.signal});
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:call.input,result:data});
+      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:call.input,result:data});
       return{ok:true,data,evidenceId};
     }catch(error){
       const message=error instanceof Error?error.message:String(error);
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:call.input});
+      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:call.input});
       return{ok:false,data:null,evidenceId,error:{category:descriptor.effects.includes("network")?"network_error":"tool_error",message}};
     }
   }
