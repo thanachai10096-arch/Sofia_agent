@@ -20,6 +20,7 @@ import { discoverProjectContext } from "../brain/project-context.js";
 import { createSubagentRuntime } from "../brain/subagents.js";
 import { DurableCheckpointManager } from "../brain/durable-checkpoint.js";
 import { FileRunStore } from "../brain/run-store.js";
+import { DurableJobRuntime } from "../brain/job-runtime.js";
 import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
 
@@ -52,5 +53,7 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const browserTools=policy.allowBrowser?createBrowserTools(new PlaywrightBrowserRuntime()):[];
   const tools=createToolRegistry([...createBuiltinTools(),...browserTools]);
   const provider=new SofiaModelGateway(config.providers);
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory:createBrainFactory(config,provider,workspace,{runtime,tools,policy,approval})};
+  const brainFactory=createBrainFactory(config,provider,workspace,{runtime,tools,policy,approval});
+  const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace));
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime};
 }
