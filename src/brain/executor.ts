@@ -785,11 +785,11 @@ export class SofiaBrain {
     let recoveryRounds = 0;
     const recoveryFingerprints = new Set<string>();
     const resumed = input.resume;
-    let understanding: TaskUnderstanding;
+    let understanding: TaskUnderstanding | undefined;
     let completedStepIds = new Set<string>();
 
     const checkpointState = (plan: ExecutionPlan | undefined): void => {
-      if (!plan || !checkpointId) return;
+      if (!plan || !checkpointId || !understanding) return;
       this.saveRunSnapshot({
         version: 1,
         runId: this.runId,
