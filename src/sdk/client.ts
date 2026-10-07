@@ -8,6 +8,7 @@ export interface SofiaRunInput {
   workspace?: string;
   context?: Record<string, unknown>;
   maxSteps?: number;
+  acceptanceCriteria?: Array<{ id: string; description: string; probe: { tool: string; input: Record<string, unknown> } }>;
 }
 
 export type SofiaRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -59,6 +60,46 @@ export class SofiaClient {
       throw new Error(data.error ?? `Sofia API error ${response.status}`);
     }
     return data;
+  }
+
+  async startJob(input: SofiaRunInput): Promise<SofiaRunResponse> {
+    const response = await fetch(this.url("/v1/jobs"), { method: "POST", headers: this.headers(), body: JSON.stringify(input) });
+    const data = await response.json() as SofiaRunResponse;
+    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
+    return data;
+  }
+
+  async getJob(id: string): Promise<SofiaRunResponse> {
+    const response = await fetch(this.url(`/v1/jobs/${encodeURIComponent(id)}`), { headers: { authorization: `Bearer ${this.options.apiKey}` } });
+    const data = await response.json() as SofiaRunResponse;
+    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
+    return data;
+  }
+
+  async resumeJob(id: string): Promise<SofiaRunResponse> {
+    const response = await fetch(this.url(`/v1/jobs/${encodeURIComponent(id)}/resume`), { method: "POST", headers: this.headers() });
+    const data = await response.json() as SofiaRunResponse;
+    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
+    return data;
+  }
+
+  async cancelJob(id: string): Promise<SofiaRunResponse> {
+    const response = await fetch(this.url(`/v1/jobs/${encodeURIComponent(id)}/cancel`), { method: "POST", headers: this.headers() });
+    const data = await response.json() as SofiaRunResponse;
+    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
+    return data;
+  }
+
+  async waitForJob(id: string, options: { intervalMs?: number; timeoutMs?: number } = {}) {
+    const intervalMs = options.intervalMs ?? 1000;
+    const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const job = await this.getJob(id);
+      if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return job;
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+    throw new Error("Timed out waiting for Sofia job.");
   }
 
   async getRun(id: string): Promise<SofiaRunResponse> {
