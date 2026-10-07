@@ -6,7 +6,7 @@ import { assertSafeStep, assertToolAllowed, loadExecutionPolicyFromEnv } from ".
 export class SofiaAgent {
  constructor(private readonly deps:AgentDependencies){}
  async run(request:AgentRequest):Promise<AgentResult>{
-  const runId=randomUUID(); const events:AgentEvent[]=[{type:"run.started",message:"Sofia run started."}];
+  const runId=randomUUID(); const events:AgentEvent[]=[]; const emit=(event:AgentEvent)=>{emit(event);request.onEvent?.(event);}; emit({type:"run.started",message:"Sofia run started."});
   const kind=classifyTask(request.task); events.push({type:"task.classified",message:`Task classified as ${kind}.`,metadata:{kind}});
   const policy=this.deps.policy ?? loadExecutionPolicyFromEnv(); const maxSteps=Math.min(request.maxSteps??policy.maxSteps,policy.maxSteps);
   const messages:ChatMessage[]=[{role:"system",content:"You are Sofia. Complete the user's task by reasoning and using tools. Work inside the provided workspace. Do not claim a change was made unless a tool confirms it."},{role:"user",content:request.task},...(request.context?[{role:"user",content:`Workspace context:\n${request.context}`}]:[])];
