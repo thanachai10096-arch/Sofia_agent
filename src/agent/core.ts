@@ -108,6 +108,7 @@ export class SofiaAgent {
   private async runLegacy(request: AgentRequest): Promise<AgentResult> {
     const runId = randomUUID();
     const events: AgentEvent[] = [];
+    const progress: SofiaProgress[] = [];
     const emit = (event: AgentEvent) => {
       events.push(event);
       request.onEvent?.(event);
