@@ -33,12 +33,23 @@ export class InMemoryRunManager implements RunManager {
     const now = new Date().toISOString();
     const record: ManagedRun = { id, status: "running", createdAt: now, updatedAt: now, task: input.task };
     this.runs.set(id, record);
-    await this.execute(record, input);
+    void this.execute(record, input);
     return record;
   }
 
   async get(runId: string): Promise<ManagedRun | undefined> {
-    return this.runs.get(runId);
+    const existing = this.runs.get(runId);
+    if (existing) return { ...existing };
+    const snapshot = await this.runStore?.load(runId);
+    if (!snapshot) return undefined;
+    return {
+      id: runId,
+      status: "running",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      task: snapshot.task,
+      snapshot,
+    };
   }
 
   async resume(runId: string, signal?: AbortSignal): Promise<ManagedRun> {
