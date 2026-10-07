@@ -103,7 +103,7 @@ export class DurableJobRuntime implements JobRuntime{
   };
   try{
    const brain=this.brainFactory({signal:controller.signal,onRunSnapshot:onSnapshot});
-   const result=await brain.run({...input,signal:controller.signal,resume});
+   const result=await brain.run({...input,...(record.ownerKeyId?{principalId:record.ownerKeyId}:{}),signal:controller.signal,resume});
    record.result=result;record.status=result.completed?"completed":result.state==="cancelled"?"cancelled":"failed";record.updatedAt=new Date().toISOString();await this.state.save(record);
   }catch(error){
    record.error=error instanceof Error?error.message:String(error);record.status=controller.signal.aborted?"cancelled":"failed";record.updatedAt=new Date().toISOString();await this.state.save(record);
