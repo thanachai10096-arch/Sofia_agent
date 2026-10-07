@@ -8,7 +8,7 @@ import {
   topologicalOrder,
 } from "./planner.js";
 
-import { runVerification } from "./verification.js";
+import { runVerification, verificationCriteria } from "./verification.js";
 import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
 import { compactSkillContext, matchSkills } from "./skills.js";
 import type { SkillLedger } from "./learning.js";
@@ -872,6 +872,9 @@ export class SofiaBrain {
     const recoveryFingerprints = new Set<string>();
     const resumed = input.resume;
     let understanding: TaskUnderstanding | undefined;
+    let activeAcceptanceCriteria: AcceptanceCriterion[] = input.acceptanceCriteria
+      ? [...input.acceptanceCriteria]
+      : [];
     let completedStepIds = new Set<string>();
 
     const checkpointState = async (plan: ExecutionPlan | undefined): Promise<void> => {
@@ -882,7 +885,7 @@ export class SofiaBrain {
         task: input.task,
         understanding,
         plan,
-        acceptanceCriteria: input.acceptanceCriteria ?? [],
+        acceptanceCriteria: activeAcceptanceCriteria,
         completedStepIds: [...completedStepIds],
         checkpointId,
         baselineSnapshotId: baselineId,
@@ -919,6 +922,14 @@ export class SofiaBrain {
       } else {
         this.move("understanding");
         understanding = await this.understand(input);
+
+        if (activeAcceptanceCriteria.length === 0) {
+          // Generate a deterministic baseline acceptance contract when the
+          // caller did not provide one. The model still has to satisfy the
+          // task itself; these probes prevent "done" without a healthy build.
+          activeAcceptanceCriteria = verificationCriteria(["typecheck", "test", "build"]);
+          this.emit({ type: "brain.acceptance.generated", count: activeAcceptanceCriteria.length });
+        }
 
         this.emit({
           type: "brain.understanding.completed",
@@ -986,30 +997,13 @@ export class SofiaBrain {
 
           this.move("observing");
 
-          const criteria = input.acceptanceCriteria ?? [];
-          if (criteria.length === 0) {
-            this.move("verifying");
-            this.emit({ type: "brain.verification.started" });
-            // A coding task gets a bounded trusted verification pipeline by default.
-            // Custom acceptance criteria still take precedence for domain-specific work.
-            verification = await runVerification(
-              this.dependencies.tools,
-              ["typecheck", "test", "build"],
-              this.signal,
-              this.runId,
-            );
-            this.emit({
-              type: "brain.verification.completed",
-              passed: verification.every((item) => item.passed),
-            });
-            this.emit({
-              type: "brain.coding.loop.verification",
-              count: codingIteration,
-              passed: verification.every((item) => item.passed),
-            });
-          } else {
-            verification = await this.verify(criteria);
-          }
+          const criteria = activeAcceptanceCriteria;
+          verification = await this.verify(criteria);
+          this.emit({
+            type: "brain.coding.loop.verification",
+            count: codingIteration,
+            passed: verification.every((item) => item.passed),
+          });
 
           if (verification.every((item) => item.passed)) {
             const changedFiles = baselineId
