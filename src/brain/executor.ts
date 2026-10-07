@@ -796,7 +796,6 @@ export class SofiaBrain {
         task: input.task,
         understanding,
         plan,
-        acceptanceCriteria: input.acceptanceCriteria ?? [],
         completedStepIds: [...completedStepIds],
         checkpointId,
         baselineSnapshotId: baselineId,
