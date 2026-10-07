@@ -37,3 +37,9 @@ export type * from "./models/types.js";
 export type * from "./api/types.js";
 export type * from "./platform/runtime.js";
 export type * from "./tools/types.js";
+
+export { SecurityController } from "./security/controller.js";
+export { MemorySecurityAudit } from "./security/audit.js";
+export { assessAction, containsPromptInjection, redactSecrets, riskFor } from "./security/guard.js";
+export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/guard.js";
+export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
