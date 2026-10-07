@@ -81,7 +81,7 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
 export class PersistentSkillLedger implements SkillLedger {
   constructor(private readonly store: ProjectMemoryStore) {}
 
-  record(candidate: LearnedSkillCandidate): void {
+  record(candidate: LearnedSkillCandidate): Promise<void> {
     const now = new Date().toISOString();
     const id = createHash("sha256")
       .update(JSON.stringify({
@@ -92,7 +92,7 @@ export class PersistentSkillLedger implements SkillLedger {
       }))
       .digest("hex");
 
-    void this.store.save({
+    return this.store.save({
       id,
       project: "skill",
       kind: "repair",
@@ -105,8 +105,18 @@ export class PersistentSkillLedger implements SkillLedger {
     });
   }
 
-  list(): readonly LearnedSkillCandidate[] {
-    return [];
+  async list(): Promise<readonly LearnedSkillCandidate[]> {
+    const entries = await this.store.list();
+    return entries
+      .filter((entry) => entry.project === "skill" && entry.kind === "repair")
+      .map((entry) => {
+        try {
+          return JSON.parse(entry.content) as LearnedSkillCandidate;
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((entry): entry is LearnedSkillCandidate => Boolean(entry));
   }
 }
 
