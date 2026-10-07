@@ -7,4 +7,10 @@ export interface ModelRequest { task:string; kind:TaskKind; context?:string; ste
 export interface ModelUsage { inputTokens: number; outputTokens: number; }
 export interface ModelResponse { text:string; confidence?:number; toolCalls?:ToolCall[]; assistantMessage?:ChatMessage; usage?:ModelUsage; }
 export interface ToolCall { id:string; name:string; input:Record<string,unknown>; }
-export interface ModelProvider { generate(request:ModelRequest,route:ModelRoute):Promise<ModelResponse>; }
+export interface ModelProvider {
+  generate(
+    request: ModelRequest,
+    route: ModelRoute,
+    options?: { signal?: AbortSignal; maxOutputTokens?: number },
+  ): Promise<ModelResponse>;
+}
