@@ -120,7 +120,10 @@ function createBrainFactory(
   };
 }
 
-export function createSofiaAgentDependencies(workspace = process.cwd()): AgentDependencies {
+export function createSofiaAgentDependencies(
+  workspace = process.cwd(),
+  approval?: AgentDependencies["approval"],
+): AgentDependencies {
   const config = loadModelConfigFromEnv();
   const runtime = createNodeWorkspaceRuntime(workspace);
   const tools = createToolRegistry(createBuiltinTools());
@@ -138,6 +141,7 @@ export function createSofiaAgentDependencies(workspace = process.cwd()): AgentDe
       runtime,
       tools,
       policy,
+      approval,
     }),
   };
 }
