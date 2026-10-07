@@ -6,7 +6,7 @@ export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export interface SecurityAction {
   runId: string;
-  principalId?: string;
+  principalId?: string | undefined;
   toolName: string;
   input: Record<string, unknown>;
   effects: readonly ToolEffect[];
