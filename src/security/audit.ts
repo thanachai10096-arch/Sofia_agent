@@ -15,7 +15,7 @@ export type SecurityAuditEvent = {
   result?: unknown;
 };
 
-export interface SecurityAuditSink { record(event: SecurityAuditEvent): void | Promise<void>; }
+export interface SecurityAuditSink { record(event: SecurityAuditEvent): void | Promise<void>; }\nexport class CompositeSecurityAudit implements SecurityAuditSink { constructor(private readonly sinks:SecurityAuditSink[]){} async record(event:SecurityAuditEvent){ for(const sink of this.sinks) await sink.record(event); } }
 
 export class MemorySecurityAudit implements SecurityAuditSink {
   private readonly events: SecurityAuditEvent[] = [];
