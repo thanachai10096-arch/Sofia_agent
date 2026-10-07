@@ -144,7 +144,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       if (id && req.method === "DELETE") {
         const run = runs.get(id);
-        if (!run) return json(res, 404, { error: "run_not_found" }, origin, config);
+        if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
         if (run.status === "queued" || run.status === "running") {
           run.controller.abort();
           run.status = "cancelled";
