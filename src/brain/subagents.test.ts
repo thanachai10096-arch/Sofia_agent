@@ -13,7 +13,6 @@ test("subagent routing", () => {
 
   test("routes verification work to tester", () => {
     assert.equal(roleForTask("verify the regression tests"), "tester");
-  });
 });
 
 test("subagent runtime executes a bounded internal role without exposing model selection", async () => {
