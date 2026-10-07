@@ -13,6 +13,7 @@ import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrateg
 import { compactSkillContext, matchSkills } from "./skills.js";
 import type { SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
+import { roleForTask, type SubagentRuntime } from "./subagents.js";
 
 import type {
   AcceptanceCriterion,
@@ -79,6 +80,7 @@ interface Dependencies {
   skillLedger?: SkillLedger;
   projectContext?: ProjectContext;
   projectContextLoader?: () => Promise<ProjectContext>;
+  subagents?: SubagentRuntime;
 }
 
 export interface BrainRunInput {
@@ -281,7 +283,7 @@ export class SofiaBrain {
   }
 
   private async infer(
-    phase: "understand" | "plan" | "replan",
+    phase: "understand" | "plan" | "replan" | "subagent",
     payload: Record<string, unknown>,
   ): Promise<unknown> {
     if (this.usage.modelCalls >= this.limits.maxModelCalls) {
@@ -426,9 +428,15 @@ export class SofiaBrain {
       );
     }
 
+    const subagent = await this.delegateSubagent(
+      input.task,
+      { understanding, projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined },
+    );
+
     const value = await this.infer("plan", {
       task: input.task,
       understanding,
+      subagent,
     });
 
     return this.validatePlan(
