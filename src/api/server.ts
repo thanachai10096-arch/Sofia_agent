@@ -59,6 +59,23 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   return { keyId: token, scopes: config.apiKeys[token] };
 }
 
+function normalizeContext(context: AgentRunInput["context"]): string | undefined {
+  if (context === undefined) return undefined;
+  return typeof context === "string" ? context : JSON.stringify(context);
+}
+
+function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"]) {
+  return input?.map((criterion) => ({
+    id: criterion.id,
+    description: criterion.description,
+    probe: criterion.probe,
+    evaluate: (value: unknown) => ({
+      passed: Boolean((value as { passed?: unknown })?.passed),
+      detail: "API acceptance probe",
+    }),
+  }));
+}
+
 function pathId(url: string): string | null {
   const match = url.match(/^\/v1\/agent\/runs\/([^/?]+)$/);
   return match?.[1] ?? null;
@@ -309,10 +326,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const job = await deps.jobRuntime.submit({
             task: input.task,
             ownerKeyId: auth.keyId,
-            ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: input.acceptanceCriteria.map((x) => ({
-              id: x.id, description: x.description, probe: x.probe,
-              evaluate: (value: unknown) => ({ passed: Boolean((value as { passed?: unknown })?.passed), detail: "API acceptance probe" }),
-            })) } : {}),
+            ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });
           return json(res, 202, job, origin, config);
         } catch (error) {
