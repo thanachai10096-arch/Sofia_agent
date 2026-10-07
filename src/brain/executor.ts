@@ -235,6 +235,7 @@ export class SofiaBrain {
   private readonly diagnoses: Diagnosis[] = [];
   private readonly decisions: Array<{ strategy: Strategy; reason: string }> = [];
   private projectContext?: ProjectContext;
+  private repositoryMap?: RepositoryMap;
   private projectContextLoaded = false;
 
   constructor(
@@ -515,7 +516,7 @@ export class SofiaBrain {
 
     const subagent = await this.delegateSubagent(
       input.task,
-      { understanding, projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined },
+      { understanding, projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined, repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined },
     );
 
     if (subagent?.proposedAction) {
