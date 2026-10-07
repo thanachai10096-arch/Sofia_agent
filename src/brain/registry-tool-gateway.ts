@@ -1,0 +1,204 @@
+import { createHash, randomUUID } from "node:crypto";
+
+import type { ExecutionPolicy } from "../security/policy.js";
+import type { AgentDependencies } from "../agent/types.js";
+import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, ToolCall } from "./types.js";
+
+function digest(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function classifyEffects(name: string) {
+  if (name === "workspace.read_file" || name === "workspace.list_files") {
+    return ["read"] as const;
+  }
+  if (name === "workspace.write_file") {
+    return ["write"] as const;
+  }
+  if (name === "terminal.run") {
+    return ["shell"] as const;
+  }
+  if (name === "git.run") {
+    return ["read", "write"] as const;
+  }
+  return ["read"] as const;
+}
+
+interface SnapshotRecord {
+  id: string;
+  revision: string;
+  files: string[];
+}
+
+export class RegistryToolGateway implements ToolGateway {
+  private readonly snapshots = new Map<string, SnapshotRecord>();
+
+  constructor(
+    private readonly dependencies: Pick<AgentDependencies, "runtime" | "tools">,
+    private readonly policy: ExecutionPolicy,
+  ) {}
+
+  describe(name: string) {
+    const tool = this.dependencies.tools.get(name);
+    if (!tool) return undefined;
+
+    const effects = classifyEffects(name);
+    return { effects };
+  }
+
+  async execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolResult> {
+    context.signal.throwIfAborted();
+
+    const descriptor = this.describe(call.tool);
+    if (!descriptor) {
+      return {
+        ok: false,
+        data: null,
+        evidenceId: randomUUID(),
+        error: { category: "tool_error", message: `Unknown tool: ${call.tool}` },
+      };
+    }
+
+    if (!this.policy.allowTools) {
+      return {
+        ok: false,
+        data: null,
+        evidenceId: randomUUID(),
+        error: { category: "permission_error", message: "Tool execution is disabled by policy." },
+      };
+    }
+
+    if (descriptor.effects.includes("shell") && !this.policy.allowShell) {
+      return {
+        ok: false,
+        data: null,
+        evidenceId: randomUUID(),
+        error: { category: "permission_error", message: "Shell execution is disabled by policy." },
+      };
+    }
+
+    if (descriptor.effects.includes("write") && !this.policy.allowFileWrite) {
+      return {
+        ok: false,
+        data: null,
+        evidenceId: randomUUID(),
+        error: { category: "permission_error", message: "File writes are disabled by policy." },
+      };
+    }
+
+    if (descriptor.effects.includes("network") && !this.policy.allowNetwork) {
+      return {
+        ok: false,
+        data: null,
+        evidenceId: randomUUID(),
+        error: { category: "network_error", message: "Network access is disabled by policy." },
+      };
+    }
+
+    const tool = this.dependencies.tools.get(call.tool);
+    if (!tool) {
+      return {
+        ok: false,
+        data: null,
+        evidenceId: randomUUID(),
+        error: { category: "tool_error", message: "Tool disappeared during execution." },
+      };
+    }
+
+    const requiresApproval =
+      descriptor.effects.includes("write") ||
+      descriptor.effects.includes("shell") ||
+      descriptor.effects.includes("destructive");
+
+    if (requiresApproval && context.requireApproval) {
+      context.notifyApproval(true);
+      try {
+        // Approval is deliberately controlled by the host integration.
+        // A denied approval is represented by policy at this boundary.
+        if (!context.requireApproval) {
+          return {
+            ok: false,
+            data: null,
+            evidenceId: randomUUID(),
+            error: { category: "permission_error", message: "Tool approval denied." },
+          };
+        }
+      } finally {
+        context.notifyApproval(false);
+      }
+    }
+
+    try {
+      const data = await tool.execute(call.input, {
+        runtime: this.dependencies.runtime,
+        signal: context.signal,
+      });
+
+      return {
+        ok: true,
+        data,
+        evidenceId: randomUUID(),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        data: null,
+        evidenceId: randomUUID(),
+        error: {
+          category: "tool_error",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
+
+  async snapshot(signal: AbortSignal): Promise<WorkspaceSnapshot> {
+    signal.throwIfAborted();
+
+    const result = await this.dependencies.runtime.git(
+      ["status", "--porcelain", "--untracked-files=all"],
+    );
+
+    const files = result.code === 0
+      ? result.stdout
+          .split(/\r?\n/)
+          .map((line) => line.slice(3).trim())
+          .filter(Boolean)
+          .sort()
+      : [];
+
+    const revisionSource =
+      result.code === 0
+        ? result.stdout
+        : `non-git:${await this.dependencies.runtime.cwd()}`;
+
+    const revision = digest(revisionSource);
+    const id = randomUUID();
+
+    this.snapshots.set(id, { id, revision, files });
+
+    return {
+      id,
+      revision,
+      evidenceId: randomUUID(),
+    };
+  }
+
+  async changedFiles(
+    baselineSnapshotId: string,
+    signal: AbortSignal,
+  ): Promise<string[]> {
+    signal.throwIfAborted();
+
+    const baseline = this.snapshots.get(baselineSnapshotId);
+    if (!baseline) throw new Error("Unknown baseline snapshot");
+
+    const current = await this.snapshot(signal);
+    const before = new Set(baseline.files);
+    const after = new Set(current.id ? this.snapshots.get(current.id)!.files : []);
+
+    return [...new Set([...before, ...after])]
+      .filter((file) => before.has(file) !== after.has(file))
+      .sort();
+  }
+}
