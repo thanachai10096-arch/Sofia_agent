@@ -106,7 +106,7 @@ export class RuntimeCheckpointManager implements CheckpointManager {
     }
 
     for (const file of baselineDirtyTracked) {
-      const content = checkpoint.files[file];
+      const content = checkpoint.files[file] ?? null;
       if (content === null) {
         const result = await this.runtime.git(["restore", "--worktree", "--staged", "--", file]);
         if (result.code !== 0) throw new Error(result.stderr || "Unable to restore missing tracked file");
