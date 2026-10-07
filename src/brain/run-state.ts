@@ -1,6 +1,4 @@
 import type {
-  AcceptanceCriterion,
-  Decision,
   Diagnosis,
   ExecutionPlan,
   Observation,
@@ -22,7 +20,6 @@ export interface BrainRunSnapshot {
   task: string;
   understanding: TaskUnderstanding;
   plan: ExecutionPlan;
-  acceptanceCriteria: AcceptanceCriterion[];
   completedStepIds: string[];
   checkpointId: string;
   baselineSnapshotId?: string;
