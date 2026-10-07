@@ -11,6 +11,8 @@ export { loadModelConfigFromEnv } from "./models/config.js";
 export { createSofiaAgentDependencies } from "./models/factory.js";
 export { createToolRegistry } from "./tools/registry.js";
 export { createBuiltinTools } from "./tools/builtin.js";
+export { buildRepositoryMap, compactRepositoryMap } from "./brain/repository-intelligence.js";
+export type * from "./brain/repository-intelligence.js";
 export { loadExecutionPolicyFromEnv } from "./security/policy.js";
 export type * from "./agent/types.js";
 export type * from "./models/types.js";
