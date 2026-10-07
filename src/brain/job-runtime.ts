@@ -7,7 +7,7 @@ import type { BrainRunSnapshot } from "./run-state.js";
 import type { RunStore } from "./run-store.js";
 
 export type JobStatus="queued"|"running"|"completed"|"failed"|"cancelled";
-export interface JobRecord{id:string;status:JobStatus;createdAt:string;updatedAt:string;task:string;snapshot?:BrainRunSnapshot;result?:Awaited<ReturnType<SofiaBrain["run"]>>;error?:string;}
+export interface JobRecord{id:string;status:JobStatus;createdAt:string;updatedAt:string;task:string;ownerKeyId?:string;snapshot?:BrainRunSnapshot;result?:Awaited<ReturnType<SofiaBrain["run"]>>;error?:string;}
 export interface JobRuntime{
  submit(input:Omit<BrainRunInput,"signal"|"resume">):Promise<JobRecord>;
  get(id:string):Promise<JobRecord|undefined>;
@@ -48,9 +48,9 @@ export class DurableJobRuntime implements JobRuntime{
   namespace=process.cwd(),
  ){this.state=new FileJobStateStore(namespace);}
 
- async submit(input:Omit<BrainRunInput,"signal"|"resume">):Promise<JobRecord>{
+ async submit(input:Omit<BrainRunInput,"signal"|"resume"> & { ownerKeyId?: string }):Promise<JobRecord>{
   const id=randomUUID(),now=new Date().toISOString();
-  const record:JobRecord={id,status:"queued",createdAt:now,updatedAt:now,task:input.task};
+  const record:JobRecord={id,status:"queued",createdAt:now,updatedAt:now,task:input.task,...(input.ownerKeyId?{ownerKeyId:input.ownerKeyId}:{})};
   this.jobs.set(id,record);await this.state.save(record);void this.execute(record,input);return{...record};
  }
 
