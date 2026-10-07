@@ -758,6 +758,8 @@ export class SofiaBrain {
 
           const criteria = input.acceptanceCriteria ?? [];
           if (criteria.length === 0) {
+            this.move("verifying");
+            this.emit({ type: "brain.verification.started" });
             // A coding task gets a bounded trusted verification pipeline by default.
             // Custom acceptance criteria still take precedence for domain-specific work.
             verification = await runVerification(
@@ -766,6 +768,10 @@ export class SofiaBrain {
               this.signal,
               this.runId,
             );
+            this.emit({
+              type: "brain.verification.completed",
+              passed: verification.every((item) => item.passed),
+            });
           } else {
             verification = await this.verify(criteria);
           }
