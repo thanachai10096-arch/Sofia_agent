@@ -1,5 +1,6 @@
 import type { AgentResult } from "../agent/types.js";
 import type { AcceptanceCriterion } from "../brain/types.js";
+import type { SofiaExperienceOptions } from "../experience/types.js";
 
 export interface AgentRunInput {
   task: string;
@@ -9,6 +10,7 @@ export interface AgentRunInput {
   stream?: boolean;
   sessionId?: string;
   acceptanceCriteria?: AcceptanceCriterion[];
+  experience?: SofiaExperienceOptions;
 }
 
 export interface AgentRunResponse {
