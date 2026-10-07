@@ -64,7 +64,7 @@ function normalizeContext(context: AgentRunInput["context"]): string | undefined
   return typeof context === "string" ? context : JSON.stringify(context);
 }
 
-function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"]) {
+function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"]): import("../brain/types.js").AcceptanceCriterion[] | undefined {
   return input?.map((criterion) => ({
     id: criterion.id,
     description: criterion.description,
@@ -291,7 +291,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.context !== undefined
               ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) }
               : {}),
-            ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
+            ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });
           return json(res, 202, publicResponse(run), origin, config);
         }
