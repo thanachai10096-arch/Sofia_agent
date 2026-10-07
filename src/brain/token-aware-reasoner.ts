@@ -77,7 +77,19 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
       options.signal.throwIfAborted();
     }
 
+    const parsed = JSON.parse(request) as { phase?: unknown };
     const input = asInferenceRequest(request);
+    if (typeof parsed.phase === "string") {
+      input.core = {
+        ...input.core,
+        state: {
+          ...(input.core.state && typeof input.core.state === "object"
+            ? input.core.state
+            : {}),
+          phase: parsed.phase,
+        },
+      };
+    }
 
     // Preparation is deliberately local. The gateway performs the real
     // tokenizer-bound reservation immediately before provider invocation.
