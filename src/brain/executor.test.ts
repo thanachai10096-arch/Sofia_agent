@@ -215,5 +215,6 @@ test("Brain feeds a failed verification into a specialist and executes its valid
   assert.equal(report.state, "completed");
   assert.equal(writes, 2);
   assert.ok(events.includes("brain.subagent.completed"));
+  assert.equal(events.includes("brain.replan.started"), false);
   assert.ok(events.includes("brain.verification.completed"));
 });
