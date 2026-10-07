@@ -305,7 +305,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             task: input.task,
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
-            ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
+            ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
           });
           return json(res, 200, { id: runId, status: "completed", result }, origin, config);
