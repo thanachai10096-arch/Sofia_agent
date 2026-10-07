@@ -4,6 +4,7 @@ import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from ".
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
 import { assertSafeStep, assertToolAllowed, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { progressFromAgentEvent } from "../experience/progress.js";
+import type { SofiaProgress } from "../experience/types.js";
 
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
@@ -24,6 +25,7 @@ export class SofiaAgent {
   private async runBrain(request: AgentRequest): Promise<AgentResult> {
     const kind = classifyTask(request.task);
     const events: AgentEvent[] = [];
+    const progress: SofiaProgress[] = [];
     const emit = (event: AgentEvent) => {
       events.push(event);
       request.onEvent?.(event);
@@ -83,6 +85,7 @@ export class SofiaAgent {
       kind,
       steps: report.usage.steps,
       events,
+      progress,
       brainReport: report,
     };
   }
