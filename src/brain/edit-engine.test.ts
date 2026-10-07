@@ -29,12 +29,13 @@ test("edit engine applies matching patch and reports hashes", async () => {
 
   const patch = createEditPatch([{
     path: "README.md",
-    expectedHash: "5891b5b522d5df086d0ff5c2c1f4f7f5c3c1c3c3b3f1b5c5c2e5c3f3f4f5f6f7",
+    expectedContent: "hello\n",
     content: "world\n",
   }]);
 
-  // Hash validation is intentionally exercised by the conflict path above;
-  // this assertion verifies the diff utility independently.
+  const result = await applyEditPatch(runtime, patch);
+  assert.equal(result[0]?.changed, true);
+  assert.equal(content, "world\n");
   assert.match(unifiedDiff("hello\n", "world\n", "README.md"), /-hello/);
   assert.match(unifiedDiff("hello\n", "world\n", "README.md"), /\+world/);
 });
