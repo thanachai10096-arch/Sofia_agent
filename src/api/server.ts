@@ -70,6 +70,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const usage = new UsageLimiter(config.maxRunsPerKeyPerDay ?? 100, config.maxToolCallsPerKeyPerDay ?? 1000);
   const runs = new Map<string, ActiveRun>();
   const retention = config.runRetentionMs ?? 24 * 60 * 60 * 1000;
+  let lastPruneAt = 0;
 
   const publicResponse = (run: ActiveRun): AgentRunResponse => ({
     id: run.id,
@@ -114,7 +115,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
     try {
-      prune();
+      if (Date.now() - lastPruneAt > 30_000) { lastPruneAt = Date.now(); prune(); }
 
       if (req.method === "OPTIONS") {
         res.writeHead(204, headers(origin, config));
