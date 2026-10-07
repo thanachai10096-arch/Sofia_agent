@@ -4,13 +4,19 @@ import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { AgentRunInput, AgentRunResponse, SofiaApiConfig } from "./types.js";
 
-function json(res: ServerResponse, status: number, body: unknown) {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
+function headers() {
+  return {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
-  });
-  res.end(payload);
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  };
+}
+
+function json(res: ServerResponse, status: number, body: unknown) {
+  res.writeHead(status, headers());
+  res.end(JSON.stringify(body));
 }
 
 async function body(req: IncomingMessage, maxBytes: number): Promise<unknown> {
@@ -38,6 +44,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
   return createServer(async (req, res) => {
     try {
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, headers());
+        return res.end();
+      }
+
       if (req.method === "GET" && req.url === "/health") {
         return json(res, 200, { ok: true, service: "sofia-agent-api", version: "v1" });
       }
