@@ -26,10 +26,7 @@ export interface ProjectMemoryStore {
 export class FileProjectMemoryStore implements ProjectMemoryStore {
   private readonly file: string;
 
-  constructor(
-    project: string,
-    root = path.join(os.tmpdir(), "sofia-agents-memory"),
-  ) {
+  constructor(project: string, root = path.join(os.tmpdir(), "sofia-agents-memory")) {
     const key = createHash("sha256").update(project).digest("hex");
     this.file = path.join(root, key + ".json");
   }
@@ -54,9 +51,7 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
     await fs.rename(temporary, this.file);
   }
 
-  async list(): Promise<ProjectMemoryEntry[]> {
-    return this.read();
-  }
+  async list(): Promise<ProjectMemoryEntry[]> { return this.read(); }
 
   async find(query: string): Promise<ProjectMemoryEntry[]> {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -64,10 +59,7 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
       .map((entry) => ({
         entry,
         score: terms.reduce(
-          (score, term) =>
-            score +
-            (entry.content.toLowerCase().includes(term) ? 2 : 0) +
-            (entry.kind.includes(term) ? 1 : 0),
+          (score, term) => score + (entry.content.toLowerCase().includes(term) ? 2 : 0) + (entry.kind.includes(term) ? 1 : 0),
           0,
         ),
       }))
@@ -79,20 +71,20 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
 }
 
 export class PersistentSkillLedger implements SkillLedger {
+  private cache: LearnedSkillCandidate[] | undefined;
+
   constructor(private readonly store: ProjectMemoryStore) {}
 
   record(candidate: LearnedSkillCandidate): void {
     const now = new Date().toISOString();
-    const id = createHash("sha256")
-      .update(JSON.stringify({
-        category: candidate.category,
-        strategy: candidate.strategy,
-        trigger: candidate.trigger,
-        procedure: candidate.procedure,
-      }))
-      .digest("hex");
+    const id = createHash("sha256").update(JSON.stringify({
+      category: candidate.category,
+      strategy: candidate.strategy,
+      trigger: candidate.trigger,
+      procedure: candidate.procedure,
+    })).digest("hex");
 
-    void this.store.save({
+    const entry: ProjectMemoryEntry = {
       id,
       project: "skill",
       kind: "repair",
@@ -102,49 +94,42 @@ export class PersistentSkillLedger implements SkillLedger {
       createdAt: now,
       updatedAt: now,
       uses: 0,
-    });
+    };
+    this.cache = undefined;
+    void this.store.save(entry);
   }
 
   list(): readonly LearnedSkillCandidate[] {
-    return [];
+    return this.cache ?? [];
+  }
+
+  async hydrate(): Promise<void> {
+    const entries = await this.store.list();
+    this.cache = entries
+      .filter((entry) => entry.kind === "repair" && entry.project === "skill")
+      .map((entry) => {
+        try { return JSON.parse(entry.content) as LearnedSkillCandidate; }
+        catch { return undefined; }
+      })
+      .filter((entry): entry is LearnedSkillCandidate => Boolean(entry));
   }
 }
 
 export function memoryEntryFromConvention(project: string, content: string, source = "project-context"): ProjectMemoryEntry {
   const now = new Date().toISOString();
-  const id = createHash("sha256").update(project + "\n" + content).digest("hex");
   return {
-    id,
-    project,
-    kind: "convention",
-    content: content.slice(0, 4000),
-    source,
-    confidence: 0.9,
-    createdAt: now,
-    updatedAt: now,
-    uses: 0,
+    id: createHash("sha256").update(project + "\n" + content).digest("hex"),
+    project, kind: "convention", content: content.slice(0, 4000), source,
+    confidence: 0.9, createdAt: now, updatedAt: now, uses: 0,
   };
 }
 
-export function memoryEntryFromRepair(
-  project: string,
-  category: FailureCategory,
-  strategy: Strategy,
-  message: string,
-): ProjectMemoryEntry {
+export function memoryEntryFromRepair(project: string, category: FailureCategory, strategy: Strategy, message: string): ProjectMemoryEntry {
   const now = new Date().toISOString();
-  const id = createHash("sha256")
-    .update(project + category + strategy + message)
-    .digest("hex");
   return {
-    id,
-    project,
-    kind: "repair",
+    id: createHash("sha256").update(project + category + strategy + message).digest("hex"),
+    project, kind: "repair",
     content: `Failure: ${category}\nStrategy: ${strategy}\nResolution: ${message.slice(0, 1200)}`,
-    source: "brain-recovery",
-    confidence: 0.75,
-    createdAt: now,
-    updatedAt: now,
-    uses: 0,
+    source: "brain-recovery", confidence: 0.75, createdAt: now, updatedAt: now, uses: 0,
   };
 }
