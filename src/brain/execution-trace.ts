@@ -7,6 +7,7 @@ export interface ExecutionTraceEntry extends BrainEvent {
 
 export interface ExecutionTraceOptions {
   maxEntries?: number;
+  clock?: () => string;
 }
 
 const DEFAULT_MAX_ENTRIES = 500;
@@ -15,9 +16,12 @@ export class ExecutionTrace {
   private readonly entries: ExecutionTraceEntry[] = [];
   private nextSequence = 1;
   private readonly maxEntries: number;
+  private readonly clock: () => string;
 
   constructor(options: ExecutionTraceOptions = {}) {
     this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+    this.clock = options.clock ?? (() => new Date().toISOString());
+
     if (!Number.isSafeInteger(this.maxEntries) || this.maxEntries < 1) {
       throw new Error("Invalid execution trace limit");
     }
@@ -27,7 +31,7 @@ export class ExecutionTrace {
     this.entries.push({
       ...event,
       sequence: this.nextSequence++,
-      timestamp: new Date().toISOString(),
+      timestamp: this.clock(),
     });
 
     if (this.entries.length > this.maxEntries) {
