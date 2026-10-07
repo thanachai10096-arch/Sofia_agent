@@ -128,6 +128,7 @@ function createBrainFactory(
         allowShell: dependencies.policy.allowShell,
         allowNetwork: dependencies.policy.allowNetwork,
         projectContextLoader: () => discoverProjectContext(dependencies.runtime),
+        repositoryMapLoader: (task) => buildRepositoryMap(dependencies.runtime, task),
         runStore,
       },
       limits,
