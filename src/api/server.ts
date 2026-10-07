@@ -63,9 +63,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (req.method === "POST" && req.url === "/v1/agent/runs/stream") {
         const input = (await body(req, maxBytes)) as AgentRunInput;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" });
+        try { usage.consume(auth.keyId); } catch (error) { return json(res, 429, { error: "quota_exceeded" }); }
         const id = randomUUID();
         res.writeHead(200, { ...headers(), "content-type": "text/event-stream; charset=utf-8", "connection": "keep-alive" });
-        const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\\n\\n`);
+        const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
         try {
           const result = await agent.run({
             task: input.task,
