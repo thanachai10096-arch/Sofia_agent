@@ -99,6 +99,7 @@ interface Dependencies {
 
 export interface BrainRunInput {
   task: string;
+  principalId?: string;
   understanding?: unknown;
   plan?: unknown;
   acceptanceCriteria?: AcceptanceCriterion[];
@@ -597,6 +598,7 @@ export class SofiaBrain {
       result = await this.io(() =>
         this.dependencies.tools.execute(step.call, {
           runId: this.runId,
+          ...(input.principalId ? { principalId: input.principalId } : {}),
           signal: this.signal,
           requireApproval:
             descriptor.effects.includes("destructive") ||
@@ -669,6 +671,7 @@ export class SofiaBrain {
       const result = await this.io(() =>
         this.dependencies.tools.execute(criterion.probe, {
           runId: this.runId,
+          ...(input.principalId ? { principalId: input.principalId } : {}),
           signal: this.signal,
           requireApproval: false,
           notifyApproval: () => {
