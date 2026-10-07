@@ -16,6 +16,8 @@ export type ModelCapability =
 
 export interface ModelRoute {
   id: string;
+  /** Internal provider key; never exposed to API consumers. */
+  providerId?: string;
   capabilities: ModelCapability[];
   costWeight: number;
   latencyWeight: number;
