@@ -1,0 +1,25 @@
+name: Sofia Diagnostic
+on:
+  push:
+    branches: ["main"]
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install 2>&1 | tee npm-install.log
+      - run: npm run typecheck 2>&1 | tee typecheck.log
+      - run: npm test 2>&1 | tee test.log
+      - run: npm run build 2>&1 | tee build.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sofia-diagnostic
+          path: |
+            npm-install.log
+            typecheck.log
+            test.log
+            build.log
