@@ -240,9 +240,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (jobMatch && deps.jobRuntime) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
+        const job = await deps.jobRuntime.get(jobId);
+        if (!job || job.ownerKeyId !== auth.keyId) {
+          return json(res, 404, { error: "job_not_found" }, origin, config);
+        }
         if (req.method === "GET" && !action) {
-          const job = await deps.jobRuntime.get(jobId);
-          return job ? json(res, 200, job, origin, config) : json(res, 404, { error: "job_not_found" }, origin, config);
+          return json(res, 200, job, origin, config);
         }
         if (req.method === "POST" && action === "resume") {
           try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
@@ -256,7 +259,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       if (req.method === "GET" && req.url === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
-        return json(res, 200, { jobs: await deps.jobRuntime.list() }, origin, config);
+        const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
+        return json(res, 200, { jobs }, origin, config);
       }
 
       if (req.method === "POST" && req.url === "/v1/jobs") {
@@ -267,6 +271,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           const job = await deps.jobRuntime.submit({
             task: input.task,
+            ownerKeyId: auth.keyId,
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: input.acceptanceCriteria.map((x) => ({
               id: x.id, description: x.description, probe: x.probe,
               evaluate: (value: unknown) => ({ passed: Boolean((value as { passed?: unknown })?.passed), detail: "API acceptance probe" }),
