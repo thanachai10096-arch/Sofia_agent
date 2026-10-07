@@ -29,6 +29,6 @@ export function createNodeWorkspaceRuntime(root=process.cwd()):WorkspaceRuntime{
     async search(query,p="."){const target=resolve(p);let pattern:RegExp;try{pattern=new RegExp(query)}catch(error){throw new Error("Invalid search pattern: "+(error instanceof Error?error.message:String(error)))}const matches:string[]=[];const ignored=new Set([".git","node_modules","dist",".next","coverage"]);
       const walk=async(directory:string,relative:string):Promise<void>=>{for(const entry of await fs.readdir(directory,{withFileTypes:true})){if(ignored.has(entry.name))continue;const absolute=path.join(directory,entry.name);const rel=relative?path.join(relative,entry.name):entry.name;if(entry.isDirectory()){await walk(absolute,rel);continue}try{const content=await fs.readFile(absolute,"utf8");content.split(/\r?\n/).forEach((line,index)=>{pattern.lastIndex=0;if(pattern.test(line))matches.push(rel+":"+ (index+1)+":"+line);});}catch{}}};await walk(target,"");return matches;},
     run,
-    git:(args,options)=>run("git",args,options),
+    git:async(args,options)=>{try{const result=await execFileAsync("git",args,{cwd:options?.cwd?resolve(options.cwd):root,windowsHide:true,maxBuffer:8*1024*1024,timeout:options?.timeoutMs??60_000,env:safeEnv()});return{stdout:result.stdout,stderr:result.stderr,code:0};}catch(error){const e=error as{stdout?:string;stderr?:string;code?:number;signal?:string};return{stdout:e.stdout??"",stderr:e.stderr??String(error),code:e.code??(e.signal?124:1)};}},
   };
 }
