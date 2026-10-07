@@ -40,7 +40,7 @@ function parseStructured(value: unknown): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    const fenced = text.match(/^\`\`\`(?:json)?\\s*([\\s\\S]*?)\\s*\`\`\`$/i);
+    const fenced = text.match(/^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i);
     if (fenced) return JSON.parse(fenced[1]);
     throw new Error("Model returned non-JSON Brain output");
   }
