@@ -5,12 +5,12 @@ export interface ToolPermission { allow?: boolean; requireApproval?: boolean; ma
 export interface ExecutionPolicy {
   allowTools:boolean; allowNetwork:boolean; allowShell:boolean; allowFileWrite:boolean; allowBrowser:boolean;
   allowDestructive:boolean; maxRisk:RiskLevel; maxSteps:number; maxToolCallsPerStep:number;
-  blockedPaths:string[]; permissions:Record<string,ToolPermission>;
+  blockedPaths:string[]; allowedHosts:string[]; permissions:Record<string,ToolPermission>;
 }
 export const defaultPolicy:ExecutionPolicy={
   allowTools:true,allowNetwork:false,allowShell:false,allowFileWrite:true,allowBrowser:false,
   allowDestructive:false,maxRisk:"high",maxSteps:12,maxToolCallsPerStep:4,
-  blockedPaths:[".env",".git","node_modules",".sofia/secrets"],permissions:{},
+  blockedPaths:[".env",".git","node_modules",".sofia/secrets"],allowedHosts:[],permissions:{},
 };
 const riskRank:Record<RiskLevel,number>={low:0,medium:1,high:2,critical:3};
 export function loadExecutionPolicyFromEnv():ExecutionPolicy{
@@ -18,8 +18,8 @@ export function loadExecutionPolicyFromEnv():ExecutionPolicy{
   const num=(name:string,fallback:number)=>{const n=Number(process.env[name]);return Number.isFinite(n)&&n>0?n:fallback;};
   const raw=process.env.SOFIA_MAX_RISK;
   const maxRisk:RiskLevel=raw==="low"||raw==="medium"||raw==="high"||raw==="critical"?raw:defaultPolicy.maxRisk;
-  const blockedPaths=process.env.SOFIA_BLOCKED_PATHS?process.env.SOFIA_BLOCKED_PATHS.split(",").map(x=>x.trim()).filter(Boolean):defaultPolicy.blockedPaths;
-  return {...defaultPolicy,allowTools:bool("SOFIA_ALLOW_TOOLS",defaultPolicy.allowTools),allowNetwork:bool("SOFIA_ALLOW_NETWORK",defaultPolicy.allowNetwork),allowShell:bool("SOFIA_ALLOW_SHELL",defaultPolicy.allowShell),allowFileWrite:bool("SOFIA_ALLOW_FILE_WRITE",defaultPolicy.allowFileWrite),allowBrowser:bool("SOFIA_ALLOW_BROWSER",defaultPolicy.allowBrowser),allowDestructive:bool("SOFIA_ALLOW_DESTRUCTIVE",defaultPolicy.allowDestructive),maxRisk,blockedPaths,maxSteps:Math.min(num("SOFIA_MAX_STEPS",defaultPolicy.maxSteps),50),maxToolCallsPerStep:Math.min(num("SOFIA_MAX_TOOL_CALLS_PER_STEP",defaultPolicy.maxToolCallsPerStep),16),permissions:defaultPolicy.permissions};
+  const allowedHosts=process.env.SOFIA_ALLOWED_HOSTS?process.env.SOFIA_ALLOWED_HOSTS.split(",").map(x=>x.trim().toLowerCase()).filter(Boolean):defaultPolicy.allowedHosts;\n  const blockedPaths=process.env.SOFIA_BLOCKED_PATHS?process.env.SOFIA_BLOCKED_PATHS.split(",").map(x=>x.trim()).filter(Boolean):defaultPolicy.blockedPaths;
+  return {...defaultPolicy,allowTools:bool("SOFIA_ALLOW_TOOLS",defaultPolicy.allowTools),allowNetwork:bool("SOFIA_ALLOW_NETWORK",defaultPolicy.allowNetwork),allowShell:bool("SOFIA_ALLOW_SHELL",defaultPolicy.allowShell),allowFileWrite:bool("SOFIA_ALLOW_FILE_WRITE",defaultPolicy.allowFileWrite),allowBrowser:bool("SOFIA_ALLOW_BROWSER",defaultPolicy.allowBrowser),allowDestructive:bool("SOFIA_ALLOW_DESTRUCTIVE",defaultPolicy.allowDestructive),maxRisk,blockedPaths,maxSteps:Math.min(num("SOFIA_MAX_STEPS",defaultPolicy.maxSteps),50),maxToolCallsPerStep:Math.min(num("SOFIA_MAX_TOOL_CALLS_PER_STEP",defaultPolicy.maxToolCallsPerStep),16),allowedHosts,permissions:defaultPolicy.permissions};
 }
 export function assertSafeStep(policy:ExecutionPolicy,step:number):void{if(step>policy.maxSteps)throw new Error("Agent step limit exceeded");}
 export function toolPermission(policy:ExecutionPolicy,name:string,effects:readonly ToolEffect[]):ToolPermission{
