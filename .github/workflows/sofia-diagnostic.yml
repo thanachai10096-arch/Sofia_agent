@@ -10,10 +10,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install 2>&1 | tee npm-install.log
-      - run: npm run typecheck 2>&1 | tee typecheck.log
-      - run: npm test 2>&1 | tee test.log
-      - run: npm run build 2>&1 | tee build.log
+      - continue-on-error: true
+        run: npm install 2>&1 | tee npm-install.log
+      - continue-on-error: true
+        run: npm run typecheck 2>&1 | tee typecheck.log
+      - continue-on-error: true
+        run: npm test 2>&1 | tee test.log
+      - continue-on-error: true
+        run: npm run build 2>&1 | tee build.log
       - if: always()
         uses: actions/upload-artifact@v4
         with:
