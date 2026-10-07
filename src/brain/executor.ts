@@ -312,12 +312,10 @@ export class SofiaBrain {
         continue;
       }
 
-      if (this.usage.reservedOrUsedTokens + reservation > this.limits.maxTokens) {
-        throw new Stop("Token budget exhausted");
-      }
-
+      // TokenBudget inside the reasoner/gateway is authoritative for
+      // reservation, pricing, concurrency, and provider overruns.
+      // Brain keeps only telemetry here to avoid double-reserving tokens.
       this.usage.modelCalls += 1;
-      this.usage.reservedOrUsedTokens += reservation;
 
       const result = await this.wait(() =>
         prepared.invoke({
@@ -337,8 +335,6 @@ export class SofiaBrain {
         throw new Stop("Invalid inference usage");
       }
 
-      // Replace the conservative reservation with actual usage.
-      this.usage.reservedOrUsedTokens -= reservation;
       this.usage.reservedOrUsedTokens += actual;
 
       if (this.usage.reservedOrUsedTokens > this.limits.maxTokens) {
