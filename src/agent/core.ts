@@ -8,9 +8,11 @@ export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
 
   async run(request: AgentRequest): Promise<AgentResult> {
+    // Sofia Brain is the default execution path. Legacy execution is only
+    // used when Brain is unavailable or explicitly disabled.
     const shouldUseBrain =
       this.deps.brainFactory !== undefined &&
-      (request.useBrain === true || request.acceptanceCriteria?.length);
+      request.useBrain !== false;
     if (shouldUseBrain) {
       return this.runBrain(request);
     }
@@ -27,17 +29,9 @@ export class SofiaAgent {
     };
 
     const brain = this.deps.brainFactory!({
-      signal: request.signal,
-      maxSteps: request.maxSteps,
+      ...(request.signal ? { signal: request.signal } : {}),
+      ...(request.maxSteps !== undefined ? { maxSteps: request.maxSteps } : {}),
     });
-
-    if (!request.acceptanceCriteria?.length) {
-      emit({
-        type: "run.failed",
-        message: "Brain execution requires trusted acceptance criteria.",
-      });
-      throw new Error("Brain execution requires trusted acceptance criteria.");
-    }
 
     emit({ type: "run.started", message: "Sofia Brain run started." });
     emit({
@@ -48,7 +42,10 @@ export class SofiaAgent {
 
     const report = await brain.run({
       task: request.task,
-      acceptanceCriteria: request.acceptanceCriteria,
+      ...(request.acceptanceCriteria
+        ? { acceptanceCriteria: request.acceptanceCriteria }
+        : {}),
+      ...(request.signal ? { signal: request.signal } : {}),
     });
 
     if (!report.completed) {
