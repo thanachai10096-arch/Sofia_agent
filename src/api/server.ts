@@ -91,7 +91,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       try {
         run.result = await agent.run({
           task: input.task,
-          ...(input.context ? { context: input.context } : {}),
+          ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           signal: run.controller.signal,
         });
