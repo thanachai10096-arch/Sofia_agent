@@ -1,4 +1,4 @@
-import type { BrainReasoner, ToolGateway } from "./types.js";
+import type { BrainReasoner, ToolCall, ToolGateway } from "./types.js";
 
 export type SubagentRole =
   | "explorer"
@@ -17,10 +17,17 @@ export interface SubagentRequest {
   signal: AbortSignal;
 }
 
+export interface SubagentActionProposal {
+  tool: ToolCall["tool"];
+  input: ToolCall["input"];
+  reason: string;
+}
+
 export interface SubagentResult {
   role: SubagentRole;
   summary: string;
   output: unknown;
+  proposedAction?: SubagentActionProposal;
 }
 
 export interface SubagentRuntime {
@@ -81,6 +88,7 @@ export class InProcessSubagentRuntime implements SubagentRuntime {
       payload: {
         role: request.role,
         roleInstructions: instructions,
+        actionContract: "If an action is needed, return {tool,input,reason}. This is a proposal only; Brain must validate and execute it.",
         task: request.task,
         context: request.context,
         workspaceEvidence: evidence
@@ -99,10 +107,26 @@ export class InProcessSubagentRuntime implements SubagentRuntime {
       maxOutputTokens: 1_200,
     });
 
+    const value = result.value;
+    const proposedAction =
+      value && typeof value === "object" &&
+      typeof (value as Record<string, unknown>).tool === "string" &&
+      !!(value as Record<string, unknown>).input &&
+      typeof (value as Record<string, unknown>).input === "object"
+        ? {
+            tool: (value as Record<string, unknown>).tool as string,
+            input: (value as Record<string, unknown>).input as Record<string, unknown>,
+            reason: typeof (value as Record<string, unknown>).reason === "string"
+              ? (value as Record<string, unknown>).reason as string
+              : "Subagent proposed this action for Brain review.",
+          }
+        : undefined;
+
     return {
       role: request.role,
-      summary: compact(result.value),
-      output: result.value,
+      summary: compact(value),
+      output: value,
+      proposedAction,
     };
   }
 }
