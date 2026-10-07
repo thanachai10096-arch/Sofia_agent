@@ -221,6 +221,14 @@ export class TokenAwareGateway {
     request: InferenceRequest,
     callerSignal?: AbortSignal,
   ): Promise<unknown> {
+    const result = await this.generateMetered(request, callerSignal);
+    return result.value;
+  }
+
+  async generateMetered(
+    request: InferenceRequest,
+    callerSignal?: AbortSignal,
+  ): Promise<{ value: unknown; usage: TokenUsage }> {
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, timeout])
@@ -303,7 +311,7 @@ export class TokenAwareGateway {
     const selection = chosen;
     const lease = reservation;
 
-    const work = (async (): Promise<unknown> => {
+    const work = (async (): Promise<{ value: unknown; usage: TokenUsage }> => {
       if (signal.aborted) {
         lease.settle({ inputTokens: 0, outputTokens: 0 });
         throw new GatewayError("cancelled_or_timed_out");
@@ -322,7 +330,7 @@ export class TokenAwareGateway {
         if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
         if (reply.finishReason !== "complete") throw new GatewayError("incomplete_output");
 
-        return reply.value;
+        return { value: reply.value, usage: reply.usage };
       } catch (error: unknown) {
         lease.settle(error instanceof MeteredProviderError ? error.usage : undefined);
 
