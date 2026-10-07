@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { AgentRunInput, AgentRunResponse, SofiaApiConfig } from "./types.js";
+import { UsageLimiter } from "./usage.js";
 
 function headers() {
   return {
@@ -41,6 +42,7 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
   const maxBytes = config.maxBodyBytes ?? 1_000_000;
+  const usage = new UsageLimiter(config.maxRunsPerKeyPerDay ?? 100, config.maxToolCallsPerKeyPerDay ?? 1000);
 
   return createServer(async (req, res) => {
     try {
@@ -63,6 +65,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" });
 
         const id = randomUUID();
+        try { usage.consume(auth.keyId); } catch (error) { return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }); }
         try {
           const result = await agent.run({
             task: input.task,
@@ -81,6 +84,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
+      if (req.method === "GET" && req.url.startsWith("/v1/usage")) return json(res, 200, usage.get(auth.keyId));
       return json(res, 404, { error: "not_found" });
     } catch (error) {
       return json(res, 500, {
