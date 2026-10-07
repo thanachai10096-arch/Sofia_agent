@@ -38,7 +38,7 @@ interface SnapshotRecord {
 
 export class RegistryToolGateway implements ToolGateway {
   private readonly snapshots = new Map<string, SnapshotRecord>();
-  private readonly checkpoints: RuntimeCheckpointManager;
+  private readonly checkpoints: CheckpointManager;
 
   constructor(
     private readonly dependencies: Pick<AgentDependencies, "runtime" | "tools">,
