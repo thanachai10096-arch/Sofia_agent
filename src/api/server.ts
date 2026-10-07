@@ -111,6 +111,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           task: input.task,
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
+          ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
         });
         run.status = "completed";
@@ -323,6 +324,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (jobMatch && deps.jobRuntime) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
+        if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
         const job = await deps.jobRuntime.get(jobId);
         if (!job || job.ownerKeyId !== auth.keyId) {
           return json(res, 404, { error: "job_not_found" }, origin, config);
