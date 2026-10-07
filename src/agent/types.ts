@@ -12,5 +12,6 @@ export interface AgentDependencies {
  runtime:WorkspaceRuntime;
  tools:ToolRegistry;
  policy:ExecutionPolicy;
+ approval?: import("./approval.js").ApprovalHandler;
 }
 export type { ToolCall };
