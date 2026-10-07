@@ -9,7 +9,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
   const routes:ModelRoute[]=[]; const providers:SofiaModelConfig["providers"]={};
   for(const [id,capabilities,cost,latency,quality] of definitions){
     const model=process.env[`SOFIA_${id.toUpperCase()}_MODEL`]; if(!model) continue;
-    routes.push({id,providerId:id,capabilities:[...capabilities],costWeight:numberEnv(`SOFIA_${id.toUpperCase()}_COST`,cost),latencyWeight:numberEnv(`SOFIA_${id.toUpperCase()}_LATENCY`,latency),qualityWeight:numberEnv(`SOFIA_${id.toUpperCase()}_QUALITY`,quality),healthy:true});
+    routes.push({id,providerId:id,capabilities:[...capabilities] as import("./types.js").ModelCapability[],costWeight:numberEnv(`SOFIA_${id.toUpperCase()}_COST`,cost),latencyWeight:numberEnv(`SOFIA_${id.toUpperCase()}_LATENCY`,latency),qualityWeight:numberEnv(`SOFIA_${id.toUpperCase()}_QUALITY`,quality),healthy:true});
     providers[id]={baseUrl,apiKey,model};
   }
   if(!routes.length) throw new Error("Configure at least one SOFIA_*_MODEL environment variable.");
