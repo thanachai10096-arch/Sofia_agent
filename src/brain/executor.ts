@@ -736,6 +736,14 @@ export class SofiaBrain {
         type: "brain.understanding.completed",
       });
 
+      baselineId = (
+        await this.io(() => this.dependencies.tools.snapshot(this.signal))
+      ).id;
+      checkpointId = (
+        await this.io(() => this.dependencies.tools.checkpoint(this.signal))
+      ).id;
+      this.emit({ type: "brain.checkpoint.created" });
+
       this.move("planning");
       currentPlan = await this.plan(input, understanding);
 
@@ -745,14 +753,6 @@ export class SofiaBrain {
       });
 
       this.emit({ type: "brain.plan.created" });
-
-      baselineId = (
-        await this.io(() => this.dependencies.tools.snapshot(this.signal))
-      ).id;
-      checkpointId = (
-        await this.io(() => this.dependencies.tools.checkpoint(this.signal))
-      ).id;
-      this.emit({ type: "brain.checkpoint.created" });
 
       let completed = false;
 
