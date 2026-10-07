@@ -3,6 +3,7 @@ import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
 import { assertSafeStep, assertToolAllowed, loadExecutionPolicyFromEnv } from "../security/policy.js";
+import { actionHash, riskFor } from "../security/guard.js";
 
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
@@ -189,8 +190,11 @@ export class SofiaAgent {
             if (this.deps.approval) {
               const approved = await this.deps.approval({
                 runId,
+                principalId: request.principalId,
                 toolName: call.name,
                 input: call.input,
+                actionHash: actionHash(runId, call.name, call.input, request.principalId),
+                risk: riskFor([], call.input),
               });
 
               if (!approved) {
