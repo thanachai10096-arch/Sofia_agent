@@ -87,6 +87,7 @@ export interface BrainRunInput {
   plan?: unknown;
   acceptanceCriteria?: AcceptanceCriterion[];
   signal?: AbortSignal;
+  rollbackOnFailure?: boolean;
 }
 
 export interface BrainRunOptions {
@@ -685,6 +686,7 @@ export class SofiaBrain {
     this.signal = signal;
 
     let baselineId: string | undefined;
+    let checkpointId: string | undefined;
     let verification: VerificationResult[] = [];
     let currentPlan: ExecutionPlan | undefined;
 
@@ -711,6 +713,10 @@ export class SofiaBrain {
       baselineId = (
         await this.io(() => this.dependencies.tools.snapshot(this.signal))
       ).id;
+      checkpointId = (
+        await this.io(() => this.dependencies.tools.checkpoint(this.signal))
+      ).id;
+      this.emit({ type: "brain.checkpoint.created" });
 
       let completed = false;
 
@@ -853,13 +859,24 @@ export class SofiaBrain {
         state: "failed",
       });
 
+      const remainingRisks = [message];
+      if (input.rollbackOnFailure && checkpointId) {
+        try {
+          const restored = await this.io(() => this.dependencies.tools.rollback(checkpointId!, this.signal));
+          remainingRisks.push("Rolled back " + restored.length + " workspace file(s) to the pre-run checkpoint.");
+          this.emit({ type: "brain.checkpoint.rolled_back", count: restored.length });
+        } catch (rollbackError) {
+          remainingRisks.push("Rollback failed: " + errorMessage(rollbackError));
+        }
+      }
+
       return this.report(
         false,
         `Brain execution failed: ${message}`,
         verification,
         [],
         false,
-        [message],
+        remainingRisks,
       );
     } finally {
       clearTimeout(timer);
