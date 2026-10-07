@@ -1,5 +1,4 @@
 import type { AgentResult } from "../agent/types.js";
-import type { AcceptanceCriterion } from "../brain/types.js";
 
 export interface AgentRunInput {
   task: string;
@@ -13,7 +12,11 @@ export interface AgentRunInput {
    * the server so the client can reconnect and poll for the result.
    */
   async?: boolean;
-  acceptanceCriteria?: AcceptanceCriterion[];
+  acceptanceCriteria?: Array<{
+    id: string;
+    description: string;
+    probe: { tool: string; input: Record<string, unknown> };
+  }>;
   priority?: "normal" | "high";
 }
 
