@@ -8,7 +8,7 @@ import {
   topologicalOrder,
 } from "./planner.js";
 
-import { runVerification, verificationCriteria } from "./verification.js";
+import { verificationCriteria } from "./verification.js";
 import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
 import { compactSkillContext, matchSkills } from "./skills.js";
 import type { SkillLedger } from "./learning.js";
@@ -905,6 +905,7 @@ export class SofiaBrain {
         if (resumed.version !== 1) throw new Stop("Unsupported run snapshot version");
         if (resumed.task !== input.task) throw new Stop("Run snapshot task mismatch");
         understanding = resumed.understanding;
+        activeAcceptanceCriteria = [...resumed.acceptanceCriteria];
         currentPlan = this.validatePlan(resumed.plan);
         checkpointId = resumed.checkpointId;
         baselineId = resumed.baselineSnapshotId;
