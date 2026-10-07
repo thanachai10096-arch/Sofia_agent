@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { FailureCategory, Strategy } from "./types.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
+import { containsPromptInjection, redactSecrets } from "../security/guard.js";
 
 export interface ProjectMemoryEntry {
   id: string; project: string; kind: "convention" | "repair" | "decision"; content: string;
@@ -25,14 +26,16 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
   }
   async save(entry: ProjectMemoryEntry): Promise<void> {
-    const entries=await this.read(); const i=entries.findIndex(x=>x.id===entry.id); if(i>=0) entries[i]=entry; else entries.push(entry);
+    if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
+    const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, 4000) };
+    const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
     await fs.mkdir(path.dirname(this.file),{recursive:true}); const tmp=this.file+".tmp";
     await fs.writeFile(tmp,JSON.stringify(entries,null,2),"utf8"); await fs.rename(tmp,this.file);
   }
-  async list(){return this.read();}
+  async list(){return (await this.read()).filter(entry=>!containsPromptInjection(entry.content));}
   async find(query:string){
     const terms=query.toLowerCase().split(/\s+/).filter(Boolean);
-    return (await this.read()).map(entry=>({entry,score:terms.reduce((s,t)=>s+(entry.content.toLowerCase().includes(t)?2:0)+(entry.kind.includes(t)?1:0),0)}))
+    return (await this.list()).map(entry=>({entry,score:terms.reduce((s,t)=>s+(entry.content.toLowerCase().includes(t)?2:0)+(entry.kind.includes(t)?1:0),0)}))
       .filter(x=>x.score>0).sort((a,b)=>b.score-a.score||b.entry.updatedAt.localeCompare(a.entry.updatedAt)).map(x=>x.entry).slice(0,12);
   }
   readSync(): ProjectMemoryEntry[] {
