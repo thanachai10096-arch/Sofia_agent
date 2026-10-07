@@ -130,12 +130,13 @@ export class SofiaModelGateway implements ModelProvider {
       let lastError: unknown;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const timeoutMs = 45_000;
+        let retryableFailure = false;
         const signal = options.signal
           ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
           : AbortSignal.timeout(timeoutMs);
         try {
           const response = await fetch(
-            config.baseUrl.replace(/\\/$/, "") + "/chat/completions",
+            config.baseUrl.replace(/\/$/, "") + "/chat/completions",
             {
               method: "POST",
               headers: {
@@ -153,6 +154,7 @@ export class SofiaModelGateway implements ModelProvider {
             return response;
           }
           const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+          retryableFailure = retryable;
           const detail = await response.text();
           lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
           if (!retryable || attempt === maxAttempts || options.signal?.aborted) throw lastError;
@@ -166,7 +168,7 @@ export class SofiaModelGateway implements ModelProvider {
           });
         } catch (error) {
           lastError = error;
-          if (options.signal?.aborted || attempt === maxAttempts) throw error;
+          if (options.signal?.aborted || attempt === maxAttempts || !retryableFailure) throw error;
           await new Promise((resolve) => setTimeout(resolve, Math.min(250 * 2 ** (attempt - 1), 2_000)));
         }
       }
