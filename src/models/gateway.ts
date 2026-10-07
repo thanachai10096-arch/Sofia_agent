@@ -121,6 +121,7 @@ export class SofiaModelGateway implements ModelProvider {
     this.circuits.set(providerId, circuit);
 
     if (circuit.openedAt && Date.now() - circuit.openedAt < 15_000) {
+      route.healthy = false;
       throw new Error(`Model provider ${providerId} temporarily unavailable.`);
     }
     if (circuit.openedAt) circuit.openedAt = 0;
@@ -151,6 +152,7 @@ export class SofiaModelGateway implements ModelProvider {
           if (response.ok) {
             circuit.failures = 0;
             circuit.openedAt = 0;
+            route.healthy = true;
             return response;
           }
           const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
@@ -180,7 +182,10 @@ export class SofiaModelGateway implements ModelProvider {
       response = await (gate ? gate.run(execute, options.signal) : execute());
     } catch (error) {
       circuit.failures++;
-      if (circuit.failures >= 3) circuit.openedAt = Date.now();
+      if (circuit.failures >= 3) {
+        circuit.openedAt = Date.now();
+        route.healthy = false;
+      }
       throw error;
     }
 
