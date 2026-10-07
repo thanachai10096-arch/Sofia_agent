@@ -24,6 +24,7 @@ export class SofiaAgent {
     };
 
     const brain = this.deps.brainFactory!({
+      signal: request.signal,
       maxSteps: request.maxSteps,
     });
 
