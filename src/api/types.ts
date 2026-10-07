@@ -1,9 +1,11 @@
 import type { AgentResult } from "../agent/types.js";
+import type { AcceptanceCriterion } from "../brain/types.js";
 
 export interface AgentRunInput {
   task: string;
   workspace?: string;
   context?: Record<string, unknown> | string;
+  acceptanceCriteria?: AcceptanceCriterion[];
   maxSteps?: number;
   stream?: boolean;
   sessionId?: string;
@@ -45,4 +47,6 @@ export interface SofiaApiConfig {
    */
   allowedOrigins?: string[];
   runRetentionMs?: number;
+  requestTimeoutMs?: number;
+  maxConcurrentRunsPerKey?: number;
 }
