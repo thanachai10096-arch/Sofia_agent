@@ -1,6 +1,7 @@
 import type { RiskLevel } from "../security/guard.js";
 export interface ApprovalRequest {
   runId:string;
+  principalId?:string;
   toolName:string;
   input:Record<string,unknown>;
   actionHash:string;
