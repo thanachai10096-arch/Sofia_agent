@@ -509,7 +509,7 @@ export class SofiaBrain {
     return result;
   }
 
-  private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }): Promise<void> {
+  private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string): Promise<void> {
     const descriptor = this.dependencies.tools.describe(proposal.tool);
     if (!descriptor) throw new RecoverableFailure("tool_error", "Unknown delegated tool");
     const permitted = new Set([
@@ -526,11 +526,10 @@ export class SofiaBrain {
     }
     await this.executeStep({
       id: "delegated-" + this.usage.steps,
-      title: proposal.reason,
+      objective: proposal.reason,
       dependencies: [],
       call: { tool: proposal.tool, input: proposal.input },
-      successCriteria: proposal.reason,
-    });
+    }, principalId);
   }
 
   private async plan(
@@ -549,7 +548,7 @@ export class SofiaBrain {
     );
 
     if (subagent?.proposedAction) {
-      await this.applySubagentProposal(subagent.proposedAction);
+      await this.applySubagentProposal(subagent.proposedAction, input.principalId);
     }
 
     const value = await this.infer("plan", {
@@ -564,7 +563,7 @@ export class SofiaBrain {
     );
   }
 
-  private async executeStep(step: ExecutionPlan["steps"][number]): Promise<Observation> {
+  private async executeStep(step: ExecutionPlan["steps"][number], principalId?: string): Promise<Observation> {
     this.signal.throwIfAborted();
 
     if (this.usage.steps >= this.limits.maxSteps) {
@@ -598,7 +597,7 @@ export class SofiaBrain {
       result = await this.io(() =>
         this.dependencies.tools.execute(step.call, {
           runId: this.runId,
-          ...(input.principalId ? { principalId: input.principalId } : {}),
+          ...(principalId ? { principalId } : {}),
           signal: this.signal,
           requireApproval:
             descriptor.effects.includes("destructive") ||
@@ -655,6 +654,7 @@ export class SofiaBrain {
 
   private async verify(
     criteria: readonly AcceptanceCriterion[],
+    principalId?: string,
   ): Promise<VerificationResult[]> {
     this.move("verifying");
     this.emit({ type: "brain.verification.started" });
@@ -671,7 +671,7 @@ export class SofiaBrain {
       const result = await this.io(() =>
         this.dependencies.tools.execute(criterion.probe, {
           runId: this.runId,
-          ...(input.principalId ? { principalId: input.principalId } : {}),
+          ...(principalId ? { principalId } : {}),
           signal: this.signal,
           requireApproval: false,
           notifyApproval: () => {
@@ -937,7 +937,7 @@ export class SofiaBrain {
               }
             }
 
-            await this.executeStep(step);
+            await this.executeStep(step, input.principalId);
             done.add(step.id);
             completedStepIds.add(step.id);
             await checkpointState(currentPlan);
@@ -967,7 +967,7 @@ export class SofiaBrain {
               passed: verification.every((item) => item.passed),
             });
           } else {
-            verification = await this.verify(criteria);
+            verification = await this.verify(criteria, input.principalId);
           }
 
           if (verification.every((item) => item.passed)) {
@@ -1063,7 +1063,7 @@ export class SofiaBrain {
             // verify it immediately instead of paying for an unnecessary plan.
             this.move("replanning");
             this.move("executing");
-            await this.applySubagentProposal(specialist.proposedAction);
+            await this.applySubagentProposal(specialist.proposedAction, input.principalId);
             this.move("observing");
 
             this.emit({ type: "brain.coding.loop.repaired", count: recoveryRounds });
