@@ -574,6 +574,9 @@ export class SofiaBrain {
       { category, message, source: "tool", files: this.observations.slice(-6).map((item) => item.tool) },
       this.diagnoses,
     );
+    diagnosis.attemptedStrategies = [
+      ...new Set(this.decisions.map((decision) => decision.strategy)),
+    ];
     this.diagnoses.push(diagnosis);
     this.emit({ type: "brain.diagnosis.created", category: diagnosis.category, count: diagnosis.repeated });
     return diagnosis;
@@ -831,7 +834,7 @@ export class SofiaBrain {
           name: "repair-" + last.category,
           trigger: last.message.slice(0, 240),
           category: last.category,
-          strategy: last.attemptedStrategies[last.attemptedStrategies.length - 1] ?? "fix-implementation",
+          strategy: this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation",
           procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
           verification: verification.map((item) => item.criterionId),
           evidenceIds: verification.flatMap((item) => item.evidenceIds),
