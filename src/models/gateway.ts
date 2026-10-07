@@ -221,11 +221,19 @@ export class SofiaModelGateway implements ModelProvider {
     const inputTokens = data.usage?.prompt_tokens;
     const outputTokens = data.usage?.completion_tokens;
 
+    const usage =
+      Number.isSafeInteger(inputTokens) &&
+      inputTokens >= 0 &&
+      Number.isSafeInteger(outputTokens) &&
+      outputTokens >= 0
+        ? { inputTokens: inputTokens as number, outputTokens: outputTokens as number }
+        : undefined;
+
     return {
       text,
       toolCalls: calls.length ? calls : undefined,
       assistantMessage: {
-        role: "assistant",
+        role: "assistant" as const,
         content: text,
         toolCalls: calls.map((call) => ({
           id: call.id,
@@ -233,12 +241,7 @@ export class SofiaModelGateway implements ModelProvider {
           arguments: JSON.stringify(call.input),
         })),
       },
-      ...(Number.isSafeInteger(inputTokens) &&
-      inputTokens >= 0 &&
-      Number.isSafeInteger(outputTokens) &&
-      outputTokens >= 0
-        ? { usage: { inputTokens, outputTokens } }
-        : {}),
+      ...(usage ? { usage } : {}),
     };
   }
 }
