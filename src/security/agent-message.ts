@@ -4,8 +4,8 @@ function canonical(m:Omit<SignedAgentMessage,"signature">){return JSON.stringify
 export function signAgentMessage<T>(m:Omit<SignedAgentMessage<T>,"signature">,secret:string):SignedAgentMessage<T>{
  return {...m,signature:createHash("sha256").update(secret+"\n"+canonical(m)).digest("hex")};
 }
-export function verifyAgentMessage<T>(m:SignedAgentMessage<T>,secret:string,maxAgeMs=120_000):boolean{
- if(Math.abs(Date.now()-m.issuedAt)>maxAgeMs)return false;
+export function verifyAgentMessage<T>(m:SignedAgentMessage<T>,secret:string,maxAgeMs=120_000,expectedRecipient?:string):boolean{
+ if(Math.abs(Date.now()-m.issuedAt)>maxAgeMs)return false;\n if(expectedRecipient && m.recipient!==expectedRecipient)return false;
  const {signature,...unsigned}=m;
  return signAgentMessage(unsigned,secret).signature===signature;
 }
