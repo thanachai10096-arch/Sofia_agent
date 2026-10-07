@@ -38,6 +38,8 @@ export function actionHash(runId: string, toolName: string, input: Record<string
 
 export function riskFor(effects: readonly ToolEffect[], input: Record<string, unknown>): RiskLevel {
   if (effects.includes("destructive")) return "critical";
+  const commandText = Array.isArray(input.args) ? input.args.join(" ") : String(input.command ?? "");
+  if (/(?:^|\\s)(?:reset|clean|push|force|rm|rmdir|del|format|shutdown|reboot)(?:\\s|$)/i.test(commandText)) return "critical";
   if (effects.includes("shell")) return "high";
   if (effects.includes("network") || effects.includes("browser")) return "high";
   if (effects.includes("write")) return "medium";
