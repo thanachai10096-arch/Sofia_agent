@@ -27,6 +27,8 @@ test("verification stops after the first failed probe", async () => {
       return { id: "s1", revision: "r1", evidenceId: "e0" };
     },
     async changedFiles() { return []; },
+    async checkpoint() { return { id: "c1", revision: "r1" }; },
+    async rollback() { return []; },
   };
 
   const results = await runVerification(
