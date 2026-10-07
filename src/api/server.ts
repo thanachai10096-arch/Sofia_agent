@@ -5,18 +5,18 @@ import type { AgentDependencies } from "../agent/types.js";
 import type { AgentRunInput, AgentRunResponse, SofiaApiConfig } from "./types.js";
 import { UsageLimiter } from "./usage.js";
 
-function headers() {
+function headers(origin?: string) {
   return {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
-    "access-control-allow-origin": "*",
+    ...(origin ? { "access-control-allow-origin": origin, "vary": "Origin" } : {}),
     "access-control-allow-headers": "authorization, content-type",
     "access-control-allow-methods": "GET, POST, OPTIONS",
   };
 }
 
-function json(res: ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, headers());
+function json(res: ServerResponse, status: number, body: unknown, origin?: string) {
+  res.writeHead(status, headers(origin));
   res.end(JSON.stringify(body));
 }
 
@@ -46,24 +46,37 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
   return createServer(async (req, res) => {
     try {
+      const requestOrigin = req.headers.origin;
+      const allowedOrigin =
+        requestOrigin && (
+          config.allowedOrigins?.includes("*") ||
+          config.allowedOrigins?.includes(requestOrigin)
+        )
+          ? requestOrigin
+          : undefined;
+
+      if (requestOrigin && config.allowedOrigins && !allowedOrigin) {
+        return json(res, 403, { error: "origin_not_allowed" });
+      }
+
       if (req.method === "OPTIONS") {
-        res.writeHead(204, headers());
+        res.writeHead(204, headers(allowedOrigin));
         return res.end();
       }
 
       if (req.method === "GET" && req.url === "/health") {
-        return json(res, 200, { ok: true, service: "sofia-agent-api", version: "v1" });
+        return json(res, 200, { ok: true, service: "sofia-agent-api", version: "v1" }, allowedOrigin);
       }
 
-      if (!req.url?.startsWith("/v1/")) return json(res, 404, { error: "not_found" });
+      if (!req.url?.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, allowedOrigin);
 
       const auth = authenticate(req, config);
-      if (!auth) return json(res, 401, { error: "unauthorized" });
+      if (!auth) return json(res, 401, { error: "unauthorized" }, allowedOrigin);
 
       if (req.method === "POST" && req.url === "/v1/agent/runs/stream") {
         const input = (await body(req, maxBytes)) as AgentRunInput;
-        if (!input.task?.trim()) return json(res, 400, { error: "task_required" });
-        try { usage.consume(auth.keyId); } catch (error) { return json(res, 429, { error: "quota_exceeded" }); }
+        if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, allowedOrigin);
+        try { usage.consume(auth.keyId); } catch (error) { return json(res, 429, { error: "quota_exceeded" }, allowedOrigin); }
         const id = randomUUID();
         res.writeHead(200, { ...headers(), "content-type": "text/event-stream; charset=utf-8", "connection": "keep-alive" });
         const send = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -91,10 +104,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       if (req.method === "POST" && req.url === "/v1/agent/runs") {
         const input = (await body(req, maxBytes)) as AgentRunInput;
-        if (!input.task?.trim()) return json(res, 400, { error: "task_required" });
+        if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, allowedOrigin);
 
         const id = randomUUID();
-        try { usage.consume(auth.keyId); } catch (error) { return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }); }
+        try { usage.consume(auth.keyId); } catch (error) { return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, allowedOrigin); }
         try {
           const result = await agent.run({
             task: input.task,
@@ -109,19 +122,19 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           });
           const response: AgentRunResponse = { id, status: "completed", result };
-          return json(res, 200, response);
+          return json(res, 200, response, allowedOrigin);
         } catch (error) {
           const response: AgentRunResponse = {
             id,
             status: "failed",
             error: error instanceof Error ? error.message : "Agent failed",
           };
-          return json(res, 502, response);
+          return json(res, 502, response, allowedOrigin);
         }
       }
 
-      if (req.method === "GET" && req.url.startsWith("/v1/usage")) return json(res, 200, usage.get(auth.keyId));
-      return json(res, 404, { error: "not_found" });
+      if (req.method === "GET" && req.url.startsWith("/v1/usage")) return json(res, 200, usage.get(auth.keyId), allowedOrigin);
+      return json(res, 404, { error: "not_found" }, allowedOrigin);
     } catch (error) {
       return json(res, 500, {
         error: "internal_error",
