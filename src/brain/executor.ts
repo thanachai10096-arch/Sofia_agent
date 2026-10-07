@@ -845,6 +845,26 @@ export class SofiaBrain {
           this.move("diagnosing");
           const diagnosis = this.diagnose(error);
 
+          const specialist = await this.delegateSubagent(
+            input.task,
+            {
+              phase: "failure-recovery",
+              understanding,
+              diagnosis,
+              observations: this.observations.slice(-8),
+              previousPlan: currentPlan,
+              projectContext: this.projectContext
+                ? compactProjectContext(this.projectContext)
+                : undefined,
+            },
+            diagnosis.category,
+          );
+
+          if (specialist?.proposedAction) {
+            await this.applySubagentProposal(specialist.proposedAction);
+            this.move("observing");
+          }
+
           if (diagnosis.repeated > 1) {
             throw new Stop(
               `Repeated failure detected: ${diagnosis.fingerprint}`,
