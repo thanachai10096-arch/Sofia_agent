@@ -16,6 +16,9 @@ function classifyEffects(name: string) {
   if (name === "workspace.write_file") {
     return ["write"] as const;
   }
+  if (name === "project.verify" || name === "git.diff") {
+    return ["read"] as const;
+  }
   if (name === "terminal.run") {
     return ["shell"] as const;
   }
