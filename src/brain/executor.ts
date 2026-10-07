@@ -446,6 +446,29 @@ export class SofiaBrain {
     return result;
   }
 
+  private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }): Promise<void> {
+    const descriptor = this.dependencies.tools.describe(proposal.tool);
+    if (!descriptor) throw new RecoverableFailure("tool_error", "Unknown delegated tool");
+    const permitted = new Set([
+      "workspace.read_file",
+      "workspace.list_files",
+      "workspace.search",
+      "git.diff",
+      "project.verify",
+      "workspace.write_file",
+    ]);
+    if (!permitted.has(proposal.tool)) {
+      throw new RecoverableFailure("tool_error", "Delegated tool is outside Brain scope");
+    }
+    await this.executeStep({
+      id: "delegated-" + this.usage.steps,
+      title: proposal.reason,
+      dependencies: [],
+      call: { tool: proposal.tool, input: proposal.input },
+      successCriteria: proposal.reason,
+    });
+  }
+
   private async plan(
     input: BrainRunInput,
     understanding: TaskUnderstanding,
