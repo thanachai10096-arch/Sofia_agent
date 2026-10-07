@@ -330,3 +330,47 @@ test("Brain can resume from a saved run snapshot without repeating completed ste
   assert.equal(report.state, "completed");
   assert.equal(writes, 1);
 });
+
+
+test("Brain emits a review gate after verification", async () => {
+  const events: string[] = [];
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      onEvent(event) {
+        events.push(event.type);
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true);
+  assert.ok(events.includes("brain.review.completed"));
+});
