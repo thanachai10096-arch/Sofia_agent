@@ -742,7 +742,7 @@ export class SofiaBrain {
       count: this.usage.replans,
     });
 
-    const skills = matchSkills(diagnosis.category, diagnosis.message);
+    const skills = matchSkills(diagnosis.category, diagnosis.message, 3, this.dependencies.skillLedger);
     const value = await this.infer("replan", {
       task,
       understanding,
