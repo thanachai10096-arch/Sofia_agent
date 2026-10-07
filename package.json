@@ -4,7 +4,7 @@
   "private": false,
   "type": "module",
   "bin": {
-    "sofia": "./dist/cli/index.js"
+    "sofia": "./dist/src/cli/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
