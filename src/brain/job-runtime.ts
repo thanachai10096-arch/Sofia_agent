@@ -27,7 +27,7 @@ class FileJobStateStore {
  }
  async save(record:JobRecord):Promise<void>{
   const records=await this.read(); const i=records.findIndex(x=>x.id===record.id);
-  const durable={...record,result:undefined};
+  const durable={...record};
   if(i>=0)records[i]=durable;else records.push(durable);
   await fs.mkdir(path.dirname(this.file),{recursive:true});
   const tmp=this.file+".tmp"; await fs.writeFile(tmp,JSON.stringify(records,null,2),"utf8"); await fs.rename(tmp,this.file);
