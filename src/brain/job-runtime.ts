@@ -91,7 +91,7 @@ export class DurableJobRuntime implements JobRuntime{
  }
 
  private async execute(record:JobRecord,input:Omit<BrainRunInput,"signal"|"resume">,externalSignal?:AbortSignal,resume?:BrainRunSnapshot){
-  if(record.status==="running")return;
+  if(record.status==="running"||record.status==="cancelled")return;
   record.status="running";record.updatedAt=new Date().toISOString();await this.state.save(record);
   const controller=new AbortController();this.controllers.set(record.id,controller);
   if(externalSignal){
@@ -102,7 +102,7 @@ export class DurableJobRuntime implements JobRuntime{
    record.snapshot=snapshot;record.updatedAt=new Date().toISOString();await this.runStore?.save(snapshot);await this.state.save(record);
   };
   try{
-   const brain=this.brainFactory({signal:controller.signal});
+   const brain=this.brainFactory({signal:controller.signal,onRunSnapshot:onSnapshot});
    const result=await brain.run({...input,signal:controller.signal,resume});
    record.result=result;record.status=result.completed?"completed":result.state==="cancelled"?"cancelled":"failed";record.updatedAt=new Date().toISOString();await this.state.save(record);
   }catch(error){
