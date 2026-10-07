@@ -37,7 +37,23 @@ function makeReasoner(): BrainReasoner {
               successCriteria: ["hello.txt exists"],
               ambiguities: [],
             }
-          : plan;
+          : parsed.phase === "replan"
+            ? {
+                strategy: "fix-implementation",
+                reason: "Verify the recovered workspace state.",
+                steps: [
+                  {
+                    id: "inspect",
+                    objective: "Inspect the recovered file",
+                    dependencies: [],
+                    call: {
+                      tool: "workspace.list_files",
+                      input: { path: "." },
+                    },
+                  },
+                ],
+              }
+            : plan;
 
       return {
         inputTokens: 10,
