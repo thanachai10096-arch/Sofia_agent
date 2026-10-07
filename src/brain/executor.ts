@@ -687,7 +687,9 @@ export class SofiaBrain {
     }
 
     this.started = true;
-    this.signal = input.signal ?? new AbortController().signal;
+    const requestedSignal = input.signal ?? new AbortController().signal;
+    requestedSignal.throwIfAborted();
+    this.signal = requestedSignal;
 
     const timeoutController = new AbortController();
     const onAbort = () => timeoutController.abort(this.signal.reason);
