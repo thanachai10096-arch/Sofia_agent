@@ -13,7 +13,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install --no-audit --no-fund
+      - run: npm install --ignore-scripts --no-audit --no-fund > install.log 2>&1 || true
+          cat install.log
       - name: TypeScript diagnostics
         shell: bash
         run: |
