@@ -13,8 +13,8 @@ export interface LearnedSkillCandidate {
 }
 
 export interface SkillLedger {
-  record(candidate: LearnedSkillCandidate): void;
-  list(): readonly LearnedSkillCandidate[];
+  record(candidate: LearnedSkillCandidate): void | Promise<void>;
+  list(): readonly LearnedSkillCandidate[] | Promise<readonly LearnedSkillCandidate[]>;
 }
 
 export class InMemorySkillLedger implements SkillLedger {
