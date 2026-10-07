@@ -34,17 +34,38 @@ interface ChatResponse {
 
 class ConcurrencyGate {
   private active = 0;
-  private readonly waiters: Array<() => void> = [];
+  private readonly waiters: Array<{ resolve: () => void; signal?: AbortSignal }> = [];
   constructor(private readonly limit: number) {}
-  async run<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.active >= this.limit) await new Promise<void>((resolve) => this.waiters.push(resolve));
+  async run<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (this.active >= this.limit) {
+      await new Promise<void>((resolve, reject) => {
+        const waiter = { resolve, ...(signal ? { signal } : {}) };
+        const onAbort = () => {
+          const index = this.waiters.indexOf(waiter);
+          if (index >= 0) this.waiters.splice(index, 1);
+          reject(signal!.reason ?? new Error("Request aborted."));
+        };
+        if (signal?.aborted) return onAbort();
+        signal?.addEventListener("abort", onAbort, { once: true });
+        this.waiters.push(waiter);
+      });
+    }
+    if (signal?.aborted) throw signal.reason ?? new Error("Request aborted.");
     this.active++;
-    try { return await operation(); } finally { this.active--; this.waiters.shift()?.(); }
+    try { return await operation(); }
+    finally {
+      this.active--;
+      const next = this.waiters.shift();
+      next?.resolve();
+    }
   }
 }
 
+interface CircuitState { failures: number; openedAt: number; }
+
 export class SofiaModelGateway implements ModelProvider {
   private readonly gates = new Map<string, ConcurrencyGate>();
+  private readonly circuits = new Map<string, CircuitState>();
 
   constructor(
     private readonly providers: Record<string, GatewayProviderConfig>,
@@ -96,20 +117,70 @@ export class SofiaModelGateway implements ModelProvider {
 
     const providerId = route.providerId ?? route.id;
     const gate = this.gates.get(providerId);
-    const execute = () => fetch(
-      config.baseUrl.replace(/\/$/, "") + "/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          authorization: "Bearer " + config.apiKey,
-          "content-type": "application/json",
-          ...config.headers,
-        },
-        body: JSON.stringify(body),
-        ...(options.signal ? { signal: options.signal } : {}),
-      },
-    );
-    const response = await (gate ? gate.run(execute) : execute());
+    const circuit = this.circuits.get(providerId) ?? { failures: 0, openedAt: 0 };
+    this.circuits.set(providerId, circuit);
+
+    if (circuit.openedAt && Date.now() - circuit.openedAt < 15_000) {
+      throw new Error(`Model provider ${providerId} temporarily unavailable.`);
+    }
+    if (circuit.openedAt) circuit.openedAt = 0;
+
+    const execute = async () => {
+      const maxAttempts = 3;
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const timeoutMs = 45_000;
+        const signal = options.signal
+          ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
+          : AbortSignal.timeout(timeoutMs);
+        try {
+          const response = await fetch(
+            config.baseUrl.replace(/\\/$/, "") + "/chat/completions",
+            {
+              method: "POST",
+              headers: {
+                authorization: "Bearer " + config.apiKey,
+                "content-type": "application/json",
+                ...config.headers,
+              },
+              body: JSON.stringify(body),
+              signal,
+            },
+          );
+          if (response.ok) {
+            circuit.failures = 0;
+            circuit.openedAt = 0;
+            return response;
+          }
+          const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+          const detail = await response.text();
+          lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
+          if (!retryable || attempt === maxAttempts || options.signal?.aborted) throw lastError;
+          const retryAfter = Number(response.headers.get("retry-after") ?? "");
+          const delay = Number.isFinite(retryAfter) && retryAfter > 0
+            ? Math.min(retryAfter * 1000, 5_000)
+            : Math.min(250 * 2 ** (attempt - 1), 2_000) + Math.floor(Math.random() * 100);
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(resolve, delay);
+            options.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(options.signal!.reason); }, { once: true });
+          });
+        } catch (error) {
+          lastError = error;
+          if (options.signal?.aborted || attempt === maxAttempts) throw error;
+          await new Promise((resolve) => setTimeout(resolve, Math.min(250 * 2 ** (attempt - 1), 2_000)));
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error("Model provider request failed.");
+    };
+
+    let response: Response;
+    try {
+      response = await (gate ? gate.run(execute, options.signal) : execute());
+    } catch (error) {
+      circuit.failures++;
+      if (circuit.failures >= 3) circuit.openedAt = Date.now();
+      throw error;
+    }
 
     if (!response.ok) {
       const detail = await response.text();
