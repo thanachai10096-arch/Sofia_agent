@@ -4,6 +4,7 @@ import type { ExecutionPolicy } from "../security/policy.js";
 import type { ToolRegistry } from "../tools/types.js";
 import type { AcceptanceCriterion, CompletionReport } from "../brain/types.js";
 import type { SofiaBrain } from "../brain/executor.js";
+import type { JobRuntime } from "../brain/job-runtime.js";
 export interface AgentRequest {
   task: string;
   context?: string;
@@ -32,5 +33,6 @@ export interface AgentDependencies {
  policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
  brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number})=>SofiaBrain;
+ jobRuntime?: JobRuntime;
 }
 export type { ToolCall };
