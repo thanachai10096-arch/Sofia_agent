@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { AbortSignal } from "node:abort_controller";
 import type { BrainRunInput, BrainRunOptions } from "./executor.js";
 import { createSofiaBrain, type SofiaBrain } from "./executor.js";
 import type { BrainRunSnapshot } from "./run-state.js";
@@ -27,7 +26,7 @@ export class InMemoryRunManager implements RunManager {
   private readonly runs = new Map<string, ManagedRun>();
   private readonly controllers = new Map<string, AbortController>();
 
-  constructor(private readonly brainOptions: Omit<BrainRunOptions, "dependencies"> & { dependencies: BrainRunOptions["dependencies"] }, private readonly runStore?: RunStore) {}
+  constructor(private readonly brainOptions: BrainRunOptions, private readonly runStore?: RunStore) {}
 
   async create(input: Omit<BrainRunInput, "signal" | "resume">): Promise<ManagedRun> {
     const id = randomUUID();
@@ -48,7 +47,7 @@ export class InMemoryRunManager implements RunManager {
     if (!record.snapshot) throw new Error("Run has no resumable snapshot");
     if (record.status === "completed") return record;
 
-    await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.trace.length >= 0 ? undefined : undefined }, signal, record.snapshot);
+    await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
     return record;
   }
 
