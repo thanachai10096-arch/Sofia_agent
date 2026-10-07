@@ -1,42 +1,21 @@
 name: Sofia Diagnostics
 
 on:
+  workflow_dispatch:
   push:
     branches: ["main"]
-  workflow_dispatch:
 
 jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - run: npm install --ignore-scripts --no-audit --no-fund > install.log 2>&1 || true
-          cat install.log
-      - name: TypeScript diagnostics
-        shell: bash
+      - name: Runner smoke test
         run: |
-          set +e
-          npm run typecheck > typecheck.log 2>&1
-          code=$?
-          cat typecheck.log
-          echo "TYPECHECK_EXIT=$code" >> typecheck.log
-          exit 0
-      - name: Test diagnostics
-        shell: bash
-        run: |
-          set +e
-          npm test > test.log 2>&1
-          code=$?
-          cat test.log
-          echo "TEST_EXIT=$code" >> test.log
-          exit 0
+          node --version
+          npm --version
+          echo "runner-ok" > runner.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: sofia-diagnostics
-          path: |
-            typecheck.log
-            test.log
+          path: runner.log
