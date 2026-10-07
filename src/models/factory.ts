@@ -18,6 +18,7 @@ import { discoverProjectContext } from "../brain/project-context.js";
 import { createSubagentRuntime } from "../brain/subagents.js";
 import { DurableCheckpointManager } from "../brain/durable-checkpoint.js";
 import { FileRunStore } from "../brain/run-store.js";
+import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 
 function intEnv(name: string, fallback: number, minimum = 0): number {
   const value = Number(process.env[name]);
