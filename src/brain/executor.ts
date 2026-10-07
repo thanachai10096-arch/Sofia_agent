@@ -269,14 +269,11 @@ export class SofiaBrain {
 
   private latestRunSnapshot?: BrainRunSnapshot;
 
-  private saveRunSnapshot(snapshot: BrainRunSnapshot): void {
+  private async saveRunSnapshot(snapshot: BrainRunSnapshot): Promise<void> {
     this.latestRunSnapshot = snapshot;
     this.emit({ type: "brain.run.checkpointed" });
     try {
-      const result = this.dependencies.onRunSnapshot?.(snapshot);
-      if (result && typeof (result as Promise<void>).then === "function") {
-        void Promise.resolve(result).catch(() => undefined);
-      }
+      await this.dependencies.onRunSnapshot?.(snapshot);
     } catch {
       // Persistence must never alter execution semantics.
     }
@@ -788,9 +785,9 @@ export class SofiaBrain {
     let understanding: TaskUnderstanding | undefined;
     let completedStepIds = new Set<string>();
 
-    const checkpointState = (plan: ExecutionPlan | undefined): void => {
+    const checkpointState = async (plan: ExecutionPlan | undefined): Promise<void> => {
       if (!plan || !checkpointId || !understanding) return;
-      this.saveRunSnapshot({
+      await this.saveRunSnapshot({
         version: 1,
         runId: this.runId,
         task: input.task,
@@ -857,7 +854,7 @@ export class SofiaBrain {
       }
 
       if (!understanding || !currentPlan) throw new Stop("Run state is incomplete");
-      checkpointState(currentPlan);
+      await checkpointState(currentPlan);
 
       let completed = false;
 
@@ -887,7 +884,7 @@ export class SofiaBrain {
             await this.executeStep(step);
             done.add(step.id);
             completedStepIds.add(step.id);
-            checkpointState(currentPlan);
+            await checkpointState(currentPlan);
           }
 
           this.move("observing");
@@ -972,7 +969,7 @@ export class SofiaBrain {
               steps: [],
             };
             completedStepIds = new Set<string>();
-            checkpointState(currentPlan);
+            await checkpointState(currentPlan);
             continue;
           }
 
