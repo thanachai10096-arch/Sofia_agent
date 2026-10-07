@@ -66,3 +66,47 @@ npm install
 npm run typecheck
 npm test
 ```
+
+## Sofia Experience Layer
+
+Sofia is designed for both non-developers and professional developers.
+
+The default user experience is **simple**: users describe the outcome they want in natural language. Sofia keeps model selection, planning, tool routing, verification, repair, memory, and learned skills internal.
+
+```text
+User intent
+   ↓
+Sofia understands
+   ↓
+Plans + builds
+   ↓
+Tests + verifies
+   ↓
+Repairs when needed
+   ↓
+Learns from successful repairs
+   ↓
+Plain-language progress
+```
+
+Three presentation modes are supported:
+
+- `simple` — outcome-focused progress with no implementation jargon.
+- `guided` — progressively explains what Sofia is doing.
+- `pro` — suitable for developer-facing clients that want deeper execution detail.
+
+The experience layer does **not** change model routing or execution safety. It only changes how Sofia communicates its work.
+
+API clients can send:
+
+```json
+{
+  "task": "สร้างระบบสมาชิกให้เว็บนี้",
+  "experience": {
+    "mode": "simple",
+    "explainProgress": true
+  }
+}
+```
+
+Streaming clients receive both engineering events and a small human-readable `progress` event stream.
