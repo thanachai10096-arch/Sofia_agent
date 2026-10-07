@@ -69,6 +69,10 @@ export class RuntimeCheckpointManager implements CheckpointManager {
     return checkpoint;
   }
 
+  remember(checkpoint: Checkpoint): void {
+    this.checkpoints.set(checkpoint.id, checkpoint);
+  }
+
   async rollback(checkpointId: string, signal: AbortSignal): Promise<{ restoredFiles: string[] }> {
     signal.throwIfAborted();
     const checkpoint = this.checkpoints.get(checkpointId);
