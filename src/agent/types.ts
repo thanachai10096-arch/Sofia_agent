@@ -31,5 +31,6 @@ export interface AgentDependencies {
  tools:ToolRegistry;
  policy:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
+ brainFactory?: (options: { signal?: AbortSignal; maxSteps?: number }) => SofiaBrain;
 }
 export type { ToolCall };
