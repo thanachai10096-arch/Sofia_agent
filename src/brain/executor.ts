@@ -11,7 +11,7 @@ import {
 import { verificationCriteria } from "./verification.js";
 import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
 import { compactSkillContext, matchSkills } from "./skills.js";
-import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
+import type { FailureMemory, LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
@@ -244,6 +244,7 @@ export class SofiaBrain {
   private projectMemoryLoaded = false;
   private learnedSkills: LearnedSkillCandidate[] = [];
   private learnedSkillsLoaded = false;
+  private failureMemory: FailureMemory[] = [];
 
   constructor(
     private readonly dependencies: Dependencies,
@@ -364,8 +365,12 @@ export class SofiaBrain {
       try {
         const learned = await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.list()));
         this.learnedSkills = [...learned];
+        if (this.dependencies.skillLedger!.listFailures) {
+          this.failureMemory = [...(await this.wait(() => Promise.resolve(this.dependencies.skillLedger!.listFailures!())))];
+        }
       } catch {
         this.learnedSkills = [];
+        this.failureMemory = [];
       }
     }
 
@@ -381,7 +386,8 @@ export class SofiaBrain {
           decisions: this.decisions,
           projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined,
           projectMemory: this.projectMemory.slice(-12).map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, source: entry.source })),
-          learnedSkills: this.learnedSkills.slice(-8).map((skill) => ({ name: skill.name, trigger: skill.trigger, category: skill.category, strategy: skill.strategy, procedure: skill.procedure, verification: skill.verification })),
+          learnedSkills: this.learnedSkills.slice(-8).map((skill) => ({ name: skill.name, trigger: skill.trigger, category: skill.category, strategy: skill.strategy, confidence: skill.confidence, successes: skill.successes ?? 0, attempts: skill.attempts ?? 0, procedure: skill.procedure, verification: skill.verification })),
+          failureMemory: this.failureMemory.slice(-8).map((failure) => ({ fingerprint: failure.fingerprint, category: failure.category, message: failure.message, strategy: failure.strategy, skillName: failure.skillName, attempts: failure.attempts, resolved: failure.resolved })),
         },
       });
 
