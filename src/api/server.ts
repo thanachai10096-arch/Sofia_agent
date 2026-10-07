@@ -99,7 +99,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             signal: controller.signal,
             ...(input.acceptanceCriteria ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
+            ...(input.experience ? { experience: input.experience } : {}),
             onEvent: (event) => send({ type: "event", runId: id, event }),
+            onProgress: (progress) => send({ type: "progress", runId: id, progress }),
           });
           send({ type: "result", runId: id, status: "completed", result });
         } catch (error) {
@@ -134,6 +136,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             signal: controller.signal,
             ...(input.acceptanceCriteria ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
+            ...(input.experience ? { experience: input.experience } : {}),
           });
           const response: AgentRunResponse = { id, status: "completed", result };
           return json(res, 200, response, allowedOrigin);
