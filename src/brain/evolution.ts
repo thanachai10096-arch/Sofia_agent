@@ -12,6 +12,8 @@ export interface SkillPerformance {
   lastSuccessAt?: string;
   lastFailureAt?: string;
   lastFailure?: string;
+  successHistory: Array<{ at: string; steps: number; recoveryRounds: number }>;
+  failureHistory: Array<{ at: string; message: string }>;
 }
 
 export interface EvolutionSnapshot {
@@ -51,7 +53,7 @@ export class EvolutionEngine {
   private get(id: string): SkillPerformance {
     return this.snapshot.skills[id] ??= {
       id, attempts: 0, successes: 0, failures: 0,
-      confidence: 0.5, avgSteps: 0, avgRecoveryRounds: 0,
+      confidence: 0.5, avgSteps: 0, avgRecoveryRounds: 0,\n      successHistory: [], failureHistory: [],
     };
   }
 
@@ -76,8 +78,7 @@ export class EvolutionEngine {
     s.confidence = clamp(s.confidence * 0.8 + 0.2, 0, 1);
     s.avgSteps = s.attempts === 1 ? steps : ((s.avgSteps * (s.attempts - 1)) + steps) / s.attempts;
     s.avgRecoveryRounds = s.attempts === 1 ? recoveryRounds : ((s.avgRecoveryRounds * (s.attempts - 1)) + recoveryRounds) / s.attempts;
-    s.lastSuccessAt = new Date().toISOString();
-    void this.persist();
+    s.lastSuccessAt = new Date().toISOString();\n    s.successHistory.push({ at: s.lastSuccessAt, steps, recoveryRounds });\n    s.successHistory = s.successHistory.slice(-20);\n    void this.persist();
   }
 
   recordFailure(id: string, message: string): void {
@@ -86,8 +87,7 @@ export class EvolutionEngine {
     s.failures++;
     s.confidence = clamp(s.confidence * 0.75 - 0.05, 0.05, 0.95);
     s.lastFailureAt = new Date().toISOString();
-    s.lastFailure = message.slice(0, 500);
-    void this.persist();
+    s.lastFailure = message.slice(0, 500);\n    s.failureHistory.push({ at: s.lastFailureAt, message: s.lastFailure });\n    s.failureHistory = s.failureHistory.slice(-20);\n    void this.persist();
   }
 
   recordRun(taskType: string, completed: boolean): void {
