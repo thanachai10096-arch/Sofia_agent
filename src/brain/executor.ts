@@ -863,6 +863,17 @@ export class SofiaBrain {
           if (specialist?.proposedAction) {
             await this.applySubagentProposal(specialist.proposedAction);
             this.move("observing");
+
+            // A specialist action is already an executed recovery attempt.
+            // Do not immediately duplicate the old plan. Run verification
+            // against the recovered workspace first; only a failed verification
+            // should consume a replan.
+            currentPlan = {
+              strategy: "inspect-evidence",
+              reason: "Verify specialist recovery before replanning.",
+              steps: [],
+            };
+            continue;
           }
 
           if (diagnosis.repeated > 1) {
