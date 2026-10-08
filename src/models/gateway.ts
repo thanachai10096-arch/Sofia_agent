@@ -221,12 +221,16 @@ export class SofiaModelGateway implements ModelProvider {
     const inputTokens = data.usage?.prompt_tokens;
     const outputTokens = data.usage?.completion_tokens;
 
+    const inputTokenCount = typeof inputTokens === "number" ? inputTokens : undefined;
+    const outputTokenCount = typeof outputTokens === "number" ? outputTokens : undefined;
     const usage =
-      Number.isSafeInteger(inputTokens) &&
-      inputTokens >= 0 &&
-      Number.isSafeInteger(outputTokens) &&
-      outputTokens >= 0
-        ? { inputTokens: inputTokens as number, outputTokens: outputTokens as number }
+      inputTokenCount !== undefined &&
+      outputTokenCount !== undefined &&
+      Number.isSafeInteger(inputTokenCount) &&
+      inputTokenCount >= 0 &&
+      Number.isSafeInteger(outputTokenCount) &&
+      outputTokenCount >= 0
+        ? { inputTokens: inputTokenCount, outputTokens: outputTokenCount }
         : undefined;
 
     return {
