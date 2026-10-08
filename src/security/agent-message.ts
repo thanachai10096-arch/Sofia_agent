@@ -5,7 +5,8 @@ export function signAgentMessage<T>(m:Omit<SignedAgentMessage<T>,"signature">,se
  return {...m,signature:createHash("sha256").update(secret+"\n"+canonical(m)).digest("hex")};
 }
 export function verifyAgentMessage<T>(m:SignedAgentMessage<T>,secret:string,maxAgeMs=120_000,expectedRecipient?:string):boolean{
- if(Math.abs(Date.now()-m.issuedAt)>maxAgeMs)return false;\n if(expectedRecipient && m.recipient!==expectedRecipient)return false;
+ if(Math.abs(Date.now()-m.issuedAt)>maxAgeMs)return false;
+ if(expectedRecipient && m.recipient!==expectedRecipient)return false;
  const {signature,...unsigned}=m;
  return signAgentMessage(unsigned,secret).signature===signature;
 }
