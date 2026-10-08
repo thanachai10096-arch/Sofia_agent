@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { FailureCategory, Strategy } from "./types.js";
+import { lifecycleForSkill } from "./learning.js";
 import type { FailureMemory, LearnedSkillCandidate, SkillLedger, SkillOutcome } from "./learning.js";
 
 export interface ProjectMemoryEntry {
@@ -134,6 +135,7 @@ export class PersistentSkillLedger implements SkillLedger {
       lastUsedAt: new Date().toISOString(),
       ...(outcome.success ? { lastSucceededAt: new Date().toISOString() } : {}),
       evidenceIds: [...new Set([...(skill.evidenceIds ?? []), ...(outcome.evidenceIds ?? [])])].slice(-40),
+      lifecycle: lifecycleForSkill({ ...skill, confidence, attempts, successes, failures, lastUsedAt: new Date().toISOString(), ...(outcome.success ? { lastSucceededAt: new Date().toISOString() } : { lastFailedAt: new Date().toISOString() }) }),
     });
   }
 

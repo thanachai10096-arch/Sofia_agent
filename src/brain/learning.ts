@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { FailureCategory, Strategy } from "./types.js";
 
+export type SkillLifecycle = "candidate" | "probation" | "trusted" | "stale" | "deprecated";
+
 export interface LearnedSkillCandidate {
   name: string;
   trigger: string;
@@ -18,6 +20,9 @@ export interface LearnedSkillCandidate {
   createdAt?: string;
   updatedAt?: string;
   source?: "agent" | "human" | "builtin";
+  lifecycle?: SkillLifecycle;
+  lastFailedAt?: string;
+  deprecatedAt?: string;
 }
 
 export interface SkillOutcome {
@@ -121,6 +126,7 @@ function mergeSkill(previous: LearnedSkillCandidate | undefined, candidate: Lear
       createdAt: candidate.createdAt ?? now,
       updatedAt: now,
       source: candidate.source ?? "agent",
+      lifecycle: candidate.lifecycle ?? nextSkillLifecycle(candidate),
     };
   }
   return {
@@ -151,9 +157,11 @@ function updateOutcome(skill: LearnedSkillCandidate, outcome: SkillOutcome): Lea
     successes,
     failures,
     lastUsedAt: now,
-    ...(outcome.success ? { lastSucceededAt: now } : {}),
+    ...(outcome.success ? { lastSucceededAt: now } : { lastFailedAt: now }),
+    lifecycle: nextSkillLifecycle({ ...skill, attempts, successes, failures, lastUsedAt: now, ...(outcome.success ? { lastSucceededAt: now } : { lastFailedAt: now }) }),
     evidenceIds: [...new Set([...(skill.evidenceIds ?? []), ...(outcome.evidenceIds ?? [])])].slice(-40),
     updatedAt: now,
+    lifecycle: candidate.lifecycle ?? nextSkillLifecycle({ ...candidate, attempts: Math.max(previous?.attempts ?? 0, candidate.attempts ?? 0), successes: Math.max(previous?.successes ?? 0, candidate.successes ?? 0), failures: Math.max(previous?.failures ?? 0, candidate.failures ?? 0) }),
   };
 }
 
@@ -174,8 +182,11 @@ export function rankLearnedSkills(
       const attempts = skill.attempts ?? 0;
       const empirical = attempts > 0 ? (skill.successes ?? 0) / attempts : 0.5;
       const reliability = empirical * 25;
+      const lifecycleBoost = skill.lifecycle === "trusted" ? 8 : skill.lifecycle === "probation" ? 2 : skill.lifecycle === "stale" ? -12 : skill.lifecycle === "deprecated" ? -100 : 0;
+      const failurePenalty = Math.min(skill.failures ?? 0, 8) * 2;
+      const score = categoryBoost + triggerHits * 8 + confidence + strategyBoost + reliability + evidenceBoost + lifecycleBoost - failurePenalty;
       const evidenceBoost = Math.min((skill.evidenceIds?.length ?? 0), 10);
-      const score = categoryBoost + triggerHits * 8 + confidence + strategyBoost + reliability + evidenceBoost;
+      const score = categoryBoost + triggerHits * 8 + confidence + strategyBoost + reliability + evidenceBoost + lifecycleBoost - failurePenalty;
       const reasons = [
         ...(categoryBoost ? ["same failure category"] : []),
         ...(triggerHits ? [`${triggerHits} matching trigger terms`] : []),
@@ -184,7 +195,7 @@ export function rankLearnedSkills(
       ];
       return { skill, score, reasons };
     })
-    .filter((item) => item.score > 20)
+    .filter((item) => item.skill.lifecycle !== "deprecated" && item.score > 20)
     .sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
     .slice(0, limit);
 }
@@ -202,6 +213,23 @@ function rankFailures(items: FailureMemory[], query: string): FailureMemory[] {
 
 function tokenize(value: string): string[] {
   return [...new Set(value.split(/[^a-z0-9_:-]+/i).filter((term) => term.length >= 3))];
+}
+
+function nextSkillLifecycle(skill: Pick<LearnedSkillCandidate, "attempts" | "successes" | "failures" | "lastUsedAt" | "lifecycle">): SkillLifecycle {
+  const attempts = skill.attempts ?? 0;
+  const successes = skill.successes ?? 0;
+  const failures = skill.failures ?? 0;
+  const rate = attempts > 0 ? successes / attempts : 0;
+  if (skill.lifecycle === "deprecated") return "deprecated";
+  if (attempts >= 5 && rate < 0.35 && failures >= 3) return "deprecated";
+  if (skill.lastUsedAt && Date.now() - Date.parse(skill.lastUsedAt) > 1000 * 60 * 60 * 24 * 30) return "stale";
+  if (attempts >= 3 && rate >= 0.8) return "trusted";
+  if (attempts >= 1) return "probation";
+  return "candidate";
+}
+
+export function lifecycleForSkill(skill: LearnedSkillCandidate): SkillLifecycle {
+  return nextSkillLifecycle(skill);
 }
 
 function clamp(value: number): number {
