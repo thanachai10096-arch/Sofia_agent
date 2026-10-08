@@ -209,7 +209,20 @@ test("Brain feeds a failed verification into a specialist and executes its valid
     },
   });
 
-  const report = await brain.run({ task: "Create hello.txt" });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
 
   assert.equal(report.completed, true, report.summary + " events=" + events.join(","));
   assert.equal(report.state, "completed", report.summary);
