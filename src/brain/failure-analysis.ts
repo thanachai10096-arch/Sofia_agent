@@ -34,7 +34,7 @@ export function classifyFailure(message: string, fallback: FailureCategory = "un
 export function normalizeFailureMessage(message: string): string {
   return message
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\b(?:[A-Za-z]:)?[\\/][^\s:]+[\\/][^\s:]+/g, "<path>")
+    .replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]+/g, "<path>")
     .replace(/\b0x[a-f0-9]+\b/gi, "0x?")
     .replace(/\b\d+\b/g, "#")
     .replace(/\s+/g, " ")
