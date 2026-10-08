@@ -12,7 +12,7 @@ test("FileRunStore survives a new store instance", async () => {
       version: 1 as const,
       runId: "run-test-1",
       task: "test",
-      understanding: { goal: "test", constraints: [], likelyFiles: [], risks: [] },
+      understanding: { objective: "test", constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [], risk: "low" as const, successCriteria: [], ambiguities: [] },
       plan: { strategy: "initial" as const, reason: "test", steps: [] },
       acceptanceCriteria: [],
       completedStepIds: [],
