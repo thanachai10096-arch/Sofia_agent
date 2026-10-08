@@ -186,8 +186,7 @@ export class TokenBudget {
         const chargedCost = costOf(charged, model.price);
         const capExceeded =
           usageKnown &&
-          (charged.inputTokens > reserved.inputTokens ||
-            charged.outputTokens > reserved.outputTokens);
+          charged.outputTokens > reserved.outputTokens;
 
         for (const account of accounts) {
           account.heldTokens -= tokens;
