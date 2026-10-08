@@ -18,7 +18,8 @@ export function loadExecutionPolicyFromEnv():ExecutionPolicy{
   const num=(name:string,fallback:number)=>{const n=Number(process.env[name]);return Number.isFinite(n)&&n>0?n:fallback;};
   const raw=process.env.SOFIA_MAX_RISK;
   const maxRisk:RiskLevel=raw==="low"||raw==="medium"||raw==="high"||raw==="critical"?raw:defaultPolicy.maxRisk;
-  const capabilitySecret=process.env.SOFIA_CAPABILITY_SECRET;\n  const allowedHosts=process.env.SOFIA_ALLOWED_HOSTS?process.env.SOFIA_ALLOWED_HOSTS.split(",").map(x=>x.trim().toLowerCase()).filter(Boolean):defaultPolicy.allowedHosts;
+  const capabilitySecret=process.env.SOFIA_CAPABILITY_SECRET;
+  const allowedHosts=process.env.SOFIA_ALLOWED_HOSTS?process.env.SOFIA_ALLOWED_HOSTS.split(",").map(x=>x.trim().toLowerCase()).filter(Boolean):defaultPolicy.allowedHosts;
   const blockedPaths=process.env.SOFIA_BLOCKED_PATHS?process.env.SOFIA_BLOCKED_PATHS.split(",").map(x=>x.trim()).filter(Boolean):defaultPolicy.blockedPaths;
   return {...defaultPolicy,allowTools:bool("SOFIA_ALLOW_TOOLS",defaultPolicy.allowTools),allowNetwork:bool("SOFIA_ALLOW_NETWORK",defaultPolicy.allowNetwork),allowShell:bool("SOFIA_ALLOW_SHELL",defaultPolicy.allowShell),allowFileWrite:bool("SOFIA_ALLOW_FILE_WRITE",defaultPolicy.allowFileWrite),allowBrowser:bool("SOFIA_ALLOW_BROWSER",defaultPolicy.allowBrowser),allowDestructive:bool("SOFIA_ALLOW_DESTRUCTIVE",defaultPolicy.allowDestructive),maxRisk,blockedPaths,maxSteps:Math.min(num("SOFIA_MAX_STEPS",defaultPolicy.maxSteps),50),maxToolCallsPerStep:Math.min(num("SOFIA_MAX_TOOL_CALLS_PER_STEP",defaultPolicy.maxToolCallsPerStep),16),allowedHosts,capabilitySecret,permissions:defaultPolicy.permissions};
 }
