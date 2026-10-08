@@ -22,6 +22,7 @@ const plan = {
 };
 
 function makeReasoner(): BrainReasoner {
+  let replanCalls = 0;
   return {
     async prepare(request) {
       const parsed = JSON.parse(request) as { phase: string };
@@ -38,21 +39,24 @@ function makeReasoner(): BrainReasoner {
               ambiguities: [],
             }
           : parsed.phase === "replan"
-            ? {
-                strategy: "fix-implementation",
-                reason: "Verify the recovered workspace state.",
-                steps: [
-                  {
-                    id: "inspect",
-                    objective: "Inspect the recovered file",
-                    dependencies: [],
-                    call: {
-                      tool: "workspace.list_files",
-                      input: { path: "." },
+            ? (() => {
+                replanCalls += 1;
+                return {
+                  strategy: "fix-implementation",
+                  reason: "Verify the recovered workspace state (" + replanCalls + ").",
+                  steps: [
+                    {
+                      id: "inspect-" + replanCalls,
+                      objective: "Inspect the recovered file",
+                      dependencies: [],
+                      call: {
+                        tool: "workspace.list_files",
+                        input: { path: replanCalls === 1 ? "." : "src" },
+                      },
                     },
-                  },
-                ],
-              }
+                  ],
+                };
+              })()
             : plan;
 
       return {
