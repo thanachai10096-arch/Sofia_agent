@@ -166,6 +166,8 @@ export function rankLearnedSkills(
   const terms = tokenize(lower);
   return skills
     .map((skill) => {
+      const effectiveLifecycle = nextSkillLifecycle(skill);
+      const rankedSkill = effectiveLifecycle === skill.lifecycle ? skill : { ...skill, lifecycle: effectiveLifecycle };
       const triggerHits = tokenize(skill.trigger).filter((term) => terms.includes(term)).length;
       const categoryBoost = skill.category === category ? 45 : 0;
       const strategyBoost = skill.strategy === "fix-implementation" && category === "incomplete_solution" ? 8 : 0;
@@ -173,7 +175,7 @@ export function rankLearnedSkills(
       const attempts = skill.attempts ?? 0;
       const empirical = attempts > 0 ? (skill.successes ?? 0) / attempts : 0.5;
       const reliability = empirical * 25;
-      const lifecycleBoost = skill.lifecycle === "trusted" ? 8 : skill.lifecycle === "probation" ? 2 : skill.lifecycle === "stale" ? -12 : skill.lifecycle === "deprecated" ? -100 : 0;
+      const lifecycleBoost = effectiveLifecycle === "trusted" ? 8 : effectiveLifecycle === "probation" ? 2 : effectiveLifecycle === "stale" ? -12 : effectiveLifecycle === "deprecated" ? -100 : 0;
       const failurePenalty = Math.min(skill.failures ?? 0, 8) * 2;
       const evidenceBoost = Math.min((skill.evidenceIds?.length ?? 0), 10);
       const lifecycleBoost = skill.lifecycle === "trusted" ? 8 : skill.lifecycle === "probation" ? 2 : skill.lifecycle === "stale" ? -12 : skill.lifecycle === "deprecated" ? -100 : 0;
@@ -185,7 +187,7 @@ export function rankLearnedSkills(
         `confidence ${Math.round((skill.confidence ?? 0.55) * 100)}%`,
         ...(attempts ? [`${skill.successes ?? 0}/${attempts} successful uses`] : []),
       ];
-      return { skill, score, reasons };
+      return { skill: rankedSkill, score, reasons };
     })
     .filter((item) => item.skill.lifecycle !== "deprecated" && item.score > 20)
     .sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
