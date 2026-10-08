@@ -1059,12 +1059,7 @@ export class SofiaBrain {
             this.move("observing");
 
             this.emit({ type: "brain.coding.loop.repaired", count: recoveryRounds });
-            currentPlan = {
-              strategy: "inspect-evidence",
-              reason: "Verify specialist recovery before replanning.",
-              steps: [],
-            };
-            completedStepIds = new Set<string>();
+            completedStepIds = new Set(currentPlan.steps.map((step) => step.id));
             await checkpointState(currentPlan);
             continue;
           }
