@@ -103,6 +103,19 @@ export function createBuiltinTools(): SofiaTool[] {
       },
     },
     {
+      name: "workspace.search",
+      description: "Search workspace files for a text query.",
+      inputSchema: {
+        type: "object",
+        properties: { query: str("Text to search for"), path: str("Optional workspace-relative path") },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      async execute(input, { runtime }) {
+        return runtime.search(String(input.query), typeof input.path === "string" ? input.path : undefined);
+      },
+    },
+    {
       name: "workspace.list_files",
       description: "List entries in a workspace directory.",
       inputSchema: {
