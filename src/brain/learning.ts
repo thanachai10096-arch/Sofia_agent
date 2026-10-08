@@ -116,29 +116,22 @@ function skillKey(candidate: Pick<LearnedSkillCandidate, "name" | "category" | "
 
 function mergeSkill(previous: LearnedSkillCandidate | undefined, candidate: LearnedSkillCandidate): LearnedSkillCandidate {
   const now = new Date().toISOString();
-  if (!previous) {
-    return {
-      ...candidate,
-      confidence: clamp(candidate.confidence ?? 0.55),
-      attempts: candidate.attempts ?? 0,
-      successes: candidate.successes ?? 0,
-      failures: candidate.failures ?? 0,
-      createdAt: candidate.createdAt ?? now,
-      updatedAt: now,
-      source: candidate.source ?? "agent",
-      lifecycle: candidate.lifecycle ?? nextSkillLifecycle(candidate),
-    };
-  }
-  return {
+  const attempts = Math.max(previous?.attempts ?? 0, candidate.attempts ?? 0);
+  const successes = Math.max(previous?.successes ?? 0, candidate.successes ?? 0);
+  const failures = Math.max(previous?.failures ?? 0, candidate.failures ?? 0);
+  const merged: LearnedSkillCandidate = {
     ...previous,
     ...candidate,
-    confidence: clamp(candidate.confidence ?? previous.confidence ?? 0.55),
-    attempts: Math.max(previous.attempts ?? 0, candidate.attempts ?? 0),
-    successes: Math.max(previous.successes ?? 0, candidate.successes ?? 0),
-    failures: Math.max(previous.failures ?? 0, candidate.failures ?? 0),
-    createdAt: previous.createdAt ?? candidate.createdAt ?? now,
+    confidence: clamp(candidate.confidence ?? previous?.confidence ?? 0.55),
+    attempts,
+    successes,
+    failures,
+    createdAt: previous?.createdAt ?? candidate.createdAt ?? now,
     updatedAt: now,
+    source: candidate.source ?? previous?.source ?? "agent",
+    lifecycle: candidate.lifecycle ?? previous?.lifecycle,
   };
+  return { ...merged, lifecycle: nextSkillLifecycle(merged) };
 }
 
 function updateOutcome(skill: LearnedSkillCandidate, outcome: SkillOutcome): LearnedSkillCandidate {
@@ -147,10 +140,9 @@ function updateOutcome(skill: LearnedSkillCandidate, outcome: SkillOutcome): Lea
   const failures = (skill.failures ?? 0) + (outcome.success ? 0 : 1);
   const empirical = successes / attempts;
   const prior = clamp(skill.confidence ?? 0.55);
-  // Bayesian-style smoothing: prior matters early, observed evidence dominates later.
   const confidence = clamp((prior * 2 + empirical * attempts) / (attempts + 2));
   const now = new Date().toISOString();
-  return {
+  const next: LearnedSkillCandidate = {
     ...skill,
     confidence,
     attempts,
@@ -158,11 +150,10 @@ function updateOutcome(skill: LearnedSkillCandidate, outcome: SkillOutcome): Lea
     failures,
     lastUsedAt: now,
     ...(outcome.success ? { lastSucceededAt: now } : { lastFailedAt: now }),
-    lifecycle: nextSkillLifecycle({ ...skill, attempts, successes, failures, lastUsedAt: now, ...(outcome.success ? { lastSucceededAt: now } : { lastFailedAt: now }) }),
     evidenceIds: [...new Set([...(skill.evidenceIds ?? []), ...(outcome.evidenceIds ?? [])])].slice(-40),
     updatedAt: now,
-    lifecycle: candidate.lifecycle ?? nextSkillLifecycle({ ...candidate, attempts: Math.max(previous?.attempts ?? 0, candidate.attempts ?? 0), successes: Math.max(previous?.successes ?? 0, candidate.successes ?? 0), failures: Math.max(previous?.failures ?? 0, candidate.failures ?? 0) }),
   };
+  return { ...next, lifecycle: nextSkillLifecycle(next) };
 }
 
 export function rankLearnedSkills(
@@ -184,8 +175,9 @@ export function rankLearnedSkills(
       const reliability = empirical * 25;
       const lifecycleBoost = skill.lifecycle === "trusted" ? 8 : skill.lifecycle === "probation" ? 2 : skill.lifecycle === "stale" ? -12 : skill.lifecycle === "deprecated" ? -100 : 0;
       const failurePenalty = Math.min(skill.failures ?? 0, 8) * 2;
-      const score = categoryBoost + triggerHits * 8 + confidence + strategyBoost + reliability + evidenceBoost + lifecycleBoost - failurePenalty;
       const evidenceBoost = Math.min((skill.evidenceIds?.length ?? 0), 10);
+      const lifecycleBoost = skill.lifecycle === "trusted" ? 8 : skill.lifecycle === "probation" ? 2 : skill.lifecycle === "stale" ? -12 : skill.lifecycle === "deprecated" ? -100 : 0;
+      const failurePenalty = Math.min(skill.failures ?? 0, 8) * 2;
       const score = categoryBoost + triggerHits * 8 + confidence + strategyBoost + reliability + evidenceBoost + lifecycleBoost - failurePenalty;
       const reasons = [
         ...(categoryBoost ? ["same failure category"] : []),
