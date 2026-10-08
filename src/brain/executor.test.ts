@@ -224,7 +224,7 @@ test("Brain feeds a failed verification into a specialist and executes its valid
     }],
   });
 
-  assert.equal(report.completed, true, report.summary + " events=" + events.join(","));
+  assert.equal(report.completed, true, report.summary);
   assert.equal(report.state, "completed", report.summary);
   assert.equal(writes, 2, report.summary);
   assert.ok(events.includes("brain.subagent.completed"));
