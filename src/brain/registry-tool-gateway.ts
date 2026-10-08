@@ -87,8 +87,7 @@ export class RegistryToolGateway implements ToolGateway {
   async snapshot(signal:AbortSignal):Promise<WorkspaceSnapshot>{
     signal.throwIfAborted();this.security.assertRunning();
     const result=await this.dependencies.runtime.git(["status","--porcelain","--untracked-files=all"]);
-    const files=result.code===0?result.stdout.split(/\r?
-/).map(x=>x.slice(3).trim()).filter(Boolean).sort():[];
+    const files=result.code===0?result.stdout.split(/\r?\n/).map(x=>x.slice(3).trim()).filter(Boolean).sort():[];
     const revision=digest(result.code===0?result.stdout:`non-git:${await this.dependencies.runtime.cwd()}`);
     const id=randomUUID();const fingerprints:Record<string,string>={};
     for(const file of files){try{fingerprints[file]=digest(await this.dependencies.runtime.readFile(file));}catch{fingerprints[file]="<missing>";}}
