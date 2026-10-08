@@ -1022,7 +1022,7 @@ export class SofiaBrain {
           this.move("diagnosing");
           const diagnosis = this.diagnose(error);
 
-          const specialist = await this.delegateSubagent(
+          const specialist = recoveryRounds === 0 ? await this.delegateSubagent(
             input.task,
             {
               phase: "failure-recovery",
@@ -1035,7 +1035,7 @@ export class SofiaBrain {
                 : undefined,
             },
             diagnosis.category,
-          );
+          ) : undefined;
 
           if (specialist?.proposedAction) {
             recoveryRounds += 1;
