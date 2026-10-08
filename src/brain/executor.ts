@@ -57,7 +57,7 @@ const TRANSITIONS: Record<BrainState, readonly BrainState[]> = {
   idle: ["understanding"],
   understanding: ["planning"],
   planning: ["executing"],
-  executing: ["observing", "waiting_approval"],
+  executing: ["observing", "waiting_approval", "diagnosing"],
   observing: ["executing", "verifying", "diagnosing"],
   verifying: ["waiting_approval", "diagnosing", "completed"],
   diagnosing: ["replanning"],
