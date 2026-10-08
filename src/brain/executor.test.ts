@@ -211,9 +211,9 @@ test("Brain feeds a failed verification into a specialist and executes its valid
 
   const report = await brain.run({ task: "Create hello.txt" });
 
-  assert.equal(report.completed, true);
-  assert.equal(report.state, "completed");
-  assert.equal(writes, 2);
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(report.state, "completed", report.summary);
+  assert.equal(writes, 2, report.summary);
   assert.ok(events.includes("brain.subagent.completed"));
   assert.equal(events.includes("brain.replan.started"), false);
   assert.ok(events.includes("brain.verification.completed"));
@@ -326,9 +326,9 @@ test("Brain can resume from a saved run snapshot without repeating completed ste
     ],
   });
 
-  assert.equal(report.completed, true);
-  assert.equal(report.state, "completed");
-  assert.equal(writes, 1);
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(report.state, "completed", report.summary);
+  assert.equal(writes, 1, report.summary);
 });
 
 
