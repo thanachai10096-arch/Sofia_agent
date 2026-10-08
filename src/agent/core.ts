@@ -110,10 +110,6 @@ export class SofiaAgent {
       policy.maxSteps,
     );
 
-    if (!this.deps.runtime || !this.deps.tools) {
-      throw new Error("Agent runtime and tool registry are required.");
-    }
-
     const messages: ChatMessage[] = [
       {
         role: "system" as const,
@@ -126,7 +122,7 @@ export class SofiaAgent {
         : []),
     ];
 
-    const toolDefs: ToolDefinition[] = this.deps.tools.list().map((tool) => ({
+    const toolDefs: ToolDefinition[] = (this.deps.tools?.list() ?? []).map((tool) => ({
       type: "function",
       function: {
         name: tool.name,
@@ -177,6 +173,7 @@ export class SofiaAgent {
 
           for (const call of response.toolCalls) {
             assertToolAllowed(policy, call.name);
+            if (!this.deps.tools || !this.deps.runtime) throw new Error("Agent runtime and tool registry are required for tool execution.");
             const tool = this.deps.tools.get(call.name);
             if (!tool) throw new Error(`Unknown tool: ${call.name}`);
 
