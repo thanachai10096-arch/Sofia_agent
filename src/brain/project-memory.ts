@@ -133,7 +133,7 @@ export class PersistentSkillLedger implements SkillLedger {
       successes,
       failures,
       lastUsedAt: new Date().toISOString(),
-      ...(outcome.success ? { lastSucceededAt: new Date().toISOString() } : {}),
+      ...(outcome.success ? { lastSucceededAt: new Date().toISOString() } : { lastFailedAt: new Date().toISOString() }),
       evidenceIds: [...new Set([...(skill.evidenceIds ?? []), ...(outcome.evidenceIds ?? [])])].slice(-40),
       lifecycle: lifecycleForSkill({ ...skill, confidence, attempts, successes, failures, lastUsedAt: new Date().toISOString(), ...(outcome.success ? { lastSucceededAt: new Date().toISOString() } : { lastFailedAt: new Date().toISOString() }) }),
     });
@@ -192,7 +192,17 @@ function parseFailure(value: string): FailureMemory | undefined {
 
 function mergeSkill(previous: LearnedSkillCandidate | undefined, candidate: LearnedSkillCandidate): LearnedSkillCandidate {
   const now = new Date().toISOString();
-  if (!previous) return { ...candidate, confidence: candidate.confidence ?? 0.55, attempts: candidate.attempts ?? 0, successes: candidate.successes ?? 0, failures: candidate.failures ?? 0, createdAt: candidate.createdAt ?? now, updatedAt: now };
-  return { ...previous, ...candidate, confidence: candidate.confidence ?? previous.confidence ?? 0.55, attempts: Math.max(previous.attempts ?? 0, candidate.attempts ?? 0), successes: Math.max(previous.successes ?? 0, candidate.successes ?? 0), failures: Math.max(previous.failures ?? 0, candidate.failures ?? 0), createdAt: previous.createdAt ?? candidate.createdAt ?? now, updatedAt: now };
+  const merged = {
+    ...previous,
+    ...candidate,
+    confidence: candidate.confidence ?? previous?.confidence ?? 0.55,
+    attempts: Math.max(previous?.attempts ?? 0, candidate.attempts ?? 0),
+    successes: Math.max(previous?.successes ?? 0, candidate.successes ?? 0),
+    failures: Math.max(previous?.failures ?? 0, candidate.failures ?? 0),
+    createdAt: previous?.createdAt ?? candidate.createdAt ?? now,
+    updatedAt: now,
+    source: candidate.source ?? previous?.source ?? "agent",
+  };
+  return { ...merged, lifecycle: candidate.lifecycle ?? lifecycleForSkill(merged) };
 }
 
