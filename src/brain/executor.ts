@@ -542,16 +542,10 @@ export class SofiaBrain {
       );
     }
 
-    const subagent = await this.delegateSubagent(
-      input.task,
-      { understanding, projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined, repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined },
-    );
-
     const value = await this.infer("plan", {
       task: input.task,
       understanding,
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
-      subagent,
     });
 
     return this.validatePlan(
@@ -870,8 +864,9 @@ export class SofiaBrain {
         this.usage.modelCalls = resumed.usage.modelCalls;
         this.usage.reservedOrUsedTokens = resumed.usage.reservedOrUsedTokens;
         this.usage.replans = resumed.usage.replans;
+        this.state = "planning";
         this.emit({ type: "brain.run.resumed" });
-        this.move("planning");
+        this.emit({ type: "brain.state.changed", state: "planning" });
       } else {
         this.move("understanding");
         understanding = await this.understand(input);
