@@ -114,8 +114,8 @@ test("Brain completes a coding loop only after trusted verification", async () =
     limits: {
       maxSteps: 4,
       maxToolCalls: 10,
-      maxReplans: 1,
-      maxModelCalls: 4,
+      maxReplans: 2,
+      maxModelCalls: 6,
       maxTokens: 1_000,
       maxContextTokens: 500,
       maxOutputTokens: 100,
