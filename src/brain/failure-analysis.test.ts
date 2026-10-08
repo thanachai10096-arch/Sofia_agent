@@ -18,7 +18,7 @@ test("classifies common compiler and environment failures deterministically", ()
 test("fingerprint ignores unstable numbers and paths", () => {
   const a = failureFingerprint({
     category: "type_error",
-    message: "TS2322 at C:\repo\src\a.ts line 12",
+    message: String.raw`TS2322 at C:\repo\src\a.ts line 12`,
     source: "verification",
   });
   const b = failureFingerprint({
