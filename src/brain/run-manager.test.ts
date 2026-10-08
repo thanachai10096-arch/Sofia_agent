@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { InMemoryRunManager } from "./run-manager.js";
 
 test("RunManager exposes create/get/list lifecycle", async () => {
-  const manager = new InMemoryRunManager(async () => ({
+  const manager = new InMemoryRunManager(() => ({
     async run() {
       return {
         completed: true,
