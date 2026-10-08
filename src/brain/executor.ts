@@ -547,10 +547,6 @@ export class SofiaBrain {
       { understanding, projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined, repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined },
     );
 
-    if (subagent?.proposedAction) {
-      await this.applySubagentProposal(subagent.proposedAction, input.principalId);
-    }
-
     const value = await this.infer("plan", {
       task: input.task,
       understanding,
@@ -875,6 +871,7 @@ export class SofiaBrain {
         this.usage.reservedOrUsedTokens = resumed.usage.reservedOrUsedTokens;
         this.usage.replans = resumed.usage.replans;
         this.emit({ type: "brain.run.resumed" });
+        this.move("planning");
       } else {
         this.move("understanding");
         understanding = await this.understand(input);
