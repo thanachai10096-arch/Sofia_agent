@@ -52,7 +52,7 @@ export function roleForTask(task: string, failureCategory?: string): SubagentRol
         failureCategory === "runtime_error" || failureCategory === "tool_error") return "debugger";
     if (failureCategory === "dependency_error" || failureCategory === "environment_error") return "researcher";
     if (failureCategory === "permission_error" || failureCategory === "network_error") return "security";
-    if (failureCategory === "incomplete_solution") return "debugger";
+    if (failureCategory === "incomplete_solution") return "tester";
   }
   if (/security|auth|permission|secret|token|credential|vulnerab/.test(text)) return "security";
   if (/test|verify|verification|regression/.test(text)) return "tester";
