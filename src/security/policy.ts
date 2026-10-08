@@ -23,6 +23,11 @@ export function loadExecutionPolicyFromEnv():ExecutionPolicy{
   const blockedPaths=process.env.SOFIA_BLOCKED_PATHS?process.env.SOFIA_BLOCKED_PATHS.split(",").map(x=>x.trim()).filter(Boolean):defaultPolicy.blockedPaths;
   return {...defaultPolicy,allowTools:bool("SOFIA_ALLOW_TOOLS",defaultPolicy.allowTools),allowNetwork:bool("SOFIA_ALLOW_NETWORK",defaultPolicy.allowNetwork),allowShell:bool("SOFIA_ALLOW_SHELL",defaultPolicy.allowShell),allowFileWrite:bool("SOFIA_ALLOW_FILE_WRITE",defaultPolicy.allowFileWrite),allowBrowser:bool("SOFIA_ALLOW_BROWSER",defaultPolicy.allowBrowser),allowDestructive:bool("SOFIA_ALLOW_DESTRUCTIVE",defaultPolicy.allowDestructive),maxRisk,blockedPaths,maxSteps:Math.min(num("SOFIA_MAX_STEPS",defaultPolicy.maxSteps),50),maxToolCallsPerStep:Math.min(num("SOFIA_MAX_TOOL_CALLS_PER_STEP",defaultPolicy.maxToolCallsPerStep),16),allowedHosts,capabilitySecret,permissions:defaultPolicy.permissions};
 }
+export function assertSecurityConfiguration(policy:ExecutionPolicy):void{
+ const production=process.env.NODE_ENV==="production"||process.env.SOFIA_ENV==="production";
+ if(production&&policy.allowTools&&!policy.capabilitySecret)throw new Error("SOFIA_CAPABILITY_SECRET is required in production.");
+ if(production&&(policy.allowNetwork||policy.allowBrowser)&&policy.allowedHosts.length===0)throw new Error("SOFIA_ALLOWED_HOSTS is required when network/browser access is enabled in production.");
+}
 export function assertSafeStep(policy:ExecutionPolicy,step:number):void{if(step>policy.maxSteps)throw new Error("Agent step limit exceeded");}
 export function toolPermission(policy:ExecutionPolicy,name:string,effects:readonly ToolEffect[]):ToolPermission{
   const override=policy.permissions[name]??{};
