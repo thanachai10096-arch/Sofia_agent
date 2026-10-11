@@ -37,6 +37,7 @@ function clamp(n: number, min: number, max: number) {
 export class EvolutionEngine {
   private snapshot: EvolutionSnapshot;
   private readonly file?: string;
+  private persistChain: Promise<void> = Promise.resolve();
 
   constructor(file?: string) {
     this.file = file;
@@ -112,15 +113,19 @@ export class EvolutionEngine {
     return JSON.parse(JSON.stringify(this.snapshot)) as EvolutionSnapshot;
   }
 
-  private async persist(): Promise<void> {
-    if (!this.file) return;
-    try {
-      await fs.mkdir(path.dirname(this.file), { recursive: true });
-      const tmp = this.file + ".tmp";
-      await fs.writeFile(tmp, JSON.stringify(this.snapshot, null, 2), "utf8");
-      await fs.rename(tmp, this.file);
-    } catch {
-      // Learning is best-effort; execution semantics never depend on persistence.
-    }
+  private persist(): Promise<void> {
+    if (!this.file) return Promise.resolve();
+    const serialized = JSON.stringify(this.snapshot, null, 2);
+    this.persistChain = this.persistChain.then(async () => {
+      try {
+        await fs.mkdir(path.dirname(this.file!), { recursive: true });
+        const tmp = this.file! + ".tmp";
+        await fs.writeFile(tmp, serialized, "utf8");
+        await fs.rename(tmp, this.file!);
+      } catch {
+        // Learning is best-effort; execution semantics never depend on persistence.
+      }
+    });
+    return this.persistChain;
   }
 }
