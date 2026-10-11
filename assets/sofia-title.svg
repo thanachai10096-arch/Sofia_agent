@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="132" viewBox="0 0 920 132" role="img" aria-labelledby="title desc">
+  <title id="title">Sofia Agents</title>
+  <desc id="desc">Sofia Agents in large green monospace code-style lettering.</desc>
+  <rect width="920" height="132" rx="14" fill="#0b0f0c"/>
+  <text x="36" y="84" fill="#4ade80" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace" font-size="62" font-weight="800" letter-spacing="-2">&gt; Sofia Agents<span fill="#86efac">_</span></text>
+  <path d="M36 104 H884" stroke="#166534" stroke-width="2"/>
+</svg>
