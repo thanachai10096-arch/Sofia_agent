@@ -44,7 +44,7 @@ function clamp(n: number, min: number, max: number) {
 }
 
 function normalizeTaskType(taskType: string): string {
-  const normalized = taskType.trim().toLowerCase().replace(/\\s+/g, "-").slice(0, 80);
+  const normalized = taskType.trim().toLowerCase().replace(/\s+/g, "-").slice(0, 80);
   return normalized || "general";
 }
 
@@ -108,7 +108,7 @@ export class EvolutionEngine {
     const s = this.get(id);
     s.attempts++;
     s.successes++;
-    const key = taskType.trim().toLowerCase() || "general";
+    const key = normalizeTaskType(taskType);
     const local = s.taskTypes[key] ??= { attempts: 0, successes: 0, failures: 0 };
     local.attempts++;
     local.successes++;
@@ -125,7 +125,7 @@ export class EvolutionEngine {
     const s = this.get(id);
     s.attempts++;
     s.failures++;
-    const key = taskType.trim().toLowerCase() || "general";
+    const key = normalizeTaskType(taskType);
     const local = s.taskTypes[key] ??= { attempts: 0, successes: 0, failures: 0 };
     local.attempts++;
     local.failures++;
