@@ -109,7 +109,7 @@ Do not expose this adapter directly from a public API server: it is intended to 
 
 The opt-in `DesktopPairingAuthority` provides the credential lifecycle for a future local host transport:
 
-- Pairing codes are random, short-lived, single-use values.
+- Pairing codes are random, short-lived, single-use values; repeated incorrect submissions invalidate the pending code.
 - The operator supplies the maximum capabilities the host may grant; a paired client can request only a subset.
 - Access tokens are high-entropy bearer credentials; only SHA-256 digests are retained in memory.
 - Sessions expire, can be revoked individually, and can be cleared when the host shuts down.
