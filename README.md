@@ -16,6 +16,43 @@ A model-agnostic execution layer for Zuse — with internal model routing, polic
 
 ---
 
+
+## The 14 Sofia characters
+
+Sofia's mascot set is included in the repository as lightweight, transparent-background SVG assets, with a typed registry for UI and documentation use.
+
+- **Artwork:** `assets/characters/*.svg`
+- **Registry:** `src/characters/registry.ts`
+- **Count:** 14 distinct characters
+- **Background:** transparent SVG canvas, suitable for light and dark surfaces
+- **Purpose:** visual identity and UI representation; each mascot does not imply a separately running agent.
+
+| Character | Focus |
+|---|---|
+| Sofia | Orchestrator |
+| Nova | Planning |
+| Pixel | Coding |
+| Lumi | Design |
+| Mira | Research |
+| Echo | Browser |
+| Mint | Testing |
+| Bloom | Writing |
+| Iris | Analysis |
+| Velvet | Security |
+| Orbit | Memory |
+| Spark | Tooling |
+| Data | Data |
+| Pulse | Operations |
+
+Example:
+
+```ts
+import { SOFIA_CHARACTERS, getSofiaCharacter } from "./characters/registry.js";
+
+console.log(SOFIA_CHARACTERS.length); // 14
+const codingMascot = getSofiaCharacter("pixel");
+```
+
 ## `> Overview`
 
 Sofia is the internal agent runtime for **Zuse**. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
