@@ -276,3 +276,15 @@ Zuse should use Sofia's stable API/SDK and let Sofia apply internal routing and 
 <sub>Built for reliable, recoverable agent execution.</sub>
 
 </div>
+
+## Benchmark harness
+
+The dependency-free benchmark runner covers ten observable coding tasks. Run the harness self-test before interpreting any agent score:
+
+```bash
+node bench/run.mjs --selftest
+node bench/run.mjs --agent noop
+node bench/run.mjs --agent reference
+```
+
+The no-op and reference modes validate the benchmark harness; they are not Sofia capability scores. A real Sofia evaluation requires a configured disposable workspace and API credentials. See [the benchmark guide](bench/README.md) for adapter setup and limitations.

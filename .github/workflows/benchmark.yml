@@ -1,0 +1,25 @@
+name: Sofia Benchmark
+on:
+  pull_request:
+    paths:
+      - "bench/**"
+      - ".github/workflows/benchmark.yml"
+  push:
+    branches: [main]
+    paths:
+      - "bench/**"
+      - ".github/workflows/benchmark.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  benchmark-selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node bench/run.mjs --selftest
+      - run: node bench/run.mjs --agent noop
+      - run: node bench/run.mjs --agent reference
