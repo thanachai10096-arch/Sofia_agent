@@ -122,6 +122,7 @@ export function createNativeDesktopDriver(config: NativeDesktopDriverConfig = {}
 
     async click(point) {
       const button = point.button ?? "left";
+      if (button !== "left" && button !== "right" && button !== "middle") throw new Error("Unsupported mouse button.");
       if (!Number.isInteger(point.x) || !Number.isInteger(point.y) || point.x < 0 || point.y < 0 || point.x > 16383 || point.y > 16383) throw new Error("Invalid screen coordinates.");
       if (platform === "linux") {
         const buttonNumber = button === "left" ? "1" : button === "middle" ? "2" : "3";
