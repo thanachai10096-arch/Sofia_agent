@@ -156,8 +156,8 @@ export class DurableJobRuntime implements JobRuntime {
     // get() returns a defensive copy; mutations must target the canonical live record.
     const record = this.jobs.get(id) ?? fetched;
     if (record.status === "completed") return { ...record };
-    if (record.status === "running" || this.controllers.has(id)) throw new Error("Job is already running");
     if (!record.snapshot) throw new Error("Job has no resumable snapshot");
+    if (record.status === "running" || this.controllers.has(id)) throw new Error("Job is already running");
     this.resuming.add(id);
     try {
       await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
