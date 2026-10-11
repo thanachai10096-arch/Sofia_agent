@@ -118,7 +118,17 @@ test("DurableJobRuntime resumes a saved checkpoint and passes it to the brain", 
   assert.equal(current?.status, "failed");
   assert.equal(current?.snapshot?.checkpointId, "checkpoint-1");
 
-  const resumed = await runtime.resume(submitted.id);
+  let resumed: Awaited<ReturnType<typeof runtime.resume>> | undefined;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      resumed = await runtime.resume(submitted.id);
+      break;
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "Job is already running") throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  assert.ok(resumed, "job execution should release its controller before resume");
   assert.equal(resumed.status, "completed");
   assert.equal(calls, 2);
   assert.equal(receivedResume?.checkpointId, "checkpoint-1");
