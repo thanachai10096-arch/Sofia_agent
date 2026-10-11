@@ -3,9 +3,9 @@
 
 # Sofia Agents
 
-**An agent runtime built to plan, act, verify, and recover.**
+**An agent runtime designed to plan, act, check results, and recover.**
 
-A model-agnostic execution layer for Zuse — with internal model routing, policy-controlled tools, durable jobs, browser automation, and a permission-gated local runtime.
+A model-agnostic execution layer for Zuse — with internal model routing, policy-controlled tools, durable jobs, browser automation, and a permission-gated local runtime. Capabilities depend on the configured providers, permissions, and runtime mode; the descriptions below are not a guarantee that every task will succeed.
 
 ![Runtime](https://img.shields.io/badge/runtime-agent--first-16a34a?style=for-the-badge)
 ![TypeScript](https://img.shields.io/badge/TypeScript-typed-15803d?style=for-the-badge&logo=typescript&logoColor=white)
@@ -234,6 +234,14 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 - Install and start any local agent service explicitly on the user's machine, and grant only the capabilities needed for the task.
 
 More details: [Desktop Runtime Foundation](docs/desktop-runtime.md).
+
+## `> Evidence & limitations`
+
+- Verification results describe the checks actually executed; they are not a guarantee of correctness unless the checks independently establish the requested outcome.
+- Evolution confidence and success/failure history are heuristic tracking signals, not evidence of model training or calibrated learning.
+- Automated review findings are rule-based signals and can produce false positives or miss defects; use human review for security-sensitive changes.
+- CI status is the source of truth for build/test compatibility. Features without an end-to-end benchmark should be treated as implemented but not yet benchmark-validated.
+- In process mode, tool policy and approval checks are not equivalent to OS-level network or filesystem isolation. Use a properly configured container/runtime boundary for stronger isolation.
 
 ## `> Validation`
 
