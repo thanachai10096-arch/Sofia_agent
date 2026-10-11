@@ -233,26 +233,50 @@ export class SofiaModelGateway implements ModelProvider {
       );
     }
 
-    const data = (await response.json()) as ChatResponse;
+    const failResponse = (message: string): never => {
+      circuit.probeInFlight = false;
+      circuit.failures++;
+      if (circuit.failures >= 3 || circuit.openedAt) {
+        circuit.openedAt = Date.now();
+        route.healthy = false;
+      }
+      throw new Error(message);
+    };
+
+    let data: ChatResponse;
+    try {
+      data = (await response.json()) as ChatResponse;
+    } catch {
+      return failResponse("Model gateway returned invalid JSON.");
+    }
     const message = data.choices?.[0]?.message;
 
     if (!message) {
-      throw new Error("Model gateway returned no message.");
+      return failResponse("Model gateway returned no message.");
     }
 
-    const calls = (message.tool_calls ?? []).map((call, index) => ({
-      id: call.id ?? `call-${request.step}-${index}`,
-      name: call.function?.name ?? "",
-      input: JSON.parse(call.function?.arguments ?? "{}") as Record<
-        string,
-        unknown
-      >,
-    }));
+    const calls = (message.tool_calls ?? []).map((call, index) => {
+      const name = call.function?.name ?? "";
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(call.function?.arguments ?? "{}") as unknown;
+      } catch {
+        return failResponse(`Invalid arguments for tool call ${name || index}.`);
+      }
+      if (!name.trim() || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return failResponse(`Invalid arguments for tool call ${name || index}.`);
+      }
+      return {
+        id: call.id ?? `call-${request.step}-${index}`,
+        name,
+        input: parsed as Record<string, unknown>,
+      };
+    });
 
     const text = message.content?.trim() ?? "";
 
     if (!text && !calls.length) {
-      throw new Error("Model gateway returned an empty response.");
+      return failResponse("Model gateway returned an empty response.");
     }
     circuit.failures = 0;
     circuit.openedAt = 0;
