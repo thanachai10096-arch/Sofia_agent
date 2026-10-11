@@ -18,6 +18,8 @@ export interface JobRecord {
   result?: Awaited<ReturnType<SofiaBrain["run"]>>;
   error?: string;
 }
+function isJobCancelled(record: JobRecord): boolean { return record.status === "cancelled"; }
+
 export interface JobRuntime {
   submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
@@ -149,10 +151,13 @@ export class DurableJobRuntime implements JobRuntime {
 
   async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
     if (this.resuming.has(id)) throw new Error("Job is already being resumed");
-    const record = await this.get(id);
-    if (!record) throw new Error("Unknown job");
-    if (record.status === "completed") return record;
+    const fetched = await this.get(id);
+    if (!fetched) throw new Error("Unknown job");
+    // get() returns a defensive copy; mutations must target the canonical live record.
+    const record = this.jobs.get(id) ?? fetched;
+    if (record.status === "completed") return { ...record };
     if (!record.snapshot) throw new Error("Job has no resumable snapshot");
+    if (record.status === "running" || this.controllers.has(id)) throw new Error("Job is already running");
     this.resuming.add(id);
     try {
       await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
@@ -164,24 +169,17 @@ export class DurableJobRuntime implements JobRuntime {
 
   async cancel(id: string): Promise<boolean> {
     const controller = this.controllers.get(id);
-    if (!controller) {
-      const record = await this.get(id);
-      if (!record) return false;
-      if (record.status === "completed" || record.status === "failed" || record.status === "cancelled") return false;
-      record.status = "cancelled";
-      record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
-      return true;
-    }
-    // Persist cancellation before signaling the worker so a fast completion or
-    // abort-related exception cannot overwrite the user's terminal decision.
-    const record = this.jobs.get(id);
-    if (record && record.status !== "completed" && record.status !== "failed" && record.status !== "cancelled") {
-      record.status = "cancelled";
-      record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
-    }
-    controller.abort(new Error("Job cancelled by caller"));
+    const fetched = this.jobs.get(id) ? { ...this.jobs.get(id)! } : await this.get(id);
+    if (!fetched) return false;
+    const record = this.jobs.get(id) ?? fetched;
+    if (record.status === "completed" || record.status === "failed" || record.status === "cancelled") return false;
+
+    // Keep the in-memory record authoritative even when cancellation races startup.
+    record.status = "cancelled";
+    record.error ??= "Job cancelled by caller.";
+    record.updatedAt = new Date().toISOString();
+    await this.state.save(record);
+    controller?.abort(new Error("Job cancelled by caller"));
     return true;
   }
 
@@ -194,13 +192,15 @@ export class DurableJobRuntime implements JobRuntime {
     if (record.status === "running" || record.status === "cancelled") return;
     record.status = "running";
     record.updatedAt = new Date().toISOString();
-    await this.state.save(record);
 
+    // Register cancellation before the first await so cancel() cannot miss startup.
     const controller = new AbortController();
     this.controllers.set(record.id, controller);
+    let onExternalAbort: (() => void) | undefined;
     if (externalSignal) {
-      if (externalSignal.aborted) controller.abort(externalSignal.reason);
-      else externalSignal.addEventListener("abort", () => controller.abort(externalSignal.reason), { once: true });
+      onExternalAbort = () => controller.abort(externalSignal.reason);
+      if (externalSignal.aborted) onExternalAbort();
+      else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
     }
 
     const onSnapshot = async (snapshot: BrainRunSnapshot): Promise<void> => {
@@ -211,6 +211,17 @@ export class DurableJobRuntime implements JobRuntime {
     };
 
     try {
+      await this.state.save(record);
+      if (controller.signal.aborted || isJobCancelled(record)) {
+        if (!isJobCancelled(record)) {
+          record.status = "cancelled";
+          record.error ??= "Job cancelled by caller.";
+          record.updatedAt = new Date().toISOString();
+          await this.state.save(record);
+        }
+        return;
+      }
+
       const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot });
       const result = await brain.run({
         ...input,
@@ -218,7 +229,8 @@ export class DurableJobRuntime implements JobRuntime {
         signal: controller.signal,
         resume,
       });
-      if (controller.signal.aborted || result.state === "cancelled") {
+      const resultState: string = result.state;
+      if (controller.signal.aborted || resultState === "cancelled" || isJobCancelled(record)) {
         // Cancellation is terminal: discard any result that arrives after abort.
         record.status = "cancelled";
         record.error ??= "Job cancelled.";
@@ -230,12 +242,18 @@ export class DurableJobRuntime implements JobRuntime {
       record.updatedAt = new Date().toISOString();
       await this.state.save(record);
     } catch (error) {
-      record.error = error instanceof Error ? error.message : String(error);
-      record.status = controller.signal.aborted ? "cancelled" : "failed";
-      record.updatedAt = new Date().toISOString();
+      if (record.status !== "cancelled") {
+        record.error = error instanceof Error ? error.message : String(error);
+        record.status = controller.signal.aborted ? "cancelled" : "failed";
+        record.updatedAt = new Date().toISOString();
+      }
       await this.state.save(record);
     } finally {
+      if (externalSignal && onExternalAbort) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
       this.controllers.delete(record.id);
     }
   }
+
 }
