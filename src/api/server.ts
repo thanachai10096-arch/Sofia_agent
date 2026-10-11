@@ -201,11 +201,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (isRunRequest && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobReadRequest = req.method === "GET" && (req.url === "/v1/jobs" || /^\\/v1\\/jobs\\/[^/]+$/.test(req.url ?? ""));
+      const isJobReadRequest = req.method === "GET" && (req.url === "/v1/jobs" || (req.url?.startsWith("/v1/jobs/") === true && !req.url.endsWith("/resume") && !req.url.endsWith("/cancel")));
       if (isJobReadRequest && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
       }
-      const isJobMutation = req.method === "POST" && /^\\/v1\\/jobs\\/[^/]+\\/(?:resume|cancel)$/.test(req.url ?? "");
+      const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
