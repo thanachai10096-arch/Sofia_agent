@@ -55,13 +55,29 @@ const WINDOWS_SCRIPT = [
   "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class SofiaInput { [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public MOUSEKEYBDHARDWAREINPUT U; } [StructLayout(LayoutKind.Explicit)] public struct MOUSEKEYBDHARDWAREINPUT { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; } [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx,dy; public uint mouseData,dwFlags,time; public IntPtr dwExtraInfo; } [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort wVk,wScan; public uint dwFlags,time; public IntPtr dwExtraInfo; } [DllImport(\"user32.dll\", SetLastError=true)] public static extern uint SendInput(uint n, INPUT[] p, int cb); [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y); }'",
 ].join(";");
 
+const SECRET_ENV = /(?:TOKEN|SECRET|PASSWORD|PRIVATE.?KEY|API.?KEY|AUTHORIZATION|AWS_ACCESS_KEY|AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN|COOKIE|CREDENTIAL)/i;
+
+/** Keep required OS variables while preventing desktop helper processes from inheriting app credentials. */
+export function sanitizeDesktopEnvironment(
+  base: NodeJS.ProcessEnv = process.env,
+  overrides: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries({ ...base, ...overrides }).filter(([key]) => !SECRET_ENV.test(key)),
+  );
+}
+
 async function runFile(command: string, args: string[], timeoutMs: number, env?: NodeJS.ProcessEnv): Promise<void> {
-  await execFileAsync(command, args, { windowsHide: true, timeout: timeoutMs, maxBuffer: 1024 * 1024, env: env ? { ...process.env, ...env } : process.env });
+  await execFileAsync(command, args, {
+    windowsHide: true,
+    timeout: timeoutMs,
+    maxBuffer: 1024 * 1024,
+    env: sanitizeDesktopEnvironment(process.env, env),
+  });
 }
 
 async function launchFile(command: string, args: string[]): Promise<void> {
-  const secretEnv = /(?:TOKEN|SECRET|PASSWORD|PRIVATE.?KEY|API.?KEY|AUTHORIZATION|AWS_ACCESS_KEY|AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN)/i;
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !secretEnv.test(key)));
+  const env = sanitizeDesktopEnvironment(process.env);
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true, env });
     child.once("error", reject);
