@@ -246,6 +246,7 @@ export class SofiaBrain {
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
   private readonly selectedSkillIds = new Set<string>();
+  private activeSkillId?: string;
 
   constructor(
     private readonly dependencies: Dependencies,
@@ -738,13 +739,15 @@ export class SofiaBrain {
       count: this.usage.replans,
     });
 
+    const taskType = understanding.requiredCapabilities[0] ?? "general";
     let skills = matchSkills(diagnosis.category, diagnosis.message, 5, this.dependencies.skillLedger);
     if (this.dependencies.evolution) {
-      const ranking = new Map(this.dependencies.evolution.rank(skills.map(skill => skill.id)).map(item => [item.id, item.score]));
+      const ranking = new Map(this.dependencies.evolution.rank(skills.map(skill => skill.id), taskType).map(item => [item.id, item.score]));
       skills = [...skills].sort((a, b) => (ranking.get(b.id) ?? 0) - (ranking.get(a.id) ?? 0));
-      if (skills[0]) this.selectedSkillIds.add(skills[0].id);
-    } else if (skills[0]) {
+    }
+    if (skills[0]) {
       this.selectedSkillIds.add(skills[0].id);
+      this.activeSkillId = skills[0].id;
     }
     const value = await this.infer("replan", {
       task,
@@ -1021,9 +1024,15 @@ export class SofiaBrain {
 
           this.move("diagnosing");
           const diagnosis = this.diagnose(error);
-          if (this.dependencies.evolution) {
-            const failedSkills = matchSkills(diagnosis.category, diagnosis.message, 5, this.dependencies.skillLedger);
-            for (const skill of failedSkills) this.dependencies.evolution.recordFailure(skill.id, diagnosis.message);
+          if (this.dependencies.evolution && this.activeSkillId) {
+            // Penalize only the skill that actually informed the previous repair plan,
+            // never every candidate that merely matched the error text.
+            this.dependencies.evolution.recordFailure(
+              this.activeSkillId,
+              diagnosis.message,
+              understanding?.requiredCapabilities[0] ?? "general",
+            );
+            this.activeSkillId = undefined;
           }
 
           const specialist = recoveryRounds === 0 ? await this.delegateSubagent(
@@ -1085,8 +1094,12 @@ export class SofiaBrain {
 
       this.emit({ type: "brain.coding.loop.completed", count: codingIteration, passed: true });
       if (this.dependencies.evolution) {
-        for (const skillId of this.selectedSkillIds) this.dependencies.evolution.recordSuccess(skillId, this.usage.steps, recoveryRounds);
-        this.dependencies.evolution.recordRun(understanding.requiredCapabilities[0] ?? "general", true);
+        const taskType = understanding.requiredCapabilities[0] ?? "general";
+        // This block is reachable only after trusted verification and code review pass.
+        for (const skillId of this.selectedSkillIds) {
+          this.dependencies.evolution.recordSuccess(skillId, this.usage.steps, recoveryRounds, taskType);
+        }
+        this.dependencies.evolution.recordRun(taskType, true);
       }
 
       const changedFiles = baselineId
