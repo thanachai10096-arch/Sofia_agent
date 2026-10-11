@@ -3,6 +3,8 @@ export interface SofiaClientOptions {
   baseUrl: string;
   /** Injectable fetch implementation for mobile runtimes, tests, or custom transports. */
   fetchImpl?: typeof fetch;
+  /** Per-request timeout, useful for mobile networks that stall without disconnecting. */
+  requestTimeoutMs?: number;
 }
 
 export interface SofiaRunInput {
@@ -61,7 +63,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 function isTransient(error: unknown): boolean {
   if (error instanceof SofiaApiError) return error.status === 429 || error.status >= 500;
   // Network disconnects are common while a mobile app changes networks/background state.
-  return !(error instanceof Error && /aborted|timed out/i.test(error.message));
+  return !(error instanceof Error && /abort(ed)?/i.test(error.message));
 }
 
 export class SofiaClient {
@@ -90,21 +92,39 @@ export class SofiaClient {
 
   private async request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
     if (signal?.aborted) throw abortError(signal);
-    const response = await this.fetchImpl(this.url(path), { ...init, ...(signal ? { signal } : {}) });
-    let data: Record<string, unknown>;
+    const controller = new AbortController();
+    const timeoutMs = Math.max(1, this.options.requestTimeoutMs ?? 30_000);
+    const timeout = setTimeout(() => controller.abort(new Error("Sofia request timed out.")), timeoutMs);
+    const onAbort = () => controller.abort(signal?.reason ?? new Error("Sofia request aborted."));
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+
     try {
-      const parsed: unknown = await response.json();
-      data = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
-    } catch {
-      data = {};
+      const response = await this.fetchImpl(this.url(path), { ...init, signal: controller.signal });
+      let data: Record<string, unknown>;
+      try {
+        const parsed: unknown = await response.json();
+        data = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+          ? parsed as Record<string, unknown>
+          : {};
+      } catch {
+        data = {};
+      }
+      if (!response.ok) {
+        const message = typeof data.error === "string" ? data.error : `Sofia API error ${response.status}`;
+        throw new SofiaApiError(message, response.status);
+      }
+      return data as T;
+    } catch (error) {
+      if (signal?.aborted) throw abortError(signal);
+      if (controller.signal.aborted) throw controller.signal.reason instanceof Error
+        ? controller.signal.reason
+        : new Error("Sofia request timed out.");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
     }
-    if (!response.ok) {
-      const message = typeof data.error === "string" ? data.error : `Sofia API error ${response.status}`;
-      throw new SofiaApiError(message, response.status);
-    }
-    return data as T;
   }
 
   async run(input: SofiaRunInput, signal?: AbortSignal): Promise<SofiaRunResponse> {
@@ -183,6 +203,7 @@ export class SofiaClient {
         lastTransientError = undefined;
         interval = initialInterval;
       } catch (error) {
+        if (options.signal?.aborted) throw abortError(options.signal);
         if (!isTransient(error)) throw error;
         lastTransientError = error;
         interval = Math.min(maxInterval, Math.max(initialInterval, interval * 2));
