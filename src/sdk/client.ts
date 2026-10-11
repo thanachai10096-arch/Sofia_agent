@@ -1,12 +1,14 @@
 export interface SofiaClientOptions {
   apiKey: string;
   baseUrl: string;
+  /** Injectable fetch implementation for mobile runtimes, tests, or custom transports. */
+  fetchImpl?: typeof fetch;
 }
 
 export interface SofiaRunInput {
   task: string;
   workspace?: string;
-  context?: Record<string, unknown>;
+  context?: string | Record<string, unknown>;
   maxSteps?: number;
   acceptanceCriteria?: Array<{ id: string; description: string; probe: { tool: string; input: Record<string, unknown> } }>;
 }
@@ -20,8 +22,60 @@ export interface SofiaRunResponse {
   error?: string;
 }
 
+export interface SofiaPollOptions {
+  intervalMs?: number;
+  maxIntervalMs?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export class SofiaApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "SofiaApiError";
+  }
+}
+
+function abortError(signal?: AbortSignal): Error {
+  if (signal?.reason instanceof Error) return signal.reason;
+  return new Error("Sofia request aborted.");
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortError(signal));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(abortError(signal));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
+}
+
+function isTransient(error: unknown): boolean {
+  if (error instanceof SofiaApiError) return error.status === 429 || error.status >= 500;
+  // Network disconnects are common while a mobile app changes networks/background state.
+  return !(error instanceof Error && /aborted|timed out/i.test(error.message));
+}
+
 export class SofiaClient {
-  constructor(private readonly options: SofiaClientOptions) {}
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(private readonly options: SofiaClientOptions) {
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    // Fail early for malformed endpoints, while allowing HTTP loopback in local development.
+    const base = new URL(options.baseUrl);
+    if (base.protocol !== "https:" && !(base.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(base.hostname))) {
+      throw new Error("Sofia API baseUrl must use HTTPS (HTTP is allowed only for loopback development).");
+    }
+    if (!options.apiKey.trim()) throw new Error("Sofia API key is required.");
+  }
 
   private url(path: string) {
     return new URL(path, this.options.baseUrl);
@@ -34,102 +88,114 @@ export class SofiaClient {
     };
   }
 
-  async run(input: SofiaRunInput): Promise<SofiaRunResponse> {
-    const response = await fetch(this.url("/v1/agent/runs"), {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify(input),
-    });
-    const data = await response.json() as SofiaRunResponse;
-    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
-    return data;
-  }
-
-  /**
-   * Mobile-safe run: returns immediately, survives app backgrounding/network
-   * changes, and can be polled until Sofia completes.
-   */
-  async start(input: SofiaRunInput): Promise<SofiaRunResponse> {
-    const response = await fetch(this.url("/v1/agent/runs"), {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ ...input, async: true }),
-    });
-    const data = await response.json() as SofiaRunResponse;
-    if (!response.ok && response.status !== 202) {
-      throw new Error(data.error ?? `Sofia API error ${response.status}`);
+  private async request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) throw abortError(signal);
+    const response = await this.fetchImpl(this.url(path), { ...init, ...(signal ? { signal } : {}) });
+    let data: Record<string, unknown>;
+    try {
+      const parsed: unknown = await response.json();
+      data = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      data = {};
     }
-    return data;
+    if (!response.ok) {
+      const message = typeof data.error === "string" ? data.error : `Sofia API error ${response.status}`;
+      throw new SofiaApiError(message, response.status);
+    }
+    return data as T;
   }
 
-  async startJob(input: SofiaRunInput): Promise<SofiaRunResponse> {
-    const response = await fetch(this.url("/v1/jobs"), { method: "POST", headers: this.headers(), body: JSON.stringify(input) });
-    const data = await response.json() as SofiaRunResponse;
-    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
-    return data;
+  async run(input: SofiaRunInput, signal?: AbortSignal): Promise<SofiaRunResponse> {
+    return this.request<SofiaRunResponse>("/v1/agent/runs", {
+      method: "POST", headers: this.headers(), body: JSON.stringify(input),
+    }, signal);
   }
 
-  async getJob(id: string): Promise<SofiaRunResponse> {
-    const response = await fetch(this.url(`/v1/jobs/${encodeURIComponent(id)}`), { headers: { authorization: `Bearer ${this.options.apiKey}` } });
-    const data = await response.json() as SofiaRunResponse;
-    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
-    return data;
+  /** Starts a durable async run so a mobile client can reconnect and poll by ID. */
+  async start(input: SofiaRunInput, signal?: AbortSignal): Promise<SofiaRunResponse> {
+    return this.request<SofiaRunResponse>("/v1/agent/runs", {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ ...input, async: true }),
+    }, signal);
   }
 
-  async resumeJob(id: string): Promise<SofiaRunResponse> {
-    const response = await fetch(this.url(`/v1/jobs/${encodeURIComponent(id)}/resume`), { method: "POST", headers: this.headers() });
-    const data = await response.json() as SofiaRunResponse;
-    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
-    return data;
+  async startJob(input: SofiaRunInput, signal?: AbortSignal): Promise<SofiaRunResponse> {
+    return this.request<SofiaRunResponse>("/v1/jobs", {
+      method: "POST", headers: this.headers(), body: JSON.stringify(input),
+    }, signal);
   }
 
-  async cancelJob(id: string): Promise<SofiaRunResponse> {
-    const response = await fetch(this.url(`/v1/jobs/${encodeURIComponent(id)}/cancel`), { method: "POST", headers: this.headers() });
-    const data = await response.json() as SofiaRunResponse;
-    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
-    return data;
+  async getJob(id: string, signal?: AbortSignal): Promise<SofiaRunResponse> {
+    return this.request<SofiaRunResponse>(`/v1/jobs/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
   }
 
-  async waitForJob(id: string, options: { intervalMs?: number; timeoutMs?: number } = {}) {
-    const intervalMs = options.intervalMs ?? 1000;
-    const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
+  async resumeJob(id: string, signal?: AbortSignal): Promise<SofiaRunResponse> {
+    return this.request<SofiaRunResponse>(`/v1/jobs/${encodeURIComponent(id)}/resume`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  async cancelJob(id: string, signal?: AbortSignal): Promise<SofiaRunResponse> {
+    return this.request<SofiaRunResponse>(`/v1/jobs/${encodeURIComponent(id)}/cancel`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  async waitForJob(id: string, options: SofiaPollOptions = {}): Promise<SofiaRunResponse> {
+    return this.waitFor(() => this.getJob(id, options.signal), options);
+  }
+
+  async getRun(id: string, signal?: AbortSignal): Promise<SofiaRunResponse> {
+    return this.request<SofiaRunResponse>(`/v1/agent/runs/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  async cancel(id: string, signal?: AbortSignal): Promise<SofiaRunResponse> {
+    return this.request<SofiaRunResponse>(`/v1/agent/runs/${encodeURIComponent(id)}`, {
+      method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  async waitForRun(id: string, options: SofiaPollOptions = {}): Promise<SofiaRunResponse> {
+    return this.waitFor(() => this.getRun(id, options.signal), options);
+  }
+
+  private async waitFor(
+    fetchStatus: () => Promise<SofiaRunResponse>,
+    options: SofiaPollOptions,
+  ): Promise<SofiaRunResponse> {
+    const initialInterval = Math.max(100, options.intervalMs ?? 1_000);
+    const maxInterval = Math.max(initialInterval, options.maxIntervalMs ?? 10_000);
+    const timeoutMs = Math.max(1, options.timeoutMs ?? 30 * 60 * 1_000);
     const started = Date.now();
+    let interval = initialInterval;
+    let lastTransientError: unknown;
+
     while (Date.now() - started < timeoutMs) {
-      const job = await this.getJob(id);
-      if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return job;
-      await new Promise(resolve => setTimeout(resolve, intervalMs));
+      if (options.signal?.aborted) throw abortError(options.signal);
+      try {
+        const run = await fetchStatus();
+        if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") return run;
+        lastTransientError = undefined;
+        interval = initialInterval;
+      } catch (error) {
+        if (!isTransient(error)) throw error;
+        lastTransientError = error;
+        interval = Math.min(maxInterval, Math.max(initialInterval, interval * 2));
+      }
+
+      const remaining = timeoutMs - (Date.now() - started);
+      if (remaining <= 0) break;
+      await sleep(Math.min(interval, remaining), options.signal);
+    }
+
+    if (lastTransientError && Date.now() - started >= timeoutMs) {
+      throw new Error("Timed out waiting for Sofia job after repeated transient API errors.", { cause: lastTransientError });
     }
     throw new Error("Timed out waiting for Sofia job.");
-  }
-
-  async getRun(id: string): Promise<SofiaRunResponse> {
-    const response = await fetch(this.url(`/v1/agent/runs/${encodeURIComponent(id)}`), {
-      headers: { authorization: `Bearer ${this.options.apiKey}` },
-    });
-    const data = await response.json() as SofiaRunResponse;
-    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
-    return data;
-  }
-
-  async cancel(id: string): Promise<SofiaRunResponse> {
-    const response = await fetch(this.url(`/v1/agent/runs/${encodeURIComponent(id)}`), {
-      method: "DELETE",
-      headers: { authorization: `Bearer ${this.options.apiKey}` },
-    });
-    const data = await response.json() as SofiaRunResponse;
-    if (!response.ok) throw new Error(data.error ?? `Sofia API error ${response.status}`);
-    return data;
-  }
-
-  async waitForRun(id: string, options: { intervalMs?: number; timeoutMs?: number } = {}) {
-    const intervalMs = options.intervalMs ?? 1000;
-    const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
-    const started = Date.now();
-    while (Date.now() - started < timeoutMs) {
-      const run = await this.getRun(id);
-      if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") return run;
-      await new Promise(resolve => setTimeout(resolve, intervalMs));
-    }
-    throw new Error("Timed out waiting for Sofia run.");
   }
 }
