@@ -114,4 +114,6 @@ test("DurableJobRuntime resumes a saved checkpoint and passes it to the brain", 
   assert.equal(resumed.status, "completed");
   assert.equal(calls, 2);
   assert.equal(receivedResume?.checkpointId, "checkpoint-1");
+  assert.equal((await runtime.get(submitted.id))?.status, "completed");
+  assert.equal((await runtime.list()).find((item) => item.id === submitted.id)?.status, "completed");
 });
