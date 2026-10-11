@@ -55,7 +55,7 @@ test("desktop input actions require user approval before the native driver is ca
   assert.deepEqual(calls, [["type", "hello"]]);
 });
 
-test("desktop adapter rejects unapproved apps, invalid coordinates, and unsafe key names", async () => {
+test("desktop adapter rejects unapproved apps, unapproved launch arguments, invalid coordinates, and unsafe key names", async () => {
   const calls: unknown[] = [];
   const tools = createDesktopAdapterTools({
     config: { driver: driver(calls), requestApproval: async () => true, allowedApplications: ["calculator"] },
@@ -68,6 +68,7 @@ test("desktop adapter rejects unapproved apps, invalid coordinates, and unsafe k
   assert.ok(click);
   assert.ok(key);
   await assert.rejects(launch.execute({ applicationId: "terminal" }, context()), /not allowlisted/);
+  await assert.rejects(launch.execute({ applicationId: "calculator", args: ["--dangerous-option"] }, context()), /arguments are not allowlisted/);
   await assert.rejects(click.execute({ x: -1, y: 4 }, context()), /coordinates/);
   await assert.rejects(key.execute({ key: "Ctrl+Alt+Delete" }, context()), /allowlist/);
   assert.deepEqual(calls, []);
