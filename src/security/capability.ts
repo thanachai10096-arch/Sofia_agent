@@ -15,8 +15,10 @@ export function issueCapability(input:{principalId:string;runId:string;tool:stri
   const base={id:randomUUID(),principalId:input.principalId,runId:input.runId,tool:input.tool,effects:input.effects,risk:input.risk,expiresAt:Date.now()+(input.ttlMs??60_000),nonce:randomUUID()};
   return {...base,signature:mac(payload(base),secret)};
 }
-export function verifyCapability(cap:Capability,expected:{principalId:string;runId:string;tool:string},secret:string):boolean{
+export function verifyCapability(cap:Capability,expected:{principalId:string;runId:string;tool:string;effects?:readonly ToolEffect[];risk?:RiskLevel},secret:string):boolean{
   if(!secret||cap.principalId!==expected.principalId||cap.runId!==expected.runId||cap.tool!==expected.tool||cap.expiresAt<Date.now())return false;
+  if(expected.risk!==undefined&&cap.risk!==expected.risk)return false;
+  if(expected.effects!==undefined&&JSON.stringify([...cap.effects].sort())!==JSON.stringify([...expected.effects].sort()))return false;
   const {signature:_signature,...unsigned}=cap;
   return safeEqual(mac(payload(unsigned),secret),cap.signature);
 }
