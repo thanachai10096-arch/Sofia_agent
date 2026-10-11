@@ -197,7 +197,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       // Authorization scopes are enforced at the API boundary, not merely used to
       // derive desktop capabilities. Admin scopes do not implicitly grant run access.
-      const isRunRequest = req.method === "POST" && (req.url === "/v1/agent/runs" || req.url === "/v1/jobs");
+      const isRunRequest = req.method === "POST" && (req.url === "/v1/agent/runs" || req.url === "/v1/agent/runs/stream" || req.url === "/v1/jobs");
       if (isRunRequest && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
