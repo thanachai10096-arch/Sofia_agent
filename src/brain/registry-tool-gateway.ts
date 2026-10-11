@@ -18,6 +18,9 @@ function classifyEffects(name:string):ToolEffect[]{
   if(name==="desktop.system.discover"||name==="desktop.workspace.list_files"||name==="desktop.workspace.read_file")return["read"];
   if(name==="desktop.workspace.write_file")return["write"];
   if(name==="desktop.process.run")return["shell"];
+  if(name==="desktop.screen.capture")return["read"];
+  if(name==="desktop.app.launch")return["shell","destructive"];
+  if(name==="desktop.input.click"||name==="desktop.input.type_text"||name==="desktop.input.press_key")return["destructive"];
   if(name==="workspace.read_file"||name==="workspace.list_files"||name==="workspace.search"||name==="git.diff"||name==="project.verify")return["read"];
   if(name==="workspace.write_file"||name==="workspace.apply_patch")return["write"];
   if(name==="terminal.run")return["shell"];
