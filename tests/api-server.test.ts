@@ -20,7 +20,7 @@ function dependencies(): AgentDependencies {
 
   return {
     provider: {} as AgentDependencies["provider"],
-    router: { select: () => ({ id: "unused" }), markUnhealthy: () => undefined } as AgentDependencies["router"],
+    router: { select: () => ({ id: "unused" }), markUnhealthy: () => undefined } as unknown as AgentDependencies["router"],
     reviewer: { review: async () => ({ approved: true, reason: "approved" }) },
     brainFactory: () => fakeBrain,
   };
