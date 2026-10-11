@@ -1,7 +1,7 @@
 <!-- Sofia Agents — README -->
 <div align="center">
 
-# Sofia Agents
+<h1 align="center"><img src="assets/sofia-title.svg" alt="Sofia Agents — large green code-style title" width="100%" /></h1>
 
 **An agent runtime built to plan, act, verify, and recover.**
 
