@@ -10,7 +10,7 @@ export interface WorkspaceRuntime {
   listFiles(path?: string): Promise<string[]>;
   search(query: string, path?: string): Promise<string[]>;
   run(command: string, args?: string[], options?: { cwd?: string; timeoutMs?: number }): Promise<{ stdout: string; stderr: string; code: number }>;
-  git(args: string[], options?: { cwd?: string }): Promise<{ stdout: string; stderr: string; code: number }>;
+  git(args: string[], options?: { cwd?: string; timeoutMs?: number }): Promise<{ stdout: string; stderr: string; code: number }>;
 }
 
 export function detectPlatform(): SofiaPlatform {
