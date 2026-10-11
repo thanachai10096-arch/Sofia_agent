@@ -49,7 +49,14 @@ function isPrivateIpv6(host: string): boolean {
   const value = host.toLowerCase().replace(/^\[|\]$/g, "");
   if (value === "::" || value === "::1" || value.startsWith("fc") || value.startsWith("fd") ||
       value.startsWith("fe8") || value.startsWith("fe9") || value.startsWith("fea") ||
-      value.startsWith("feb") || value.startsWith("ff") || value.startsWith("2001:db8:")) return true;
+      value.startsWith("feb") || value.startsWith("ff") || value.startsWith("2001:db8:") ||
+      value.startsWith("2002:") || value.startsWith("3fff:")) return true;
+  // IANA special-purpose IPv6 block 2001:0000::/23 includes Teredo, benchmarking,
+  // and other non-public ranges. A compressed zero second hextet is also in-range.
+  if (value.startsWith("2001:")) {
+    const second = value.slice(5).split(":")[0] ?? "";
+    if (second === "" || (/^[0-9a-f]{1,4}$/i.test(second) && Number.parseInt(second, 16) <= 0x01ff)) return true;
+  }
   if (value.startsWith("::ffff:")) {
     const mapped = value.slice(7);
     if (mapped.includes(".")) return isPrivateIpv4(mapped);
@@ -78,7 +85,8 @@ export function assertSafeBrowserUrl(input: string): URL {
 
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
   if (!host || host === "localhost" || host.endsWith(".localhost") ||
-      host.endsWith(".local") || host.endsWith(".internal") ||
+      host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".test") ||
+      host.endsWith(".example") || host.endsWith(".invalid") ||
       host === "metadata.google.internal" || host === "metadata") {
     throw new Error("Browser navigation to local or internal hosts is blocked.");
   }
