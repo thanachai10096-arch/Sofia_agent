@@ -30,6 +30,32 @@ const info = await runtime.discover(principal);
 const files = await runtime.listFiles(principal);
 ```
 
+## Optional Sofia tool integration
+
+The desktop adapter is opt-in and is not added to the default tool registry automatically. A local host can add it explicitly:
+
+```ts
+import { createDesktopTools, createToolRegistry, createBuiltinTools } from "../src/index.js";
+
+const tools = createToolRegistry([
+  ...createBuiltinTools(),
+  ...createDesktopTools({ runtime, principal }),
+]);
+```
+
+The adapter exposes `desktop.system.discover`, `desktop.workspace.list_files`,
+`desktop.workspace.read_file`, `desktop.workspace.write_file`, and
+`desktop.process.run`. The registry gateway classifies writes as write effects and
+process launch as a shell effect, so the existing execution policy and approval flow
+can block them. File and process permissions are also checked again by
+`DesktopRuntime` against the host-supplied principal.
+
+**Important:** the principal in this example is fixed for a local host. A multi-user
+API server must resolve a separate least-privilege principal for each authenticated
+identity and construct a user-scoped registry; do not share an all-capabilities
+principal across API keys. Do not enable process execution unless the operator has
+explicitly configured an executable allowlist and shell policy.
+
 ## Security boundary
 
 - The workspace root is configured by the local operator; it is not inferred from a request.
