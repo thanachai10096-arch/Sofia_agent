@@ -5,8 +5,21 @@ import assert from "node:assert/strict";
 import {issueCapability,verifyCapability} from "../src/security/capability.js";
 import {ReplayProtector,signAgentMessage,verifyAgentMessage} from "../src/security/agent-message.js";
 import {assertSecurityConfiguration,loadExecutionPolicyFromEnv} from "../src/security/policy.js";
+import {SecurityController} from "../src/security/controller.js";
 
 describe("advanced security",()=>{
+ it("aborts active operations when the kill switch activates",()=>{
+  const security=new SecurityController();
+  const parent=new AbortController();
+  const bound=security.bindSignal(parent.signal);
+  assert.equal(bound.signal.aborted,false);
+  security.kill("test incident");
+  assert.equal(bound.signal.aborted,true);
+  assert.throws(()=>security.assertRunning(),/kill switch is active/);
+  bound.dispose();
+  security.revive();
+  assert.equal(security.isKilled(),false);
+ });
  it("binds capabilities and rejects tampering",()=>{
   const c=issueCapability({principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"medium",ttlMs:1000},"secret");
   assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file"},"secret"),true);
