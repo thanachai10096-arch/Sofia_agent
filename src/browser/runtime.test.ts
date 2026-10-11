@@ -5,6 +5,7 @@ import { assertSafeBrowserUrl } from "./runtime.js";
 test("browser URL policy allows public HTTP(S) destinations", () => {
   assert.equal(assertSafeBrowserUrl("https://example.com/path").hostname, "example.com");
   assert.equal(assertSafeBrowserUrl("http://8.8.8.8/").hostname, "8.8.8.8");
+  assert.equal(assertSafeBrowserUrl("http://[2606:4700:4700::1111]/").hostname, "[2606:4700:4700::1111]");
 });
 
 test("browser URL policy rejects non-web schemes and URL credentials", () => {
