@@ -4,6 +4,7 @@ import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from ".
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
 import { assertSafeStep, assertToolAllowed, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { actionHash, riskFor } from "../security/guard.js";
+import { validateToolInput } from "../tools/types.js";
 
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
@@ -179,6 +180,7 @@ export class SofiaAgent {
             if (!this.deps.tools || !this.deps.runtime) throw new Error("Agent runtime and tool registry are required for tool execution.");
             const tool = this.deps.tools.get(call.name);
             if (!tool) throw new Error(`Unknown tool: ${call.name}`);
+            validateToolInput(tool.inputSchema, call.input);
 
             emit({
               type: "tool.started",
@@ -217,6 +219,7 @@ export class SofiaAgent {
             try {
               const result = await tool.execute(call.input, {
                 runtime: this.deps.runtime,
+                ...(request.signal ? { signal: request.signal } : {}),
               });
               messages.push({
                 role: "tool",
