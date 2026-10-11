@@ -53,3 +53,14 @@ test("invalid pairing codes do not reveal token data and revokeAll clears sessio
   authority.revokeAll();
   assert.throws(() => authority.authenticate(session.token), /Invalid or expired/);
 });
+
+test("pairing code is invalidated after repeated incorrect attempts", () => {
+  const authority = new DesktopPairingAuthority({
+    allowedCapabilities: ["screen:capture"],
+    maxPairingAttempts: 2,
+  });
+  const { code } = authority.createPairingCode();
+  assert.throws(() => authority.pair(code === "000000" ? "000001" : "000000"), /Invalid pairing code/);
+  assert.throws(() => authority.pair(code === "000000" ? "000001" : "000000"), /Invalid pairing code/);
+  assert.throws(() => authority.pair(code), /missing or expired/);
+});
