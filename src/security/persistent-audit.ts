@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { SecurityAuditEvent, SecurityAuditSink } from "./audit.js";
+import { redactSecrets } from "./guard.js";
 
 export class EncryptedFileAudit implements SecurityAuditSink {
  constructor(private readonly file:string,private readonly secret:string){}
@@ -10,7 +11,7 @@ export class EncryptedFileAudit implements SecurityAuditSink {
   await mkdir(path.dirname(this.file),{recursive:true});
   const key=createHash("sha256").update(this.secret).digest();
   const iv=randomBytes(12); const cipher=createCipheriv("aes-256-gcm",key,iv);
-  const plaintext=Buffer.from(JSON.stringify(event));
+  // Persist only a redacted copy: encryption protects storage, but authorized readers must not receive raw credentials.\n  const safeEvent=redactSecrets(event) as SecurityAuditEvent;\n  const plaintext=Buffer.from(JSON.stringify(safeEvent));
   const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
   const tag=cipher.getAuthTag();
   await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
@@ -38,7 +39,7 @@ export class EncryptedFileAudit implements SecurityAuditSink {
    decipher.setAuthTag(tag);
    const plaintext=Buffer.concat([decipher.update(ciphertext),decipher.final()]);
    const event=JSON.parse(plaintext.toString("utf8")) as SecurityAuditEvent;
-   if (!event || typeof event.id !== "string" || typeof event.runId !== "string" || typeof event.toolName !== "string") {
+   if (!event || typeof event.id !== "string" || typeof event.at !== "string" || typeof event.runId !== "string" || typeof event.toolName !== "string" || typeof event.actionHash !== "string" || !["low","medium","high","critical"].includes(event.risk) || !["allow","deny","approval_required","approval_denied","completed","failed"].includes(event.decision)) {
     throw new Error(`Invalid audit event at line ${index+1}`);
    }
    events.push(event);
