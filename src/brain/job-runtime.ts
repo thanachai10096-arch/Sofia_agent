@@ -157,7 +157,9 @@ export class DurableJobRuntime implements JobRuntime {
     const record = this.jobs.get(id) ?? fetched;
     if (record.status === "completed") return { ...record };
     if (!record.snapshot) throw new Error("Job has no resumable snapshot");
-    if (record.status === "running" || this.controllers.has(id)) throw new Error("Job is already running");
+    // A terminal status may be persisted just before the previous worker's finally block
+    // removes its controller. Only the canonical status determines whether resume is blocked.
+    if (record.status === "running") throw new Error("Job is already running");
     this.resuming.add(id);
     try {
       await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
@@ -252,7 +254,8 @@ export class DurableJobRuntime implements JobRuntime {
       if (externalSignal && onExternalAbort) {
         externalSignal.removeEventListener("abort", onExternalAbort);
       }
-      this.controllers.delete(record.id);
+      // An older run must not remove a controller installed by a fast resume.
+      if (this.controllers.get(record.id) === controller) this.controllers.delete(record.id);
     }
   }
 
