@@ -148,7 +148,8 @@ export class EvolutionEngine {
   }
 
   getSkill(id: string): SkillPerformance | undefined {
-    return this.snapshot.skills[id] ? { ...this.snapshot.skills[id] } : undefined;
+    const skill = this.snapshot.skills[id];
+    return skill ? JSON.parse(JSON.stringify(skill)) as SkillPerformance : undefined;
   }
 
   getSnapshot(): EvolutionSnapshot {
