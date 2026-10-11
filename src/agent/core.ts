@@ -149,6 +149,7 @@ export class SofiaAgent {
 
     for (let step = 1; step <= maxSteps; step += 1) {
       try {
+        request.signal?.throwIfAborted();
         assertSafeStep(policy, step);
         const route = this.deps.router.select(kind);
 
@@ -168,6 +169,7 @@ export class SofiaAgent {
             tools: toolDefs,
           },
           route,
+          request.signal ? { signal: request.signal } : undefined,
         );
 
         if (response.assistantMessage) {
@@ -186,6 +188,7 @@ export class SofiaAgent {
           }
 
           for (const call of response.toolCalls) {
+            request.signal?.throwIfAborted();
             if (!this.deps.tools || !this.deps.runtime) throw new Error("Agent runtime and tool registry are required for tool execution.");
             const tool = this.deps.tools.get(call.name);
             if (!tool) throw new Error(`Unknown tool: ${call.name}`);
@@ -239,6 +242,7 @@ export class SofiaAgent {
             try {
               const result = await tool.execute(call.input, {
                 runtime: this.deps.runtime,
+                ...(request.signal ? { signal: request.signal } : {}),
               });
               messages.push({
                 role: "tool",
