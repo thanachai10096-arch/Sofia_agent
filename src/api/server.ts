@@ -58,8 +58,11 @@ async function body(req: IncomingMessage, maxBytes: number): Promise<unknown> {
 function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   const header = req.headers.authorization ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  if (!token || !config.apiKeys[token]) return null;
-  return { keyId: createHash("sha256").update(token).digest("hex").slice(0, 32), scopes: config.apiKeys[token] };
+  // Reject inherited object properties and malformed scope values.
+  if (!token || !Object.prototype.hasOwnProperty.call(config.apiKeys, token)) return null;
+  const scopes = config.apiKeys[token];
+  if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === "string")) return null;
+  return { keyId: createHash("sha256").update(token).digest("hex").slice(0, 32), scopes };
 }
 
 function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapability[] {
