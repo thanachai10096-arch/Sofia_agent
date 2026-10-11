@@ -6,7 +6,7 @@
  * It does not claim to measure Sofia until a real command/API adapter is run.
  */
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -62,12 +62,29 @@ async function main() {
     console.error("Usage: node bench/run.mjs --selftest | --agent noop|reference|command|http");
     process.exitCode = 2; return;
   }
-  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-bench-"));
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "sofia-bench-"));
+  let root = tempRoot;
+  if (mode === "http") {
+    const workspaceArg = valueAfter("--shared-workspace", "");
+    if (!workspaceArg) throw new Error("--shared-workspace is required; use a dedicated disposable workspace configured as Sofia's actual workspace");
+    root = await realpath(workspaceArg);
+    const info = await stat(root);
+    if (!info.isDirectory() || root === path.parse(root).root || root === os.homedir()) {
+      await rm(tempRoot, { recursive: true, force: true });
+      throw new Error("--shared-workspace must be an existing dedicated directory, not a filesystem root or home directory");
+    }
+  }
   const report = [];
   try {
     for (const task of tasks) {
-      const dir = path.join(root, task.id);
-      await mkdir(dir, { recursive: true });
+      const dir = mode === "http" ? root : path.join(root, task.id);
+      if (mode !== "http") await mkdir(dir, { recursive: true });
+      const targetFile = path.join(dir, task.file);
+      const checkFile = path.join(dir, ".bench-check.mjs");
+      if (mode === "http") {
+        await rm(targetFile, { force: true });
+        await rm(checkFile, { force: true });
+      }
       let error = "";
       if (mode === "reference") await writeFile(path.join(dir, task.file), task.solution, "utf8");
       else if (mode === "command") {
@@ -86,11 +103,15 @@ async function main() {
         if (!response.ok) error = "HTTP " + response.status + ": " + (await response.text()).slice(0, 300);
       }
       const checked = await runNode(dir, task.test);
-      report.push({ id: task.id, passed: checked.ok, error: error || checked.stderr.trim() });
+      report.push({ id: task.id, passed: checked.ok && !error, error: error || checked.stderr.trim() });
+      if (mode === "http") {
+        await rm(targetFile, { force: true });
+        await rm(checkFile, { force: true });
+      }
     }
     const passed = report.filter((x) => x.passed).length;
     console.log(JSON.stringify({ agent: mode, passed, total: tasks.length, note: mode === "noop" ? "Expected negative control; not a Sofia score." : mode === "reference" ? "Reference upper bound; not a Sofia score." : "Measured against task checks.", results: report }, null, 2));
     if (mode === "reference" && passed !== tasks.length) process.exitCode = 1;
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(tempRoot, { recursive: true, force: true }); }
 }
 main().catch((error) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });
