@@ -81,7 +81,13 @@ export class RegistryToolGateway implements ToolGateway {
       }
       const tool=this.dependencies.tools.get(call.tool);
       if(!tool)return{ok:false,data:null,evidenceId,error:{category:"tool_error",message:"Tool disappeared during execution."}};
-      const data=await tool.execute(call.input,{runtime:this.dependencies.runtime,signal:context.signal});
+      const boundSignal=this.security.bindSignal(context.signal);
+      let data:unknown;
+      try {
+        data=await tool.execute(call.input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
+      } finally {
+        boundSignal.dispose();
+      }
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:call.input,result:data});
       return{ok:true,data,evidenceId};
     }catch(error){
