@@ -70,6 +70,8 @@ export class DesktopPairingAuthority {
       throw new Error("Pairing code is missing or expired.");
     }
     if (!/^\d{6}$/.test(code) || !safeDigestEqual(digest(code), this.pending.digest)) {
+      this.pending.failedAttempts += 1;
+      if (this.pending.failedAttempts >= this.maxPairingAttempts) this.pending = undefined;
       throw new Error("Invalid pairing code.");
     }
     const requested = new Set(requestedCapabilities);
