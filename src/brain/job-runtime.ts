@@ -218,10 +218,15 @@ export class DurableJobRuntime implements JobRuntime {
         signal: controller.signal,
         resume,
       });
-      record.result = result;
-      record.status = controller.signal.aborted || result.state === "cancelled"
-        ? "cancelled"
-        : result.completed ? "completed" : "failed";
+      if (controller.signal.aborted || result.state === "cancelled") {
+        // Cancellation is terminal: discard any result that arrives after abort.
+        record.status = "cancelled";
+        record.error ??= "Job cancelled.";
+        record.result = undefined;
+      } else {
+        record.result = result;
+        record.status = result.completed ? "completed" : "failed";
+      }
       record.updatedAt = new Date().toISOString();
       await this.state.save(record);
     } catch (error) {
