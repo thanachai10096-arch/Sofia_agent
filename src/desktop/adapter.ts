@@ -22,6 +22,7 @@ export function createDesktopAdapterTools(options: {
   const { config, principal } = options;
   const maxTextLength = Math.min(Math.max(1, config.maxTextLength ?? 2000), 2000);
   const allowedApplications = new Set(config.allowedApplications ?? []);
+  const allowedApplicationArgs = config.allowedApplicationArgs ?? {};
   const string = (description: string) => ({ type: "string", description });
 
   return [
@@ -33,6 +34,9 @@ export function createDesktopAdapterTools(options: {
         context.signal?.throwIfAborted();
         requireCapability(principal, "screen:capture");
         const capture = await config.driver.captureScreen(typeof input.displayId === "string" ? { displayId: input.displayId } : undefined);
+        context.signal?.throwIfAborted();
+        if (capture.mimeType !== "image/png" && capture.mimeType !== "image/jpeg") throw new Error("Desktop driver returned an unsupported image MIME type.");
+        if (!(capture.data instanceof Uint8Array)) throw new Error("Desktop driver returned invalid image data.");
         if (capture.data.byteLength > MAX_SCREEN_BYTES) throw new Error("Screen capture exceeds the 5 MiB limit.");
         if (!Number.isInteger(capture.width) || !Number.isInteger(capture.height) || capture.width < 1 || capture.height < 1 || capture.width > 16384 || capture.height > 16384) {
           throw new Error("Desktop driver returned invalid screen dimensions.");
@@ -55,6 +59,8 @@ export function createDesktopAdapterTools(options: {
         if (typeof input.applicationId !== "string" || !allowedApplications.has(input.applicationId)) throw new Error("Application is not allowlisted by the local operator.");
         const args = Array.isArray(input.args) && input.args.every((item) => typeof item === "string" && !item.includes("\0")) ? input.args as string[] : [];
         if (Array.isArray(input.args) && args.length !== input.args.length) throw new Error("Application arguments must be valid strings.");
+        const permittedArgs = new Set(allowedApplicationArgs[input.applicationId] ?? []);
+        if (args.some((arg) => !permittedArgs.has(arg))) throw new Error("Application arguments are not allowlisted for this application.");
         await approved(config, { kind: "app.launch", applicationId: input.applicationId, args });
         context.signal?.throwIfAborted();
         return config.driver.launchApplication(input.applicationId, args);
