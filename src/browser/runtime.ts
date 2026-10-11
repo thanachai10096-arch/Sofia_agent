@@ -70,7 +70,7 @@ function isUnsafeAddress(address: string): boolean {
  * Reject local/private targets before navigation and on every intercepted request.
  * This is an application-level SSRF guard; production hosts should additionally
  * enforce outbound network policy because DNS validation alone cannot prevent
- * all DNS-rebinding and network-level routing attacks.
+ * all DNS-rebinding and network-level routing attacks; deny by default when uncertain.
  */
 export async function assertSafeBrowserUrl(rawUrl: string): Promise<void> {
   let url: URL;
