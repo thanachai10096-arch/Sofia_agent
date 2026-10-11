@@ -103,3 +103,16 @@ Do not expose this adapter directly from a public API server: it is intended to 
 - The current process runner is a policy boundary, **not an OS-level sandbox**. For untrusted workloads, use a real OS/container sandbox and run the local service as a non-admin user.
 - The OS command-based native driver is included, but an authenticated local pairing service, durable host lifecycle, and signed platform installers are still separate deliverables. Do not expose this driver directly from a public API or treat it as a fully packaged desktop agent.
 - Do not grant screen/input capabilities to an API key that only needs ordinary server-side agent execution.
+
+
+## Secure local pairing primitive
+
+The opt-in `DesktopPairingAuthority` provides the credential lifecycle for a future local host transport:
+
+- Pairing codes are random, short-lived, single-use values.
+- The operator supplies the maximum capabilities the host may grant; a paired client can request only a subset.
+- Access tokens are high-entropy bearer credentials; only SHA-256 digests are retained in memory.
+- Sessions expire, can be revoked individually, and can be cleared when the host shuts down.
+- Pairing state is memory-only; restarting the process invalidates every token.
+
+This is a credential primitive, **not a network service or installer**. It intentionally does not bind a socket. A future transport must bind only to loopback, reject non-loopback clients, require an explicit user-visible pairing step, avoid logging tokens/codes, and never forward the local desktop driver through the public Sofia API. Do not consider pairing complete until the loopback transport, host lifecycle, and signed platform installers are implemented and tested.
