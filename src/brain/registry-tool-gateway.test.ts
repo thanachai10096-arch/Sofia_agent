@@ -128,3 +128,53 @@ test("security kill switch aborts an active tool execution", async () => {
   assert.match(result.error?.message ?? "", /kill switch/i);
   assert.equal(security.status().killed, true);
 });
+
+
+test("security kill switch prevents a tool from starting after approval wait", async () => {
+  const rt = runtime();
+  const security = new SecurityController();
+  let signalApprovalReached!: () => void;
+  const approvalReached = new Promise<void>((resolve) => { signalApprovalReached = resolve; });
+  let releaseApproval!: (approved: boolean) => void;
+  const approvalDecision = new Promise<boolean>((resolve) => { releaseApproval = resolve; });
+  let toolStarted = false;
+
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Controlled write tool for approval cancellation test",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute() {
+      toolStarted = true;
+      return { written: true };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    defaultPolicy,
+    async () => {
+      signalApprovalReached();
+      return approvalDecision;
+    },
+    undefined,
+    security,
+  );
+
+  const execution = gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/approved-later.txt", content: "safe" } },
+    {
+      runId: "kill-switch-approval-test",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  await approvalReached;
+  security.kill("emergency stop during approval");
+  releaseApproval(true);
+  const result = await execution;
+
+  assert.equal(result.ok, false);
+  assert.equal(toolStarted, false);
+  assert.match(result.error?.message ?? "", /kill switch/i);
+});
