@@ -66,3 +66,12 @@ test("evolution persistence survives a reload", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("skill snapshots cannot mutate the engine's internal history", () => {
+  const engine = new EvolutionEngine();
+  engine.recordFailure("isolated-skill", "known failure");
+  const snapshot = engine.getSkill("isolated-skill");
+  snapshot?.failureHistory.splice(0, 1);
+  assert.equal(engine.getSkill("isolated-skill")?.failureHistory.length, 1);
+});
