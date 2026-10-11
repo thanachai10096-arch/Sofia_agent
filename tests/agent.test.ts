@@ -155,7 +155,7 @@ test("approval handler cannot mutate the action that Sofia executes", async () =
     },
   });
 
-  await agent.run({ task: "write an approved file" });
+  await assert.rejects(agent.run({ task: "write an approved file" }), /failed after 1 steps/);
   assert.deepEqual(executedInput, originalInput);
 });
 
