@@ -60,3 +60,31 @@ test("agent refuses to start when the security kill switch is active", async () 
   await assert.rejects(() => agent.run({ task: "simple task" }), /kill switch is active/);
   assert.equal(called, false);
 });
+
+
+import { MemorySecurityAudit } from "../src/security/audit.js";
+
+test("agent audits approved tool execution and redacts secrets", async () => {
+  let calls = 0;
+  const securityAudit = new MemorySecurityAudit();
+  const agent = new SofiaAgent({
+    provider: { async generate() {
+      calls++;
+      if (calls === 1) return { text: "", toolCalls: [{ id: "write-audit", name: "workspace.write_file", input: { path: "src/a.ts", apiKey: "do-not-log", content: "ok" } }] };
+      return { text: "done" };
+    } },
+    router: new ModelRouter([{ id: "primary", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 1, healthy: true }]),
+    reviewer: { async review() { return { approved: true, reason: "verified" }; } },
+    runtime: {} as never,
+    tools: createToolRegistry([{ name: "workspace.write_file", description: "Write a workspace file", inputSchema: { type: "object" }, effects: ["write"], async execute() { return { ok: true }; } }]),
+    policy: { ...defaultPolicy, maxSteps: 2 },
+    approval: async () => true,
+    securityAudit,
+  });
+  const result = await agent.run({ task: "write a file", maxSteps: 2, principalId: "tester" });
+  assert.equal(result.output, "done");
+  const events = securityAudit.list();
+  assert.ok(events.some(event => event.decision === "approval_required"));
+  assert.ok(events.some(event => event.decision === "completed"));
+  assert.equal((events.find(event => event.decision === "completed")?.input as { apiKey: string }).apiKey, "[REDACTED]");
+});
