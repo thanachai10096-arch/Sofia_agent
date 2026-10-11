@@ -9,6 +9,7 @@ test("skill ranking improves after verified success and declines after failure",
   const engine = new EvolutionEngine();
   engine.recordSuccess("test-repair", 4, 0);
   const afterSuccess = engine.rank(["test-repair", "new-skill"])[0];
+  assert.ok(afterSuccess);
   assert.equal(afterSuccess.id, "test-repair");
   assert.equal(afterSuccess.successRate, 1);
   assert.equal(afterSuccess.attempts, 1);
