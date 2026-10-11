@@ -166,6 +166,8 @@ test("gateway releases reserved budget and propagates caller cancellation", asyn
   await assert.rejects(pending, (error: unknown) =>
     error instanceof GatewayError && error.code === "cancelled_or_timed_out");
   assert.equal(budget.snapshot().reservedTokens, 0);
+  assert.equal(budget.snapshot().inFlight, 0);
+  assert.equal(budget.snapshot().stopped, true);
 });
 
 test("gateway fails closed when no route satisfies the requested capabilities", async () => {
