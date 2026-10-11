@@ -40,7 +40,7 @@ export interface SofiaApiConfig {
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
   /**
-   * Allowed browser origins. Defaults to "*" for the model-agnostic API.
+   * Allowed browser origins. If omitted or empty, cross-origin browser access is not granted.
    * Keep the master API key on a trusted server; do not ship it in a browser.
    */
   allowedOrigins?: string[];
