@@ -1,5 +1,6 @@
 import { promises as fs, readFileSync } from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 export interface SkillPerformance {
   id: string;
@@ -43,6 +44,20 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+
+function ownValue<T>(record: Record<string, T>, key: string): T | undefined {
+  return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
+}
+
+function setOwnValue<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+}
+
 function normalizeTaskType(taskType: string): string {
   const normalized = taskType.trim().toLowerCase().replace(/\s+/g, "-").slice(0, 80);
   return normalized || "general";
@@ -78,11 +93,15 @@ export class EvolutionEngine {
   }
 
   private get(id: string): SkillPerformance {
-    return this.snapshot.skills[id] ??= {
+    const existing = ownValue(this.snapshot.skills, id);
+    if (existing) return existing;
+    const created: SkillPerformance = {
       id, attempts: 0, successes: 0, failures: 0,
       confidence: 0.5, avgSteps: 0, avgRecoveryRounds: 0,
       successHistory: [], failureHistory: [], taskTypes: {},
     };
+    setOwnValue(this.snapshot.skills, id, created);
+    return created;
   }
 
   rank(ids: readonly string[], taskType = "general"): SkillRanking[] {
@@ -90,7 +109,7 @@ export class EvolutionEngine {
     return ids.map(id => {
       const s = this.get(id);
       const globalRate = s.attempts ? s.successes / s.attempts : 0.5;
-      const local = s.taskTypes[key];
+      const local = ownValue(s.taskTypes, key);
       const localEvidence = local ? 1 - Math.exp(-local.attempts / 3) : 0;
       const localRate = local?.attempts ? local.successes / local.attempts : globalRate;
       const rate = globalRate * (1 - localEvidence) + localRate * localEvidence;
@@ -109,7 +128,11 @@ export class EvolutionEngine {
     s.attempts++;
     s.successes++;
     const key = normalizeTaskType(taskType);
-    const local = s.taskTypes[key] ??= { attempts: 0, successes: 0, failures: 0 };
+    let local = ownValue(s.taskTypes, key);
+    if (!local) {
+      local = { attempts: 0, successes: 0, failures: 0 };
+      setOwnValue(s.taskTypes, key, local);
+    }
     local.attempts++;
     local.successes++;
     s.confidence = clamp(s.confidence * 0.8 + 0.2, 0, 1);
@@ -126,7 +149,11 @@ export class EvolutionEngine {
     s.attempts++;
     s.failures++;
     const key = normalizeTaskType(taskType);
-    const local = s.taskTypes[key] ??= { attempts: 0, successes: 0, failures: 0 };
+    let local = ownValue(s.taskTypes, key);
+    if (!local) {
+      local = { attempts: 0, successes: 0, failures: 0 };
+      setOwnValue(s.taskTypes, key, local);
+    }
     local.attempts++;
     local.failures++;
     s.confidence = clamp(s.confidence * 0.75 - 0.05, 0.05, 0.95);
@@ -139,7 +166,11 @@ export class EvolutionEngine {
 
   recordRun(taskType: string, completed: boolean): void {
     const key = normalizeTaskType(taskType);
-    const stats = this.snapshot.taskTypes[key] ??= { attempts: 0, successes: 0, failures: 0 };
+    let stats = ownValue(this.snapshot.taskTypes, key);
+    if (!stats) {
+      stats = { attempts: 0, successes: 0, failures: 0 };
+      setOwnValue(this.snapshot.taskTypes, key, stats);
+    }
     stats.attempts++;
     completed ? stats.successes++ : stats.failures++;
     void this.persist();
@@ -166,7 +197,8 @@ export class EvolutionEngine {
   }
 
   getSkill(id: string): SkillPerformance | undefined {
-    return this.snapshot.skills[id] ? JSON.parse(JSON.stringify(this.snapshot.skills[id])) as SkillPerformance : undefined;
+    const skill = ownValue(this.snapshot.skills, id);
+    return skill ? JSON.parse(JSON.stringify(skill)) as SkillPerformance : undefined;
   }
 
   getSnapshot(): EvolutionSnapshot {
@@ -177,13 +209,15 @@ export class EvolutionEngine {
     if (!this.file) return Promise.resolve();
     const serialized = JSON.stringify(this.snapshot, null, 2);
     this.persistChain = this.persistChain.then(async () => {
+      const tmp = this.file! + "." + process.pid + "." + randomUUID() + ".tmp";
       try {
         await fs.mkdir(path.dirname(this.file!), { recursive: true });
-        const tmp = this.file! + ".tmp";
-        await fs.writeFile(tmp, serialized, "utf8");
+        await fs.writeFile(tmp, serialized, { encoding: "utf8", flag: "wx" });
         await fs.rename(tmp, this.file!);
       } catch {
         // Learning is best-effort; execution semantics never depend on persistence.
+        // Never leave a temporary snapshot behind after a failed write/rename.
+        await fs.rm(tmp, { force: true }).catch(() => undefined);
       }
     });
     return this.persistChain;
