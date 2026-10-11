@@ -146,3 +146,43 @@ test("gateway stops when provider usage exceeds the reserved cap", async () => {
 
   assert.equal(budget.snapshot().stopped, true);
 });
+
+
+test("gateway releases reserved budget and propagates caller cancellation", async () => {
+  const budget = makeBudget();
+  let started!: () => void;
+  const entered = new Promise<void>((resolve) => { started = resolve; });
+  const controller = new AbortController();
+  const gateway = new TokenAwareGateway(budget, [
+    route(async () => {
+      started();
+      return new Promise<ProviderReply>(() => undefined);
+    }),
+  ], 5_000);
+
+  const pending = gateway.generate(request(), controller.signal);
+  await entered;
+  controller.abort();
+  await assert.rejects(pending, (error: unknown) =>
+    error instanceof GatewayError && error.code === "cancelled_or_timed_out");
+  assert.equal(budget.snapshot().reservedTokens, 0);
+  assert.equal(budget.snapshot().inFlight, 0);
+  assert.equal(budget.snapshot().stopped, true);
+});
+
+test("gateway fails closed when no route satisfies the requested capabilities", async () => {
+  const budget = makeBudget();
+  const incapable = route(async () => ({
+    value: { shouldNotRun: true },
+    usage: { inputTokens: 1, outputTokens: 1 },
+    finishReason: "complete",
+  }));
+  const gateway = new TokenAwareGateway(budget, [{
+    ...incapable,
+    capabilities: ["text"],
+  }]);
+
+  await assert.rejects(gateway.generate(request()), (error: unknown) =>
+    error instanceof GatewayError && error.code === "no_eligible_route");
+  assert.equal(budget.snapshot().calls, 0);
+});
