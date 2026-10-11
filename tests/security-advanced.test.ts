@@ -22,7 +22,7 @@ describe("advanced security",()=>{
   const old={...process.env};
   process.env.SOFIA_ENV="production"; delete process.env.SOFIA_CAPABILITY_SECRET;
   assert.throws(()=>assertSecurityConfiguration(loadExecutionPolicyFromEnv()),/SOFIA_CAPABILITY_SECRET/);
-  process.env.SOFIA_CAPABILITY_SECRET="test"; process.env.SOFIA_ALLOW_NETWORK="true"; delete process.env.SOFIA_ALLOWED_HOSTS;
+  process.env.SOFIA_CAPABILITY_SECRET="test"; process.env.SOFIA_AUDIT_SECRET="test-audit"; process.env.SOFIA_ALLOW_NETWORK="true"; delete process.env.SOFIA_ALLOWED_HOSTS;
   assert.throws(()=>assertSecurityConfiguration(loadExecutionPolicyFromEnv()),/SOFIA_ALLOWED_HOSTS/);
   process.env=old;
  });
