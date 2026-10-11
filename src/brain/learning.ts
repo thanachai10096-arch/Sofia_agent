@@ -178,8 +178,6 @@ export function rankLearnedSkills(
       const lifecycleBoost = effectiveLifecycle === "trusted" ? 8 : effectiveLifecycle === "probation" ? 2 : effectiveLifecycle === "stale" ? -12 : effectiveLifecycle === "deprecated" ? -100 : 0;
       const failurePenalty = Math.min(skill.failures ?? 0, 8) * 2;
       const evidenceBoost = Math.min((skill.evidenceIds?.length ?? 0), 10);
-      const lifecycleBoost = skill.lifecycle === "trusted" ? 8 : skill.lifecycle === "probation" ? 2 : skill.lifecycle === "stale" ? -12 : skill.lifecycle === "deprecated" ? -100 : 0;
-      const failurePenalty = Math.min(skill.failures ?? 0, 8) * 2;
       const score = categoryBoost + triggerHits * 8 + confidence + strategyBoost + reliability + evidenceBoost + lifecycleBoost - failurePenalty;
       const reasons = [
         ...(categoryBoost ? ["same failure category"] : []),
