@@ -1,0 +1,50 @@
+name: Sofia Live Provider Smoke Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sofia-live-provider-smoke
+  cancel-in-progress: false
+
+jobs:
+  live-provider:
+    name: Real provider connectivity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      SOFIA_FAST_MODEL: ${{ vars.SOFIA_FAST_MODEL }}
+      SOFIA_AI_GATEWAY_URL: ${{ vars.SOFIA_AI_GATEWAY_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate required configuration
+        shell: bash
+        run: |
+          if [ -z "${AI_GATEWAY_API_KEY}" ]; then
+            echo "::error::Add AI_GATEWAY_API_KEY in repository Actions secrets before running this workflow."
+            exit 1
+          fi
+          if [ -z "${SOFIA_FAST_MODEL}" ]; then
+            echo "::error::Add SOFIA_FAST_MODEL in repository Actions variables (internal routing only)."
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Call the configured real provider through SofiaModelGateway
+        run: node scripts/live-provider-smoke.mjs
