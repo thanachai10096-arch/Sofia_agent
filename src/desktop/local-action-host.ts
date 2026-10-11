@@ -47,9 +47,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function localOriginAllowed(origin: string, port: number, configured: readonly string[]): boolean {
-  if (configured.length > 0) return configured.includes(origin);
   try {
     const parsed = new URL(origin);
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.origin !== origin) return false;
+    if (configured.length > 0) return configured.includes(parsed.origin);
     return parsed.protocol === "http:" &&
       (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") &&
       parsed.port === String(port);
@@ -85,6 +86,13 @@ function send(res: import("node:http").ServerResponse, status: number, value: un
  * desktop adapter actions are accepted.
  */
 export async function startLocalDesktopActionHost(config: LocalDesktopActionHostConfig): Promise<LocalDesktopActionHost> {
+  for (const origin of config.allowedOrigins ?? []) {
+    let parsed: URL;
+    try { parsed = new URL(origin); } catch { throw new Error("Allowed origins must be exact HTTP(S) origins."); }
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.origin !== origin) {
+      throw new Error("Allowed origins must be exact HTTP(S) origins without paths or wildcards.");
+    }
+  }
   const authority = new DesktopPairingAuthority({ allowedCapabilities: config.allowedCapabilities });
   const maxConcurrent = Math.min(Math.max(1, config.maxConcurrentActions ?? 2), 8);
   const activeByPrincipal = new Map<string, number>();
