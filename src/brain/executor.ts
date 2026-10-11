@@ -1021,6 +1021,10 @@ export class SofiaBrain {
 
           this.move("diagnosing");
           const diagnosis = this.diagnose(error);
+          if (this.dependencies.evolution) {
+            const failedSkills = matchSkills(diagnosis.category, diagnosis.message, 5, this.dependencies.skillLedger);
+            for (const skill of failedSkills) this.dependencies.evolution.recordFailure(skill.id, diagnosis.message);
+          }
 
           const specialist = recoveryRounds === 0 ? await this.delegateSubagent(
             input.task,
@@ -1080,6 +1084,10 @@ export class SofiaBrain {
       }
 
       this.emit({ type: "brain.coding.loop.completed", count: codingIteration, passed: true });
+      if (this.dependencies.evolution) {
+        for (const skillId of this.selectedSkillIds) this.dependencies.evolution.recordSuccess(skillId, this.usage.steps, recoveryRounds);
+        this.dependencies.evolution.recordRun(understanding.requiredCapabilities[0] ?? "general", true);
+      }
 
       const changedFiles = baselineId
         ? await this.io(() =>
@@ -1153,6 +1161,9 @@ export class SofiaBrain {
       });
 
       const remainingRisks = [message];
+      if (this.dependencies.evolution && understanding) {
+        this.dependencies.evolution.recordRun(understanding.requiredCapabilities[0] ?? "general", false);
+      }
       if (input.rollbackOnFailure && checkpointId) {
         try {
           const restored = await this.io(() => this.dependencies.tools.rollback(checkpointId!, this.signal));
