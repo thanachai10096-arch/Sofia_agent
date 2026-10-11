@@ -1,5 +1,3 @@
-import type { Platform } from "node:os";
-
 export type DesktopCapability =
   | "system:discover"
   | "workspace:list"
@@ -24,7 +22,7 @@ export interface DesktopRuntimeConfig {
 }
 
 export interface DesktopSystemInfo {
-  platform: Platform;
+  platform: string;
   arch: string;
   nodeVersion: string;
   workspaceRoot: string;
