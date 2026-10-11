@@ -8,6 +8,8 @@ export interface DesktopPairingConfig {
   pairingCodeTtlMs?: number;
   /** Access token lifetime. Clamped to 1 minute–30 days. */
   accessTokenTtlMs?: number;
+  /** Maximum incorrect code submissions before the code is invalidated. */
+  maxPairingAttempts?: number;
   /** Injectable clock for deterministic tests. */
   now?: () => number;
 }
@@ -15,6 +17,7 @@ export interface DesktopPairingConfig {
 interface PendingPairing {
   digest: Buffer;
   expiresAt: number;
+  failedAttempts: number;
 }
 
 interface Session {
@@ -35,6 +38,7 @@ export class DesktopPairingAuthority {
   private readonly now: () => number;
   private readonly codeTtl: number;
   private readonly tokenTtl: number;
+  private readonly maxPairingAttempts: number;
   private pending?: PendingPairing;
   private readonly sessions = new Map<string, Session>();
 
@@ -43,13 +47,14 @@ export class DesktopPairingAuthority {
     this.now = config.now ?? Date.now;
     this.codeTtl = clamp(config.pairingCodeTtlMs ?? 120_000, 30_000, 600_000);
     this.tokenTtl = clamp(config.accessTokenTtlMs ?? 86_400_000, 60_000, 2_592_000_000);
+    this.maxPairingAttempts = clamp(config.maxPairingAttempts ?? 5, 1, 20);
   }
 
   /** Create a cryptographically random, single-use six-digit pairing code. */
   createPairingCode(): { code: string; expiresAt: number } {
     this.pruneExpired();
     const code = String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, "0");
-    this.pending = { digest: digest(code), expiresAt: this.now() + this.codeTtl };
+    this.pending = { digest: digest(code), expiresAt: this.now() + this.codeTtl, failedAttempts: 0 };
     return { code, expiresAt: this.pending.expiresAt };
   }
 
