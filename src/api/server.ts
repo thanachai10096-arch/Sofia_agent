@@ -251,8 +251,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           connection: "keep-alive",
         });
         const send = (event: unknown) => {
-          if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\\n\\n`);
+          if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
         };
+        const abortOnDisconnect = () => {
+          if (!res.writableEnded) controller.abort(new Error("SSE client disconnected."));
+        };
+        res.on("close", abortOnDisconnect);
         try {
           run.status = "running";
           run.result = await agent.run({
@@ -275,7 +279,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         send({ type: "done", runId });
         run.updatedAt = Date.now();
         clearTimeout(timer);
-        return res.end();
+        res.off("close", abortOnDisconnect);
+        if (!res.destroyed) return res.end();
+        return;
       }
 
       if (req.method === "POST" && req.url === "/v1/agent/runs") {
