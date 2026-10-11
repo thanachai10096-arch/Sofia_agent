@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
-import { assertSafeStep, assertToolAllowed, loadExecutionPolicyFromEnv } from "../security/policy.js";
+import { assertSafeStep, assertToolAllowed, classifyToolEffects, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { actionHash, riskFor } from "../security/guard.js";
 import { validateToolInput } from "../tools/types.js";
 
@@ -179,10 +179,11 @@ export class SofiaAgent {
           }
 
           for (const call of response.toolCalls) {
-            assertToolAllowed(policy, call.name);
             if (!this.deps.tools || !this.deps.runtime) throw new Error("Agent runtime and tool registry are required for tool execution.");
             const tool = this.deps.tools.get(call.name);
             if (!tool) throw new Error(`Unknown tool: ${call.name}`);
+            const effects = tool.effects ?? classifyToolEffects(call.name);
+            assertToolAllowed(policy, call.name, effects);
             validateToolInput(tool.inputSchema, call.input);
 
             emit({
@@ -199,7 +200,7 @@ export class SofiaAgent {
                 toolName: call.name,
                 input: call.input,
                 actionHash: actionHash(runId, call.name, call.input, request.principalId),
-                risk: riskFor([], call.input),
+                risk: riskFor(effects, call.input),
               });
 
               if (!approved) {
