@@ -77,14 +77,21 @@ export function createBrowserTools(runtime: BrowserRuntime): SofiaTool[] {
         if (typeof input.pageId === "string") {
           const id = input.pageId;
           const value = page(id);
-          await value.close();
-          pages.delete(id);
+          try {
+            await value.close();
+          } finally {
+            // Never leave a closed or partially-closed page addressable by later actions.
+            pages.delete(id);
+          }
           return { ok: true, closed: "page", pageId: id };
         }
         if (session) {
-          await session.close();
+          const closing = session;
+          // Reset the local handle even if the runtime reports a close error,
+          // so subsequent browser.open calls do not reuse a broken session.
           session = undefined;
           pages.clear();
+          await closing.close();
         }
         return { ok: true, closed: "session" };
       },
