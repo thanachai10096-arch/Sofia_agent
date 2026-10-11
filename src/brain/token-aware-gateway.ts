@@ -348,6 +348,11 @@ export class TokenAwareGateway {
       }
     })();
 
-    return observeWithAbort(work, signal, () => this.budget.stop());
+    return observeWithAbort(work, signal, () => {
+      // Settle the outstanding reservation at its full reserved amount when provider
+      // usage is unknown. This releases in-flight capacity without undercounting cost.
+      lease.settle();
+      this.budget.stop();
+    });
   }
 }
