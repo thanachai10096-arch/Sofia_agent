@@ -76,3 +76,67 @@ test("gateway rejects malformed and non-object tool arguments", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("gateway enforces one timeout budget across the provider request", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_input, init) => {
+    calls++;
+    return new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) return reject(new Error("missing request signal"));
+      const onAbort = () => reject(signal.reason ?? new Error("aborted"));
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    });
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": {
+        baseUrl: "https://example.test/v1",
+        apiKey: "test",
+        model: "test-model",
+        requestTimeoutMs: 30,
+      },
+    });
+    await assert.rejects(gateway.generate(request, makeRoute()), /timeout|timed out/i);
+    assert.equal(calls, 1, "a timed-out request must not start another retry");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("gateway keeps configured API credentials from being overwritten by custom headers", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedHeaders: HeadersInit | undefined;
+  globalThis.fetch = async (_input, init) => {
+    capturedHeaders = init?.headers;
+    return okResponse();
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": {
+        baseUrl: "https://example.test/v1",
+        apiKey: "real-test-key",
+        model: "test-model",
+        headers: { authorization: "Bearer wrong-key", "content-type": "text/plain" },
+      },
+    });
+    await gateway.generate(request, makeRoute());
+    const headers = new Headers(capturedHeaders);
+    assert.equal(headers.get("authorization"), "Bearer real-test-key");
+    assert.equal(headers.get("content-type"), "application/json");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("gateway rejects unsafe concurrency and timeout configuration", () => {
+  assert.throws(() => new SofiaModelGateway({
+    "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model", maxConcurrent: 0 },
+  }), /Invalid maxConcurrent/);
+  assert.throws(() => new SofiaModelGateway({
+    "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model", requestTimeoutMs: -1 },
+  }), /Invalid requestTimeoutMs/);
+});
