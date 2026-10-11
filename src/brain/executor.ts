@@ -476,6 +476,7 @@ export class SofiaBrain {
 
     const value = await this.infer("understand", {
       task: input.task,
+      availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
 
@@ -546,6 +547,7 @@ export class SofiaBrain {
     const value = await this.infer("plan", {
       task: input.task,
       understanding,
+      availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
 

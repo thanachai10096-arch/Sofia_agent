@@ -8,11 +8,14 @@ import type { JobRuntime } from "../brain/job-runtime.js";
 import type { BrainRunSnapshot } from "../brain/run-state.js";
 import type { SecurityController } from "../security/controller.js";
 import type { SecurityAuditSink } from "../security/audit.js";
+import type { DesktopCapability } from "../desktop/types.js";
 export interface AgentRequest {
   task: string;
   context?: string;
   sessionId?: string;
   principalId?: string;
+  /** Desktop capabilities are derived by the trusted host from authenticated scopes. */
+  desktopCapabilities?: DesktopCapability[];
   maxSteps?: number;
   acceptanceCriteria?: AcceptanceCriterion[];
   useBrain?: boolean;
@@ -36,7 +39,7 @@ export interface AgentDependencies {
  tools?:ToolRegistry;
  policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
- brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>})=>SofiaBrain;
+ brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>})=>SofiaBrain;
  jobRuntime?: JobRuntime;
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;

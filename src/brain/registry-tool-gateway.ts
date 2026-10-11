@@ -15,6 +15,12 @@ import { RuntimeCheckpointManager, type CheckpointManager } from "./checkpoint.j
 function digest(value:string){return createHash("sha256").update(value).digest("hex");}
 function classifyEffects(name:string):ToolEffect[]{
   if(name.startsWith("browser."))return["browser","network"];
+  if(name==="desktop.system.discover"||name==="desktop.workspace.list_files"||name==="desktop.workspace.read_file")return["read"];
+  if(name==="desktop.workspace.write_file")return["write"];
+  if(name==="desktop.process.run")return["shell"];
+  if(name==="desktop.screen.capture")return["read"];
+  if(name==="desktop.app.launch")return["shell","destructive"];
+  if(name==="desktop.input.click"||name==="desktop.input.type_text"||name==="desktop.input.press_key")return["destructive"];
   if(name==="workspace.read_file"||name==="workspace.list_files"||name==="workspace.search"||name==="git.diff"||name==="project.verify")return["read"];
   if(name==="workspace.write_file"||name==="workspace.apply_patch")return["write"];
   if(name==="terminal.run")return["shell"];
@@ -34,6 +40,7 @@ export class RegistryToolGateway implements ToolGateway {
     private readonly security:SecurityController=new SecurityController(),
     private readonly audit?:SecurityAuditSink,
   ){this.checkpoints=checkpoints??new RuntimeCheckpointManager(dependencies.runtime);}
+  listTools(){return this.dependencies.tools.list().map((tool)=>({name:tool.name,description:tool.description,effects:classifyEffects(tool.name)}));}
   describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:classifyEffects(name)};}
 
   async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{

@@ -178,3 +178,28 @@ test("security kill switch prevents a tool from starting after approval wait", a
   assert.equal(toolStarted, false);
   assert.match(result.error?.message ?? "", /kill switch/i);
 });
+
+test("tool catalog exposes only registered tools with accurate desktop effects", () => {
+  const desktopTools = [
+    {
+      name: "desktop.workspace.write_file",
+      description: "Write a workspace file",
+      inputSchema: { type: "object" },
+      async execute() { return { ok: true }; },
+    },
+    {
+      name: "desktop.process.run",
+      description: "Run an allowlisted process",
+      inputSchema: { type: "object" },
+      async execute() { return { exitCode: 0 }; },
+    },
+  ];
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: createToolRegistry([...createBuiltinTools(), ...desktopTools]) },
+    defaultPolicy,
+  );
+  const catalog = gateway.listTools();
+  assert.ok(catalog.some((tool) => tool.name === "desktop.workspace.write_file" && tool.effects.includes("write")));
+  assert.ok(catalog.some((tool) => tool.name === "desktop.process.run" && tool.effects.includes("shell")));
+  assert.equal(gateway.describe("desktop.process.run")?.effects.includes("shell"), true);
+});
