@@ -26,7 +26,7 @@ export async function startLocalPairingHost(config: LocalPairingHostConfig): Pro
     if (req.headers.origin) {
       try {
         const origin = new URL(req.headers.origin);
-        if (origin.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(origin.hostname)) {
+        if (origin.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(origin.hostname) || origin.port !== String(port)) {
           res.writeHead(403, { "cache-control": "no-store" }).end();
           return;
         }
