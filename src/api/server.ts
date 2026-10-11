@@ -224,7 +224,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           connection: "keep-alive",
         });
         const send = (event: unknown) => {
-          if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\\n\\n`);
+          if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
         };
         try {
           run.status = "running";
