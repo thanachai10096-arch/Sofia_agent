@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
-import { assertSafeStep, assertToolAllowed, classifyToolEffects, loadExecutionPolicyFromEnv } from "../security/policy.js";
+import { assertSafeStep, assertToolAllowed, classifyToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission } from "../security/policy.js";
 import { actionHash, riskFor } from "../security/guard.js";
 import { validateToolInput } from "../tools/types.js";
 
@@ -190,6 +190,16 @@ export class SofiaAgent {
             if (!tool) throw new Error(`Unknown tool: ${call.name}`);
             const effects = tool.effects ?? classifyToolEffects(call.name);
             assertToolAllowed(policy, call.name, effects);
+            const permission = toolPermission(policy, call.name, effects);
+            const risk = riskFor(effects, call.input);
+            const maximumRisk = permission.maxRisk ?? policy.maxRisk;
+            if (riskRank[risk] > riskRank[maximumRisk]) {
+              throw new Error(`Tool risk ${risk} exceeds configured maximum ${maximumRisk}: ${call.name}`);
+            }
+            const requiresApproval = permission.requireApproval ?? risk !== "low";
+            if (requiresApproval && !this.deps.approval) {
+              throw new Error(`Approval handler required for ${risk}-risk tool: ${call.name}`);
+            }
             validateToolInput(tool.inputSchema, call.input);
 
             emit({
@@ -199,14 +209,14 @@ export class SofiaAgent {
               metadata: { tool: call.name },
             });
 
-            if (this.deps.approval) {
+            if (requiresApproval && this.deps.approval) {
               const approved = await this.deps.approval({
                 runId,
                 principalId: request.principalId,
                 toolName: call.name,
                 input: call.input,
                 actionHash: actionHash(runId, call.name, call.input, request.principalId),
-                risk: riskFor(effects, call.input),
+                risk,
               });
 
               if (!approved) {
