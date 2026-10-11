@@ -116,7 +116,23 @@ More details: [Desktop Runtime Foundation](docs/desktop-runtime.md).
 
 ## `> Validation`
 
-GitHub Actions validation covers dependency installation, TypeScript checks, tests, and build. Use the current CI run and local test output to determine whether a revision passes; this README does not imply that checks have passed.
+Run the complete local validation suite:
+
+```bash
+npm install
+npm run license:check
+npm run typecheck
+npm test
+npm run build
+```
+
+GitHub Actions runs the same license, type, test, and build checks on pushes and pull requests. Use the workflow result as the source of truth; a commit alone does not mean the checks passed.
+
+## `> License`
+
+Sofia Agents is distributed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) for the complete terms. The license permits use, modification, and redistribution subject to its conditions, including preserving required notices. Third-party dependencies remain subject to their own license terms.
+
+SPDX identifier: `Apache-2.0`.
 
 ## `> Integration principle`
 
