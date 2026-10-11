@@ -186,9 +186,7 @@ export class SofiaModelGateway implements ModelProvider {
             },
           );
           if (response.ok) {
-            circuit.failures = 0;
-            circuit.openedAt = 0;
-            route.healthy = true;
+            // Do not close a half-open circuit until the payload has been validated.
             return response;
           }
           const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
