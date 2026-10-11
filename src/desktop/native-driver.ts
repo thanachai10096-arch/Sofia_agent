@@ -55,8 +55,10 @@ async function runFile(command: string, args: string[], timeoutMs: number, env?:
 }
 
 async function launchFile(command: string, args: string[]): Promise<void> {
+  const secretEnv = /(?:TOKEN|SECRET|PASSWORD|PRIVATE.?KEY|API.?KEY|AUTHORIZATION|AWS_ACCESS_KEY|AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN)/i;
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !secretEnv.test(key)));
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
+    const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true, env });
     child.once("error", reject);
     child.once("spawn", () => { child.unref(); resolve(); });
   });
@@ -115,7 +117,7 @@ export function createNativeDesktopDriver(config: NativeDesktopDriverConfig = {}
       const app = apps[applicationId];
       if (!app || !app.executable || app.executable.includes("\0")) throw new Error("Application ID has no fixed local executable mapping.");
       const fixedArgs = [...(app.args ?? [])];
-      if (args.some((arg) => !fixedArgs.includes(arg))) throw new Error("Application arguments must match the operator-configured fixed arguments.");
+      if (args.length !== fixedArgs.length || args.some((arg, index) => arg !== fixedArgs[index])) throw new Error("Application arguments must exactly match the operator-configured fixed arguments.");
       await launchFile(app.executable, fixedArgs);
       return { launched: true, applicationId };
     },
