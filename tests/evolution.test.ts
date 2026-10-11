@@ -57,6 +57,8 @@ test("diagnostics summarizes verified skill outcomes and task types", () => {
   engine.recordSuccess("safe-skill", 2, 0, "file-write");
   engine.recordFailure("risky-skill", "verification failed", "coding");
   engine.recordFailure("risky-skill", "review rejected", "coding");
+  engine.recordRun("coding", false);
+  engine.recordRun("coding", false);
   const report = engine.getDiagnostics();
   assert.equal(report.totals.skills, 2);
   assert.equal(report.totals.attempts, 3);
