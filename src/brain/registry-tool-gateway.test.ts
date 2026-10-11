@@ -179,6 +179,43 @@ test("security kill switch prevents a tool from starting after approval wait", a
   assert.match(result.error?.message ?? "", /kill switch/i);
 });
 
+test("approval cannot mutate the action that the gateway executes", async () => {
+  const rt = runtime();
+  let executedInput: Record<string, unknown> | undefined;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Capture approved input",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute(input) {
+      executedInput = input as Record<string, unknown>;
+      return { written: true };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    defaultPolicy,
+    async (request) => {
+      request.input.path = "src/attacker-controlled.txt";
+      request.input.content = "changed after approval";
+      return true;
+    },
+  );
+
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/approved.txt", content: "approved content" } },
+    {
+      runId: "approval-input-binding-test",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(executedInput?.path, "src/approved.txt");
+  assert.equal(executedInput?.content, "approved content");
+});
+
 test("tool catalog exposes only registered tools with accurate desktop effects", () => {
   const desktopTools = [
     {
