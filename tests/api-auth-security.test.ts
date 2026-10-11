@@ -93,7 +93,7 @@ test("API requires agent:read or agent:run to inspect a run", async () => {
   try {
     const address = server.address();
     assert.ok(address && typeof address !== "string");
-    const response = await fetch(\`http://127.0.0.1:\${address.port}/v1/agent/runs/not-owned\`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/agent/runs/not-owned`, {
       headers: { authorization: "Bearer desktop-only-key" },
     });
     assert.equal(response.status, 403);
@@ -114,7 +114,7 @@ test("API requires agent:run to cancel a run even when the key can read runs", a
   try {
     const address = server.address();
     assert.ok(address && typeof address !== "string");
-    const response = await fetch(\`http://127.0.0.1:\${address.port}/v1/agent/runs/not-owned\`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/agent/runs/not-owned`, {
       method: "DELETE",
       headers: { authorization: "Bearer read-only-key" },
     });
@@ -137,7 +137,7 @@ test("API permits agent:run scope to inspect its own run status", async () => {
   try {
     const address = server.address();
     assert.ok(address && typeof address !== "string");
-    const response = await fetch(\`http://127.0.0.1:\${address.port}/v1/agent/runs/not-found\`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/agent/runs/not-found`, {
       headers: { authorization: "Bearer run-key" },
     });
     assert.equal(response.status, 404, "run-capable keys can read run status; this ID simply does not exist");
