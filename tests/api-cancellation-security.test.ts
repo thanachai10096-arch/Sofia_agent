@@ -111,7 +111,7 @@ test("API rejects malformed idempotency keys, invalid JSON, and oversized reques
 
     const invalidKey = await fetch(`${baseUrl}/v1/agent/runs`, {
       method: "POST",
-      headers: { ...headers, "idempotency-key": "bad\nkey" },
+      headers: { ...headers, "idempotency-key": "k".repeat(129) },
       body: JSON.stringify({ task: "test", async: true }),
     });
     assert.equal(invalidKey.status, 400);
