@@ -91,6 +91,42 @@ The driver must be implemented and packaged by a trusted platform host for Windo
 
 Do not expose this adapter directly from a public API server: it is intended to be constructed by the local host running on the user's own machine. A remote server cannot safely assume that its OS is the user's desktop.
 
+## Paired local desktop action host
+
+The repository now includes `startLocalDesktopActionHost`. It is an explicitly started loopback service, not a background daemon. It binds only to `127.0.0.1`, creates a one-time pairing code through `onPairingCode`, and issues a short-lived scoped bearer token only after the requested capabilities pass the local operator's allowlist.
+
+The host exposes only the native desktop adapter actions—screen capture, allowlisted application launch, click, text entry and restricted keypress. It does **not** expose arbitrary shell commands or filesystem endpoints. Input and app-launch actions go through the configured `requestApproval` callback. Text-entry approval receives the exact text that will be typed, so a real UI can display it before asking the user.
+
+Example configuration (the executable path and approval UI must be supplied for the target OS):
+
+```ts
+import {
+  createNativeDesktopDriver,
+  startLocalDesktopActionHost,
+} from "../src/desktop/index.js";
+
+const host = await startLocalDesktopActionHost({
+  allowedCapabilities: ["screen:capture", "input:control", "app:launch"],
+  // Exact origins only; never use "*" or allow an origin just because it is convenient.
+  allowedOrigins: ["https://your-app.example"],
+  driver: createNativeDesktopDriver({
+    applications: {
+      calculator: { executable: "/path/to/operator-approved/calculator" },
+    },
+  }),
+  runtime: workspaceRuntime,
+  allowedApplications: ["calculator"],
+  requestApproval: (action) => showNativeApprovalDialog(action),
+  onPairingCode: (code, expiresAt) => showPairingCodeToUser(code, expiresAt),
+});
+
+// Keep host.url and the pairing token local. Call host.close() to revoke sessions and stop listening.
+```
+
+Pair a client with `POST /pair` and JSON `{ "code": "...", "capabilities": ["input:control"] }`. Then call `POST /action` with `Authorization: Bearer <token>` and JSON `{ "tool": "desktop.input.click", "input": { "x": 10, "y": 20 } }`. Capabilities in the pairing request can only be a subset of `allowedCapabilities`. Configure `allowedOrigins` as exact HTTP(S) origins if a browser frontend must call the host; origin checks and the loopback Host check both apply. The default policy permits only same-port loopback origins.
+
+This host is a local bridge for a trusted frontend/companion; it does not itself connect a cloud-hosted Sofia run to the user's machine. The app must deliberately invoke the local bridge, keep the token out of model context and logs, and present a genuine user approval prompt. The CI suite verifies mocked drivers and protocol security, not real OS input/display behavior. A signed installer, OS-specific packaging, and real-machine end-to-end verification remain required before production use.
+
 ## Security boundary
 
 - The workspace root is configured by the local operator; it is not inferred from a request.
