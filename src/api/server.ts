@@ -22,9 +22,9 @@ interface ActiveRun {
 function headers(origin: string | undefined, config: SofiaApiConfig) {
   const allowed = config.allowedOrigins;
   const allowOrigin =
-    !allowed?.length || allowed.includes("*")
+    allowed?.includes("*")
       ? "*"
-      : origin && allowed.includes(origin)
+      : origin && allowed?.includes(origin)
         ? origin
         : undefined;
   return {
