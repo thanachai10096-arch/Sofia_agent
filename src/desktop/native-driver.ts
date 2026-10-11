@@ -115,7 +115,7 @@ export function createNativeDesktopDriver(config: NativeDesktopDriverConfig = {}
       const app = apps[applicationId];
       if (!app || !app.executable || app.executable.includes("\0")) throw new Error("Application ID has no fixed local executable mapping.");
       const fixedArgs = [...(app.args ?? [])];
-      if (args.length) throw new Error("Native driver accepts only operator-configured fixed application arguments.");
+      if (args.some((arg) => !fixedArgs.includes(arg))) throw new Error("Application arguments must match the operator-configured fixed arguments.");
       await launchFile(app.executable, fixedArgs);
       return { launched: true, applicationId };
     },
