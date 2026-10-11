@@ -61,5 +61,5 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,learningDiagnostics:()=>evolution.getDiagnostics()};
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:audit,learningDiagnostics:()=>evolution.getDiagnostics()};
 }
