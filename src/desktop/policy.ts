@@ -24,8 +24,8 @@ export async function resolveWorkspaceRoot(root: string): Promise<string> {
 
 /**
  * Resolve a relative path inside the configured workspace. Existing targets are
- * realpathed to prevent symlink escapes. For new targets, the existing parent
- * is realpathed before the final path is accepted.
+ * realpathed to prevent symlink escapes. For new targets, every existing ancestor
+ * is checked before the remaining missing path segments are appended.
  */
 export async function resolveWorkspacePath(root: string, input: string, allowMissing = false): Promise<string> {
   if (!input.trim() || path.isAbsolute(input)) throw new DesktopPermissionError("Only non-empty relative workspace paths are allowed.");
@@ -37,9 +37,22 @@ export async function resolveWorkspacePath(root: string, input: string, allowMis
     return resolved;
   } catch (error) {
     if (!allowMissing || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    const parent = await realpath(path.dirname(lexical));
-    if (!isInside(root, parent)) throw new DesktopPermissionError("Parent directory escapes the configured workspace.");
-    return path.join(parent, path.basename(lexical));
+    let ancestor = path.dirname(lexical);
+    const missing: string[] = [path.basename(lexical)];
+    while (isInside(root, ancestor)) {
+      try {
+        const resolvedAncestor = await realpath(ancestor);
+        if (!isInside(root, resolvedAncestor)) throw new DesktopPermissionError("Parent directory escapes the configured workspace.");
+        return path.join(resolvedAncestor, ...missing.reverse());
+      } catch (ancestorError) {
+        if ((ancestorError as NodeJS.ErrnoException).code !== "ENOENT") throw ancestorError;
+      }
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) break;
+      missing.push(path.basename(ancestor));
+      ancestor = parent;
+    }
+    throw new DesktopPermissionError("Could not resolve a safe parent inside the workspace.");
   }
 }
 
