@@ -32,36 +32,69 @@ interface ChatResponse {
   };
 }
 
+interface GateWaiter {
+  resolve: () => void;
+  reject: (reason: unknown) => void;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+}
+
 class ConcurrencyGate {
   private active = 0;
-  private readonly waiters: Array<{ resolve: () => void; signal?: AbortSignal }> = [];
+  private readonly waiters: GateWaiter[] = [];
   constructor(private readonly limit: number) {}
-  async run<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    if (this.active >= this.limit) {
-      await new Promise<void>((resolve, reject) => {
-        const waiter = { resolve, ...(signal ? { signal } : {}) };
-        const onAbort = () => {
-          const index = this.waiters.indexOf(waiter);
-          if (index >= 0) this.waiters.splice(index, 1);
-          reject(signal!.reason ?? new Error("Request aborted."));
-        };
-        if (signal?.aborted) return onAbort();
-        signal?.addEventListener("abort", onAbort, { once: true });
-        this.waiters.push(waiter);
-      });
-    }
+
+  private async acquire(signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) throw signal.reason ?? new Error("Request aborted.");
-    this.active++;
-    try { return await operation(); }
-    finally {
-      this.active--;
-      const next = this.waiters.shift();
-      next?.resolve();
+    if (this.active < this.limit) { this.active++; return; }
+    await new Promise<void>((resolve, reject) => {
+      const waiter: GateWaiter = { resolve, reject, ...(signal ? { signal } : {}) };
+      waiter.onAbort = () => {
+        const index = this.waiters.indexOf(waiter);
+        if (index >= 0) this.waiters.splice(index, 1);
+        reject(signal?.reason ?? new Error("Request aborted."));
+      };
+      signal?.addEventListener("abort", waiter.onAbort, { once: true });
+      this.waiters.push(waiter);
+      if (signal?.aborted) waiter.onAbort();
+    });
+  }
+
+  private release(): void {
+    while (this.waiters.length) {
+      const next = this.waiters.shift()!;
+      next.signal?.removeEventListener("abort", next.onAbort!);
+      if (next.signal?.aborted) {
+        next.reject(next.signal.reason ?? new Error("Request aborted."));
+        continue;
+      }
+      next.resolve();
+      return;
     }
+    this.active--;
+  }
+
+  async run<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    await this.acquire(signal);
+    try {
+      if (signal?.aborted) throw signal.reason ?? new Error("Request aborted.");
+      return await operation();
+    } finally { this.release(); }
   }
 }
 
-interface CircuitState { failures: number; openedAt: number; }
+interface CircuitState { failures: number; openedAt: number; probeInFlight?: boolean; }
+
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("Request aborted."));
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+    const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+    const onAbort = () => { clearTimeout(timer); cleanup(); reject(signal?.reason ?? new Error("Request aborted.")); };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
+}
 
 export class SofiaModelGateway implements ModelProvider {
   private readonly gates = new Map<string, ConcurrencyGate>();
@@ -117,14 +150,17 @@ export class SofiaModelGateway implements ModelProvider {
 
     const providerId = route.providerId ?? route.id;
     const gate = this.gates.get(providerId);
-    const circuit = this.circuits.get(providerId) ?? { failures: 0, openedAt: 0 };
+    const circuit = this.circuits.get(providerId) ?? { failures: 0, openedAt: 0, probeInFlight: false };
     this.circuits.set(providerId, circuit);
 
-    if (circuit.openedAt && Date.now() - circuit.openedAt < 15_000) {
-      route.healthy = false;
-      throw new Error(`Model provider ${providerId} temporarily unavailable.`);
+    if (circuit.openedAt) {
+      if (Date.now() - circuit.openedAt < 15_000) {
+        route.healthy = false;
+        throw new Error(`Model provider ${providerId} temporarily unavailable.`);
+      }
+      if (circuit.probeInFlight) throw new Error(`Model provider ${providerId} recovery probe already in progress.`);
+      circuit.probeInFlight = true;
     }
-    if (circuit.openedAt) circuit.openedAt = 0;
 
     const execute = async () => {
       const maxAttempts = 3;
@@ -164,14 +200,12 @@ export class SofiaModelGateway implements ModelProvider {
           const delay = Number.isFinite(retryAfter) && retryAfter > 0
             ? Math.min(retryAfter * 1000, 5_000)
             : Math.min(250 * 2 ** (attempt - 1), 2_000) + Math.floor(Math.random() * 100);
-          await new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(resolve, delay);
-            options.signal?.addEventListener("abort", () => { clearTimeout(timer); reject(options.signal!.reason); }, { once: true });
-          });
+          await abortableDelay(delay, options.signal);
         } catch (error) {
           lastError = error;
-          if (options.signal?.aborted || attempt === maxAttempts || !retryableFailure) throw error;
-          await new Promise((resolve) => setTimeout(resolve, Math.min(250 * 2 ** (attempt - 1), 2_000)));
+          if (options.signal?.aborted || attempt === maxAttempts ||
+              (error instanceof Error && error.message.startsWith("Model gateway request failed (") && !retryableFailure)) throw error;
+          await abortableDelay(Math.min(250 * 2 ** (attempt - 1), 2_000), options.signal);
         }
       }
       throw lastError instanceof Error ? lastError : new Error("Model provider request failed.");
@@ -181,10 +215,13 @@ export class SofiaModelGateway implements ModelProvider {
     try {
       response = await (gate ? gate.run(execute, options.signal) : execute());
     } catch (error) {
-      circuit.failures++;
-      if (circuit.failures >= 3) {
-        circuit.openedAt = Date.now();
-        route.healthy = false;
+      circuit.probeInFlight = false;
+      if (!options.signal?.aborted) {
+        circuit.failures++;
+        if (circuit.failures >= 3 || circuit.openedAt) {
+          circuit.openedAt = Date.now();
+          route.healthy = false;
+        }
       }
       throw error;
     }
@@ -217,6 +254,10 @@ export class SofiaModelGateway implements ModelProvider {
     if (!text && !calls.length) {
       throw new Error("Model gateway returned an empty response.");
     }
+    circuit.failures = 0;
+    circuit.openedAt = 0;
+    circuit.probeInFlight = false;
+    route.healthy = true;
 
     const inputTokens = data.usage?.prompt_tokens;
     const outputTokens = data.usage?.completion_tokens;
