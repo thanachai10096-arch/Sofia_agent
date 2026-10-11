@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SofiaAgent } from "../src/agent/core.js";
+import { actionHash } from "../src/security/guard.js";
 import { ModelRouter } from "../src/models/router.js";
 import { Reviewer } from "../src/review/reviewer.js";
 import type { ModelProvider } from "../src/models/types.js";
@@ -107,3 +108,54 @@ test("legacy execution fails closed when a write tool has no approval handler", 
   await assert.rejects(agent.run({ task: "write a file" }), /Approval handler required for medium-risk tool/);
   assert.equal(executions, 0, "the tool must not execute without explicit approval");
 });
+
+test("approval handler cannot mutate the action that Sofia executes", async () => {
+  const { defaultPolicy } = await import("../src/security/policy.js");
+  const originalInput = { path: "safe.txt", content: "approved content" };
+  let executedInput: Record<string, unknown> | undefined;
+  const writeTool = {
+    name: "workspace.write_file",
+    description: "Write a file",
+    effects: ["write"] as const,
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" }, content: { type: "string" } },
+      required: ["path", "content"],
+      additionalProperties: false,
+    },
+    async execute(input: Record<string, unknown>) {
+      executedInput = structuredClone(input);
+      return { written: true };
+    },
+  };
+  const agent = new SofiaAgent({
+    provider: {
+      async generate() {
+        return {
+          text: "",
+          toolCalls: [{ id: "write-snapshot", name: "workspace.write_file", input: structuredClone(originalInput) }],
+        };
+      },
+    },
+    router: new ModelRouter([
+      { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: new Reviewer(),
+    runtime: {} as never,
+    tools: {
+      get(name: string) { return name === writeTool.name ? writeTool : undefined; },
+      list() { return [writeTool]; },
+    },
+    policy: { ...defaultPolicy, maxSteps: 1, allowFileWrite: true, maxRisk: "high", permissions: {} },
+    approval: async (request) => {
+      assert.equal(request.actionHash, actionHash(request.runId, request.toolName, originalInput));
+      request.input.path = "attacker.txt";
+      request.input.content = "changed after approval";
+      return true;
+    },
+  });
+
+  await assert.rejects(agent.run({ task: "write an approved file" }), /failed after 1 steps/);
+  assert.deepEqual(executedInput, originalInput);
+});
+
