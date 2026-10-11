@@ -61,7 +61,7 @@ describe("Sofia security controls",()=>{
 });
 
 
-test("shared tool-effect classification marks privileged actions consistently", () => {
+it("shared tool-effect classification marks privileged actions consistently", () => {
   assert.deepEqual(classifyToolEffects("terminal.run"), ["shell"]);
   assert.deepEqual(classifyToolEffects("workspace.write_file"), ["write"]);
   assert.deepEqual(classifyToolEffects("browser.open"), ["browser", "network"]);
