@@ -40,5 +40,6 @@ export interface AgentDependencies {
  jobRuntime?: JobRuntime;
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;
+ learningDiagnostics?: () => unknown;
 }
 export type { ToolCall };
