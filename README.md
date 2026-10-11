@@ -13,3 +13,8 @@ Sofia is designed so a phone browser can use the same Agent runtime as desktop. 
 For a web app, keep the Sofia master API key on the server. The browser should call your authenticated application backend, which then calls Sofia; do not embed a privileged Sofia API key in shipped frontend JavaScript.
 
 The SDK exposes start(), getRun(), cancel(), and waitForRun() for this reconnectable flow.
+
+
+## Local desktop runtime foundation
+
+The permission-gated local runtime foundation is documented in [docs/desktop-runtime.md](docs/desktop-runtime.md). It provides scoped workspace discovery/list/read/write and opt-in allowlisted process execution. It does not yet provide remote desktop control, unrestricted whole-disk indexing, browser-profile access, or OS-level sandboxing. Install and run any local agent service explicitly on the user's machine and grant only the capabilities required for the task.
