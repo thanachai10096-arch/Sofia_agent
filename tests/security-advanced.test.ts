@@ -1,3 +1,5 @@
+
+import {approveAll} from "../src/agent/approval.js";
 import {describe,it} from "node:test";
 import assert from "node:assert/strict";
 import {issueCapability,verifyCapability} from "../src/security/capability.js";
@@ -17,6 +19,13 @@ describe("advanced security",()=>{
   assert.equal(verifyAgentMessage(m,"secret",120_000,"b",replay),true);
   assert.equal(verifyAgentMessage(m,"secret",120_000,"b",replay),false);
   assert.equal(verifyAgentMessage({...m,body:{task:"evil"}},"secret"),false);
+ });
+ it("never blanket-approves actions in production",async()=>{
+  const oldNode=process.env.NODE_ENV; const oldSofia=process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV="production";
+  assert.equal(await approveAll({runId:"r",principalId:"p",toolName:"terminal.run",input:{command:"x"},actionHash:"hash",risk:"high"}),false);
+  if(oldNode===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=oldNode;
+  if(oldSofia===undefined)delete process.env.SOFIA_ENV;else process.env.SOFIA_ENV=oldSofia;
  });
  it("fails closed for production security configuration",()=>{
   const old={...process.env};
