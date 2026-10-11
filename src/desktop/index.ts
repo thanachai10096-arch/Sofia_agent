@@ -7,3 +7,5 @@ export { DesktopPermissionError, requireCapability, resolveWorkspacePath, resolv
 export type { DesktopCapability, DesktopCommandResult, DesktopFileEntry, DesktopPrincipal, DesktopRuntimeConfig, DesktopSystemInfo, DesktopAction, DesktopAdapterConfig, DesktopHostDriver } from "./types.js";
 export { DesktopPairingAuthority } from "./pairing.js";
 export type { DesktopPairingConfig } from "./pairing.js";
+export { startLocalPairingHost } from "./local-pairing-host.js";
+export type { LocalPairingHost, LocalPairingHostConfig } from "./local-pairing-host.js";
