@@ -174,7 +174,7 @@ export function createNativeDesktopDriver(config: NativeDesktopDriverConfig = {}
         const combo = /^(Ctrl|Alt|Shift)\+([A-Za-z0-9])$/.exec(key);
         const base = combo ? combo[2]!.toUpperCase().charCodeAt(0) : KEY_CODES[key] ?? (key.length === 1 ? key.toUpperCase().charCodeAt(0) : undefined);
         if (base === undefined) throw new Error("Key is not supported by the Windows native driver.");
-        const modifierCodes = combo ? [{ Ctrl: 0x11, Alt: 0x12, Shift: 0x10 }[combo[1]!]] : [];
+        const modifierCodes = combo ? [({ Ctrl: 0x11, Alt: 0x12, Shift: 0x10 } as Record<string, number>)[combo[1]!]] : [];
         const codes = [...modifierCodes, base];
         const events = codes.map((code) => `$a[$i].type=1; $a[$i].U.ki.wVk=${code}; $a[$i].U.ki.dwFlags=0; $i++`).concat([...codes].reverse().map((code) => `$a[$i].type=1; $a[$i].U.ki.wVk=${code}; $a[$i].U.ki.dwFlags=2; $i++`)).join("; ");
         const script = WINDOWS_SCRIPT + `; $a=New-Object SofiaInput+INPUT[] ${codes.length * 2}; $i=0; ${events}; [SofiaInput]::SendInput($a.Length,$a,[Runtime.InteropServices.Marshal]::SizeOf([type][SofiaInput+INPUT])) | Out-Null`;
