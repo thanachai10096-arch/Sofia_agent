@@ -217,9 +217,7 @@ export class DurableJobRuntime implements JobRuntime {
         ? "cancelled"
         : result.completed
           ? "completed"
-          : result.state === "cancelled"
-            ? "cancelled"
-            : "failed";
+          : "failed";
       record.updatedAt = new Date().toISOString();
       await this.state.save(record);
     } catch (error) {
