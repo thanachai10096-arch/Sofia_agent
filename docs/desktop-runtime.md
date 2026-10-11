@@ -93,11 +93,11 @@ Do not expose this adapter directly from a public API server: it is intended to 
 
 ## Paired local desktop action host
 
-The repository now includes `startLocalDesktopActionHost`. It is an explicitly started loopback service, not a background daemon. It binds only to `127.0.0.1`, creates a one-time pairing code through `onPairingCode`, and issues a short-lived scoped bearer token only after the requested capabilities pass the local operator's allowlist.
+The repository now includes `startLocalDesktopActionHost`. It is an explicitly started loopback service, not a background daemon. It binds only to `127.0.0.1`, creates a one-time pairing code through `onPairingCode`, and issues a time-limited scoped bearer token only after the requested capabilities pass the local operator's allowlist.
 
 The host exposes only the native desktop adapter actions—screen capture, allowlisted application launch, click, text entry and restricted keypress. It does **not** expose arbitrary shell commands or filesystem endpoints. Input and app-launch actions go through the configured `requestApproval` callback. Text-entry approval receives the exact text that will be typed, so a real UI can display it before asking the user.
 
-Example configuration (the executable path and approval UI must be supplied for the target OS):
+Example configuration (the executable path and approval UI must be supplied for the target OS; `workspaceRuntime` is the host's initialized `WorkspaceRuntime`):
 
 ```ts
 import {
