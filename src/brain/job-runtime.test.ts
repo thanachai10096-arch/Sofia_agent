@@ -62,6 +62,14 @@ test("DurableJobRuntime rejects resume when a job has no saved checkpoint", asyn
   const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
   const submitted = await runtime.submit({ task: "no checkpoint available" });
 
+  // submit() starts execution asynchronously; wait until the run has settled before
+  // asserting that resume rejects for a missing checkpoint rather than a live run.
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status === "running"; attempt++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
   await assert.rejects(() => runtime.resume(submitted.id), /no resumable snapshot/i);
 });
 
