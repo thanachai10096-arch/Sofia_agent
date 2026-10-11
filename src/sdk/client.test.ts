@@ -73,3 +73,19 @@ test("SDK surfaces structured API errors and refuses insecure remote endpoints",
   });
   assert.throws(() => new SofiaClient({ apiKey: "test-key", baseUrl: "http://api.example.test" }), /HTTPS/);
 });
+
+test("SDK aborts stalled mobile requests at the configured timeout", async () => {
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    requestTimeoutMs: 20,
+    fetchImpl: async (_input, init) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) return reject(new Error("missing timeout signal"));
+      const fail = () => reject(signal.reason ?? new Error("aborted"));
+      if (signal.aborted) fail();
+      else signal.addEventListener("abort", fail, { once: true });
+    }),
+  });
+  await assert.rejects(client.start({ task: "must not hang forever" }), /timed out/i);
+});
