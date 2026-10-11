@@ -160,6 +160,26 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
       return matches;
     },
     run,
-    git: async (args, options) => run("git", args, options),
+    git: async (args, options = {}) => {
+      const cwd = await contained(options.cwd ?? ".");
+      try {
+        const result = await execFileAsync("git", args, {
+          cwd,
+          windowsHide: true,
+          maxBuffer: 8 * 1024 * 1024,
+          timeout: options.timeoutMs ?? 60_000,
+          env: safeEnv(),
+        });
+        return { stdout: result.stdout, stderr: result.stderr, code: 0 };
+      } catch (error) {
+        const e = error as { code?: string | number; stdout?: string; stderr?: string; signal?: string; killed?: boolean };
+        const numericCode = typeof e.code === "number" ? e.code : undefined;
+        return {
+          stdout: e.stdout ?? "",
+          stderr: e.stderr ?? String(error),
+          code: numericCode ?? (e.killed || e.signal === "SIGTERM" ? 124 : 1),
+        };
+      }
+    },
   };
 }
