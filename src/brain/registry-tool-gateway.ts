@@ -15,6 +15,9 @@ import { RuntimeCheckpointManager, type CheckpointManager } from "./checkpoint.j
 function digest(value:string){return createHash("sha256").update(value).digest("hex");}
 function classifyEffects(name:string):ToolEffect[]{
   if(name.startsWith("browser."))return["browser","network"];
+  if(name==="desktop.system.discover"||name==="desktop.workspace.list_files"||name==="desktop.workspace.read_file")return["read"];
+  if(name==="desktop.workspace.write_file")return["write"];
+  if(name==="desktop.process.run")return["shell"];
   if(name==="workspace.read_file"||name==="workspace.list_files"||name==="workspace.search"||name==="git.diff"||name==="project.verify")return["read"];
   if(name==="workspace.write_file"||name==="workspace.apply_patch")return["write"];
   if(name==="terminal.run")return["shell"];
