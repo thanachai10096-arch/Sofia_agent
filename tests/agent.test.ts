@@ -27,3 +27,20 @@ test("agent retries after reviewer rejection and succeeds on fallback", async ()
   assert.equal(result.output, "Implemented and verified.");
   assert.equal(result.steps, 2);
 });
+
+import { createToolRegistry } from "../src/tools/registry.js";
+import { defaultPolicy } from "../src/security/policy.js";
+
+test("agent requires explicit approval before executing a write tool", async () => {
+  let executed = false;
+  const agent = new SofiaAgent({
+    provider: { async generate() { return { text: "", toolCalls: [{ id: "write-1", name: "workspace.write_file", input: { path: "src/a.ts", content: "example" } }] }; } },
+    router: new ModelRouter([{ id: "primary", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 1, healthy: true }]),
+    reviewer: new Reviewer(),
+    runtime: {} as never,
+    tools: createToolRegistry([{ name: "workspace.write_file", description: "Write a workspace file", inputSchema: { type: "object" }, effects: ["write"], async execute() { executed = true; return { ok: true }; } }]),
+    policy: { ...defaultPolicy, maxSteps: 1 },
+  });
+  await assert.rejects(() => agent.run({ task: "write a file", maxSteps: 1 }), /Approval handler required/);
+  assert.equal(executed, false);
+});
