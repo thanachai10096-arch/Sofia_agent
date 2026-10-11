@@ -5,7 +5,7 @@ import { createDesktopPrincipal } from "../../src/desktop/runtime.js";
 import type { DesktopAction, DesktopHostDriver } from "../../src/desktop/types.js";
 import type { ToolContext } from "../../src/tools/types.js";
 
-function context(): ToolContext { return { runtime: {} as ToolContext["runtime"] }; }
+function context(signal?: AbortSignal): ToolContext { return { runtime: {} as ToolContext["runtime"], ...(signal ? { signal } : {}) }; }
 
 function driver(calls: unknown[] = []): DesktopHostDriver {
   return {
@@ -72,4 +72,32 @@ test("desktop adapter rejects unapproved apps, invalid coordinates, and unsafe k
   await assert.rejects(click.execute({ x: -1, y: 4 }, context()), /coordinates/);
   await assert.rejects(key.execute({ key: "Ctrl+Alt+Delete" }, context()), /allowlist/);
   assert.deepEqual(calls, []);
+});
+
+
+test("desktop action cancels a pending approval and forwards the abort signal to the UI", async () => {
+  const controller = new AbortController();
+  const calls: unknown[] = [];
+  let approvalSignal: AbortSignal | undefined;
+  let markApprovalStarted!: () => void;
+  const approvalStarted = new Promise<void>((resolve) => { markApprovalStarted = resolve; });
+  const tools = createDesktopAdapterTools({
+    config: {
+      driver: driver(calls),
+      requestApproval: async (_action, signal) => {
+        approvalSignal = signal;
+        markApprovalStarted();
+        return new Promise<boolean>(() => {});
+      },
+    },
+    principal: createDesktopPrincipal("operator", ["input:control"]),
+  });
+  const click = tools.find((tool) => tool.name === "desktop.input.click");
+  assert.ok(click);
+  const action = click.execute({ x: 1, y: 2 }, context(controller.signal));
+  await approvalStarted;
+  assert.equal(approvalSignal, controller.signal);
+  controller.abort(new Error("approval timed out"));
+  await assert.rejects(action, /approval timed out/);
+  assert.deepEqual(calls, [], "aborted approval must not reach the native driver");
 });
