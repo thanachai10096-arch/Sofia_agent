@@ -5,6 +5,8 @@ import type { WorkspaceRuntime } from "../platform/runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { defaultPolicy } from "../security/policy.js";
+import { SecurityController } from "../security/controller.js";
+import { MapToolRegistry } from "../tools/types.js";
 
 function runtime(): WorkspaceRuntime {
   const files = new Map<string, string>([["src/app.ts", "const x = 1;"]]);
@@ -68,4 +70,61 @@ test("inspection tools are available without write approval", async () => {
   );
 
   assert.equal(result.ok, true);
+});
+
+
+test("security kill switch aborts an active tool execution", async () => {
+  const rt = runtime();
+  const security = new SecurityController();
+  let announceStarted!: () => void;
+  const started = new Promise<void>((resolve) => { announceStarted = resolve; });
+  let sawAbort = false;
+
+  const registry = new MapToolRegistry([{
+    name: "workspace.search",
+    description: "Wait for cancellation in a controlled test",
+    inputSchema: { type: "object", properties: { query: { type: "string" } } },
+    async execute(_input, context) {
+      announceStarted();
+      return await new Promise((_resolve, reject) => {
+        const signal = context.signal;
+        if (!signal) {
+          reject(new Error("Expected a bound execution signal"));
+          return;
+        }
+        const onAbort = () => {
+          sawAbort = true;
+          reject(signal.reason ?? new Error("aborted"));
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+  }]);
+
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    defaultPolicy,
+    undefined,
+    undefined,
+    security,
+  );
+  const execution = gateway.execute(
+    { tool: "workspace.search", input: { query: "wait" } },
+    {
+      runId: "kill-switch-test",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+
+  await started;
+  security.kill("test requested emergency stop");
+  const result = await execution;
+
+  assert.equal(result.ok, false);
+  assert.equal(sawAbort, true);
+  assert.match(result.error?.message ?? "", /kill switch/i);
+  assert.equal(security.status().killed, true);
 });
