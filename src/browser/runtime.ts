@@ -33,9 +33,9 @@ export interface BrowserRuntime {
 function isPrivateIpv4(address: string): boolean {
   const octets = address.split(".").map(Number);
   if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
-  const a = octets[0]!;
-  const b = octets[1]!;
-  const c = octets[2]!;
+  const a = octets[0] ?? -1;
+  const b = octets[1] ?? -1;
+  const c = octets[2] ?? -1;
   return a === 0 || a === 10 || a === 127 || a >= 224 ||
     (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
