@@ -26,6 +26,7 @@ export function loadExecutionPolicyFromEnv():ExecutionPolicy{
 export function assertSecurityConfiguration(policy:ExecutionPolicy):void{
  const production=process.env.NODE_ENV==="production"||process.env.SOFIA_ENV==="production";
  if(production&&policy.allowTools&&!policy.capabilitySecret)throw new Error("SOFIA_CAPABILITY_SECRET is required in production.");
+ if(production&&!process.env.SOFIA_AUDIT_SECRET)throw new Error("SOFIA_AUDIT_SECRET is required in production for encrypted security audit persistence.");
  if(production&&(policy.allowNetwork||policy.allowBrowser)&&policy.allowedHosts.length===0)throw new Error("SOFIA_ALLOWED_HOSTS is required when network/browser access is enabled in production.");
 }
 export function assertSafeStep(policy:ExecutionPolicy,step:number):void{if(step>policy.maxSteps)throw new Error("Agent step limit exceeded");}
