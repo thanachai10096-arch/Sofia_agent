@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { requireCapability, resolveWorkspacePath, resolveWorkspaceRoot } from "./policy.js";
-import type { DesktopCommandResult, DesktopFileEntry, DesktopPrincipal, DesktopRuntimeConfig, DesktopSystemInfo } from "./types.js";
+import type { DesktopCapability, DesktopCommandResult, DesktopFileEntry, DesktopPrincipal, DesktopRuntimeConfig, DesktopSystemInfo } from "./types.js";
 
 const DEFAULT_ALLOWED_EXECUTABLES = ["git", "node", "npm", "npx", "pnpm", "yarn", "python", "python3", "pytest", "tsc"];
 
@@ -90,7 +90,7 @@ export class DesktopRuntime {
   ): Promise<DesktopCommandResult> {
     requireCapability(principal, "process:execute");
     const executable = path.basename(command);
-    if (!this.allowedExecutables.has(executable)) throw new Error(`Executable "${executable}" is not allowlisted.`);
+    if (command !== executable || !this.allowedExecutables.has(executable)) throw new Error(`Executable "${executable}" is not allowlisted by name.`);
     if (args.some((arg) => typeof arg !== "string" || arg.includes("\0"))) throw new Error("Invalid command argument.");
     const root = await this.rootPromise;
     const cwd = options.cwd && options.cwd !== "." ? await resolveWorkspacePath(root, options.cwd) : root;
@@ -141,6 +141,6 @@ export class DesktopRuntime {
   }
 }
 
-export function createDesktopPrincipal(id: string, capabilities: readonly DesktopPrincipal["capabilities"] extends ReadonlySet<infer T> ? T[] : never): DesktopPrincipal {
+export function createDesktopPrincipal(id: string, capabilities: readonly DesktopCapability[]): DesktopPrincipal {
   return { id, capabilities: new Set(capabilities) };
 }
