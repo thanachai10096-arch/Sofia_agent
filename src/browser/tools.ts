@@ -72,8 +72,22 @@ export function createBrowserTools(runtime: BrowserRuntime): SofiaTool[] {
     {
       name: "browser.close",
       description: "Close a browser page or the entire session.",
-      inputSchema: { type:"object", properties:{pageId:{type:"string"}}, required:["pageId"], additionalProperties:false },
-      async execute(input){ const id=String(input.pageId); const p=page(id); await p.close(); pages.delete(id); return {ok:true}; },
+      inputSchema: { type:"object", properties:{pageId:{type:"string"}}, additionalProperties:false },
+      async execute(input){
+        if (typeof input.pageId === "string") {
+          const id = input.pageId;
+          const value = page(id);
+          await value.close();
+          pages.delete(id);
+          return { ok: true, closed: "page", pageId: id };
+        }
+        if (session) {
+          await session.close();
+          session = undefined;
+          pages.clear();
+        }
+        return { ok: true, closed: "session" };
+      },
     },
   ];
 }
