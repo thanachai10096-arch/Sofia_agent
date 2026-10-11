@@ -62,4 +62,32 @@ describe("encrypted persistent audit", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("redacts credentials before persisting and returning audit records", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "sofia-audit-"));
+    const file = path.join(directory, "events.log");
+    try {
+      const audit = new EncryptedFileAudit(file, "test-audit-secret");
+      await audit.record(event("event-secret", {
+        api_key: "super-secret-value",
+        authorization: "BearerToken123",
+        note: "api_key=inline-secret",
+        nested: { password: "nested-password" },
+      }));
+      const restored = (await new EncryptedFileAudit(file, "test-audit-secret").list())[0]!;
+      assert.deepEqual(restored.input, {
+        api_key: "[REDACTED]",
+        authorization: "[REDACTED]",
+        note: "api_key=[REDACTED]",
+        nested: { password: "[REDACTED]" },
+      });
+      const onDisk = await readFile(file, "utf8");
+      assert.equal(onDisk.includes("super-secret-value"), false);
+      assert.equal(onDisk.includes("inline-secret"), false);
+      assert.equal(onDisk.includes("nested-password"), false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
 });
