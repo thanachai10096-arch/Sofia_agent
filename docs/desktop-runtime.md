@@ -101,5 +101,5 @@ Do not expose this adapter directly from a public API server: it is intended to 
 - Callers should issue narrow capabilities and keep user approval outside the model-generated task text.
 - Do not pass secrets, browser profiles, credential stores, private keys or unrelated home-directory paths as the workspace.
 - The current process runner is a policy boundary, **not an OS-level sandbox**. For untrusted workloads, use a real OS/container sandbox and run the local service as a non-admin user.
-- A production native driver, authenticated loopback pairing service and signed installer are still separate deliverables; this PR adds the capability/approval contract, not those packaged components.
+- The OS command-based native driver is included, but an authenticated local pairing service, durable host lifecycle, and signed platform installers are still separate deliverables. Do not expose this driver directly from a public API or treat it as a fully packaged desktop agent.
 - Do not grant screen/input capabilities to an API key that only needs ordinary server-side agent execution.
