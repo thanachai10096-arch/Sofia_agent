@@ -188,10 +188,13 @@ export class SofiaAgent {
             if (!this.deps.tools || !this.deps.runtime) throw new Error("Agent runtime and tool registry are required for tool execution.");
             const tool = this.deps.tools.get(call.name);
             if (!tool) throw new Error(`Unknown tool: ${call.name}`);
+            // Freeze the model-produced action as a private snapshot before asking for approval.
+            // The approval UI/handler receives a separate copy and cannot mutate what will execute.
+            const actionInput = structuredClone(call.input);
             const effects = tool.effects ?? classifyToolEffects(call.name);
             assertToolAllowed(policy, call.name, effects);
             const permission = toolPermission(policy, call.name, effects);
-            const risk = riskFor(effects, call.input);
+            const risk = riskFor(effects, actionInput);
             const maximumRisk = permission.maxRisk ?? policy.maxRisk;
             if (riskRank[risk] > riskRank[maximumRisk]) {
               throw new Error(`Tool risk ${risk} exceeds configured maximum ${maximumRisk}: ${call.name}`);
@@ -200,7 +203,7 @@ export class SofiaAgent {
             if (requiresApproval && !this.deps.approval) {
               throw new Error(`Approval handler required for ${risk}-risk tool: ${call.name}`);
             }
-            validateToolInput(tool.inputSchema, call.input);
+            validateToolInput(tool.inputSchema, actionInput);
 
             emit({
               type: "tool.started",
@@ -214,8 +217,8 @@ export class SofiaAgent {
                 runId,
                 principalId: request.principalId,
                 toolName: call.name,
-                input: call.input,
-                actionHash: actionHash(runId, call.name, call.input, request.principalId),
+                input: structuredClone(actionInput),
+                actionHash: actionHash(runId, call.name, actionInput, request.principalId),
                 risk,
               });
 
@@ -237,7 +240,7 @@ export class SofiaAgent {
             }
 
             try {
-              const result = await tool.execute(call.input, {
+              const result = await tool.execute(actionInput, {
                 runtime: this.deps.runtime,
                 ...(request.signal ? { signal: request.signal } : {}),
               });
