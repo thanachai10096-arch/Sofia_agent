@@ -14,12 +14,21 @@ export interface SkillPerformance {
   lastFailure?: string;
   successHistory: Array<{ at: string; steps: number; recoveryRounds: number }>;
   failureHistory: Array<{ at: string; message: string }>;
+  taskTypes: Record<string, { attempts: number; successes: number; failures: number }>;
 }
 
 export interface EvolutionSnapshot {
   version: 1;
   skills: Record<string, SkillPerformance>;
   taskTypes: Record<string, { attempts: number; successes: number; failures: number }>;
+}
+
+export interface LearningDiagnostics {
+  generatedAt: string;
+  totals: { skills: number; attempts: number; successes: number; failures: number; successRate: number };
+  taskTypes: EvolutionSnapshot["taskTypes"];
+  topSkills: SkillRanking[];
+  skillsNeedingAttention: SkillRanking[];
 }
 
 export interface SkillRanking {
@@ -55,28 +64,37 @@ export class EvolutionEngine {
     return this.snapshot.skills[id] ??= {
       id, attempts: 0, successes: 0, failures: 0,
       confidence: 0.5, avgSteps: 0, avgRecoveryRounds: 0,
-      successHistory: [], failureHistory: [],
+      successHistory: [], failureHistory: [], taskTypes: {},
     };
   }
 
-  rank(ids: readonly string[]): SkillRanking[] {
+  rank(ids: readonly string[], taskType = "general"): SkillRanking[] {
+    const key = taskType.trim().toLowerCase() || "general";
     return ids.map(id => {
       const s = this.get(id);
-      const rate = s.attempts ? s.successes / s.attempts : 0.5;
+      const globalRate = s.attempts ? s.successes / s.attempts : 0.5;
+      const local = s.taskTypes[key];
+      const localEvidence = local ? 1 - Math.exp(-local.attempts / 3) : 0;
+      const localRate = local?.attempts ? local.successes / local.attempts : globalRate;
+      const rate = globalRate * (1 - localEvidence) + localRate * localEvidence;
       const evidence = 1 - Math.exp(-s.attempts / 5);
       const score = rate * 70 + s.confidence * 20 + evidence * 10 - Math.min(10, s.avgRecoveryRounds * 2);
-      return { id, score, confidence: s.confidence, successRate: rate, attempts: s.attempts };
+      return { id, score, confidence: s.confidence, successRate: rate, attempts: local?.attempts ?? s.attempts };
     }).sort((a,b) => b.score-a.score);
   }
 
-  choose(ids: readonly string[]): string | undefined {
-    return this.rank(ids)[0]?.id;
+  choose(ids: readonly string[], taskType = "general"): string | undefined {
+    return this.rank(ids, taskType)[0]?.id;
   }
 
-  recordSuccess(id: string, steps: number, recoveryRounds = 0): void {
+  recordSuccess(id: string, steps: number, recoveryRounds = 0, taskType = "general"): void {
     const s = this.get(id);
     s.attempts++;
     s.successes++;
+    const key = taskType.trim().toLowerCase() || "general";
+    const local = s.taskTypes[key] ??= { attempts: 0, successes: 0, failures: 0 };
+    local.attempts++;
+    local.successes++;
     s.confidence = clamp(s.confidence * 0.8 + 0.2, 0, 1);
     s.avgSteps = s.attempts === 1 ? steps : ((s.avgSteps * (s.attempts - 1)) + steps) / s.attempts;
     s.avgRecoveryRounds = s.attempts === 1 ? recoveryRounds : ((s.avgRecoveryRounds * (s.attempts - 1)) + recoveryRounds) / s.attempts;
@@ -86,10 +104,14 @@ export class EvolutionEngine {
     void this.persist();
   }
 
-  recordFailure(id: string, message: string): void {
+  recordFailure(id: string, message: string, taskType = "general"): void {
     const s = this.get(id);
     s.attempts++;
     s.failures++;
+    const key = taskType.trim().toLowerCase() || "general";
+    const local = s.taskTypes[key] ??= { attempts: 0, successes: 0, failures: 0 };
+    local.attempts++;
+    local.failures++;
     s.confidence = clamp(s.confidence * 0.75 - 0.05, 0.05, 0.95);
     s.lastFailureAt = new Date().toISOString();
     s.lastFailure = message.slice(0, 500);
@@ -103,6 +125,26 @@ export class EvolutionEngine {
     stats.attempts++;
     completed ? stats.successes++ : stats.failures++;
     void this.persist();
+  }
+
+  getDiagnostics(): LearningDiagnostics {
+    const snapshot = this.getSnapshot();
+    const skills = Object.values(snapshot.skills);
+    const attempts = skills.reduce((sum, skill) => sum + skill.attempts, 0);
+    const successes = skills.reduce((sum, skill) => sum + skill.successes, 0);
+    const failures = skills.reduce((sum, skill) => sum + skill.failures, 0);
+    const ranked = this.rank(skills.map(skill => skill.id));
+    return {
+      generatedAt: new Date().toISOString(),
+      totals: { skills: skills.length, attempts, successes, failures, successRate: attempts ? successes / attempts : 0 },
+      taskTypes: snapshot.taskTypes,
+      topSkills: ranked.slice(0, 10),
+      skillsNeedingAttention: ranked.filter(item => item.attempts >= 2 && item.successRate < 0.5).slice(-10).reverse(),
+    };
+  }
+
+  async flush(): Promise<void> {
+    await this.persistChain;
   }
 
   getSkill(id: string): SkillPerformance | undefined {
