@@ -230,6 +230,19 @@ test("tool catalog exposes only registered tools with accurate desktop effects",
       inputSchema: { type: "object" },
       async execute() { return { exitCode: 0 }; },
     },
+    {
+      name: "custom.read",
+      description: "Custom tool with explicit read-only effects",
+      inputSchema: { type: "object" },
+      effects: ["read"] as const,
+      async execute() { return { ok: true }; },
+    },
+    {
+      name: "custom.unknown",
+      description: "Custom tool with no effect declaration",
+      inputSchema: { type: "object" },
+      async execute() { return { ok: true }; },
+    },
   ];
   const gateway = new RegistryToolGateway(
     { runtime: runtime(), tools: createToolRegistry([...createBuiltinTools(), ...desktopTools]) },
@@ -239,4 +252,6 @@ test("tool catalog exposes only registered tools with accurate desktop effects",
   assert.ok(catalog.some((tool) => tool.name === "desktop.workspace.write_file" && tool.effects.includes("write")));
   assert.ok(catalog.some((tool) => tool.name === "desktop.process.run" && tool.effects.includes("shell")));
   assert.equal(gateway.describe("desktop.process.run")?.effects.includes("shell"), true);
+  assert.deepEqual(gateway.describe("custom.read")?.effects, ["read"]);
+  assert.deepEqual(gateway.describe("custom.unknown")?.effects, ["destructive"]);
 });
