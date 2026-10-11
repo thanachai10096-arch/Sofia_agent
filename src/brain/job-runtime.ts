@@ -127,7 +127,7 @@ export class DurableJobRuntime implements JobRuntime{
 
  private async execute(record:JobRecord,input:Omit<BrainRunInput,"signal"|"resume">,externalSignal?:AbortSignal,resume?:BrainRunSnapshot){
   if(record.status==="running"||record.status==="cancelled")return;
-  record.status="running";record.updatedAt=new Date().toISOString();await this.state.save(record);
+  record.status="running";record.updatedAt=new Date().toISOString();
   const controller=new AbortController();this.controllers.set(record.id,controller);
   if(externalSignal){
    if(externalSignal.aborted)controller.abort(externalSignal.reason);
@@ -137,11 +137,13 @@ export class DurableJobRuntime implements JobRuntime{
    record.snapshot=snapshot;record.updatedAt=new Date().toISOString();await this.runStore?.save(snapshot);await this.state.save(record);
   };
   try{
+   await this.state.save(record);
    const brain=this.brainFactory({signal:controller.signal,onRunSnapshot:onSnapshot});
    const result=await brain.run({...input,...(record.ownerKeyId?{principalId:record.ownerKeyId}:{}),signal:controller.signal,resume});
    record.result=result;record.status=result.completed?"completed":result.state==="cancelled"?"cancelled":"failed";record.updatedAt=new Date().toISOString();await this.state.save(record);
   }catch(error){
-   record.error=error instanceof Error?error.message:String(error);record.status=controller.signal.aborted?"cancelled":"failed";record.updatedAt=new Date().toISOString();await this.state.save(record);
+   record.error=error instanceof Error?error.message:String(error);record.status=controller.signal.aborted?"cancelled":"failed";record.updatedAt=new Date().toISOString();
+   try{await this.state.save(record);}catch{/* Keep the terminal error in memory if durable storage is unavailable. */}
   }finally{this.controllers.delete(record.id);}
  }
 }
