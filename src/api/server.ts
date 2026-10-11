@@ -310,7 +310,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const header = req.headers["idempotency-key"];
           const rawIdempotencyKey = Array.isArray(header) ? header[0] : header;
           const idempotencyKey = rawIdempotencyKey?.trim();
-          if (idempotencyKey && (idempotencyKey.length > 128 || /[\\u0000-\\u001f\\u007f]/.test(idempotencyKey))) {
+          if (idempotencyKey && (idempotencyKey.length > 128 || /[\x00-\x1f\x7f]/.test(idempotencyKey))) {
             return json(res, 400, { error: "invalid_idempotency_key" }, origin, config);
           }
           const idempotencyId = idempotencyKey ? `${auth.keyId}:${idempotencyKey}` : undefined;
@@ -320,13 +320,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
             if (existing) idempotency.delete(idempotencyId);
           }
-          try { usage.consume(auth.keyId); } catch (error) {
-            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
-          }
           const active = activeByKey.get(auth.keyId) ?? 0;
           if (active >= maxConcurrentRunsPerKey) {
             res.setHeader("retry-after", "2");
             return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
+          }
+          try { usage.consume(auth.keyId); } catch (error) {
+            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
           }
           const runId = randomUUID();
           const run: ActiveRun = {
