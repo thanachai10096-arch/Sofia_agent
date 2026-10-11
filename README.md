@@ -19,30 +19,28 @@ A model-agnostic execution layer for Zuse — with internal model routing, polic
 
 ## The 14 Sofia characters
 
-Sofia's mascot set is included in the repository as lightweight, transparent-background SVG assets, with a typed registry for UI and documentation use.
+The original 14 mascot images from the Agent Workspace artwork are now stored as individual PNG assets in this repository. The artwork uses transparent backgrounds, so it can be displayed on both light and dark surfaces.
 
-- **Artwork:** `assets/characters/*.svg`
-- **Registry:** `src/characters/registry.ts`
-- **Count:** 14 distinct characters
-- **Background:** transparent SVG canvas, suitable for light and dark surfaces
-- **Purpose:** visual identity and UI representation; each mascot does not imply a separately running agent.
+- **Artwork:** `assets/characters/*.png` (14 original character images)
+- **Typed registry:** `src/characters/registry.ts`
+- **Purpose:** visual identity and UI representation; the character list does not imply 14 separate running runtime agents.
 
-| Character | Focus |
-|---|---|
-| Sofia | Orchestrator |
-| Nova | Planning |
-| Pixel | Coding |
-| Lumi | Design |
-| Mira | Research |
-| Echo | Browser |
-| Mint | Testing |
-| Bloom | Writing |
-| Iris | Analysis |
-| Velvet | Security |
-| Orbit | Memory |
-| Spark | Tooling |
-| Data | Data |
-| Pulse | Operations |
+| Character identity | Focus | Artwork |
+|---|---|---|
+| Sofia | Orchestrator | `a01-beanie-white.png` |
+| Nova | Planning | `a02-glasses-blue.png` |
+| Pixel | Coding | `a03-cap-shadow.png` |
+| Lumi | Design | `a04-cap-back-pink.png` |
+| Mira | Research | `a05-curly-pink.png` |
+| Echo | Browser | `a06-bob-pink.png` |
+| Data | Data | `a07-cap-pink.png` |
+| Mint | Testing | `a08-curly-mint.png` |
+| Bloom | Writing | `a09-spiky-pink.png` |
+| Iris | Analysis | `a10-spiky-violet.png` |
+| Orbit | Memory | `a11-curly-lilac.png` |
+| Velvet | Security | `a12-beanie-violet.png` |
+| Spark | Tooling | `a13-bob-violet.png` |
+| Pulse | Operations | `a14-tuft-lilac.png` |
 
 Example:
 
