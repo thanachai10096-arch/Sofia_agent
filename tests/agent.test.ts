@@ -27,3 +27,43 @@ test("agent retries after reviewer rejection and succeeds on fallback", async ()
   assert.equal(result.output, "Implemented and verified.");
   assert.equal(result.steps, 2);
 });
+
+
+test("security kill switch aborts active model calls and blocks new runs", async () => {
+  const { SecurityController } = await import("../src/security/controller.js");
+  const securityController = new SecurityController();
+  let markStarted!: () => void;
+  let markAborted!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const aborted = new Promise<void>((resolve) => { markAborted = resolve; });
+  const provider: ModelProvider = {
+    generate(_request, _route, options) {
+      const signal = options?.signal;
+      assert.ok(signal, "agent must bind the security controller to the provider signal");
+      markStarted();
+      return new Promise((_, reject) => {
+        const onAbort = () => {
+          markAborted();
+          reject(signal.reason ?? new Error("aborted"));
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+  };
+  const agent = new SofiaAgent({
+    provider,
+    router: new ModelRouter([
+      { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: new Reviewer(),
+    securityController,
+  });
+
+  const pending = agent.run({ task: "wait for cancellation" });
+  await started;
+  securityController.kill("operator emergency stop");
+  await aborted;
+  await assert.rejects(pending, /operator emergency stop|aborted/i);
+  await assert.rejects(agent.run({ task: "must not start" }), /kill switch is active/);
+});
