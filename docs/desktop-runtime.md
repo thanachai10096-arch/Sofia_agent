@@ -50,11 +50,19 @@ process launch as a shell effect, so the existing execution policy and approval 
 can block them. File and process permissions are also checked again by
 `DesktopRuntime` against the host-supplied principal.
 
-**Important:** the principal in this example is fixed for a local host. A multi-user
-API server must resolve a separate least-privilege principal for each authenticated
-identity and construct a user-scoped registry; do not share an all-capabilities
-principal across API keys. Do not enable process execution unless the operator has
-explicitly configured an executable allowlist and shell policy.
+The API maps authenticated API-key scopes to desktop capabilities; request JSON cannot grant itself permissions:
+
+- `desktop:discover` → `system:discover`
+- `desktop:workspace:list` → `workspace:list`
+- `desktop:workspace:read` → `workspace:read`
+- `desktop:workspace:write` → `workspace:write`
+- `desktop:process:execute` → `process:execute`
+
+Grant these scope strings only to trusted API keys that should have those local capabilities.
+File writes still pass through the existing write approval policy. Process execution additionally
+requires `SOFIA_ALLOW_SHELL=true`, the `desktop:process:execute` scope, and an explicit
+comma-separated `SOFIA_DESKTOP_ALLOWED_EXECUTABLES` allowlist. The allowlist defaults to
+empty. The desktop runtime remains bounded to the workspace configured when Sofia starts.
 
 ## Security boundary
 
