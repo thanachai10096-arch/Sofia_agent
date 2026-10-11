@@ -12,6 +12,8 @@ export { createSofiaAgentDependencies } from "./models/factory.js";
 export { createToolRegistry } from "./tools/registry.js";
 export { createDesktopTools } from "./desktop/tools.js";
 export { createDesktopAdapterTools } from "./desktop/adapter.js";
+export { createNativeDesktopDriver } from "./desktop/native-driver.js";
+export type { NativeDesktopDriverConfig } from "./desktop/native-driver.js";
 export type { DesktopAction, DesktopAdapterConfig, DesktopHostDriver } from "./desktop/types.js";
 export { DesktopRuntime, createDesktopPrincipal } from "./desktop/runtime.js";
 export type { DesktopCapability, DesktopPrincipal, DesktopRuntimeConfig } from "./desktop/types.js";
