@@ -1,5 +1,6 @@
 import { promises as fs, readFileSync } from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 export interface SkillPerformance {
   id: string;
@@ -177,13 +178,15 @@ export class EvolutionEngine {
     if (!this.file) return Promise.resolve();
     const serialized = JSON.stringify(this.snapshot, null, 2);
     this.persistChain = this.persistChain.then(async () => {
+      const tmp = this.file! + "." + process.pid + "." + randomUUID() + ".tmp";
       try {
         await fs.mkdir(path.dirname(this.file!), { recursive: true });
-        const tmp = this.file! + ".tmp";
-        await fs.writeFile(tmp, serialized, "utf8");
+        await fs.writeFile(tmp, serialized, { encoding: "utf8", flag: "wx" });
         await fs.rename(tmp, this.file!);
       } catch {
         // Learning is best-effort; execution semantics never depend on persistence.
+        // Never leave a temporary snapshot behind after a failed write/rename.
+        await fs.rm(tmp, { force: true }).catch(() => undefined);
       }
     });
     return this.persistChain;
