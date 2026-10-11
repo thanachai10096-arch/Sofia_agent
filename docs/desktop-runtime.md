@@ -8,6 +8,7 @@ This module is the local-machine capability foundation for Sofia. It is intentio
 - List, read and atomically write text files inside one configured workspace root.
 - Execute an explicitly allowlisted executable with an argument array (never through a shell), within the workspace and with output/time limits.
 - Apply per-principal capabilities before each operation.
+- Provide an opt-in native desktop adapter contract for screen capture, allowlisted app launch, mouse clicks, text entry and restricted key presses; interactive actions require an out-of-band user approval callback.
 
 ## Quick start
 
@@ -64,6 +65,32 @@ requires `SOFIA_ALLOW_SHELL=true`, the `desktop:process:execute` scope, and an e
 comma-separated `SOFIA_DESKTOP_ALLOWED_EXECUTABLES` allowlist. The allowlist defaults to
 empty. The desktop runtime remains bounded to the workspace configured when Sofia starts.
 
+## Native desktop adapter (local host only)
+
+The native adapter is deliberately driver-injected: the repository does not silently install an OS-control dependency or start a remote-control daemon. A trusted local host supplies a platform-specific `DesktopHostDriver` and a real approval prompt:
+
+```ts
+import { createDesktopAdapterTools, createDesktopPrincipal } from "../src/desktop/index.js";
+
+const principal = createDesktopPrincipal("local-user", [
+  "screen:capture",
+  "app:launch",
+  "input:control",
+]);
+const tools = createDesktopAdapterTools({
+  principal,
+  config: {
+    driver: nativeDriver,
+    allowedApplications: ["calculator"],
+    requestApproval: (action) => showNativeApprovalDialog(action),
+  },
+});
+```
+
+The driver must be implemented and packaged by a trusted platform host for Windows/macOS/Linux; it is not provided by this adapter contract alone. The adapter limits screenshots to 5 MiB, validates coordinates and key names, limits typed text to 2,000 characters, and requires an explicit user approval for every application launch, click, text-entry, and keypress action. Screen capture needs the separate `screen:capture` grant. The existing execution policy also classifies app launch/input as destructive effects, so it remains blocked unless the operator deliberately enables that class of action.
+
+Do not expose this adapter directly from a public API server: it is intended to be constructed by the local host running on the user's own machine. A remote server cannot safely assume that its OS is the user's desktop.
+
 ## Security boundary
 
 - The workspace root is configured by the local operator; it is not inferred from a request.
@@ -74,4 +101,5 @@ empty. The desktop runtime remains bounded to the workspace configured when Sofi
 - Callers should issue narrow capabilities and keep user approval outside the model-generated task text.
 - Do not pass secrets, browser profiles, credential stores, private keys or unrelated home-directory paths as the workspace.
 - The current process runner is a policy boundary, **not an OS-level sandbox**. For untrusted workloads, use a real OS/container sandbox and run the local service as a non-admin user.
-- Desktop UI control, browser profile access, system-wide discovery and installer packaging are not enabled by this foundation. Add them as separately permissioned adapters with their own tests.
+- A production native driver, authenticated loopback pairing service and signed installer are still separate deliverables; this PR adds the capability/approval contract, not those packaged components.
+- Do not grant screen/input capabilities to an API key that only needs ordinary server-side agent execution.
