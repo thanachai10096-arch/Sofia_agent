@@ -159,3 +159,20 @@ test("concurrent evolution instances persist valid snapshots without temp-file c
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("evolution treats prototype property names as ordinary skill and task IDs", async () => {
+  const engine = new EvolutionEngine();
+  const before = (Object.prototype as { attempts?: number }).attempts;
+  engine.recordSuccess("__proto__", 1, 0, "__proto__");
+  engine.recordFailure("constructor", "safe test failure", "constructor");
+  await engine.flush();
+
+  const skill = engine.getSkill("__proto__");
+  assert.ok(skill);
+  assert.equal(skill.successes, 1);
+  assert.equal(skill.taskTypes["__proto__"]?.successes, 1);
+  assert.equal(engine.getSkill("constructor")?.failures, 1);
+  assert.equal(engine.getSnapshot().taskTypes["__proto__"]?.successes, 1);
+  assert.equal((Object.prototype as { attempts?: number }).attempts, before);
+});
