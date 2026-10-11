@@ -53,7 +53,19 @@ export class EvolutionEngine {
     this.snapshot = { version: 1, skills: {}, taskTypes: {} };
     if (file) {
       try {
-        this.snapshot = JSON.parse(readFileSync(file, "utf8")) as EvolutionSnapshot;
+        const loaded = JSON.parse(readFileSync(file, "utf8")) as Partial<EvolutionSnapshot>;
+        const skills = loaded.skills ?? {};
+        this.snapshot = {
+          version: 1,
+          skills: Object.fromEntries(Object.entries(skills).map(([id, skill]) => [id, {
+            ...skill,
+            id: skill.id ?? id,
+            taskTypes: skill.taskTypes ?? {},
+            successHistory: skill.successHistory ?? [],
+            failureHistory: skill.failureHistory ?? [],
+          }])),
+          taskTypes: loaded.taskTypes ?? {},
+        };
       } catch {
         // A missing/corrupt learning file must never prevent Sofia from running.
       }
@@ -148,7 +160,7 @@ export class EvolutionEngine {
   }
 
   getSkill(id: string): SkillPerformance | undefined {
-    return this.snapshot.skills[id] ? { ...this.snapshot.skills[id] } : undefined;
+    return this.snapshot.skills[id] ? JSON.parse(JSON.stringify(this.snapshot.skills[id])) as SkillPerformance : undefined;
   }
 
   getSnapshot(): EvolutionSnapshot {
