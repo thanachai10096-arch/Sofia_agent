@@ -38,7 +38,9 @@ describe("Sofia security controls",()=>{
     assert.equal(controller.isKilled(),false);
     controller.kill("test");
     assert.throws(()=>controller.assertRunning());
+    assert.equal(controller.signal.aborted, true);
     controller.revive();
+    assert.equal(controller.signal.aborted, false);
     assert.doesNotThrow(()=>controller.assertRunning());
   });
 });
