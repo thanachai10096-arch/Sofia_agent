@@ -40,7 +40,12 @@ function keyForXdotool(key: string): string {
   if (aliases[key]) return aliases[key];
   if (/^F(?:[1-9]|1[0-2])$/.test(key)) return key;
   const combo = /^(Ctrl|Alt|Shift)\+([A-Za-z0-9])$/.exec(key);
-  if (combo) return `${combo[1].toLowerCase()}+${combo[2].toLowerCase()}`;
+  if (combo) {
+    const modifier = combo[1];
+    const key = combo[2];
+    if (!modifier || !key) throw new Error("Invalid desktop key combination.");
+    return `${modifier.toLowerCase()}+${key.toLowerCase()}`;
+  }
   return key;
 }
 
