@@ -8,7 +8,7 @@ test("native driver refuses unmapped applications and model-provided launch argu
     applications: { editor: { executable: "/usr/bin/editor", args: ["--safe-mode"] } },
   });
   await assert.rejects(driver.launchApplication("terminal"), /fixed local executable mapping/);
-  await assert.rejects(driver.launchApplication("editor", ["--execute=rm"]), /operator-configured fixed application arguments/);
+  await assert.rejects(driver.launchApplication("editor", ["--execute=rm"]), /operator-configured fixed arguments/);
 });
 
 test("native driver rejects unsafe key names and out-of-range pointer coordinates before OS calls", async () => {
