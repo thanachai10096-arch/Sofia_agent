@@ -96,7 +96,7 @@ export function redactSecrets(value: unknown): unknown {
   if (typeof value === "string") {
     return value
       .replace(/(?:Bearer\s+)[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
-      .replace(/(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
+      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
   }
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value && typeof value === "object") {
