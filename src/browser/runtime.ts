@@ -40,7 +40,7 @@ function isPrivateIpv4(host: string): boolean {
     (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && (b === 168 || (b === 0 && c === 0) || (b === 0 && c === 2))) ||
+    (a === 192 && (b === 168 || (b === 0 && c === 0) || (b === 0 && c === 2) || (b === 88 && c === 99))) ||
     (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
     (a === 203 && b === 0 && c === 113);
 }
@@ -99,7 +99,7 @@ export function assertSafeBrowserUrl(input: string): URL {
 }
 
 async function assertPublicResolvedHost(host: string): Promise<void> {
-  const normalized = host.replace(/^\\[|\\]$/g, "");
+  const normalized = host.replace(/^\[|\]$/g, "");
   if (isIP(normalized)) return; // Literal IPs are checked by assertSafeBrowserUrl.
   let addresses: Array<{ address: string; family: number }>;
   try {
