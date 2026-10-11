@@ -53,21 +53,25 @@ test("gateway retries transient provider status and then succeeds", async () => 
   }
 });
 
-test("gateway rejects malformed tool arguments instead of accepting them", async () => {
+test("gateway rejects malformed and non-object tool arguments", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    choices: [{ message: { content: "", tool_calls: [
-      { id: "call-1", function: { name: "run", arguments: "[" } },
-    ] } }],
-  }), { status: 200, headers: { "content-type": "application/json" } });
   try {
-    const gateway = new SofiaModelGateway({
-      "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model" },
-    });
-    await assert.rejects(
-      gateway.generate({ ...request, tools: [] }, makeRoute()),
-      /invalid arguments for tool call/,
-    );
+    for (const args of ["[", "[]", "null", "42"]) {
+      globalThis.fetch = async () => new Response(JSON.stringify({
+        choices: [{ message: { content: "", tool_calls: [
+          { id: "call-1", function: { name: "run", arguments: args } },
+        ] } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+
+      const gateway = new SofiaModelGateway({
+        "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model" },
+      });
+      await assert.rejects(
+        gateway.generate({ ...request, tools: [] }, makeRoute()),
+        /invalid arguments for tool call/,
+        `expected arguments ${JSON.stringify(args)} to be rejected`,
+      );
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }
