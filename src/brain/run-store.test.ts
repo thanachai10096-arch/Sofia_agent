@@ -1,4 +1,4 @@
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -12,7 +12,7 @@ test("FileRunStore survives a new store instance", async () => {
       version: 1 as const,
       runId: "run-test-1",
       task: "test",
-      understanding: { goal: "test", constraints: [], likelyFiles: [], risks: [] },
+      understanding: { objective: "test", constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [], risk: "low" as const, successCriteria: [], ambiguities: [] },
       plan: { strategy: "initial" as const, reason: "test", steps: [] },
       acceptanceCriteria: [],
       completedStepIds: [],
