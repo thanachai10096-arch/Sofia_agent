@@ -229,7 +229,8 @@ export class DurableJobRuntime implements JobRuntime {
         signal: controller.signal,
         resume,
       });
-      if (controller.signal.aborted || result.state === "cancelled" || isJobCancelled(record)) {
+      const resultState: string = result.state;
+      if (controller.signal.aborted || resultState === "cancelled" || isJobCancelled(record)) {
         // Cancellation is terminal: discard any result that arrives after abort.
         record.status = "cancelled";
         record.error ??= "Job cancelled.";
