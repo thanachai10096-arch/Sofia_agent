@@ -38,8 +38,8 @@ try {
     { signal: controller.signal, maxOutputTokens: 32 },
   );
 
-  if (!result.text.includes("SOFIA_LIVE_PROVIDER_OK")) {
-    throw new Error("Live provider returned a response, but it did not contain the required smoke-test token.");
+  if (result.text.trim() !== "SOFIA_LIVE_PROVIDER_OK") {
+    throw new Error("Live provider response did not exactly match the required smoke-test token.");
   }
 
   console.log("Live provider smoke test passed.");
