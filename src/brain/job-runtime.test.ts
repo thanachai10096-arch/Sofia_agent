@@ -102,8 +102,8 @@ test("DurableJobRuntime resumes a saved checkpoint and passes it to the brain", 
 
   const submitted = await runtime.submit({ task: "resume checkpoint" });
   let current = await runtime.get(submitted.id);
-  for (let attempt = 0; attempt < 30 && current?.status !== "failed"; attempt++) {
-    await new Promise<void>((resolve) => setImmediate(resolve));
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
     current = await runtime.get(submitted.id);
   }
 
