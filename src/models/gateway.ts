@@ -13,6 +13,8 @@ export interface GatewayProviderConfig {
   model: string;
   headers?: Record<string, string>;
   maxConcurrent?: number;
+  /** One deadline for queue wait, provider attempts, and retry delays. Defaults to 45 seconds. */
+  requestTimeoutMs?: number;
 }
 
 interface ChatResponse {
@@ -103,7 +105,17 @@ export class SofiaModelGateway implements ModelProvider {
   constructor(
     private readonly providers: Record<string, GatewayProviderConfig>,
   ) {
-    for (const [id, config] of Object.entries(providers)) this.gates.set(id, new ConcurrencyGate(Math.max(1, config.maxConcurrent ?? 8)));
+    for (const [id, config] of Object.entries(providers)) {
+      const limit = config.maxConcurrent ?? 8;
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) {
+        throw new Error("Invalid maxConcurrent for model provider " + id + ".");
+      }
+      const timeout = config.requestTimeoutMs ?? 45_000;
+      if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 2_147_483_647) {
+        throw new Error("Invalid requestTimeoutMs for model provider " + id + ".");
+      }
+      this.gates.set(id, new ConcurrencyGate(limit));
+    }
   }
 
   async generate(
@@ -149,6 +161,10 @@ export class SofiaModelGateway implements ModelProvider {
     };
 
     const providerId = route.providerId ?? route.id;
+    const timeoutMs = config.requestTimeoutMs ?? 45_000;
+    const requestSignal = options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
+      : AbortSignal.timeout(timeoutMs);
     const gate = this.gates.get(providerId);
     const circuit = this.circuits.get(providerId) ?? { failures: 0, openedAt: 0, probeInFlight: false };
     this.circuits.set(providerId, circuit);
@@ -166,23 +182,19 @@ export class SofiaModelGateway implements ModelProvider {
       const maxAttempts = 3;
       let lastError: unknown;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const timeoutMs = 45_000;
         let retryableFailure = false;
-        const signal = options.signal
-          ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
-          : AbortSignal.timeout(timeoutMs);
         try {
           const response = await fetch(
             config.baseUrl.replace(/\/$/, "") + "/chat/completions",
             {
               method: "POST",
               headers: {
+                ...config.headers,
                 authorization: "Bearer " + config.apiKey,
                 "content-type": "application/json",
-                ...config.headers,
               },
               body: JSON.stringify(body),
-              signal,
+              signal: requestSignal,
             },
           );
           if (response.ok) {
@@ -198,12 +210,15 @@ export class SofiaModelGateway implements ModelProvider {
           const delay = Number.isFinite(retryAfter) && retryAfter > 0
             ? Math.min(retryAfter * 1000, 5_000)
             : Math.min(250 * 2 ** (attempt - 1), 2_000) + Math.floor(Math.random() * 100);
-          await abortableDelay(delay, options.signal);
+          if (requestSignal.aborted) throw requestSignal.reason ?? new Error("Model gateway request timed out.");
+          await abortableDelay(delay, requestSignal);
         } catch (error) {
           lastError = error;
-          if (options.signal?.aborted || attempt === maxAttempts ||
-              (error instanceof Error && error.message.startsWith("Model gateway request failed (") && !retryableFailure)) throw error;
-          await abortableDelay(Math.min(250 * 2 ** (attempt - 1), 2_000), options.signal);
+          if (requestSignal.aborted || attempt === maxAttempts ||
+              (error instanceof Error && error.message.startsWith("Model gateway request failed (") && !retryableFailure)) {
+            throw requestSignal.aborted && requestSignal.reason instanceof Error ? requestSignal.reason : error;
+          }
+          await abortableDelay(Math.min(250 * 2 ** (attempt - 1), 2_000), requestSignal);
         }
       }
       throw lastError instanceof Error ? lastError : new Error("Model provider request failed.");
@@ -211,7 +226,7 @@ export class SofiaModelGateway implements ModelProvider {
 
     let response: Response;
     try {
-      response = await (gate ? gate.run(execute, options.signal) : execute());
+      response = await (gate ? gate.run(execute, requestSignal) : execute());
     } catch (error) {
       circuit.probeInFlight = false;
       if (!options.signal?.aborted) {
