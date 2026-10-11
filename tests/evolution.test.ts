@@ -105,3 +105,14 @@ test("legacy evolution snapshots load with safe defaults", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("task type normalization is stable across casing, whitespace, and empty input", () => {
+  const engine = new EvolutionEngine();
+  engine.recordRun("  Code Review  ", true);
+  engine.recordRun("code   review", false);
+  engine.recordRun("   ", true);
+  const snapshot = engine.getSnapshot();
+  assert.deepEqual(snapshot.taskTypes["code-review"], { attempts: 2, successes: 1, failures: 1 });
+  assert.deepEqual(snapshot.taskTypes.general, { attempts: 1, successes: 1, failures: 0 });
+});
