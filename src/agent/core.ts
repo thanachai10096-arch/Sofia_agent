@@ -10,16 +10,22 @@ export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
 
   async run(request: AgentRequest): Promise<AgentResult> {
-    // Sofia Brain is the default execution path. Legacy execution is only
-    // used when Brain is unavailable or explicitly disabled.
-    const shouldUseBrain =
-      this.deps.brainFactory !== undefined &&
-      request.useBrain !== false;
-    if (shouldUseBrain) {
-      return this.runBrain(request);
+    const security = this.deps.securityController;
+    const binding = security
+      ? security.bindSignal(request.signal ?? new AbortController().signal)
+      : undefined;
+    const activeRequest = binding ? { ...request, signal: binding.signal } : request;
+    try {
+      // The host kill switch and caller cancellation share one signal for this run.
+      security?.assertRunning();
+      const shouldUseBrain =
+        this.deps.brainFactory !== undefined &&
+        request.useBrain !== false;
+      if (shouldUseBrain) return await this.runBrain(activeRequest);
+      return await this.runLegacy(activeRequest);
+    } finally {
+      binding?.dispose();
     }
-
-    return this.runLegacy(request);
   }
 
   private async runBrain(request: AgentRequest): Promise<AgentResult> {
