@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
+import type { SecurityAuditEvent } from "../security/audit.js";
 import { assertSafeStep, assertToolAllowed, loadExecutionPolicyFromEnv, riskRank, toolPermission, type ToolEffect } from "../security/policy.js";
-import { actionHash, riskFor } from "../security/guard.js";
+import { actionHash, newSecurityEventId, riskFor } from "../security/guard.js";
 
 
 function inferToolEffects(name: string): ToolEffect[] {
@@ -119,6 +120,10 @@ export class SofiaAgent {
     });
 
     const policy = this.deps.policy ?? loadExecutionPolicyFromEnv();
+    const audit = async (event: Omit<SecurityAuditEvent, "id" | "at">) => {
+      if (!this.deps.securityAudit) return;
+      await this.deps.securityAudit.record({ id: newSecurityEventId(), at: new Date().toISOString(), ...event });
+    };
     const maxSteps = Math.min(
       request.maxSteps ?? policy.maxSteps,
       policy.maxSteps,
@@ -193,16 +198,26 @@ export class SofiaAgent {
             const tool = this.deps.tools.get(call.name);
             if (!tool) throw new Error(`Unknown tool: ${call.name}`);
             const effects = tool.effects ? [...tool.effects] : inferToolEffects(call.name);
-            assertToolAllowed(policy, call.name, effects);
-            const permission = toolPermission(policy, call.name, effects);
+            const hash = actionHash(runId, call.name, call.input, request.principalId);
             const risk = riskFor(effects, call.input);
-            const maximumRisk = permission.maxRisk ?? policy.maxRisk;
-            if (riskRank[risk] > riskRank[maximumRisk]) {
-              throw new Error(`Tool risk ${risk} exceeds configured maximum ${maximumRisk}: ${call.name}`);
-            }
-            const requiresApproval = permission.requireApproval ?? risk !== "low";
-            if (requiresApproval && !this.deps.approval) {
-              throw new Error(`Approval handler required for ${risk}-risk tool: ${call.name}`);
+            try {
+              assertToolAllowed(policy, call.name, effects);
+              const permission = toolPermission(policy, call.name, effects);
+              const maximumRisk = permission.maxRisk ?? policy.maxRisk;
+              if (riskRank[risk] > riskRank[maximumRisk]) {
+                throw new Error(`Tool risk ${risk} exceeds configured maximum ${maximumRisk}: ${call.name}`);
+              }
+              const requiresApproval = permission.requireApproval ?? risk !== "low";
+              if (requiresApproval && !this.deps.approval) {
+                throw new Error(`Approval handler required for ${risk}-risk tool: ${call.name}`);
+              }
+            } catch (error) {
+              await audit({
+                runId, principalId: request.principalId, toolName: call.name, actionHash: hash, risk,
+                decision: "deny", reason: error instanceof Error ? error.message : "Security policy denied action.",
+                input: call.input,
+              });
+              throw error;
             }
 
             emit({
@@ -213,16 +228,18 @@ export class SofiaAgent {
             });
 
             if (this.deps.approval) {
+              await audit({ runId, principalId: request.principalId, toolName: call.name, actionHash: hash, risk, decision: "approval_required", input: call.input });
               const approved = await this.deps.approval({
                 runId,
                 principalId: request.principalId,
                 toolName: call.name,
                 input: call.input,
-                actionHash: actionHash(runId, call.name, call.input, request.principalId),
+                actionHash: hash,
                 risk,
               });
 
               if (!approved) {
+                await audit({ runId, principalId: request.principalId, toolName: call.name, actionHash: hash, risk, decision: "approval_denied", reason: "Approval handler rejected action.", input: call.input });
                 emit({
                   type: "tool.approval_required",
                   message: `Tool ${call.name} was not approved.`,
@@ -244,6 +261,7 @@ export class SofiaAgent {
                 runtime: this.deps.runtime,
                 ...(request.signal ? { signal: request.signal } : {}),
               });
+              await audit({ runId, principalId: request.principalId, toolName: call.name, actionHash: hash, risk, decision: "completed", input: call.input, result });
               messages.push({
                 role: "tool",
                 content: JSON.stringify(result),
@@ -259,6 +277,7 @@ export class SofiaAgent {
             } catch (error) {
               const message =
                 error instanceof Error ? error.message : String(error);
+              await audit({ runId, principalId: request.principalId, toolName: call.name, actionHash: hash, risk, decision: "failed", reason: message, input: call.input });
 
               messages.push({
                 role: "tool",
