@@ -24,10 +24,18 @@ export class MemorySecurityAudit implements SecurityAuditSink {
   record(event: SecurityAuditEvent): void {
     this.events.push({
       ...event,
+      reason: event.reason === undefined ? undefined : String(redactSecrets(event.reason)),
       input: event.input === undefined ? undefined : redactSecrets(event.input),
       result: event.result === undefined ? undefined : redactSecrets(event.result),
     });
     while (this.events.length > this.maxEvents) this.events.shift();
   }
-  list(): SecurityAuditEvent[] { return this.events.map(event => ({ ...event })); }
+  list(): SecurityAuditEvent[] {
+    return this.events.map(event => ({
+      ...event,
+      reason: event.reason === undefined ? undefined : String(redactSecrets(event.reason)),
+      input: event.input === undefined ? undefined : redactSecrets(event.input),
+      result: event.result === undefined ? undefined : redactSecrets(event.result),
+    }));
+  }
 }
