@@ -165,6 +165,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const adminScope = config.securityAdminScope ?? "security:admin";
       const isSecurityAdmin = auth.scopes.includes(adminScope);
+      if (req.method === "GET" && req.url === "/v1/learning/diagnostics") {
+        if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
+        if (!deps.learningDiagnostics) return json(res, 503, { error: "learning_diagnostics_unavailable" }, origin, config);
+        return json(res, 200, deps.learningDiagnostics(), origin, config);
+      }
       if (req.method === "GET" && req.url === "/v1/security/status") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         return json(res, 200, {
