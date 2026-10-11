@@ -70,5 +70,7 @@ export interface DesktopAdapterConfig {
   requestApproval: (action: DesktopAction) => Promise<boolean>;
   /** Exact app identifiers the local operator permits the host to launch. */
   allowedApplications?: readonly string[];
+  /** Exact arguments allowed for each application ID. Unlisted applications accept no arguments. */
+  allowedApplicationArgs?: Readonly<Record<string, readonly string[]>>;
   maxTextLength?: number;
 }
