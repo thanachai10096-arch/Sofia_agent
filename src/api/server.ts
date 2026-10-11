@@ -132,7 +132,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
         });
-        if (run.controller.signal.aborted || run.status === "cancelled") {
+        if (run.controller.signal.aborted) {
           run.status = "cancelled";
           run.error ??= "Run cancelled.";
         } else {
