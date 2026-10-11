@@ -94,8 +94,10 @@ test("browser.close removes a page handle even when the runtime close fails", as
     } satisfies BrowserSession),
   } satisfies BrowserRuntime;
   const tools = createBrowserTools(runtime);
+  const open = tools.find((item) => item.name === "browser.open")!;
   const close = tools.find((item) => item.name === "browser.close")!;
   const observe = tools.find((item) => item.name === "browser.observe")!;
+  await open.execute({}, {} as never);
   await assert.rejects(close.execute({ pageId: "page-failure" }, {} as never), /page close failed/);
   await assert.rejects(observe.execute({ pageId: "page-failure" }, {} as never), /Unknown browser page/);
 });
