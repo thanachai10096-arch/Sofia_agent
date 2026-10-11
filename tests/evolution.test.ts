@@ -138,3 +138,24 @@ test("persisted task-specific learning changes the next skill choice after reloa
   }
 });
 
+
+
+test("concurrent evolution instances persist valid snapshots without temp-file collisions", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-evolution-concurrent-"));
+  const file = join(directory, "evolution.json");
+  try {
+    const first = new EvolutionEngine(file);
+    const second = new EvolutionEngine(file);
+    for (let i = 0; i < 20; i++) {
+      first.recordSuccess("skill-a", i + 1, 0, "coding");
+      second.recordFailure("skill-b", "simulated failure " + i, "testing");
+    }
+    await Promise.all([first.flush(), second.flush()]);
+    const raw = JSON.parse(await readFile(file, "utf8")) as { skills: Record<string, unknown> };
+    assert.ok(raw && typeof raw.skills === "object" && !Array.isArray(raw.skills));
+    const leftovers = (await import("node:fs/promises")).readdir(directory);
+    assert.deepEqual((await leftovers).filter(name => name.endsWith(".tmp")), []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
