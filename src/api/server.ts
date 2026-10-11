@@ -5,6 +5,7 @@ import type { AgentDependencies } from "../agent/types.js";
 import type { DesktopCapability } from "../desktop/types.js";
 import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } from "./types.js";
 import { UsageLimiter } from "./usage.js";
+import { validateAgentRunInput } from "./validation.js";
 
 interface ActiveRun {
   id: string;
@@ -25,11 +26,11 @@ function headers(origin: string | undefined, config: SofiaApiConfig) {
       ? "*"
       : origin && allowed.includes(origin)
         ? origin
-        : allowed[0];
+        : undefined;
   return {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
-    "access-control-allow-origin": allowOrigin,
+    ...(allowOrigin ? { "access-control-allow-origin": allowOrigin } : {}),
     "access-control-allow-headers": "authorization, content-type",
     "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
     "access-control-expose-headers": "retry-after",
@@ -159,6 +160,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (Date.now() - lastPruneAt > 30_000) { lastPruneAt = Date.now(); prune(); }
 
       if (req.method === "OPTIONS") {
+        const allowed = config.allowedOrigins;
+        if (origin && allowed?.length && !allowed.includes("*") && !allowed.includes(origin)) {
+          res.writeHead(403, { "cache-control": "no-store", vary: "Origin" });
+          return res.end();
+        }
         res.writeHead(204, headers(origin, config));
         return res.end();
       }
@@ -227,7 +233,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       if (req.method === "POST" && req.url === "/v1/agent/runs/stream") {
-        const input = (await body(req, maxBytes)) as AgentRunInput;
+        const parsed = validateAgentRunInput(await body(req, maxBytes));
+        if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
+        const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch {
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
@@ -271,7 +279,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       if (req.method === "POST" && req.url === "/v1/agent/runs") {
-        const input = (await body(req, maxBytes)) as AgentRunInput;
+        const parsed = validateAgentRunInput(await body(req, maxBytes));
+        if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
+        const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
 
         try { usage.consume(auth.keyId); } catch (error) {
@@ -372,7 +382,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       if (req.method === "POST" && req.url === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
-        const input = (await body(req, maxBytes)) as AgentRunInput;
+        const parsed = validateAgentRunInput(await body(req, maxBytes));
+        if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
+        const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
