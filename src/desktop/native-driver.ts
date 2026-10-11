@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -54,6 +54,14 @@ async function runFile(command: string, args: string[], timeoutMs: number, env?:
   await execFileAsync(command, args, { windowsHide: true, timeout: timeoutMs, maxBuffer: 1024 * 1024, env: env ? { ...process.env, ...env } : process.env });
 }
 
+async function launchFile(command: string, args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
+    child.once("error", reject);
+    child.once("spawn", () => { child.unref(); resolve(); });
+  });
+}
+
 function powershellScript(script: string): string {
   return Buffer.from(script, "utf16le").toString("base64");
 }
@@ -92,8 +100,12 @@ export function createNativeDesktopDriver(config: NativeDesktopDriverConfig = {}
           if (!captured) throw new Error("Screen capture unavailable on Linux. Install gnome-screenshot, scrot, or ImageMagick import.");
         }
         const data = await readFile(file);
-        if (data.byteLength === 0 || data.byteLength > 5 * 1024 * 1024) throw new Error("Screen capture is empty or exceeds the 5 MiB limit.");
-        return { mimeType: "image/png" as const, data: new Uint8Array(data), width: 1, height: 1 };
+        if (data.byteLength < 24 || data.byteLength > 5 * 1024 * 1024) throw new Error("Screen capture is empty or exceeds the 5 MiB limit.");
+        if (data.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw new Error("Screen capture did not produce a valid PNG.");
+        const width = data.readUInt32BE(16);
+        const height = data.readUInt32BE(20);
+        if (width < 1 || height < 1 || width > 16384 || height > 16384) throw new Error("Screen capture has invalid dimensions.");
+        return { mimeType: "image/png" as const, data: new Uint8Array(data), width, height };
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -104,7 +116,7 @@ export function createNativeDesktopDriver(config: NativeDesktopDriverConfig = {}
       if (!app || !app.executable || app.executable.includes("\0")) throw new Error("Application ID has no fixed local executable mapping.");
       const fixedArgs = [...(app.args ?? [])];
       if (args.length) throw new Error("Native driver accepts only operator-configured fixed application arguments.");
-      await runFile(app.executable, fixedArgs, timeout);
+      await launchFile(app.executable, fixedArgs);
       return { launched: true, applicationId };
     },
 
@@ -134,7 +146,7 @@ export function createNativeDesktopDriver(config: NativeDesktopDriverConfig = {}
         const script = "on run argv\n tell application \"System Events\" to keystroke (item 1 of argv)\nend run";
         await runFile("/usr/bin/osascript", ["-e", script, text], timeout);
       } else {
-        const script = WINDOWS_SCRIPT + "; Add-Type -AssemblyName System.Web; $s=[System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:SOFIA_TEXT_B64)); [System.Windows.Forms.SendKeys]::SendWait($s.Replace('{','{{').Replace('}','}}'))";
+        const script = WINDOWS_SCRIPT + "; $bytes=[Convert]::FromBase64String($env:SOFIA_TEXT_B64); $s=[System.Text.Encoding]::UTF8.GetString($bytes); foreach($ch in $s.ToCharArray()){ $down=New-Object SofiaInput+INPUT; $down.type=1; $down.U.ki.wScan=[int][char]$ch; $down.U.ki.dwFlags=4; $up=New-Object SofiaInput+INPUT; $up.type=1; $up.U.ki.wScan=[int][char]$ch; $up.U.ki.dwFlags=6; [SofiaInput]::SendInput(1,@($down),[Runtime.InteropServices.Marshal]::SizeOf([type][SofiaInput+INPUT])) | Out-Null; [SofiaInput]::SendInput(1,@($up),[Runtime.InteropServices.Marshal]::SizeOf([type][SofiaInput+INPUT])) | Out-Null }";
         await runFile("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", powershellScript(script)], timeout, { SOFIA_TEXT_B64: Buffer.from(text, "utf8").toString("base64") });
       }
     },
