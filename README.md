@@ -1,7 +1,7 @@
 <!-- Sofia Agents — README -->
 <div align="center">
 
-# 🟢 Sofia Agents
+# Sofia Agents
 
 **An agent runtime built to plan, act, verify, and recover.**
 
