@@ -219,14 +219,14 @@ export class DurableJobRuntime implements JobRuntime {
         resume,
       });
       record.result = result;
-      record.status = record.status === "cancelled" || controller.signal.aborted || result.state === "cancelled"
+      record.status = controller.signal.aborted || result.state === "cancelled"
         ? "cancelled"
         : result.completed ? "completed" : "failed";
       record.updatedAt = new Date().toISOString();
       await this.state.save(record);
     } catch (error) {
       record.error = error instanceof Error ? error.message : String(error);
-      record.status = record.status === "cancelled" || controller.signal.aborted ? "cancelled" : "failed";
+      record.status = controller.signal.aborted ? "cancelled" : "failed";
       record.updatedAt = new Date().toISOString();
       await this.state.save(record);
     } finally {
