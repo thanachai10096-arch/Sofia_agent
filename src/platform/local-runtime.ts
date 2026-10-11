@@ -97,7 +97,7 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
       });
       return { stdout: result.stdout, stderr: result.stderr, code: 0 };
     } catch (error) {
-      const e = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string; signal?: string; killed?: boolean };
+      const e = error as { code?: string | number; stdout?: string; stderr?: string; signal?: string; killed?: boolean };
       const numericCode = typeof e.code === "number" ? e.code : undefined;
       return {
         stdout: e.stdout ?? "",
