@@ -56,3 +56,27 @@ test("API refuses run creation when the API key lacks agent:run scope", async ()
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+test("API refuses streaming run creation when the API key lacks agent:run scope", async () => {
+  const server = createSofiaApi({} as AgentDependencies, {
+    apiKeys: { "read-only-key": ["agent:read"] },
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/agent/runs/stream`, {
+      method: "POST",
+      headers: { authorization: "Bearer read-only-key", "content-type": "application/json" },
+      body: JSON.stringify({ task: "must be denied" }),
+    });
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { error: "forbidden", requiredScope: "agent:run" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+

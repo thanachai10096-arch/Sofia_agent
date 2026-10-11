@@ -23,7 +23,7 @@ function dependencies(provider: ModelProvider): AgentDependencies {
 
 async function startApi(provider: ModelProvider) {
   const server = createSofiaApi(dependencies(provider), {
-    apiKeys: { "test-token": [] },
+    apiKeys: { "test-token": ["agent:run"] },
     allowedOrigins: ["https://app.example"],
     requestTimeoutMs: 5_000,
   });
