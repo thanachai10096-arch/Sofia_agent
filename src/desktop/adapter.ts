@@ -5,9 +5,33 @@ import { requireCapability } from "./policy.js";
 const MAX_SCREEN_BYTES = 5 * 1024 * 1024;
 const KEY_PATTERN = /^(?:[A-Za-z0-9]|Enter|Escape|Tab|Backspace|Delete|Arrow(?:Up|Down|Left|Right)|Home|End|PageUp|PageDown|Space|F(?:[1-9]|1[0-2])|Ctrl\+[A-Za-z0-9]|Alt\+[A-Za-z0-9]|Shift\+[A-Za-z0-9])$/;
 
-function approved(config: DesktopAdapterConfig, action: DesktopAction): Promise<void> {
-  return config.requestApproval(action).then((allow) => {
-    if (!allow) throw new Error("Desktop action was denied by the user.");
+function approved(config: DesktopAdapterConfig, action: DesktopAction, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("Desktop approval was cancelled."));
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(signal?.reason ?? new Error("Desktop approval was cancelled."));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve()
+      .then(() => config.requestApproval(action, signal))
+      .then((allow) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (!allow) reject(new Error("Desktop action was denied by the user."));
+        else resolve();
+      }, (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      });
+    if (signal?.aborted) onAbort();
   });
 }
 
@@ -55,7 +79,7 @@ export function createDesktopAdapterTools(options: {
         if (typeof input.applicationId !== "string" || !allowedApplications.has(input.applicationId)) throw new Error("Application is not allowlisted by the local operator.");
         const args = Array.isArray(input.args) && input.args.every((item) => typeof item === "string" && !item.includes("\0")) ? input.args as string[] : [];
         if (Array.isArray(input.args) && args.length !== input.args.length) throw new Error("Application arguments must be valid strings.");
-        await approved(config, { kind: "app.launch", applicationId: input.applicationId, args });
+        await approved(config, { kind: "app.launch", applicationId: input.applicationId, args }, context.signal);
         context.signal?.throwIfAborted();
         return config.driver.launchApplication(input.applicationId, args);
       },
@@ -75,7 +99,7 @@ export function createDesktopAdapterTools(options: {
         if (!Number.isInteger(input.x) || !Number.isInteger(input.y) || (input.x as number) < 0 || (input.y as number) < 0 || (input.x as number) > 16383 || (input.y as number) > 16383) throw new Error("Click coordinates must be integers between 0 and 16383.");
         const button = input.button === undefined ? "left" : input.button;
         if (button !== "left" && button !== "right" && button !== "middle") throw new Error("Unsupported mouse button.");
-        await approved(config, { kind: "input.click", x: input.x as number, y: input.y as number, button });
+        await approved(config, { kind: "input.click", x: input.x as number, y: input.y as number, button }, context.signal);
         context.signal?.throwIfAborted();
         await config.driver.click({ x: input.x as number, y: input.y as number, button });
         return { ok: true };
@@ -89,7 +113,7 @@ export function createDesktopAdapterTools(options: {
         context.signal?.throwIfAborted();
         requireCapability(principal, "input:control");
         if (typeof input.text !== "string" || input.text.length > maxTextLength || input.text.includes("\0")) throw new Error(`Text must be a string of at most ${maxTextLength} characters.`);
-        await approved(config, { kind: "input.type", text: input.text });
+        await approved(config, { kind: "input.type", text: input.text }, context.signal);
         context.signal?.throwIfAborted();
         await config.driver.typeText(input.text);
         return { ok: true, characters: input.text.length };
@@ -103,7 +127,7 @@ export function createDesktopAdapterTools(options: {
         context.signal?.throwIfAborted();
         requireCapability(principal, "input:control");
         if (typeof input.key !== "string" || !KEY_PATTERN.test(input.key)) throw new Error("Key is not in the desktop adapter allowlist.");
-        await approved(config, { kind: "input.key", key: input.key });
+        await approved(config, { kind: "input.key", key: input.key }, context.signal);
         context.signal?.throwIfAborted();
         await config.driver.pressKey(input.key);
         return { ok: true, key: input.key };
