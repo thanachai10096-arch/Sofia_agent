@@ -116,3 +116,25 @@ test("task type normalization is stable across casing, whitespace, and empty inp
   assert.deepEqual(snapshot.taskTypes["code-review"], { attempts: 2, successes: 1, failures: 1 });
   assert.deepEqual(snapshot.taskTypes.general, { attempts: 1, successes: 1, failures: 0 });
 });
+
+test("persisted task-specific learning changes the next skill choice after reload", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-evolution-ranking-"));
+  const file = join(directory, "evolution.json");
+  try {
+    const firstRun = new EvolutionEngine(file);
+    for (let i = 0; i < 5; i++) {
+      firstRun.recordSuccess("coding-repair", 2, 0, "coding");
+      firstRun.recordFailure("coding-repair", "repair failed in documentation", "documentation");
+      firstRun.recordFailure("general-repair", "repair failed", "coding");
+      firstRun.recordSuccess("general-repair", 3, 0, "documentation");
+    }
+    await firstRun.flush();
+
+    const nextRun = new EvolutionEngine(file);
+    assert.equal(nextRun.choose(["general-repair", "coding-repair"], "coding"), "coding-repair");
+    assert.equal(nextRun.choose(["general-repair", "coding-repair"], "documentation"), "general-repair");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
