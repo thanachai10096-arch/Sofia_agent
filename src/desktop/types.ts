@@ -3,7 +3,10 @@ export type DesktopCapability =
   | "workspace:list"
   | "workspace:read"
   | "workspace:write"
-  | "process:execute";
+  | "process:execute"
+  | "screen:capture"
+  | "app:launch"
+  | "input:control";
 
 export interface DesktopPrincipal {
   id: string;
@@ -43,4 +46,29 @@ export interface DesktopCommandResult {
   stdout: string;
   stderr: string;
   durationMs: number;
+}
+
+
+/** Platform-native implementation supplied by the trusted local desktop host. */
+export interface DesktopHostDriver {
+  captureScreen(options?: { displayId?: string }): Promise<{ mimeType: "image/png" | "image/jpeg"; data: Uint8Array; width: number; height: number }>;
+  launchApplication(applicationId: string, args?: string[]): Promise<{ launched: boolean; applicationId: string }>;
+  click(point: { x: number; y: number; button?: "left" | "right" | "middle" }): Promise<void>;
+  typeText(text: string): Promise<void>;
+  pressKey(key: string): Promise<void>;
+}
+
+export type DesktopAction =
+  | { kind: "app.launch"; applicationId: string; args: string[] }
+  | { kind: "input.click"; x: number; y: number; button: "left" | "right" | "middle" }
+  | { kind: "input.type"; characterCount: number }
+  | { kind: "input.key"; key: string };
+
+export interface DesktopAdapterConfig {
+  driver: DesktopHostDriver;
+  /** Must be a real user-facing approval prompt; model text cannot approve actions. */
+  requestApproval: (action: DesktopAction) => Promise<boolean>;
+  /** Exact app identifiers the local operator permits the host to launch. */
+  allowedApplications?: readonly string[];
+  maxTextLength?: number;
 }
