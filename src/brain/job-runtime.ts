@@ -25,12 +25,23 @@ class FileJobStateStore {
   try{return JSON.parse(await fs.readFile(this.file,"utf8")) as JobRecord[];}
   catch(error){if((error as NodeJS.ErrnoException).code==="ENOENT")return[];throw error;}
  }
+ private writeQueue:Promise<void>=Promise.resolve();
  async save(record:JobRecord):Promise<void>{
-  const records=await this.read(); const i=records.findIndex(x=>x.id===record.id);
-  const durable={...record};
-  if(i>=0)records[i]=durable;else records.push(durable);
-  await fs.mkdir(path.dirname(this.file),{recursive:true});
-  const tmp=this.file+".tmp"; await fs.writeFile(tmp,JSON.stringify(records,null,2),"utf8"); await fs.rename(tmp,this.file);
+  const operation=this.writeQueue.then(async()=>{
+   const records=await this.read(); const i=records.findIndex(x=>x.id===record.id);
+   const durable={...record};
+   if(i>=0)records[i]=durable;else records.push(durable);
+   await fs.mkdir(path.dirname(this.file),{recursive:true});
+   const tmp=this.file+"."+randomUUID()+".tmp";
+   try{
+    await fs.writeFile(tmp,JSON.stringify(records,null,2),"utf8");
+    await fs.rename(tmp,this.file);
+   }finally{
+    await fs.rm(tmp,{force:true}).catch(()=>undefined);
+   }
+  });
+  this.writeQueue=operation.catch(()=>undefined);
+  await operation;
  }
  async list():Promise<JobRecord[]>{return this.read();}
  async get(id:string){return(await this.read()).find(x=>x.id===id);}
@@ -55,17 +66,41 @@ export class DurableJobRuntime implements JobRuntime{
  }
 
  async get(id:string):Promise<JobRecord|undefined>{
-  const existing=this.jobs.get(id);if(existing)return{...existing};
+  const existing=this.jobs.get(id);
+  if(existing)return{...existing};
   const stored=await this.state.get(id);if(!stored)return undefined;
-  const snapshot=stored.snapshot?.runId&&this.runStore?await this.runStore.load(stored.snapshot.runId):undefined;
-  const hydrated={...stored,...(snapshot?{snapshot}: {})};
-  this.jobs.set(id,hydrated);return{...hydrated};
+  return this.hydrateStoredRecord(stored);
  }
 
  async list():Promise<JobRecord[]>{
   const stored=await this.state.list();
-  for(const record of stored)this.jobs.set(record.id,record);
-  return[...this.jobs.values()].map(x=>({...x}));
+  const records:JobRecord[]=[];
+  for(const item of stored){
+   const active=this.jobs.get(item.id);
+   if(active){
+    records.push({...active});
+    continue;
+   }
+   records.push(await this.hydrateStoredRecord(item));
+  }
+  return records;
+ }
+
+ private async hydrateStoredRecord(stored:JobRecord):Promise<JobRecord>{
+  const snapshot=stored.snapshot?.runId&&this.runStore
+   ?await this.runStore.load(stored.snapshot.runId)
+   :stored.snapshot;
+  const hydrated:JobRecord={...stored,...(snapshot?{snapshot}:{})};
+  if(hydrated.status==="running"||hydrated.status==="queued"){
+   hydrated.status="failed";
+   hydrated.updatedAt=new Date().toISOString();
+   hydrated.error=hydrated.snapshot
+    ?"Worker stopped before completion; resume this job from its saved checkpoint."
+    :"Worker stopped before a resumable checkpoint was saved.";
+   await this.state.save(hydrated);
+  }
+  this.jobs.set(hydrated.id,hydrated);
+  return{...hydrated};
  }
 
  async resume(id:string,signal?:AbortSignal):Promise<JobRecord>{
