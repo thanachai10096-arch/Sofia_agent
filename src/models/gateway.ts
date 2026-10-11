@@ -261,10 +261,10 @@ export class SofiaModelGateway implements ModelProvider {
       try {
         parsed = JSON.parse(call.function?.arguments ?? "{}") as unknown;
       } catch {
-        return failResponse(`Invalid arguments for tool call ${name || index}.`);
+        return failResponse(`invalid arguments for tool call ${name || index}.`);
       }
       if (!name.trim() || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return failResponse(`Invalid arguments for tool call ${name || index}.`);
+        return failResponse(`invalid arguments for tool call ${name || index}.`);
       }
       return {
         id: call.id ?? `call-${request.step}-${index}`,
