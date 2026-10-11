@@ -211,7 +211,15 @@ export class DurableJobRuntime implements JobRuntime {
         resume,
       });
       record.result = result;
-      record.status = result.completed ? "completed" : result.state === "cancelled" ? "cancelled" : "failed";
+      // An abort is authoritative even if a mock/provider returns a stale result
+      // after cancellation was requested.
+      record.status = controller.signal.aborted
+        ? "cancelled"
+        : result.completed
+          ? "completed"
+          : result.state === "cancelled"
+            ? "cancelled"
+            : "failed";
       record.updatedAt = new Date().toISOString();
       await this.state.save(record);
     } catch (error) {
