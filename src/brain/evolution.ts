@@ -43,6 +43,11 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+function normalizeTaskType(taskType: string): string {
+  const normalized = taskType.trim().toLowerCase().replace(/\\s+/g, "-").slice(0, 80);
+  return normalized || "general";
+}
+
 export class EvolutionEngine {
   private snapshot: EvolutionSnapshot;
   private readonly file?: string;
@@ -81,7 +86,7 @@ export class EvolutionEngine {
   }
 
   rank(ids: readonly string[], taskType = "general"): SkillRanking[] {
-    const key = taskType.trim().toLowerCase() || "general";
+    const key = normalizeTaskType(taskType);
     return ids.map(id => {
       const s = this.get(id);
       const globalRate = s.attempts ? s.successes / s.attempts : 0.5;
@@ -133,7 +138,8 @@ export class EvolutionEngine {
   }
 
   recordRun(taskType: string, completed: boolean): void {
-    const stats = this.snapshot.taskTypes[taskType] ??= { attempts: 0, successes: 0, failures: 0 };
+    const key = normalizeTaskType(taskType);
+    const stats = this.snapshot.taskTypes[key] ??= { attempts: 0, successes: 0, failures: 0 };
     stats.attempts++;
     completed ? stats.successes++ : stats.failures++;
     void this.persist();
