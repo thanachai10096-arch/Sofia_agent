@@ -116,3 +116,9 @@ The opt-in `DesktopPairingAuthority` provides the credential lifecycle for a fut
 - Pairing state is memory-only; restarting the process invalidates every token.
 
 This is a credential primitive, **not a network service or installer**. It intentionally does not bind a socket. A future transport must bind only to loopback, reject non-loopback clients, require an explicit user-visible pairing step, avoid logging tokens/codes, and never forward the local desktop driver through the public Sofia API. Do not consider pairing complete until the loopback transport, host lifecycle, and signed platform installers are implemented and tested.
+
+## Loopback pairing transport (experimental)
+
+`startLocalPairingHost()` starts a small pairing-only HTTP endpoint bound to `127.0.0.1` on an ephemeral port. It does not expose desktop actions. The one-time pairing code is delivered only to the trusted local callback, never through an HTTP response. Pair requests are size-limited, capability grants are restricted by the configured operator allowlist, and non-loopback Host/Origin values are rejected. Closing the host revokes all in-memory sessions.
+
+This is an initial pairing transport, not a complete desktop host. Do not expose it through a public API or reverse proxy. Before production use, add explicit local UI consent, pairing-code rotation after expiry/lockout, robust origin/host tests, lifecycle supervision, and signed installers. The native driver remains unverified on real OS sessions and all changes require fresh CI.
