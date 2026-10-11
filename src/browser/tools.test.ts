@@ -66,3 +66,74 @@ test("browser.close without pageId closes the session and resets it for reuse", 
   assert.notEqual(reopened.pageId, opened.pageId);
   assert.equal(harness.counts().launchCount, 2);
 });
+
+
+test("browser.close removes a page handle even when the runtime close fails", async () => {
+  const runtime = {
+    launch: async () => ({
+      id: "session-failure",
+      newPage: async () => ({
+        id: "page-failure",
+        url: async () => "about:blank",
+        title: async () => "",
+        content: async () => "",
+        goto: async () => {},
+        click: async () => {},
+        type: async () => {},
+        select: async () => {},
+        scroll: async () => {},
+        wait: async () => {},
+        press: async () => {},
+        back: async () => {},
+        forward: async () => {},
+        reload: async () => {},
+        screenshot: async () => "",
+        close: async () => { throw new Error("page close failed"); },
+      } satisfies BrowserPage),
+      close: async () => {},
+    } satisfies BrowserSession),
+  } satisfies BrowserRuntime;
+  const tools = createBrowserTools(runtime);
+  const close = tools.find((item) => item.name === "browser.close")!;
+  const observe = tools.find((item) => item.name === "browser.observe")!;
+  await assert.rejects(close.execute({ pageId: "page-failure" }, {} as never), /page close failed/);
+  await assert.rejects(observe.execute({ pageId: "page-failure" }, {} as never), /Unknown browser page/);
+});
+
+test("browser.close clears a broken session handle even when session close fails", async () => {
+  let launches = 0;
+  const runtime = {
+    launch: async () => {
+      launches++;
+      return {
+        id: "session-" + launches,
+        newPage: async () => ({
+          id: "page-" + launches,
+          url: async () => "about:blank",
+          title: async () => "",
+          content: async () => "",
+          goto: async () => {},
+          click: async () => {},
+          type: async () => {},
+          select: async () => {},
+          scroll: async () => {},
+          wait: async () => {},
+          press: async () => {},
+          back: async () => {},
+          forward: async () => {},
+          reload: async () => {},
+          screenshot: async () => "",
+          close: async () => {},
+        } satisfies BrowserPage),
+        close: async () => { if (launches === 1) throw new Error("session close failed"); },
+      } satisfies BrowserSession;
+    },
+  } satisfies BrowserRuntime;
+  const tools = createBrowserTools(runtime);
+  const open = tools.find((item) => item.name === "browser.open")!;
+  const close = tools.find((item) => item.name === "browser.close")!;
+  await open.execute({}, {} as never);
+  await assert.rejects(close.execute({}, {} as never), /session close failed/);
+  await open.execute({}, {} as never);
+  assert.equal(launches, 2);
+});
