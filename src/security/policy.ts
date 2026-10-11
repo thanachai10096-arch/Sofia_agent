@@ -54,13 +54,13 @@ export function classifyToolEffects(name: string): ToolEffect[] {
       name === "desktop.workspace.read_file" || name === "desktop.screen.capture") return ["read"];
   if (name === "desktop.workspace.write_file" || name === "workspace.write_file" ||
       name === "workspace.apply_patch") return ["write"];
-  if (name === "desktop.process.run" || name === "terminal.run") return ["shell"];
+  if (name === "desktop.process.run" || name === "terminal.run") return ["shell", "network"];
   if (name === "desktop.app.launch") return ["shell", "destructive"];
   if (name === "desktop.input.click" || name === "desktop.input.type_text" ||
       name === "desktop.input.press_key") return ["destructive"];
   if (name === "workspace.read_file" || name === "workspace.list_files" ||
       name === "workspace.search" || name === "git.diff" || name === "project.verify") return ["read"];
-  if (name === "git.run") return ["read", "write"];
+  if (name === "git.run") return ["read", "write", "shell", "network"];
   // Unknown registered tools are privileged until the operator explicitly declares effects.
   return ["destructive"];
 }

@@ -19,11 +19,26 @@ function isWithin(base: string, candidate: string): boolean {
   return candidate === base || candidate.startsWith(base + path.sep);
 }
 
+function isSensitivePath(p: string): boolean {
+  const segments = p.split(/[\\/]+/).filter(Boolean);
+  return segments.some((segment) =>
+    segment.toLowerCase() === ".git" ||
+    segment.toLowerCase() === "node_modules" ||
+    SECRET_NAME.test(segment) ||
+    segment.toLowerCase() === ".sofia" && segments.some((part) => part.toLowerCase() === "secrets")
+  );
+}
+
+function assertPathAllowed(p: string): void {
+  if (isSensitivePath(p)) throw new Error("Access to sensitive workspace paths is blocked by Sofia runtime policy.");
+}
+
 export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRuntime {
   const platform = detectPlatform();
   const base = path.resolve(root);
 
   const resolve = (p = "."): string => {
+    assertPathAllowed(p);
     const absolute = path.resolve(base, p);
     if (!isWithin(base, absolute)) {
       throw new Error("Workspace path escapes the configured root.");
@@ -113,9 +128,11 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
       return base;
     },
     async readFile(p) {
+      assertPathAllowed(p);
       return fs.readFile(await contained(p), "utf8");
     },
     async writeFile(p, content) {
+      assertPathAllowed(p);
       const target = await contained(p);
       await fs.mkdir(path.dirname(target), { recursive: true });
       // Re-check after creating parents to catch a symlink inserted during mkdir.
@@ -123,9 +140,11 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
       await fs.writeFile(target, content, "utf8");
     },
     async listFiles(p = ".") {
+      assertPathAllowed(p);
       return fs.readdir(await contained(p));
     },
     async search(query, p = ".") {
+      assertPathAllowed(p);
       const target = await contained(p);
       let pattern: RegExp;
       try {

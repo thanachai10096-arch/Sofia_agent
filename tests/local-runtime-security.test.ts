@@ -66,3 +66,18 @@ test("workspace commands enforce timeout and preserve exit status", async () => 
     await rm(f.parent, { recursive: true, force: true });
   }
 });
+
+
+test("workspace runtime blocks sensitive paths at every depth for reads and writes", async () => {
+  const f = await fixture();
+  try {
+    await mkdir(path.join(f.root, "sub", ".git", "hooks"), { recursive: true });
+    await writeFile(path.join(f.root, "sub", ".git", "config"), "secret");
+    await assert.rejects(f.runtime.readFile("sub/.git/config"), /sensitive workspace paths/);
+    await assert.rejects(f.runtime.writeFile("sub/.git/hooks/pre-commit", "malicious"), /sensitive workspace paths/);
+    await assert.rejects(f.runtime.writeFile(".env", "API_KEY=secret"), /sensitive workspace paths/);
+    await assert.rejects(f.runtime.readFile("nested/.env.production"), /sensitive workspace paths/);
+  } finally {
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});

@@ -22,9 +22,9 @@ interface ActiveRun {
 function headers(origin: string | undefined, config: SofiaApiConfig) {
   const allowed = config.allowedOrigins;
   const allowOrigin =
-    !allowed?.length || allowed.includes("*")
+    allowed?.includes("*")
       ? "*"
-      : origin && allowed.includes(origin)
+      : origin && allowed?.includes(origin)
         ? origin
         : undefined;
   return {
@@ -194,6 +194,21 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
+
+      // Authorization scopes are enforced at the API boundary, not merely used to
+      // derive desktop capabilities. Admin scopes do not implicitly grant run access.
+      const isRunRequest = req.method === "POST" && (req.url === "/v1/agent/runs" || req.url === "/v1/jobs");
+      if (isRunRequest && !auth.scopes.includes("agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
+      const isJobReadRequest = req.method === "GET" && (req.url === "/v1/jobs" || (req.url?.startsWith("/v1/jobs/") === true && !req.url.endsWith("/resume") && !req.url.endsWith("/cancel")));
+      if (isJobReadRequest && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+      }
+      const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
+      if (isJobMutation && !auth.scopes.includes("agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
 
       const adminScope = config.securityAdminScope ?? "security:admin";
       const isSecurityAdmin = auth.scopes.includes(adminScope);
