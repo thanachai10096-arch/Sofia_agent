@@ -173,6 +173,14 @@ export class DurableJobRuntime implements JobRuntime {
       await this.state.save(record);
       return true;
     }
+    // Persist cancellation before signaling the worker so a fast completion or
+    // abort-related exception cannot overwrite the user's terminal decision.
+    const record = this.jobs.get(id);
+    if (record && record.status !== "completed" && record.status !== "failed" && record.status !== "cancelled") {
+      record.status = "cancelled";
+      record.updatedAt = new Date().toISOString();
+      await this.state.save(record);
+    }
     controller.abort(new Error("Job cancelled by caller"));
     return true;
   }
@@ -211,12 +219,14 @@ export class DurableJobRuntime implements JobRuntime {
         resume,
       });
       record.result = result;
-      record.status = controller.signal.aborted || result.state === "cancelled" ? "cancelled" : result.completed ? "completed" : "failed";
+      record.status = record.status === "cancelled" || controller.signal.aborted || result.state === "cancelled"
+        ? "cancelled"
+        : result.completed ? "completed" : "failed";
       record.updatedAt = new Date().toISOString();
       await this.state.save(record);
     } catch (error) {
       record.error = error instanceof Error ? error.message : String(error);
-      record.status = controller.signal.aborted ? "cancelled" : "failed";
+      record.status = record.status === "cancelled" || controller.signal.aborted ? "cancelled" : "failed";
       record.updatedAt = new Date().toISOString();
       await this.state.save(record);
     } finally {
