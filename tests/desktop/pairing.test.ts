@@ -64,3 +64,36 @@ test("pairing code is invalidated after repeated incorrect attempts", () => {
   assert.throws(() => authority.pair(code === "000000" ? "000001" : "000000"), /Invalid pairing code/);
   assert.throws(() => authority.pair(code), /missing or expired/);
 });
+
+
+test("loopback pairing host rejects cross-port origins and returns only scoped sessions", async () => {
+  const { startLocalPairingHost } = await import("../../src/desktop/local-pairing-host.js");
+  let pairingCode = "";
+  const host = await startLocalPairingHost({
+    allowedCapabilities: ["screen:capture"],
+    onPairingCode: (code) => { pairingCode = code; },
+  });
+  try {
+    const port = new URL(host.url).port;
+    const body = JSON.stringify({ code: pairingCode, capabilities: ["screen:capture"] });
+    const rejected = await fetch(`${host.url}/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:12345" },
+      body,
+    });
+    assert.equal(rejected.status, 403);
+
+    const accepted = await fetch(`${host.url}/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: `http://127.0.0.1:${port}` },
+      body,
+    });
+    assert.equal(accepted.status, 200);
+    const result = await accepted.json() as { token?: string; capabilities?: string[] };
+    assert.equal(typeof result.token, "string");
+    assert.deepEqual(result.capabilities, ["screen:capture"]);
+    assert.equal(accepted.headers.get("cache-control"), "no-store");
+  } finally {
+    await host.close();
+  }
+});
