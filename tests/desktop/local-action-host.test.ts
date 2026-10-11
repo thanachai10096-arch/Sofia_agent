@@ -90,3 +90,24 @@ test("paired local desktop host authenticates, scopes actions, and requires expl
   });
   assert.equal(hostileOrigin.status, 403);
 });
+
+test("local desktop host rejects wildcard or non-origin CORS configuration", async () => {
+  const driver: DesktopHostDriver = {
+    async captureScreen() { return { mimeType: "image/png", data: new Uint8Array([1]), width: 1, height: 1 }; },
+    async launchApplication(applicationId) { return { launched: true, applicationId }; },
+    async click() {},
+    async typeText() {},
+    async pressKey() {},
+  };
+  await assert.rejects(
+    startLocalDesktopActionHost({
+      allowedCapabilities: [],
+      allowedOrigins: ["*"],
+      driver,
+      runtime: {} as WorkspaceRuntime,
+      requestApproval: async () => true,
+      onPairingCode() {},
+    }),
+    /exact HTTP\(S\) origins/,
+  );
+});
