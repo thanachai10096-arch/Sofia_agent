@@ -54,3 +54,5 @@ export { MemorySecurityAudit } from "./security/audit.js";
 export { assessAction, containsPromptInjection, redactSecrets, riskFor } from "./security/guard.js";
 export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/guard.js";
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
+
+export { startLocalPairingHost } from "./desktop/local-pairing-host.js";
