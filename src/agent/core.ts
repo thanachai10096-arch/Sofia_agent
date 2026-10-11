@@ -148,6 +148,7 @@ export class SofiaAgent {
           step,
         });
 
+        request.signal?.throwIfAborted();
         const response = await this.deps.provider.generate(
           {
             task: request.task,
@@ -158,7 +159,9 @@ export class SofiaAgent {
             tools: toolDefs,
           },
           route,
+          request.signal ? { signal: request.signal } : undefined,
         );
+        request.signal?.throwIfAborted();
 
         if (response.assistantMessage) {
           messages.push(response.assistantMessage);
@@ -291,6 +294,7 @@ export class SofiaAgent {
         lastError = new Error(review.reason);
         this.deps.router.markUnhealthy(route.id);
       } catch (error) {
+        if (request.signal?.aborted) throw error;
         lastError = error;
         emit({
           type: "retry",
