@@ -37,6 +37,7 @@ export class RegistryToolGateway implements ToolGateway {
     private readonly security:SecurityController=new SecurityController(),
     private readonly audit?:SecurityAuditSink,
   ){this.checkpoints=checkpoints??new RuntimeCheckpointManager(dependencies.runtime);}
+  listTools(){return this.dependencies.tools.list().map((tool)=>({name:tool.name,description:tool.description,effects:classifyEffects(tool.name)}));}
   describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:classifyEffects(name)};}
 
   async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{
