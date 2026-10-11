@@ -44,7 +44,10 @@ export function createDesktopAdapterTools(options: {
   principal: DesktopPrincipal;
 }): SofiaTool[] {
   const { config, principal } = options;
-  const maxTextLength = Math.min(Math.max(1, config.maxTextLength ?? 2000), 2000);
+  const maxTextLength = config.maxTextLength ?? 2000;
+  if (!Number.isSafeInteger(maxTextLength) || maxTextLength < 1 || maxTextLength > 2000) {
+    throw new Error("maxTextLength must be an integer between 1 and 2000.");
+  }
   const allowedApplications = new Set(config.allowedApplications ?? []);
   const string = (description: string) => ({ type: "string", description });
 
