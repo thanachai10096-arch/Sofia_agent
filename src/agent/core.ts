@@ -32,6 +32,8 @@ export class SofiaAgent {
     const brain = this.deps.brainFactory!({
       ...(request.signal ? { signal: request.signal } : {}),
       ...(request.maxSteps !== undefined ? { maxSteps: request.maxSteps } : {}),
+      ...(request.principalId ? { principalId: request.principalId } : {}),
+      ...(request.desktopCapabilities?.length ? { desktopCapabilities: request.desktopCapabilities } : {}),
     });
 
     emit({ type: "run.started", message: "Sofia Brain run started." });
