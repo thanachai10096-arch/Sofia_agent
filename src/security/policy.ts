@@ -61,5 +61,6 @@ export function classifyToolEffects(name: string): ToolEffect[] {
   if (name === "workspace.read_file" || name === "workspace.list_files" ||
       name === "workspace.search" || name === "git.diff" || name === "project.verify") return ["read"];
   if (name === "git.run") return ["read", "write"];
-  return ["read"];
+  // Unknown registered tools are privileged until the operator explicitly declares effects.
+  return ["destructive"];
 }
