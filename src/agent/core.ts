@@ -2,8 +2,21 @@ import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
-import { assertSafeStep, assertToolAllowed, loadExecutionPolicyFromEnv } from "../security/policy.js";
+import { assertSafeStep, assertToolAllowed, loadExecutionPolicyFromEnv, riskRank, toolPermission, type ToolEffect } from "../security/policy.js";
 import { actionHash, riskFor } from "../security/guard.js";
+
+
+function inferToolEffects(name: string): ToolEffect[] {
+  const value = name.toLowerCase();
+  const effects = new Set<ToolEffect>();
+  if (/(^|[._-])(shell|exec|command|terminal)([._-]|$)/.test(value)) effects.add("shell");
+  if (/(^|[._-])(browser|playwright|puppeteer)([._-]|$)/.test(value)) effects.add("browser");
+  if (/(^|[._-])(fetch|http|network|search|web)([._-]|$)/.test(value)) effects.add("network");
+  if (/(^|[._-])(write|edit|patch|create|save|update|move|copy)([._-]|$)/.test(value)) effects.add("write");
+  if (/(^|[._-])(delete|remove|destroy|drop|reset|format)([._-]|$)/.test(value)) effects.add("destructive");
+  if (effects.size === 0) effects.add("read");
+  return [...effects];
+}
 
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
@@ -172,10 +185,20 @@ export class SofiaAgent {
           }
 
           for (const call of response.toolCalls) {
-            assertToolAllowed(policy, call.name);
             if (!this.deps.tools || !this.deps.runtime) throw new Error("Agent runtime and tool registry are required for tool execution.");
             const tool = this.deps.tools.get(call.name);
             if (!tool) throw new Error(`Unknown tool: ${call.name}`);
+            const effects = tool.effects ? [...tool.effects] : inferToolEffects(call.name);
+            assertToolAllowed(policy, call.name, effects);
+            const permission = toolPermission(policy, call.name, effects);
+            const risk = riskFor(effects, call.input);
+            if (riskRank[risk] > riskRank[policy.maxRisk]) {
+              throw new Error(`Tool risk ${risk} exceeds configured maximum ${policy.maxRisk}: ${call.name}`);
+            }
+            const requiresApproval = permission.requireApproval ?? risk !== "low";
+            if (requiresApproval && !this.deps.approval) {
+              throw new Error(`Approval handler required for ${risk}-risk tool: ${call.name}`);
+            }
 
             emit({
               type: "tool.started",
@@ -191,7 +214,7 @@ export class SofiaAgent {
                 toolName: call.name,
                 input: call.input,
                 actionHash: actionHash(runId, call.name, call.input, request.principalId),
-                risk: riskFor([], call.input),
+                risk,
               });
 
               if (!approved) {
