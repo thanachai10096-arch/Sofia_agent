@@ -89,7 +89,7 @@ export function createDesktopAdapterTools(options: {
         context.signal?.throwIfAborted();
         requireCapability(principal, "input:control");
         if (typeof input.text !== "string" || input.text.length > maxTextLength || input.text.includes("\0")) throw new Error(`Text must be a string of at most ${maxTextLength} characters.`);
-        await approved(config, { kind: "input.type", characterCount: input.text.length });
+        await approved(config, { kind: "input.type", text: input.text });
         context.signal?.throwIfAborted();
         await config.driver.typeText(input.text);
         return { ok: true, characters: input.text.length };

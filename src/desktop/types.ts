@@ -61,7 +61,7 @@ export interface DesktopHostDriver {
 export type DesktopAction =
   | { kind: "app.launch"; applicationId: string; args: string[] }
   | { kind: "input.click"; x: number; y: number; button: "left" | "right" | "middle" }
-  | { kind: "input.type"; characterCount: number }
+  | { kind: "input.type"; text: string }
   | { kind: "input.key"; key: string };
 
 export interface DesktopAdapterConfig {

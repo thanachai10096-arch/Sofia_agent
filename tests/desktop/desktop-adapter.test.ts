@@ -52,6 +52,7 @@ test("desktop input actions require user approval before the native driver is ca
   assert.equal(calls.length, 0);
   await type.execute({ text: "hello" }, context());
   assert.deepEqual(approvals.map((action) => action.kind), ["input.click", "input.type"]);
+  assert.deepEqual(approvals[1], { kind: "input.type", text: "hello" }, "approval must show the exact text that will be typed");
   assert.deepEqual(calls, [["type", "hello"]]);
 });
 

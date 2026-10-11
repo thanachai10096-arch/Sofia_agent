@@ -10,3 +10,6 @@ export { DesktopPairingAuthority } from "./pairing.js";
 export type { DesktopPairingConfig } from "./pairing.js";
 export { startLocalPairingHost } from "./local-pairing-host.js";
 export type { LocalPairingHost, LocalPairingHostConfig } from "./local-pairing-host.js";
+
+export { startLocalDesktopActionHost } from "./local-action-host.js";
+export type { LocalDesktopActionHost, LocalDesktopActionHostConfig } from "./local-action-host.js";
