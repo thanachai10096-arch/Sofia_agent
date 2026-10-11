@@ -8,6 +8,7 @@
     "sofia": "./dist/src/cli/index.js"
   },
   "scripts": {
+    "license:check": "node scripts/check-license.mjs",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-tests.mjs",
