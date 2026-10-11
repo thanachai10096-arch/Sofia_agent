@@ -159,6 +159,7 @@ export async function startLocalDesktopActionHost(config: LocalDesktopActionHost
       return;
     }
 
+    activeByPrincipal.set(principal.id, active + 1);
     try {
       const body = await readJson(req, MAX_BODY_BYTES);
       if (!isRecord(body) || typeof body.tool !== "string" || !isRecord(body.input)) {
@@ -179,28 +180,25 @@ export async function startLocalDesktopActionHost(config: LocalDesktopActionHost
         return;
       }
 
-      activeByPrincipal.set(principal.id, active + 1);
-      try {
-        validateToolInput(tool.inputSchema, body.input);
-        const result = await tool.execute(body.input, {
-          runtime: config.runtime,
-          signal: AbortSignal.timeout(30_000),
-        });
-        if (tool.name === "desktop.screen.capture" && isRecord(result) && typeof result.dataBase64 === "string") {
-          const bytes = Buffer.byteLength(result.dataBase64, "base64");
-          if (bytes > MAX_SCREEN_BYTES) {
-            send(res, 413, { error: "screen_capture_too_large" }, origin);
-            return;
-          }
+      validateToolInput(tool.inputSchema, body.input);
+      const result = await tool.execute(body.input, {
+        runtime: config.runtime,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (tool.name === "desktop.screen.capture" && isRecord(result) && typeof result.dataBase64 === "string") {
+        const bytes = Buffer.byteLength(result.dataBase64, "base64");
+        if (bytes > MAX_SCREEN_BYTES) {
+          send(res, 413, { error: "screen_capture_too_large" }, origin);
+          return;
         }
-        send(res, 200, { ok: true, result }, origin);
-      } finally {
-        const current = activeByPrincipal.get(principal.id) ?? 1;
-        if (current <= 1) activeByPrincipal.delete(principal.id);
-        else activeByPrincipal.set(principal.id, current - 1);
       }
+      send(res, 200, { ok: true, result }, origin);
     } catch (error) {
       send(res, 400, { error: error instanceof Error ? error.message : "desktop_action_failed" }, origin);
+    } finally {
+      const current = activeByPrincipal.get(principal.id) ?? 1;
+      if (current <= 1) activeByPrincipal.delete(principal.id);
+      else activeByPrincipal.set(principal.id, current - 1);
     }
   });
 
