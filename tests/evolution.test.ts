@@ -165,6 +165,7 @@ test("evolution treats prototype property names as ordinary skill and task IDs",
   const engine = new EvolutionEngine();
   const before = (Object.prototype as { attempts?: number }).attempts;
   engine.recordSuccess("__proto__", 1, 0, "__proto__");
+  engine.recordRun("__proto__", true);
   engine.recordFailure("constructor", "safe test failure", "constructor");
   await engine.flush();
 
