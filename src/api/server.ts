@@ -114,7 +114,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
         });
-        run.status = "completed";
+        // Some tools/providers may resolve after abort. Never report a cancelled
+        // run as completed just because the underlying operation ignored the signal.
+        if (run.controller.signal.aborted) {
+          run.status = "cancelled";
+          run.error = "Run cancelled.";
+          run.result = undefined;
+        } else {
+          run.status = "completed";
+        }
       } catch (error) {
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
@@ -240,8 +248,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             signal: controller.signal,
             onEvent: (event) => send({ type: "event", runId, event }),
           });
-          run.status = "completed";
-          send({ type: "result", runId, status: "completed", result: run.result });
+          if (controller.signal.aborted) {
+            run.status = "cancelled";
+            run.error = "Run cancelled.";
+            run.result = undefined;
+            send({ type: "error", runId, status: "cancelled", error: run.error });
+          } else {
+            run.status = "completed";
+            send({ type: "result", runId, status: "completed", result: run.result });
+          }
         } catch (error) {
           run.status = controller.signal.aborted ? "cancelled" : "failed";
           run.error = controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Agent failed";
@@ -311,6 +326,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
           });
+          if (controller.signal.aborted) {
+            return json(res, 504, { id: runId, status: "cancelled", error: "Request timed out or was cancelled." }, origin, config);
+          }
           return json(res, 200, { id: runId, status: "completed", result }, origin, config);
         } catch (error) {
           return json(res, 502, {
