@@ -24,16 +24,19 @@ export class SofiaAgent {
 
   async run(request: AgentRequest): Promise<AgentResult> {
     this.deps.securityController?.assertRunning();
-    // Sofia Brain is the default execution path. Legacy execution is only
-    // used when Brain is unavailable or explicitly disabled.
+    // The global kill switch and caller cancellation both stop this run.
+    const signal = this.deps.securityController
+      ? AbortSignal.any([
+          ...(request.signal ? [request.signal] : []),
+          this.deps.securityController.signal,
+        ])
+      : request.signal;
+    const activeRequest = signal ? { ...request, signal } : request;
     const shouldUseBrain =
       this.deps.brainFactory !== undefined &&
       request.useBrain !== false;
-    if (shouldUseBrain) {
-      return this.runBrain(request);
-    }
-
-    return this.runLegacy(request);
+    if (shouldUseBrain) return this.runBrain(activeRequest);
+    return this.runLegacy(activeRequest);
   }
 
   private async runBrain(request: AgentRequest): Promise<AgentResult> {
@@ -154,6 +157,7 @@ export class SofiaAgent {
 
     for (let step = 1; step <= maxSteps; step += 1) {
       try {
+        this.deps.securityController?.assertRunning();
         request.signal?.throwIfAborted();
         assertSafeStep(policy, step);
         const route = this.deps.router.select(kind);
@@ -193,6 +197,7 @@ export class SofiaAgent {
           }
 
           for (const call of response.toolCalls) {
+            this.deps.securityController?.assertRunning();
             request.signal?.throwIfAborted();
             if (!this.deps.tools || !this.deps.runtime) throw new Error("Agent runtime and tool registry are required for tool execution.");
             const tool = this.deps.tools.get(call.name);
