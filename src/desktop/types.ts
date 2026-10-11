@@ -67,7 +67,7 @@ export type DesktopAction =
 export interface DesktopAdapterConfig {
   driver: DesktopHostDriver;
   /** Must be a real user-facing approval prompt; model text cannot approve actions. */
-  requestApproval: (action: DesktopAction) => Promise<boolean>;
+  requestApproval: (action: DesktopAction, signal?: AbortSignal) => Promise<boolean>;
   /** Exact app identifiers the local operator permits the host to launch. */
   allowedApplications?: readonly string[];
   maxTextLength?: number;

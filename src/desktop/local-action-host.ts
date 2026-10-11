@@ -12,7 +12,7 @@ export interface LocalDesktopActionHostConfig {
   /** Exact web origins permitted to call the loopback service. Never use '*'. */
   allowedOrigins?: readonly string[];
   /** A real, user-facing approval prompt. Mutating/input actions fail closed without it. */
-  requestApproval: (action: DesktopAction) => Promise<boolean>;
+  requestApproval: (action: DesktopAction, signal?: AbortSignal) => Promise<boolean>;
   driver: DesktopHostDriver;
   runtime: WorkspaceRuntime;
   allowedApplications?: readonly string[];
