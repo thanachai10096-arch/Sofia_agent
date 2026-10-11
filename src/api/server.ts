@@ -123,7 +123,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       run.updatedAt = Date.now();
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
-        run.result = await agent.run({
+        const result = await agent.run({
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
@@ -132,7 +132,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
         });
-        run.status = "completed";
+        if (run.controller.signal.aborted || run.status === "cancelled") {
+          run.status = "cancelled";
+          run.error ??= "Run cancelled.";
+        } else {
+          run.result = result;
+          run.status = "completed";
+        }
       } catch (error) {
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
@@ -154,6 +160,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     const cutoff = Date.now() - retention;
     for (const [id, run] of runs) {
       if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) runs.delete(id);
+    }
+    for (const [key, runId] of idempotency) {
+      if (!runs.has(runId)) idempotency.delete(key);
     }
   };
 
@@ -262,7 +271,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         res.on("close", abortOnDisconnect);
         try {
           run.status = "running";
-          run.result = await agent.run({
+          const result = await agent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
@@ -272,6 +281,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             signal: controller.signal,
             onEvent: (event) => send({ type: "event", runId, event }),
           });
+          if (controller.signal.aborted) throw new Error("Run cancelled.");
+          run.result = result;
           run.status = "completed";
           send({ type: "result", runId, status: "completed", result: run.result });
         } catch (error) {
@@ -293,20 +304,24 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
 
-        try { usage.consume(auth.keyId); } catch (error) {
-          return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
-        }
-
         // Async mode is the reliable path for phones: the browser may sleep,
         // change networks, or be backgrounded while Sofia continues server-side.
         if (input.async) {
           const header = req.headers["idempotency-key"];
-          const idempotencyKey = Array.isArray(header) ? header[0] : header;
+          const rawIdempotencyKey = Array.isArray(header) ? header[0] : header;
+          const idempotencyKey = rawIdempotencyKey?.trim();
+          if (idempotencyKey && (idempotencyKey.length > 128 || /[\\u0000-\\u001f\\u007f]/.test(idempotencyKey))) {
+            return json(res, 400, { error: "invalid_idempotency_key" }, origin, config);
+          }
           const idempotencyId = idempotencyKey ? `${auth.keyId}:${idempotencyKey}` : undefined;
           if (idempotencyId) {
             const existing = idempotency.get(idempotencyId);
             const existingRun = existing ? runs.get(existing) : undefined;
             if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
+            if (existing) idempotency.delete(idempotencyId);
+          }
+          try { usage.consume(auth.keyId); } catch (error) {
+            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
           }
           const active = activeByKey.get(auth.keyId) ?? 0;
           if (active >= maxConcurrentRunsPerKey) {
@@ -336,6 +351,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 202, publicResponse(run), origin, config);
         }
 
+        try { usage.consume(auth.keyId); } catch (error) {
+          return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+        }
+
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const runId = randomUUID();
@@ -349,6 +368,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
           });
+          if (controller.signal.aborted) {
+            return json(res, 504, { id: runId, status: "failed", error: "Request timed out or was cancelled." }, origin, config);
+          }
           return json(res, 200, { id: runId, status: "completed", result }, origin, config);
         } catch (error) {
           return json(res, 502, {
@@ -414,10 +436,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       return json(res, 404, { error: "not_found" }, origin, config);
     } catch (error) {
-      return json(res, 500, {
-        error: "internal_error",
-        message: error instanceof Error ? error.message : "Unknown error",
-      }, origin, config);
+      if (error instanceof Error && error.message === "Request body too large.") {
+        return json(res, 413, { error: "request_body_too_large" }, origin, config);
+      }
+      if (error instanceof SyntaxError) {
+        return json(res, 400, { error: "invalid_json" }, origin, config);
+      }
+      return json(res, 500, { error: "internal_error" }, origin, config);
     }
   });
 }
