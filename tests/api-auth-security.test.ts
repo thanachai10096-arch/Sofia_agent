@@ -80,3 +80,68 @@ test("API refuses streaming run creation when the API key lacks agent:run scope"
   }
 });
 
+
+
+test("API requires agent:read or agent:run to inspect a run", async () => {
+  const server = createSofiaApi({} as AgentDependencies, {
+    apiKeys: { "desktop-only-key": ["desktop:discover"] },
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/agent/runs/not-owned`, {
+      headers: { authorization: "Bearer desktop-only-key" },
+    });
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { error: "forbidden", requiredScope: "agent:read" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("API requires agent:run to cancel a run even when the key can read runs", async () => {
+  const server = createSofiaApi({} as AgentDependencies, {
+    apiKeys: { "read-only-key": ["agent:read"] },
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/agent/runs/not-owned`, {
+      method: "DELETE",
+      headers: { authorization: "Bearer read-only-key" },
+    });
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { error: "forbidden", requiredScope: "agent:run" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API permits agent:run scope to inspect its own run status", async () => {
+  const server = createSofiaApi({} as AgentDependencies, {
+    apiKeys: { "run-key": ["agent:run"] },
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/agent/runs/not-found`, {
+      headers: { authorization: "Bearer run-key" },
+    });
+    assert.equal(response.status, 404, "run-capable keys can read run status; this ID simply does not exist");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
