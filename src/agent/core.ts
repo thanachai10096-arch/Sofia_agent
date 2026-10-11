@@ -22,6 +22,7 @@ export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
 
   async run(request: AgentRequest): Promise<AgentResult> {
+    this.deps.securityController?.assertRunning();
     // Sofia Brain is the default execution path. Legacy execution is only
     // used when Brain is unavailable or explicitly disabled.
     const shouldUseBrain =
@@ -192,8 +193,9 @@ export class SofiaAgent {
             assertToolAllowed(policy, call.name, effects);
             const permission = toolPermission(policy, call.name, effects);
             const risk = riskFor(effects, call.input);
-            if (riskRank[risk] > riskRank[policy.maxRisk]) {
-              throw new Error(`Tool risk ${risk} exceeds configured maximum ${policy.maxRisk}: ${call.name}`);
+            const maximumRisk = permission.maxRisk ?? policy.maxRisk;
+            if (riskRank[risk] > riskRank[maximumRisk]) {
+              throw new Error(`Tool risk ${risk} exceeds configured maximum ${maximumRisk}: ${call.name}`);
             }
             const requiresApproval = permission.requireApproval ?? risk !== "low";
             if (requiresApproval && !this.deps.approval) {
