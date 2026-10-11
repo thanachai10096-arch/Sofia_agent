@@ -33,7 +33,9 @@ export interface BrowserRuntime {
 function isPrivateIpv4(address: string): boolean {
   const octets = address.split(".").map(Number);
   if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
-  const [a, b, c] = octets;
+  const a = octets[0]!;
+  const b = octets[1]!;
+  const c = octets[2]!;
   return a === 0 || a === 10 || a === 127 || a >= 224 ||
     (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
@@ -52,7 +54,7 @@ function isPrivateIpv6(address: string): boolean {
       value.startsWith("fe8") || value.startsWith("fe9") || value.startsWith("fea") ||
       value.startsWith("feb") || value.startsWith("ff") || value.startsWith("2001:db8:")) return true;
   const mapped = value.match(/::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (mapped) return isPrivateIpv4(mapped[1]);
+  if (mapped) return isPrivateIpv4(mapped[1]!);
   // Permit only global-unicast 2000::/3 IPv6 destinations.
   return !/^[23][0-9a-f]{0,3}:/i.test(value);
 }
