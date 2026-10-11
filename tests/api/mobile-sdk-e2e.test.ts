@@ -56,7 +56,7 @@ test("mobile SDK starts and polls a real local Sofia API run end-to-end", async 
 
   const started = await client.start({ task: "Return the exact test token." });
   assert.ok(started.id);
-  assert.equal(started.status, "queued");
+  assert.ok(started.status === "queued" || started.status === "running", "async start may begin before the HTTP response is observed");
   const finished = await client.waitForRun(started.id, {
     intervalMs: 100,
     maxIntervalMs: 200,
