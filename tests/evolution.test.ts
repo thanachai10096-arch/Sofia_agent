@@ -124,6 +124,7 @@ test("persisted task-specific learning changes the next skill choice after reloa
     const firstRun = new EvolutionEngine(file);
     for (let i = 0; i < 5; i++) {
       firstRun.recordSuccess("coding-repair", 2, 0, "coding");
+      firstRun.recordFailure("coding-repair", "repair failed in documentation", "documentation");
       firstRun.recordFailure("general-repair", "repair failed", "coding");
       firstRun.recordSuccess("general-repair", 3, 0, "documentation");
     }
