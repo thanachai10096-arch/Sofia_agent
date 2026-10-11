@@ -18,6 +18,8 @@ export interface JobRecord {
   result?: Awaited<ReturnType<SofiaBrain["run"]>>;
   error?: string;
 }
+function isJobCancelled(record: JobRecord): boolean { return record.status === "cancelled"; }
+
 export interface JobRuntime {
   submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
@@ -210,8 +212,8 @@ export class DurableJobRuntime implements JobRuntime {
 
     try {
       await this.state.save(record);
-      if (controller.signal.aborted || record.status === "cancelled") {
-        if (record.status !== "cancelled") {
+      if (controller.signal.aborted || isJobCancelled(record)) {
+        if (!isJobCancelled(record)) {
           record.status = "cancelled";
           record.error ??= "Job cancelled by caller.";
           record.updatedAt = new Date().toISOString();
@@ -227,7 +229,7 @@ export class DurableJobRuntime implements JobRuntime {
         signal: controller.signal,
         resume,
       });
-      if (controller.signal.aborted || result.state === "cancelled" || record.status === "cancelled") {
+      if (controller.signal.aborted || result.state === "cancelled" || isJobCancelled(record)) {
         // Cancellation is terminal: discard any result that arrives after abort.
         record.status = "cancelled";
         record.error ??= "Job cancelled.";
