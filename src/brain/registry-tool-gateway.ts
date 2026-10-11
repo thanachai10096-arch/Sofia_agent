@@ -53,7 +53,7 @@ export class RegistryToolGateway implements ToolGateway {
   async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{
     // Bind the approval hash and actual execution to one immutable input snapshot.
     // The caller and approval UI must not be able to swap the action while approval is pending.
-    const input = deepFreeze(structuredClone(input));
+    const input = deepFreeze(structuredClone(call.input));
     context.signal.throwIfAborted();
     this.security.assertRunning();
     const descriptor=this.describe(call.tool);
