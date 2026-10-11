@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { assessAction, assertSafePath, containsPromptInjection, redactSecrets, riskFor } from "../src/security/guard.js";
 import { MemorySecurityAudit } from "../src/security/audit.js";
+import { classifyToolEffects } from "../src/security/policy.js";
 import { SecurityController } from "../src/security/controller.js";
 
 describe("Sofia security controls",()=>{
@@ -57,4 +58,13 @@ describe("Sofia security controls",()=>{
     (first[0]!.result as { nested: { message: string } }).nested.message = "mutated";
     assert.deepEqual(audit.list()[0]?.result, { nested: { message: "Bearer [REDACTED]" } });
   });
+});
+
+
+it("shared tool-effect classification marks privileged actions consistently", () => {
+  assert.deepEqual(classifyToolEffects("terminal.run"), ["shell"]);
+  assert.deepEqual(classifyToolEffects("workspace.write_file"), ["write"]);
+  assert.deepEqual(classifyToolEffects("browser.open"), ["browser", "network"]);
+  assert.deepEqual(classifyToolEffects("desktop.input.click"), ["destructive"]);
+  assert.deepEqual(classifyToolEffects("workspace.read_file"), ["read"]);
 });

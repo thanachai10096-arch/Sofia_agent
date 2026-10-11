@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { ExecutionPolicy, ToolEffect } from "../security/policy.js";
+import type { ExecutionPolicy } from "../security/policy.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import type { ToolRegistry } from "../tools/types.js";
-import { toolPermission, riskRank } from "../security/policy.js";
+import { classifyToolEffects, toolPermission, riskRank } from "../security/policy.js";
 import { assessAction, type RiskLevel } from "../security/guard.js";
 import { issueCapability, verifyCapability } from "../security/capability.js";
 import type { AgentDependencies } from "../agent/types.js";
@@ -20,20 +20,6 @@ function deepFreeze<T>(value:T):T {
   }
   return value;
 }
-function classifyEffects(name:string):ToolEffect[]{
-  if(name.startsWith("browser."))return["browser","network"];
-  if(name==="desktop.system.discover"||name==="desktop.workspace.list_files"||name==="desktop.workspace.read_file")return["read"];
-  if(name==="desktop.workspace.write_file")return["write"];
-  if(name==="desktop.process.run")return["shell"];
-  if(name==="desktop.screen.capture")return["read"];
-  if(name==="desktop.app.launch")return["shell","destructive"];
-  if(name==="desktop.input.click"||name==="desktop.input.type_text"||name==="desktop.input.press_key")return["destructive"];
-  if(name==="workspace.read_file"||name==="workspace.list_files"||name==="workspace.search"||name==="git.diff"||name==="project.verify")return["read"];
-  if(name==="workspace.write_file"||name==="workspace.apply_patch")return["write"];
-  if(name==="terminal.run")return["shell"];
-  if(name==="git.run")return["read","write"];
-  return["read"];
-}
 interface SnapshotRecord{id:string;revision:string;files:string[];fingerprints:Record<string,string>}
 
 export class RegistryToolGateway implements ToolGateway {
@@ -47,8 +33,8 @@ export class RegistryToolGateway implements ToolGateway {
     private readonly security:SecurityController=new SecurityController(),
     private readonly audit?:SecurityAuditSink,
   ){this.checkpoints=checkpoints??new RuntimeCheckpointManager(dependencies.runtime);}
-  listTools(){return this.dependencies.tools.list().map((tool)=>({name:tool.name,description:tool.description,effects:classifyEffects(tool.name)}));}
-  describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:classifyEffects(name)};}
+  listTools(){return this.dependencies.tools.list().map((tool)=>({name:tool.name,description:tool.description,effects:classifyToolEffects(tool.name)}));}
+  describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:classifyToolEffects(name)};}
 
   async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{
     // Bind the approval hash and actual execution to one immutable input snapshot.
