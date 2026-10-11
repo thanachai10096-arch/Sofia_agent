@@ -57,7 +57,7 @@ export class RegistryToolGateway implements ToolGateway {
     const requiresApproval=permission.requireApproval===true||assessment.requireApproval||descriptor.effects.some(x=>x==="write"||x==="shell"||x==="destructive"||x==="browser");
     const capabilitySecret=this.policy.capabilitySecret;
     const capability=capabilitySecret?issueCapability({principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret):undefined;
-    if(capabilitySecret && capability && !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool},capabilitySecret)) return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability verification failed."}};
+    if(capabilitySecret && capability && !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret)) return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability verification failed."}};
     await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:requiresApproval?"approval_required":"allow",input:call.input});
     if(requiresApproval){
       if(!this.approval)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is required for this tool."}};
@@ -72,9 +72,22 @@ export class RegistryToolGateway implements ToolGateway {
     }
     try{
       this.security.assertRunning();
+      context.signal.throwIfAborted();
+      if(capabilitySecret && (!capability || !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret))) {
+        return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability validation failed immediately before execution."}};
+      }
+      if(!capabilitySecret && (process.env.NODE_ENV==="production"||process.env.SOFIA_ENV==="production")) {
+        return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Production tool execution requires a capability secret."}};
+      }
       const tool=this.dependencies.tools.get(call.tool);
       if(!tool)return{ok:false,data:null,evidenceId,error:{category:"tool_error",message:"Tool disappeared during execution."}};
-      const data=await tool.execute(call.input,{runtime:this.dependencies.runtime,signal:context.signal});
+      const boundSignal=this.security.bindSignal(context.signal);
+      let data:unknown;
+      try {
+        data=await tool.execute(call.input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
+      } finally {
+        boundSignal.dispose();
+      }
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:call.input,result:data});
       return{ok:true,data,evidenceId};
     }catch(error){
