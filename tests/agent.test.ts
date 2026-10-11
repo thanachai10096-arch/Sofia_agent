@@ -44,3 +44,19 @@ test("agent requires explicit approval before executing a write tool", async () 
   await assert.rejects(() => agent.run({ task: "write a file", maxSteps: 1 }), /Approval handler required/);
   assert.equal(executed, false);
 });
+
+import { SecurityController } from "../src/security/controller.js";
+
+test("agent refuses to start when the security kill switch is active", async () => {
+  let called = false;
+  const securityController = new SecurityController();
+  securityController.kill("test stop");
+  const agent = new SofiaAgent({
+    provider: { async generate() { called = true; return { text: "should not run" }; } },
+    router: new ModelRouter([{ id: "primary", capabilities: ["coding", "reasoning"], costWeight: 1, latencyWeight: 1, qualityWeight: 1, healthy: true }]),
+    reviewer: new Reviewer(),
+    securityController,
+  });
+  await assert.rejects(() => agent.run({ task: "simple task" }), /kill switch is active/);
+  assert.equal(called, false);
+});
