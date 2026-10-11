@@ -2,7 +2,7 @@ name: Sofia CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "ci/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -43,7 +43,7 @@ jobs:
 
   cross-platform:
     name: Cross-platform (${{ matrix.os }})
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
