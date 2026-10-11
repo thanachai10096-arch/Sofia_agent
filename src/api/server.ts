@@ -323,6 +323,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           const result = await agent.run({
             principalId: auth.keyId,
+            desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
