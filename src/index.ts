@@ -22,6 +22,8 @@ export { PolicySandbox } from "./sandbox.js";
 export { InMemorySkillsPlatform } from "./skills/platform.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
 export { AgentEvaluationRunner } from "./evaluation.js";
+export { EvolutionEngine } from "./brain/evolution.js";
+export type { SkillPerformance, SkillRanking, EvolutionSnapshot } from "./brain/evolution.js";
 export type * from "./brain/edit-engine.js";
 export type * from "./brain/repository-intelligence.js";
 export type * from "./brain/project-memory.js";
