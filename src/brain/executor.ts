@@ -1026,12 +1026,14 @@ export class SofiaBrain {
           const diagnosis = this.diagnose(error);
           if (this.dependencies.evolution && this.activeSkillId) {
             // Penalize only the skill that actually informed the previous repair plan,
-            // never every candidate that merely matched the error text.
+            // never every candidate that merely matched the error text. A failed skill
+            // is not also credited when a different repair later succeeds.
             this.dependencies.evolution.recordFailure(
               this.activeSkillId,
               diagnosis.message,
               understanding?.requiredCapabilities[0] ?? "general",
             );
+            this.selectedSkillIds.delete(this.activeSkillId);
             this.activeSkillId = undefined;
           }
 
