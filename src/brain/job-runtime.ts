@@ -218,7 +218,7 @@ export class DurableJobRuntime implements JobRuntime {
         signal: controller.signal,
         resume,
       });
-      if (controller.signal.aborted || result.state === "cancelled") {
+      // Widen the inferred state so TypeScript does not reject the cancelled terminal state.\n      const resultState: string = result.state;\n      if (controller.signal.aborted || resultState === "cancelled") {
         // Cancellation is terminal: discard any result that arrives after abort.
         record.status = "cancelled";
         record.error ??= "Job cancelled.";
