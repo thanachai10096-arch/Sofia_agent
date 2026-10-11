@@ -64,15 +64,19 @@ async function main() {
   }
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "sofia-bench-"));
   let root = tempRoot;
-  if (mode === "http") {
-    const workspaceArg = valueAfter("--shared-workspace", "");
-    if (!workspaceArg) throw new Error("--shared-workspace is required; use a dedicated disposable workspace configured as Sofia's actual workspace");
-    root = await realpath(workspaceArg);
-    const info = await stat(root);
-    if (!info.isDirectory() || root === path.parse(root).root || root === os.homedir()) {
-      await rm(tempRoot, { recursive: true, force: true });
-      throw new Error("--shared-workspace must be an existing dedicated directory, not a filesystem root or home directory");
+  try {
+    if (mode === "http") {
+      const workspaceArg = valueAfter("--shared-workspace", "");
+      if (!workspaceArg) throw new Error("--shared-workspace is required; use a dedicated disposable workspace configured as Sofia's actual workspace");
+      root = await realpath(workspaceArg);
+      const info = await stat(root);
+      if (!info.isDirectory() || root === path.parse(root).root || root === os.homedir()) {
+        throw new Error("--shared-workspace must be an existing dedicated directory, not a filesystem root or home directory");
+      }
     }
+  } catch (error) {
+    await rm(tempRoot, { recursive: true, force: true });
+    throw error;
   }
   const report = [];
   try {
