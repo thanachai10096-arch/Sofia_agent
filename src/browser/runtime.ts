@@ -49,7 +49,7 @@ function isPrivateIpv4(address: string): boolean {
 }
 
 function isPrivateIpv6(address: string): boolean {
-  const value = address.toLowerCase().split("%")[0];
+  const value = address.toLowerCase().split("%")[0] ?? "";
   if (value === "::" || value === "::1" || value.startsWith("fc") || value.startsWith("fd") ||
       value.startsWith("fe8") || value.startsWith("fe9") || value.startsWith("fea") ||
       value.startsWith("feb") || value.startsWith("ff") || value.startsWith("2001:db8:")) return true;
