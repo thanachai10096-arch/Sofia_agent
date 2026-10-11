@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createHash, randomUUID } from "node:crypto";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
+import type { DesktopCapability } from "../desktop/types.js";
 import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } from "./types.js";
 import { UsageLimiter } from "./usage.js";
 
@@ -14,6 +15,7 @@ interface ActiveRun {
   createdAt: number;
   updatedAt: number;
   ownerKeyId: string;
+  desktopCapabilities: DesktopCapability[];
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -57,6 +59,17 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!token || !config.apiKeys[token]) return null;
   return { keyId: createHash("sha256").update(token).digest("hex").slice(0, 32), scopes: config.apiKeys[token] };
+}
+
+function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapability[] {
+  const mapping: Record<string, DesktopCapability> = {
+    "desktop:discover": "system:discover",
+    "desktop:workspace:list": "workspace:list",
+    "desktop:workspace:read": "workspace:read",
+    "desktop:workspace:write": "workspace:write",
+    "desktop:process:execute": "process:execute",
+  };
+  return [...new Set(scopes.map((scope) => mapping[scope]).filter((capability): capability is DesktopCapability => capability !== undefined))];
 }
 
 function normalizeContext(context: AgentRunInput["context"]): string | undefined {
@@ -108,6 +121,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       try {
         run.result = await agent.run({
           principalId: run.ownerKeyId,
+          desktopCapabilities: run.desktopCapabilities,
           task: input.task,
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -221,7 +235,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId };
+        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
         runs.set(runId, run);
         res.writeHead(200, {
           ...headers(origin, config),
@@ -235,6 +249,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.status = "running";
           run.result = await agent.run({
             principalId: auth.keyId,
+            desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -287,6 +302,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             createdAt: Date.now(),
             updatedAt: Date.now(),
             ownerKeyId: auth.keyId,
+            desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
           };
           runs.set(runId, run);
           if (idempotencyId) idempotency.set(idempotencyId, runId);
