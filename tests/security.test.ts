@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { assessAction, assertSafePath, containsPromptInjection, redactSecrets } from "../src/security/guard.js";
+import { assessAction, assertSafePath, containsPromptInjection, redactSecrets, riskFor } from "../src/security/guard.js";
+import { MemorySecurityAudit } from "../src/security/audit.js";
 import { SecurityController } from "../src/security/controller.js";
 
 describe("Sofia security controls",()=>{
@@ -33,5 +34,27 @@ describe("Sofia security controls",()=>{
     assert.throws(()=>controller.assertRunning());
     controller.revive();
     assert.doesNotThrow(()=>controller.assertRunning());
+  });
+
+  it("classifies destructive shell commands using real whitespace boundaries", () => {
+    assert.equal(riskFor(["shell"], { command: "git push origin main" }), "critical");
+    assert.equal(riskFor(["shell"], { command: "rm -rf build" }), "critical");
+    assert.equal(riskFor(["shell"], { command: "git status" }), "high");
+  });
+  it("redacts audit reasons and returns isolated sanitized snapshots", () => {
+    const audit = new MemorySecurityAudit();
+    audit.record({
+      id: "audit-1", at: new Date().toISOString(), runId: "run-1", toolName: "tool",
+      actionHash: "hash", risk: "high", decision: "failed",
+      reason: "password=super-secret",
+      input: { nested: { apiKey: "secret-value" } },
+      result: { nested: { message: "Bearer abc123" } },
+    });
+    const first = audit.list();
+    assert.equal(first[0]?.reason, "password=[REDACTED]");
+    assert.deepEqual(first[0]?.input, { nested: { apiKey: "[REDACTED]" } });
+    assert.deepEqual(first[0]?.result, { nested: { message: "Bearer [REDACTED]" } });
+    (first[0]!.result as { nested: { message: string } }).nested.message = "mutated";
+    assert.deepEqual(audit.list()[0]?.result, { nested: { message: "Bearer [REDACTED]" } });
   });
 });

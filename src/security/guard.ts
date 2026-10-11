@@ -40,7 +40,7 @@ export function actionHash(runId: string, toolName: string, input: Record<string
 export function riskFor(effects: readonly ToolEffect[], input: Record<string, unknown>): RiskLevel {
   if (effects.includes("destructive")) return "critical";
   const commandText = Array.isArray(input.args) ? input.args.join(" ") : String(input.command ?? "");
-  if (/(?:^|\\s)(?:reset|clean|push|force|rm|rmdir|del|format|shutdown|reboot)(?:\\s|$)/i.test(commandText)) return "critical";
+  if (/(?:^|\s)(?:reset|clean|push|force|rm|rmdir|del|format|shutdown|reboot)(?:\s|$)/i.test(commandText)) return "critical";
   if (effects.includes("shell")) return "high";
   if (effects.includes("network") || effects.includes("browser")) return "high";
   if (effects.includes("write")) return "medium";
@@ -96,7 +96,7 @@ export function redactSecrets(value: unknown): unknown {
   if (typeof value === "string") {
     return value
       .replace(/(?:Bearer\s+)[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
-      .replace(/(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
+      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
   }
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value && typeof value === "object") {
