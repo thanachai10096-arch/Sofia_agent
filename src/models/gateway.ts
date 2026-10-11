@@ -233,6 +233,7 @@ export class SofiaModelGateway implements ModelProvider {
 
     const failResponse = (message: string): never => {
       circuit.probeInFlight = false;
+      route.healthy = false;
       circuit.failures++;
       if (circuit.failures >= 3 || circuit.openedAt) {
         circuit.openedAt = Date.now();
