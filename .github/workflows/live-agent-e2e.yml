@@ -1,0 +1,49 @@
+name: Sofia Live Agent E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sofia-live-agent-e2e
+  cancel-in-progress: false
+
+jobs:
+  live-agent:
+    name: Real API and agent run
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SOFIA_API_KEY: ${{ secrets.SOFIA_API_KEY }}
+      SOFIA_API_BASE_URL: ${{ vars.SOFIA_API_BASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate configuration
+        shell: bash
+        run: |
+          if [ -z "${SOFIA_API_KEY}" ]; then
+            echo "::error::Add SOFIA_API_KEY in repository Actions secrets."
+            exit 1
+          fi
+          if [ -z "${SOFIA_API_BASE_URL}" ]; then
+            echo "::error::Add SOFIA_API_BASE_URL in repository Actions variables."
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Run safe live agent task
+        run: node scripts/live-agent-e2e.mjs
