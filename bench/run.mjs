@@ -16,10 +16,10 @@ const valueAfter = (flag, fallback) => {
   const i = args.indexOf(flag);
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
-const timeoutMs = timeoutMs;
+const timeoutMs = Number(valueAfter("--timeout-ms", "120000"));
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3_600_000) {
   console.error("--timeout-ms must be an integer between 1 and 3600000");
-  process.exitCode = 2;
+  process.exit(2);
 }
 const selftest = args.includes("--selftest");
 const mode = valueAfter("--agent", selftest ? "selftest" : "");
