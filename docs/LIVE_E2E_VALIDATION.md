@@ -23,7 +23,37 @@ Never put credentials in repository variables, source files, issue comments, or 
 
 The check calls the configured provider through `SofiaModelGateway`, enforces a 60-second outer timeout, and requires the exact response token `SOFIA_LIVE_PROVIDER_OK`. It validates connectivity and response parsing only; it does not prove tool execution, task quality, budget enforcement, or full agent completion. If no Actions secret/variable is configured, the workflow should fail early with a configuration message.
 
-## 2. Interactive desktop host verification
+## 2. Real API + agent end-to-end check
+
+This checks a deployed Sofia API, async run creation, run-ID polling, and a small safe model task. It does not request tools or desktop actions.
+
+Configure:
+
+- **Actions secret** `SOFIA_API_KEY`: a narrowly scoped API key with `agent:run` and permission to read its own run status.
+- **Actions variable** `SOFIA_API_BASE_URL`: the HTTPS base URL of the deployed Sofia API (for example, `https://sofia-api.example.com`; replace with your deployment URL).
+
+Then open **Actions → Sofia Live Agent E2E → Run workflow**. A pass requires the API to accept the async request, return a run ID, reach `completed`, and return the marker `SOFIA_LIVE_AGENT_OK`. The workflow logs the run ID and status only, not the output or credentials. It costs one small model request and should only be run against an API deployment you control. It will fail early if either required setting is missing.
+
+## 3. Read-only live desktop capture check
+
+Run this only on a dedicated test desktop/session, not while personal or confidential content is visible. The script captures the screen in memory, validates PNG signature/dimensions, discards the image, and prints only OS/dimensions/byte count. It does not click, type, launch applications, or upload screenshots.
+
+```sh
+npm install
+SOFIA_DESKTOP_LIVE_TEST=1 npm run desktop:live-smoke
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:SOFIA_DESKTOP_LIVE_TEST = "1"
+npm run desktop:live-smoke
+Remove-Item Env:SOFIA_DESKTOP_LIVE_TEST
+```
+
+On macOS, grant screen-recording permission to the terminal/Node process if prompted. On Linux, a graphical session and one supported capture tool (`gnome-screenshot`, `scrot`, or ImageMagick `import`) are required. A headless CI runner is not a substitute for this test. A passing capture proves only that screen capture works; it does not prove mouse/keyboard actions, pairing, approval denial, cancellation, or revocation.
+
+## 4. Interactive desktop host verification
 
 Run only on a disposable test machine or a dedicated test account. Keep the host bound to loopback; do not expose the pairing host to a LAN or the public internet. Do not use personal documents or real accounts for the first test.
 
