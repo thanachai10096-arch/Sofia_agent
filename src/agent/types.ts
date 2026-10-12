@@ -22,7 +22,7 @@ export interface AgentRequest {
   signal?: AbortSignal;
   onEvent?: (event: AgentEvent) => void;
 }
-export interface AgentEvent { type:"run.started"|"task.classified"|"model.selected"|"model.completed"|"tool.started"|"tool.completed"|"tool.failed"|"tool.approval_required"|"review.started"|"review.completed"|"retry"|"run.completed"|"run.failed"; message:string; step?:number; metadata?:Record<string,unknown>; }
+export interface AgentEvent { type:"run.started"|"task.classified"|"model.selected"|"model.completed"|"tool.started"|"tool.completed"|"tool.failed"|"tool.output_suspicious"|"tool.approval_required"|"review.started"|"review.completed"|"retry"|"run.completed"|"run.failed"; message:string; step?:number; metadata?:Record<string,unknown>; }
 export interface AgentResult {
   runId: string;
   output: string;
