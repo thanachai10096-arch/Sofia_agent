@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { assessAction } from "../src/security/guard.js";
-import { createNodeWorkspaceRuntime, assertSafeGitArgs } from "../src/platform/local-runtime.js";
+import { createNodeWorkspaceRuntime } from "../src/platform/local-runtime.js";
 import { createBuiltinTools } from "../src/tools/builtin.js";
 
 const blocked = [".env", ".git", "node_modules", ".sofia/secrets"];
