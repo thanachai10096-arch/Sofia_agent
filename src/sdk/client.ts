@@ -86,7 +86,7 @@ export class SofiaClient {
       throw new Error("Sofia API baseUrl must not contain a query string or fragment.");
     }
     if (!options.apiKey.trim()) throw new Error("Sofia API key is required.");
-    this.baseUrl = base.toString().replace(/\\/$/, "");
+    this.baseUrl = base.toString().replace(/\/$/, "");
   }
 
   private url(path: string) {
