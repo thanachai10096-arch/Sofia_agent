@@ -154,3 +154,54 @@ test("DurableJobRuntime reserves the resume lock before asynchronous job lookup"
   assert.equal(errors.filter((message) => message === "Unknown job").length, 1);
   assert.equal(errors.filter((message) => message === "Job is already being resumed").length, 1);
 });
+
+
+test("DurableJobRuntime rejects resume for a cancelled job even when a checkpoint exists", async () => {
+  const namespace = "job-runtime-cancelled-resume-" + randomUUID();
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => { started = resolve; });
+  const snapshot = {
+    version: 1,
+    runId: "cancelled-resume-" + randomUUID(),
+    task: "cancelled checkpoint",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "cancelled-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const brain = {
+    run: async ({ signal }: { signal?: AbortSignal }) => {
+      started();
+      if (!signal) throw new Error("Runtime did not pass an abort signal");
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return { completed: false, state: "cancelled" };
+    },
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => {
+    void onRunSnapshot?.(snapshot);
+    return brain;
+  }, undefined, namespace);
+
+  const submitted = await runtime.submit({ task: "cancelled checkpoint" });
+  await running;
+  assert.equal(await runtime.cancel(submitted.id), true);
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 50 && current?.status !== "cancelled"; attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "cancelled");
+  assert.ok(current?.snapshot, "cancelled job should retain its checkpoint");
+  await assert.rejects(() => runtime.resume(submitted.id), /cancelled jobs cannot be resumed/i);
+});
