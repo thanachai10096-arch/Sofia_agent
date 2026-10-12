@@ -36,10 +36,18 @@ async function runNode(cwd, code) {
   await writeFile(file, code, "utf8");
   const child = spawn(process.execPath, [file], { cwd, stdio: "pipe" });
   let stderr = "";
-  child.stderr.on("data", (b) => stderr += b);
+  let settled = false;
+  child.stderr.on("data", (b) => { stderr += b; });
   child.stdout.resume();
-  const codeOut = await new Promise((resolve) => child.on("close", resolve));
-  return { ok: codeOut === 0, stderr };
+  const codeOut = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
+    child.once("error", (error) => { if (!settled) { settled = true; clearTimeout(timer); reject(error); } });
+    child.once("close", (code, signal) => {
+      clearTimeout(timer);
+      if (!settled) { settled = true; resolve({ code, signal }); }
+    });
+  });
+  return { ok: codeOut.code === 0, stderr: stderr.trim() || (codeOut.signal ? `checker terminated by ${codeOut.signal}` : "") };
 }
 async function selfTest() {
   assert.equal(tasks.length, 10);
@@ -83,6 +91,7 @@ async function main() {
     for (const task of tasks) {
       const dir = mode === "http" ? root : path.join(root, task.id);
       if (mode !== "http") await mkdir(dir, { recursive: true });
+      const startedAt = Date.now();
       const targetFile = path.join(dir, task.file);
       const checkFile = path.join(dir, ".bench-check.mjs");
       if (mode === "http") {
@@ -95,19 +104,37 @@ async function main() {
         const command = valueAfter("--command", "");
         if (!command) throw new Error("--command is required for command agent");
         const child = spawn(command, [], { cwd: dir, shell: true, stdio: "inherit", env: { ...process.env, BENCH_PROMPT: task.prompt, BENCH_WORKSPACE: dir, BENCH_TASK_ID: task.id } });
-        const code = await new Promise((resolve) => child.on("close", resolve));
-        if (code !== 0) error = "command exited " + code;
+        const code = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            child.kill("SIGTERM");
+            const forceTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+            forceTimer.unref();
+          }, Math.max(1, Number(valueAfter("--timeout-ms", "120000"))));
+          child.once("error", (cause) => { clearTimeout(timer); reject(cause); });
+          child.once("close", (exitCode, signal) => { clearTimeout(timer); resolve({ exitCode, signal }); });
+        });
+        if (code.exitCode !== 0) error = code.signal ? "command terminated by " + code.signal : "command exited " + code.exitCode;
       } else if (mode === "http") {
         const url = valueAfter("--url", "");
         const apiKey = process.env.SOFIA_API_KEY;
         if (!url || !apiKey) throw new Error("--url and SOFIA_API_KEY are required for http agent");
         const workspace = valueAfter("--shared-workspace", "");
         if (!workspace) throw new Error("--shared-workspace is required; point Sofia at a disposable workspace matching its server configuration");
-        const response = await fetch(new URL("/v1/agent/runs", url), { method: "POST", headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" }, body: JSON.stringify({ task: task.prompt + "\nWorkspace: " + workspace, async: false, maxSteps: 12 }) });
-        if (!response.ok) error = "HTTP " + response.status + ": " + (await response.text()).slice(0, 300);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), Number(valueAfter("--timeout-ms", "120000")));
+        try {
+          const response = await fetch(new URL("/v1/agent/runs", url), { method: "POST", headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" }, body: JSON.stringify({ task: task.prompt + "\nWorkspace: " + workspace, async: false, maxSteps: 12 }), signal: controller.signal });
+          const raw = await response.text();
+          let payload;
+          try { payload = JSON.parse(raw); } catch { throw new Error("API returned non-JSON response"); }
+          if (!response.ok) error = "HTTP " + response.status + ": " + raw.slice(0, 300);
+          else if (payload?.status !== "completed" || !payload?.result) error = "API run did not complete successfully (status=" + String(payload?.status ?? "missing") + ")";
+        } catch (cause) {
+          error = cause instanceof Error ? cause.message : String(cause);
+        } finally { clearTimeout(timer); }
       }
       const checked = await runNode(dir, task.test);
-      report.push({ id: task.id, passed: checked.ok && !error, error: error || checked.stderr.trim() });
+      report.push({ id: task.id, passed: checked.ok && !error, durationMs: Date.now() - startedAt, error: error || checked.stderr.trim() });
       if (mode === "http") {
         await rm(targetFile, { force: true });
         await rm(checkFile, { force: true });
