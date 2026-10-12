@@ -6,7 +6,7 @@
  * It does not claim to measure Sofia until a real command/API adapter is run.
  */
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -16,6 +16,11 @@ const valueAfter = (flag, fallback) => {
   const i = args.indexOf(flag);
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
+const timeoutMs = Number(valueAfter("--timeout-ms", "120000"));
+if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3_600_000) {
+  console.error("--timeout-ms must be an integer between 1 and 3600000");
+  process.exit(2);
+}
 const selftest = args.includes("--selftest");
 const mode = valueAfter("--agent", selftest ? "selftest" : "");
 const tasks = [
@@ -80,6 +85,10 @@ async function main() {
       const info = await stat(root);
       if (!info.isDirectory() || root === path.parse(root).root || root === os.homedir()) {
         throw new Error("--shared-workspace must be an existing dedicated directory, not a filesystem root or home directory");
+      }
+      const entries = await readdir(root);
+      if (entries.length > 0) {
+        throw new Error("--shared-workspace must be empty before the benchmark starts; use a new disposable directory to avoid deleting or contaminating project files");
       }
     }
   } catch (error) {
