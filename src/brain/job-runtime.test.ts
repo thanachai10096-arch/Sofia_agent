@@ -135,3 +135,22 @@ test("DurableJobRuntime resumes a saved checkpoint and passes it to the brain", 
   assert.equal((await runtime.get(submitted.id))?.status, "completed");
   assert.equal((await runtime.list()).find((item) => item.id === submitted.id)?.status, "completed");
 });
+
+test("DurableJobRuntime reserves the resume lock before asynchronous job lookup", async () => {
+  const namespace = "job-runtime-resume-lock-" + randomUUID();
+  const runtime = new DurableJobRuntime(() => ({
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  const results = await Promise.allSettled([
+    runtime.resume("missing-job"),
+    runtime.resume("missing-job"),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "rejected").length, 2);
+  const errors = results
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason));
+  assert.equal(errors.filter((message) => message === "Unknown job").length, 1);
+  assert.equal(errors.filter((message) => message === "Job is already being resumed").length, 1);
+});
