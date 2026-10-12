@@ -55,6 +55,8 @@ test("Git runtime rejects config/alias execution flags and unknown subcommands",
       ["--exec-path=/tmp", "status"],
       ["config", "alias.x", "!echo RCE"],
       ["fetch", "--upload-pack=touch /tmp/pwned", "origin"],
+      ["apply", "--unsafe-paths", "patch.diff"],
+      ["apply", "--unsafe-paths=true", "patch.diff"],
       [],
     ]) {
       await assert.rejects(runtime.git(args), /not allowed by Sofia runtime policy/, JSON.stringify(args));
