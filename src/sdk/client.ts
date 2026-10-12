@@ -68,19 +68,29 @@ function isTransient(error: unknown): boolean {
 
 export class SofiaClient {
   private readonly fetchImpl: typeof fetch;
+  private readonly baseUrl: string;
 
   constructor(private readonly options: SofiaClientOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
-    // Fail early for malformed endpoints, while allowing HTTP loopback in local development.
+    // Validate before retaining a URL that will receive the caller's bearer token.
     const base = new URL(options.baseUrl);
-    if (base.protocol !== "https:" && !(base.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(base.hostname))) {
+    const loopbackHttp = base.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(base.hostname);
+    if (base.protocol !== "https:" && !loopbackHttp) {
       throw new Error("Sofia API baseUrl must use HTTPS (HTTP is allowed only for loopback development).");
     }
+    if (base.username || base.password) {
+      throw new Error("Sofia API baseUrl must not contain embedded credentials.");
+    }
+    if (base.search || base.hash) {
+      throw new Error("Sofia API baseUrl must not contain a query string or fragment.");
+    }
     if (!options.apiKey.trim()) throw new Error("Sofia API key is required.");
+    this.baseUrl = base.toString().replace(/\/$/, "");
   }
 
   private url(path: string) {
-    return new URL(path, this.options.baseUrl);
+    return new URL(path, this.baseUrl);
   }
 
   private headers() {
