@@ -44,15 +44,22 @@ test("runtime refuses to overwrite secret files through apply_patch", async () =
 });
 
 test("Git runtime rejects config/alias execution flags and unknown subcommands", async () => {
-  for (const args of [
-    ["-c", "alias.x=!echo RCE", "x"],
-    ["-C", "..", "status"],
-    ["--exec-path=/tmp", "status"],
-    ["config", "alias.x", "!echo RCE"],
-    ["fetch", "--upload-pack=touch /tmp/pwned", "origin"],
-    [],
-  ]) {
-    assert.throws(() => assertSafeGitArgs(args), /not allowed by Sofia runtime policy/, JSON.stringify(args));
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-git-"));
+  try {
+    const runtime = createNodeWorkspaceRuntime(root);
+    for (const args of [
+      ["-c", "alias.x=!echo RCE", "x"],
+      ["-C", "..", "status"],
+      ["--exec-path=/tmp", "status"],
+      ["config", "alias.x", "!echo RCE"],
+      ["fetch", "--upload-pack=touch /tmp/pwned", "origin"],
+      [],
+    ]) {
+      await assert.rejects(runtime.git(args), /not allowed by Sofia runtime policy/, JSON.stringify(args));
+    }
+    const ok = await runtime.git(["status"]);
+    assert.ok(typeof ok.code === "number");
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
-  assert.doesNotThrow(() => assertSafeGitArgs(["status"]));
 });
