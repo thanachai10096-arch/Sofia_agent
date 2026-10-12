@@ -22,6 +22,7 @@ test("browser URL policy rejects local, private and metadata destinations", () =
     "http://192.168.1.1", "http://192.88.99.1", "http://192.175.48.1", "http://169.254.169.254/latest/meta-data",
     "http://100.64.0.1", "http://2130706433", "http://0x7f000001", "http://0177.0.0.1",
     "http://[::1]", "http://[fd00::1]",
+    "http://[64:ff9b::a00:1]", "http://[64:ff9b:1::a00:1]",
     "http://metadata.google.internal", "http://metadata",
     "http://host.test", "http://host.example", "http://host.invalid",
     "http://[2001:0::1]", "http://[2001:100::1]", "http://[2002:c0a8:101::1]", "http://[3fff::1]",

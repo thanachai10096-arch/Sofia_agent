@@ -57,6 +57,9 @@ function isPrivateIpv6(host: string): boolean {
   if (value === "::" || value === "::1" || value.startsWith("fc") || value.startsWith("fd") ||
       value.startsWith("fe8") || value.startsWith("fe9") || value.startsWith("fea") ||
       value.startsWith("feb") || value.startsWith("ff") || value.startsWith("2001:db8:") ||
+      // NAT64 translation prefixes can encode IPv4 destinations; do not let a
+      // public-looking IPv6 literal become a route to an internal IPv4 address.
+      value.startsWith("64:ff9b:") ||
       value.startsWith("2002:") || value.startsWith("3fff:")) return true;
   // IANA special-purpose IPv6 block 2001:0000::/23 includes Teredo, benchmarking,
   // and other non-public ranges. A compressed zero second hextet is also in-range.
