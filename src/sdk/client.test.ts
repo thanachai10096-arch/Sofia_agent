@@ -74,6 +74,27 @@ test("SDK surfaces structured API errors and refuses insecure remote endpoints",
   assert.throws(() => new SofiaClient({ apiKey: "test-key", baseUrl: "http://api.example.test" }), /HTTPS/);
 });
 
+test("SDK rejects API URLs with embedded credentials, query strings, or fragments", () => {
+  assert.throws(
+    () => new SofiaClient({ apiKey: "test-key", baseUrl: "https://user:pass@api.example.test" }),
+    /embedded credentials/,
+  );
+  assert.throws(
+    () => new SofiaClient({ apiKey: "test-key", baseUrl: "https://api.example.test?token=unexpected" }),
+    /query string or fragment/,
+  );
+  assert.throws(
+    () => new SofiaClient({ apiKey: "test-key", baseUrl: "https://api.example.test/#route" }),
+    /query string or fragment/,
+  );
+});
+
+test("SDK permits HTTP only for loopback development endpoints", () => {
+  assert.doesNotThrow(() => new SofiaClient({ apiKey: "test-key", baseUrl: "http://localhost:3000" }));
+  assert.doesNotThrow(() => new SofiaClient({ apiKey: "test-key", baseUrl: "http://127.0.0.1:3000" }));
+  assert.throws(() => new SofiaClient({ apiKey: "test-key", baseUrl: "http://api.example.test" }), /HTTPS/);
+});
+
 test("SDK aborts stalled mobile requests at the configured timeout", async () => {
   const client = new SofiaClient({
     apiKey: "test-key",
