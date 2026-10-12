@@ -150,18 +150,20 @@ export class DurableJobRuntime implements JobRuntime {
   }
 
   async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
+    // Reserve the resume slot before the first await. Otherwise two callers can both
+    // pass the guard while get() is pending and race to resume the same checkpoint.
     if (this.resuming.has(id)) throw new Error("Job is already being resumed");
-    const fetched = await this.get(id);
-    if (!fetched) throw new Error("Unknown job");
-    // get() returns a defensive copy; mutations must target the canonical live record.
-    const record = this.jobs.get(id) ?? fetched;
-    if (record.status === "completed") return { ...record };
-    if (!record.snapshot) throw new Error("Job has no resumable snapshot");
-    // A terminal status may be persisted just before the previous worker's finally block
-    // removes its controller. Only the canonical status determines whether resume is blocked.
-    if (record.status === "running") throw new Error("Job is already running");
     this.resuming.add(id);
     try {
+      const fetched = await this.get(id);
+      if (!fetched) throw new Error("Unknown job");
+      // get() returns a defensive copy; mutations must target the canonical live record.
+      const record = this.jobs.get(id) ?? fetched;
+      if (record.status === "completed") return { ...record };
+      if (!record.snapshot) throw new Error("Job has no resumable snapshot");
+      // A terminal status may be persisted just before the previous worker's finally block
+      // removes its controller. Only the canonical status determines whether resume is blocked.
+      if (record.status === "running") throw new Error("Job is already running");
       await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
       return { ...record };
     } finally {
