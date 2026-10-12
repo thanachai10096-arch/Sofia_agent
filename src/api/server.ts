@@ -93,6 +93,20 @@ function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"])
   }));
 }
 
+function integerSetting(
+  name: string,
+  value: number | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const resolved = value ?? fallback;
+  if (!Number.isSafeInteger(resolved) || resolved < minimum || resolved > maximum) {
+    throw new Error("Invalid Sofia API configuration: " + name + " must be an integer between " + minimum + " and " + maximum + ".");
+  }
+  return resolved;
+}
+
 function pathId(url: string): string | null {
   const match = url.match(/^\/v1\/agent\/runs\/([^/?]+)$/);
   return match?.[1] ?? null;
@@ -100,14 +114,16 @@ function pathId(url: string): string | null {
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
-  const maxBytes = config.maxBodyBytes ?? 1_000_000;
-  const usage = new UsageLimiter(config.maxRunsPerKeyPerDay ?? 100, config.maxToolCallsPerKeyPerDay ?? 1000);
+  const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
+  const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
+  const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
+  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
   const runs = new Map<string, ActiveRun>();
   const idempotency = new Map<string, string>();
   const activeByKey = new Map<string, number>();
-  const requestTimeoutMs = config.requestTimeoutMs ?? 120_000;
-  const maxConcurrentRunsPerKey = config.maxConcurrentRunsPerKey ?? 4;
-  const retention = config.runRetentionMs ?? 24 * 60 * 60 * 1000;
+  const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
+  const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
+  const retention = integerSetting("runRetentionMs", config.runRetentionMs, 24 * 60 * 60 * 1000, 0, 365 * 24 * 60 * 60 * 1000);
   let lastPruneAt = 0;
 
   const publicResponse = (run: ActiveRun): AgentRunResponse => ({
