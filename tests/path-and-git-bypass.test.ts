@@ -20,8 +20,8 @@ test("security guard checks every apply_patch operation path", () => {
 test("blocked directory names match at any depth", () => {
   assert.throws(() => assess("workspace.write_file", { path: "sub/.git/config", content: "x" }), /blocked/i);
   assert.throws(() => assess("workspace.write_file", { path: "pkg/node_modules/x.js", content: "x" }), /blocked/i);
-  assert.throws(() => assess("workspace.write_file", { path: "sub\\\\.git\\\\config", content: "x" }), /blocked/i);
-  assert.throws(() => assess("workspace.write_file", { path: "pkg\\\\node_modules\\\\x.js", content: "x" }), /blocked/i);
+  assert.throws(() => assess("workspace.write_file", { path: "sub\\.git\\config", content: "x" }), /blocked/i);
+  assert.throws(() => assess("workspace.write_file", { path: "pkg\\node_modules\\x.js", content: "x" }), /blocked/i);
 });
 
 test("runtime refuses to overwrite secret files through apply_patch", async () => {
