@@ -105,7 +105,11 @@ async function main() {
         if (!command) throw new Error("--command is required for command agent");
         const child = spawn(command, [], { cwd: dir, shell: true, stdio: "inherit", env: { ...process.env, BENCH_PROMPT: task.prompt, BENCH_WORKSPACE: dir, BENCH_TASK_ID: task.id } });
         const code = await new Promise((resolve, reject) => {
-          const timer = setTimeout(() => child.kill("SIGTERM"), Number(valueAfter("--timeout-ms", "120000")));
+          const timer = setTimeout(() => {
+            child.kill("SIGTERM");
+            const forceTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+            forceTimer.unref();
+          }, Math.max(1, Number(valueAfter("--timeout-ms", "120000"))));
           child.once("error", (cause) => { clearTimeout(timer); reject(cause); });
           child.once("close", (exitCode, signal) => { clearTimeout(timer); resolve({ exitCode, signal }); });
         });
