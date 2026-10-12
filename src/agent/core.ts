@@ -1,3 +1,4 @@
+import { fenceUntrustedOutput } from "../security/untrusted.js";
 import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
@@ -248,10 +249,13 @@ export class SofiaAgent {
                 runtime: this.deps.runtime,
                 ...(request.signal ? { signal: request.signal } : {}),
               });
-              messages.push({
-                role: "tool",
-                content: JSON.stringify(result),
-                toolCallId: call.id,
+              const fenced = fenceUntrustedOutput(call.name, JSON.stringify(result));
+              messages.push({ role: "tool", content: fenced.text, toolCallId: call.id });
+              if (fenced.suspicious) emit({
+                type: "tool.output_suspicious",
+                message: `${call.name} output contains instruction-like text.`,
+                step,
+                metadata: { tool: call.name, signals: fenced.signals.join(",") },
               });
 
               emit({
