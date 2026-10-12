@@ -20,7 +20,7 @@ const GIT_SUBCOMMANDS = new Set([
   "add", "commit", "restore", "switch", "checkout", "stash", "reset", "clean", "merge",
   "rebase", "remote", "fetch", "pull", "push", "clone", "apply",
 ]);
-const GIT_DANGEROUS_ARG = /^--(?:upload-pack|receive-pack|exec|exec-path|ext-diff|textconv|config-env)(?:=|$)/i;
+const GIT_DANGEROUS_ARG = /^--(?:upload-pack|receive-pack|exec|exec-path|ext-diff|textconv|config-env|unsafe-paths)(?:=|$)/i;
 
 /** Only allow known Git subcommands; reject global options that can alter execution/configuration. */
 export function assertSafeGitArgs(args: readonly string[]): void {
