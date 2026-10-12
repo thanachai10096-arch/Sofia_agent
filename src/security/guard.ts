@@ -62,7 +62,9 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
     throw new Error("Workspace path escapes the configured root.");
   }
   if (SECRET_PATH.test(normalized)) throw new Error("Access to credential/secret files is blocked.");
-  if (blockedPaths.some(pattern => normalized === pattern || normalized.startsWith(pattern.endsWith("/") ? pattern : pattern + path.sep))) {
+  const segments = normalized.split(/[\\\\/]+/);
+  if (blockedPaths.some(pattern => normalized === pattern || normalized.startsWith(pattern.endsWith("/") ? pattern : pattern + path.sep) ||
+      (!pattern.includes("/") && segments.includes(pattern)))) {
     throw new Error("Workspace path is blocked by security policy.");
   }
 }
@@ -77,7 +79,10 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
       if (allowedHosts.length === 0 || !allowedHosts.some(allowed => host === allowed || host.endsWith("." + allowed))) return { allowed:false,risk:"critical",requireApproval:true,reason:"Network host is not allowlisted.",actionHash:hash };
     }
   }
-  if (pathValue) assertSafePath(pathValue, blockedPaths);
+  const patchPaths = Array.isArray(action.input.operations)
+    ? action.input.operations.map((op) => (op && typeof op === "object" ? (op as { path?: unknown }).path : undefined)).filter((p): p is string => typeof p === "string")
+    : [];
+  for (const candidate of [...(pathValue ? [pathValue] : []), ...patchPaths]) assertSafePath(candidate, blockedPaths);
 
   // Treat command/URL/query text as untrusted control input. Content being written is
   // deliberately excluded so legitimate source code/comments can contain these phrases.
