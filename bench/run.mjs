@@ -116,8 +116,18 @@ async function main() {
         if (!url || !apiKey) throw new Error("--url and SOFIA_API_KEY are required for http agent");
         const workspace = valueAfter("--shared-workspace", "");
         if (!workspace) throw new Error("--shared-workspace is required; point Sofia at a disposable workspace matching its server configuration");
-        const response = await fetch(new URL("/v1/agent/runs", url), { method: "POST", headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" }, body: JSON.stringify({ task: task.prompt + "\nWorkspace: " + workspace, async: false, maxSteps: 12 }) });
-        if (!response.ok) error = "HTTP " + response.status + ": " + (await response.text()).slice(0, 300);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), Number(valueAfter("--timeout-ms", "120000")));
+        try {
+          const response = await fetch(new URL("/v1/agent/runs", url), { method: "POST", headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" }, body: JSON.stringify({ task: task.prompt + "\nWorkspace: " + workspace, async: false, maxSteps: 12 }), signal: controller.signal });
+          const raw = await response.text();
+          let payload;
+          try { payload = JSON.parse(raw); } catch { throw new Error("API returned non-JSON response"); }
+          if (!response.ok) error = "HTTP " + response.status + ": " + raw.slice(0, 300);
+          else if (payload?.status !== "completed" || !payload?.result) error = "API run did not complete successfully (status=" + String(payload?.status ?? "missing") + ")";
+        } catch (cause) {
+          error = cause instanceof Error ? cause.message : String(cause);
+        } finally { clearTimeout(timer); }
       }
       const checked = await runNode(dir, task.test);
       report.push({ id: task.id, passed: checked.ok && !error, durationMs: Date.now() - startedAt, error: error || checked.stderr.trim() });
