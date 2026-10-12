@@ -239,6 +239,10 @@ export class SofiaAgent {
               }
             }
 
+            // Approval may take time. Never start an action after the caller or host
+            // kill switch has cancelled this run while approval was pending.
+            request.signal?.throwIfAborted();
+
             try {
               const result = await tool.execute(actionInput, {
                 runtime: this.deps.runtime,
