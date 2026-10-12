@@ -144,6 +144,8 @@ export interface Observation {
   evidenceId: string;
   preview: string;
   truncated: boolean;
+  /** Heuristic signal: tool output contains instruction-like text. */
+  suspicious?: boolean;
 }
 
 export interface BrainLimits {

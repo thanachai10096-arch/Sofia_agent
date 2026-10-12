@@ -1,3 +1,4 @@
+import { fenceUntrustedOutput } from "../security/untrusted.js";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -613,13 +614,11 @@ export class SofiaBrain {
     }
 
     const p = preview(result.data);
+    const fenced = fenceUntrustedOutput(step.call.tool, p.text);
     const observation: Observation = {
-      stepId: step.id,
-      tool: step.call.tool,
-      ok: result.ok,
-      evidenceId: result.evidenceId,
-      preview: p.text,
-      truncated: p.truncated,
+      stepId: step.id, tool: step.call.tool, ok: result.ok, evidenceId: result.evidenceId,
+      preview: fenced.text, truncated: p.truncated,
+      ...(fenced.suspicious ? { suspicious: true } : {}),
     };
 
     this.observations.push(observation);

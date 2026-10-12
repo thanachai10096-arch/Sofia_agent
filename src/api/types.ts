@@ -1,4 +1,5 @@
 import type { AgentResult } from "../agent/types.js";
+import type { RunRecordStore } from "./run-record-store.js";
 
 export interface AgentRunInput {
   task: string;
@@ -48,4 +49,6 @@ export interface SofiaApiConfig {
   requestTimeoutMs?: number;
   maxConcurrentRunsPerKey?: number;
   securityAdminScope?: string;
+  /** Optional durable run store; queued/running runs become failed after restart. */
+  runStore?: RunRecordStore;
 }

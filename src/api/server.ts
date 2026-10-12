@@ -6,6 +6,7 @@ import type { DesktopCapability } from "../desktop/types.js";
 import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } from "./types.js";
 import { UsageLimiter } from "./usage.js";
 import { validateAgentRunInput } from "./validation.js";
+import type { RunRecord } from "./run-record-store.js";
 
 interface ActiveRun {
   id: string;
@@ -119,6 +120,34 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
   const runs = new Map<string, ActiveRun>();
+  const runStore = config.runStore;
+  const persist = (run: ActiveRun) => {
+    if (!runStore) return;
+    const record: RunRecord = {
+      id: run.id, status: run.status,
+      ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
+      ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
+      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+    };
+    void runStore.save(record);
+  };
+  if (runStore) for (const record of runStore.loadAllSync()) {
+    const interrupted = record.status === "queued" || record.status === "running";
+    const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
+    if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
+        !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string")) {
+      void runStore.remove(record.id); continue;
+    }
+    const run: ActiveRun = {
+      id: record.id, status: interrupted ? "failed" : record.status,
+      ...(record.result ? { result: record.result as unknown as AgentRunResponse["result"] } : {}),
+      ...(interrupted ? { error: "Run interrupted by server restart." } : record.error ? { error: record.error } : {}),
+      controller: new AbortController(), createdAt: record.createdAt,
+      updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
+      desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+    };
+    runs.set(run.id, run); if (interrupted) persist(run);
+  }
   const idempotency = new Map<string, string>();
   const activeByKey = new Map<string, number>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
@@ -137,6 +166,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
+      persist(run);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
         const result = await agent.run({
@@ -166,6 +196,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       } finally {
         clearTimeout(timer);
         run.updatedAt = Date.now();
+        persist(run);
         const current = activeByKey.get(run.ownerKeyId) ?? 1;
         if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
       }
@@ -175,7 +206,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const prune = () => {
     const cutoff = Date.now() - retention;
     for (const [id, run] of runs) {
-      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) runs.delete(id);
+      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id); }
     }
     for (const [key, runId] of idempotency) {
       if (!runs.has(runId)) idempotency.delete(key);
@@ -279,6 +310,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.controller.abort();
           run.status = "cancelled";
           run.updatedAt = Date.now();
+          persist(run);
         }
         return json(res, 200, publicResponse(run), origin, config);
       }
@@ -296,6 +328,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
         runs.set(runId, run);
+        persist(run);
         res.writeHead(200, {
           ...headers(origin, config),
           "content-type": "text/event-stream; charset=utf-8",
@@ -331,6 +364,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         send({ type: "done", runId });
         run.updatedAt = Date.now();
+        persist(run);
         clearTimeout(timer);
         res.off("close", abortOnDisconnect);
         if (!res.destroyed) return res.end();
@@ -378,6 +412,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
           };
           runs.set(runId, run);
+          persist(run);
           if (idempotencyId) idempotency.set(idempotencyId, runId);
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
