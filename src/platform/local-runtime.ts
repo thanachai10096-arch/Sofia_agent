@@ -15,6 +15,24 @@ function safeEnv(): NodeJS.ProcessEnv {
   );
 }
 
+const GIT_SUBCOMMANDS = new Set([
+  "status", "diff", "log", "show", "rev-parse", "ls-files", "blame", "branch", "tag",
+  "add", "commit", "restore", "switch", "checkout", "stash", "reset", "clean", "merge",
+  "rebase", "remote", "fetch", "pull", "push", "clone", "apply",
+]);
+const GIT_DANGEROUS_ARG = /^--(?:upload-pack|receive-pack|exec|exec-path|ext-diff|textconv|config-env)(?:=|$)/i;
+
+/** Only allow known Git subcommands; reject global options that can alter execution/configuration. */
+export function assertSafeGitArgs(args: readonly string[]): void {
+  const sub = args[0];
+  if (typeof sub !== "string" || sub.startsWith("-") || !GIT_SUBCOMMANDS.has(sub)) {
+    throw new Error("Git subcommand is not allowed by Sofia runtime policy.");
+  }
+  if (args.some((arg) => GIT_DANGEROUS_ARG.test(arg))) {
+    throw new Error("Git option is not allowed by Sofia runtime policy.");
+  }
+}
+
 function isWithin(base: string, candidate: string): boolean {
   return candidate === base || candidate.startsWith(base + path.sep);
 }
@@ -180,6 +198,7 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
     },
     run,
     git: async (args, options = {}) => {
+      assertSafeGitArgs(args);
       const cwd = await contained(options.cwd ?? ".");
       try {
         const result = await execFileAsync("git", args, {
