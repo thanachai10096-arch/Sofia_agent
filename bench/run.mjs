@@ -36,10 +36,18 @@ async function runNode(cwd, code) {
   await writeFile(file, code, "utf8");
   const child = spawn(process.execPath, [file], { cwd, stdio: "pipe" });
   let stderr = "";
-  child.stderr.on("data", (b) => stderr += b);
+  let settled = false;
+  child.stderr.on("data", (b) => { stderr += b; });
   child.stdout.resume();
-  const codeOut = await new Promise((resolve) => child.on("close", resolve));
-  return { ok: codeOut === 0, stderr };
+  const codeOut = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
+    child.once("error", (error) => { if (!settled) { settled = true; clearTimeout(timer); reject(error); } });
+    child.once("close", (code, signal) => {
+      clearTimeout(timer);
+      if (!settled) { settled = true; resolve({ code, signal }); }
+    });
+  });
+  return { ok: codeOut.code === 0, stderr: stderr.trim() || (codeOut.signal ? `checker terminated by ${codeOut.signal}` : "") };
 }
 async function selfTest() {
   assert.equal(tasks.length, 10);
@@ -83,6 +91,7 @@ async function main() {
     for (const task of tasks) {
       const dir = mode === "http" ? root : path.join(root, task.id);
       if (mode !== "http") await mkdir(dir, { recursive: true });
+      const startedAt = Date.now();
       const targetFile = path.join(dir, task.file);
       const checkFile = path.join(dir, ".bench-check.mjs");
       if (mode === "http") {
@@ -95,8 +104,12 @@ async function main() {
         const command = valueAfter("--command", "");
         if (!command) throw new Error("--command is required for command agent");
         const child = spawn(command, [], { cwd: dir, shell: true, stdio: "inherit", env: { ...process.env, BENCH_PROMPT: task.prompt, BENCH_WORKSPACE: dir, BENCH_TASK_ID: task.id } });
-        const code = await new Promise((resolve) => child.on("close", resolve));
-        if (code !== 0) error = "command exited " + code;
+        const code = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => child.kill("SIGTERM"), Number(valueAfter("--timeout-ms", "120000")));
+          child.once("error", (cause) => { clearTimeout(timer); reject(cause); });
+          child.once("close", (exitCode, signal) => { clearTimeout(timer); resolve({ exitCode, signal }); });
+        });
+        if (code.exitCode !== 0) error = code.signal ? "command terminated by " + code.signal : "command exited " + code.exitCode;
       } else if (mode === "http") {
         const url = valueAfter("--url", "");
         const apiKey = process.env.SOFIA_API_KEY;
@@ -107,7 +120,7 @@ async function main() {
         if (!response.ok) error = "HTTP " + response.status + ": " + (await response.text()).slice(0, 300);
       }
       const checked = await runNode(dir, task.test);
-      report.push({ id: task.id, passed: checked.ok && !error, error: error || checked.stderr.trim() });
+      report.push({ id: task.id, passed: checked.ok && !error, durationMs: Date.now() - startedAt, error: error || checked.stderr.trim() });
       if (mode === "http") {
         await rm(targetFile, { force: true });
         await rm(checkFile, { force: true });
