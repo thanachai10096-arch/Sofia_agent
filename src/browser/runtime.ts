@@ -170,6 +170,7 @@ function sendSocketError(socket: Socket, status: number): void {
  * gap left by validating a URL while letting Chromium resolve the hostname.
  */
 export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
+  let closed = false;
   const clientSockets = new Set<Socket>();
   const upstreamSockets = new Set<Socket>();
   const server = createServer((request, response) => {
@@ -179,6 +180,7 @@ export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
         if (target.protocol !== "http:") throw new Error("Only HTTP proxy requests are supported without CONNECT.");
         if ((target.port ? Number(target.port) : 80) !== 80) throw new Error("Only standard HTTP port 80 is allowed.");
         const address = await resolvePublicHostAddress(target.hostname);
+        if (closed || request.destroyed) return;
         const headers: OutgoingHttpHeaders = { ...request.headers, host: target.host };
         delete headers["proxy-authorization"];
         delete headers["proxy-connection"];
@@ -221,6 +223,7 @@ export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
         const target = assertSafeBrowserUrl("https://" + (request.url ?? "") + "/");
         if ((target.port ? Number(target.port) : 443) !== 443) throw new Error("Only standard HTTPS port 443 is allowed.");
         const address = await resolvePublicHostAddress(target.hostname);
+        if (closed || client.destroyed) return;
         const upstream = connectTcp({ host: address, family: isIP(address), port: 443 });
         upstreamSockets.add(upstream);
         upstream.once("close", () => upstreamSockets.delete(upstream));
@@ -257,6 +260,7 @@ export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
   return {
     url: "http://127.0.0.1:" + address.port,
     async close() {
+      closed = true;
       for (const socket of clientSockets) socket.destroy();
       for (const socket of upstreamSockets) socket.destroy();
       await new Promise<void>((resolve, reject) => {
