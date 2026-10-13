@@ -167,14 +167,23 @@ export interface SkillOutcome {readonly skillId:string;readonly taskType:TaskTyp
 export const HISTORY_LIMIT=100;
 export const CONTEXT_SKILL_LIMIT=3;
 const byId=(id:string):Skill|undefined=>BUILTIN_SKILLS.find(s=>s.id===id);
+// Outcomes are trusted only when created by finishAttempt in this process. Plain JSON or
+// caller-constructed objects must never be able to poison skill ranking.
+const trustedOutcomes=new WeakSet<object>();
+function makeOutcome(skillId:string,taskType:TaskType,result:SkillOutcome["result"]):SkillOutcome {
+ const value=Object.freeze({skillId,taskType,result});
+ if(result!=="unverified")trustedOutcomes.add(value);
+ return value;
+}
 export function boundedHistory(v:unknown):readonly SkillOutcome[]{
  if(!Array.isArray(v))return [];
  const out:SkillOutcome[]=[];
  for(const r of v.slice(-HISTORY_LIMIT)){
   try {
-   if(!record(r)||typeof r.skillId!=="string"||!byId(r.skillId)||!member(TASK_TYPES,r.taskType)||(r.result!=="verified-success"&&r.result!=="failure"))continue;
-   out.push(Object.freeze({skillId:r.skillId,taskType:r.taskType,result:r.result}));
-  } catch { /* Ignore malformed or hostile history rows. */ }
+   if(!record(r)||!trustedOutcomes.has(r)||typeof r.skillId!=="string"||!byId(r.skillId)||!member(TASK_TYPES,r.taskType)||(r.result!=="verified-success"&&r.result!=="failure"))continue;
+   const safe=makeOutcome(r.skillId,r.taskType,r.result);
+   out.push(safe);
+  } catch { /* Ignore malformed or untrusted history rows. */ }
  }
  return Object.freeze(out);
 }
@@ -239,8 +248,8 @@ export function finishAttempt(attempt:SkillAttempt,observation:unknown):SkillOut
  if(!pending.has(attempt)||!record(observation)||observation.runId!==attempt.runId||
     !member(["succeeded","failed","cancelled","unknown"],observation.state))return undefined;
  pending.delete(attempt);
- if(observation.state==="failed")return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"failure"});
- if(observation.state==="cancelled"||observation.state==="unknown")return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"unverified"});
+ if(observation.state==="failed")return makeOutcome(attempt.skillId,attempt.taskType,"failure");
+ if(observation.state==="cancelled"||observation.state==="unknown")return makeOutcome(attempt.skillId,attempt.taskType,"unverified");
  if(!Array.isArray(observation.checks)||observation.checks.length>32)return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"unverified"});
  const seen=new Set<Check>();let unverified=false;let failed=false;
  for(const raw of observation.checks){
@@ -253,5 +262,5 @@ export function finishAttempt(attempt:SkillAttempt,observation:unknown):SkillOut
  }
  if(failed)return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"failure"});
  if(unverified||!attempt.requiredChecks.every(check=>seen.has(check)))return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"unverified"});
- return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"verified-success"});
+ return makeOutcome(attempt.skillId,attempt.taskType,"verified-success");
 }
