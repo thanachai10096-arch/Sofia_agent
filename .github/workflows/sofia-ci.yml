@@ -137,3 +137,30 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  source-provenance-inventory:
+    name: Source provenance line inventory (not a copyright verdict)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout full Git history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Generate line-level Git attribution report
+        run: npm run provenance:report -- "$RUNNER_TEMP/sofia-code-provenance-lines.csv"
+
+      - name: Upload provenance inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: sofia-code-provenance-lines
+          path: ${{ runner.temp }}/sofia-code-provenance-lines.csv
+          if-no-files-found: error
+          retention-days: 14
