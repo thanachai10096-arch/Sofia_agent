@@ -18,6 +18,8 @@ export interface DesktopRuntimeConfig {
   workspaceRoot: string;
   /** Exact executable names allowed for process execution. Empty by default. */
   allowedExecutables?: readonly string[];
+  /** Additional parent environment variable names to pass to child processes. Secrets are not inherited by default. */
+  allowedEnvironmentVariables?: readonly string[];
   /** Maximum output bytes captured from a command. */
   maxOutputBytes?: number;
   /** Default process timeout. */
