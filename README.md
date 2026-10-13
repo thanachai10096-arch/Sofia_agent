@@ -180,7 +180,7 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 | **Browser runtime** | Playwright-backed navigation, click, type, select, scroll, wait, keypress, history, reload, observation, screenshots, and close actions. |
 | **Durable jobs** | Background and long-running execution through one durable job runtime, with a compatibility facade for older callers. |
 | **Recovery** | Durable local checkpoints and run snapshots; resume is guarded against duplicate concurrent resumes. |
-| **Security boundaries** | Centralized tool permissions and explicit policy/process sandbox abstractions. The process sandbox is **not** represented as a container. |
+| **Security boundaries** | Centralized tool permissions plus policy/process runners and an opt-in Docker-backed container sandbox. Process mode is **not** represented as a container. |
 | **Platform services** | Agent profiles and templates, skills platform, cloud execution backend contract, and evaluation runner. |
 | **SDK & API** | A stable, model-agnostic public surface for clients such as Zuse. |
 
@@ -202,7 +202,7 @@ Browser access is disabled by default. To opt in:
 ```bash
 export SOFIA_ALLOW_BROWSER=true
 npm install
-npx playwright install chromium
+npm ci\nnpx playwright install chromium
 ```
 
 Only enable browser capability in environments where its permissions and policy are configured appropriately.
@@ -232,6 +232,22 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 - The permission-gated desktop foundation supports scoped workspace discovery, listing, reading, writing, and opt-in allowlisted process execution.
 - The local runtime does **not** claim unrestricted whole-disk indexing, browser-profile access, remote desktop control, or OS-level sandboxing.
 - Install and start any local agent service explicitly on the user's machine, and grant only the capabilities needed for the task.
+
+### Opt-in Docker container execution
+
+The SDK exports `ContainerSandbox` for tasks that require an actual container boundary. It requires a trusted image pinned by SHA-256 digest and already present locally; it will not pull images implicitly. The container uses a read-only root filesystem, drops Linux capabilities, enables `no-new-privileges`, caps PIDs/memory/CPU, and mounts only the configured workspace at `/workspace`. Set `allowNetwork: false` to use Docker's `none` network.
+
+This is stronger isolation than `ProcessSandbox`, but it is not a substitute for a patched container runtime, host-level egress controls, or a dedicated disposable worker for hostile workloads. The workspace mount remains writable by design so coding tasks can edit project files. Docker must be installed, running, and available to the Sofia process. Set the image explicitly to an immutable digest; do not use a mutable tag as the configured value:
+
+```bash
+docker pull node:22-alpine
+docker image inspect node:22-alpine --format '{{index .RepoDigests 0}}'
+# Copy the exact repository@sha256:... value printed above:
+export SOFIA_SANDBOX_IMAGE='docker.io/library/node@sha256:REPLACE_WITH_THE_REAL_DIGEST'
+export SOFIA_SANDBOX_MODE=docker
+```
+
+Replace the example placeholder with the actual digest printed by your local Docker engine. The placeholder is not a usable image reference. Preload the exact digest before running Sofia; the sandbox uses `--pull=never` and fails closed if that image is absent.
 
 More details: [Desktop Runtime Foundation](docs/desktop-runtime.md).
 

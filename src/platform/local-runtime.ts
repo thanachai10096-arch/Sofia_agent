@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { detectPlatform, type WorkspaceRuntime } from "./runtime.js";
+import { ContainerSandbox } from "../sandbox.js";
 
 const execFileAsync = promisify(execFile);
 const SECRET_NAME = /^(?:\.env(?:\..*)?|id_(?:rsa|ed25519)|credentials(?:\.json)?|secrets?(?:\.json|\.ya?ml)?|.*\.(?:pem|key|p12|pfx))$/i;
@@ -96,29 +97,18 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
     const timeout = options.timeoutMs ?? 60_000;
     try {
       if (process.env.SOFIA_SANDBOX_MODE === "docker") {
-        const image = process.env.SOFIA_SANDBOX_IMAGE || "node:22-alpine";
-        const realRoot = await fs.realpath(base);
-        const result = await execFileAsync("docker", [
-          "run", "--rm",
-          "--network", "none",
-          "--cap-drop", "ALL",
-          "--security-opt", "no-new-privileges",
-          "--read-only",
-          "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-          "--pids-limit", "128",
-          "--memory", "512m",
-          "--cpus", "1",
-          "-v", realRoot + ":/workspace:rw",
-          "-w", path.posix.join("/workspace", path.relative(base, cwd).split(path.sep).join("/")),
-          image, command, ...args,
-        ], {
-          cwd: base,
-          windowsHide: true,
-          maxBuffer: 8 * 1024 * 1024,
-          timeout,
-          env: safeEnv(),
+        const image = process.env.SOFIA_SANDBOX_IMAGE;
+        if (!image) {
+          throw new Error("SOFIA_SANDBOX_IMAGE must name a preloaded SHA-256-pinned container image when SOFIA_SANDBOX_MODE=docker.");
+        }
+        const sandbox = new ContainerSandbox({ image });
+        return await sandbox.run(command, args, {
+          workspaceRoot: base,
+          cwd: path.relative(base, cwd),
+          timeoutMs: timeout,
+          maxOutputBytes: 8 * 1024 * 1024,
+          allowNetwork: false,
         });
-        return { stdout: result.stdout, stderr: result.stderr, code: 0 };
       }
 
       const result = await execFileAsync(command, args, {

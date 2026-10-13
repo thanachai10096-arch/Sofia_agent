@@ -81,3 +81,23 @@ test("workspace runtime blocks sensitive paths at every depth for reads and writ
     await rm(f.parent, { recursive: true, force: true });
   }
 });
+
+
+test("Docker sandbox mode fails closed without an explicitly pinned image", async () => {
+  const f = await fixture();
+  const oldMode = process.env.SOFIA_SANDBOX_MODE;
+  const oldImage = process.env.SOFIA_SANDBOX_IMAGE;
+  process.env.SOFIA_SANDBOX_MODE = "docker";
+  delete process.env.SOFIA_SANDBOX_IMAGE;
+  try {
+    const result = await f.runtime.run(process.execPath, ["-e", "process.exit(0)"]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /SOFIA_SANDBOX_IMAGE must name a preloaded SHA-256-pinned container image/);
+  } finally {
+    if (oldMode === undefined) delete process.env.SOFIA_SANDBOX_MODE;
+    else process.env.SOFIA_SANDBOX_MODE = oldMode;
+    if (oldImage === undefined) delete process.env.SOFIA_SANDBOX_IMAGE;
+    else process.env.SOFIA_SANDBOX_IMAGE = oldImage;
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});

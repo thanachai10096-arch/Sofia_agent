@@ -21,7 +21,7 @@ Evidence:
 - [Lockfile / npm ci CI](https://github.com/thanachai10096-arch/Sofia_agents/actions/runs/38366148663) — all four jobs succeeded with the committed lockfile.
 - [Desktop child environment CI](https://github.com/thanachai10096-arch/Sofia_agents/actions/runs/38366620524) — all four jobs succeeded; the Ubuntu suite reported 182 tests passed and 0 failed.
 
-**Remaining security limitation:** `ProcessSandbox` is still a child-process runner, not an OS/container sandbox. It does not enforce filesystem or network isolation. Do not expose it as a complete sandbox; production isolation still requires a real OS/container boundary and explicit network egress controls.
+**Remaining security limitation:** `ProcessSandbox` is still a child-process runner, not an OS/container sandbox. An opt-in `ContainerSandbox` backend now exists in PR #74, with digest-pinned local images, read-only root filesystem, dropped capabilities, no-new-privileges, resource limits, a scoped writable workspace mount, and Docker network mode selection. It is not automatically wired into every execution path and has not been proven on a live Docker daemon by unit tests alone. Production rollout still requires integration wiring, a real Docker smoke test, host-level egress policy, and a documented trusted-image provisioning process.
 
 ## Current architecture documented by the repository
 

@@ -23,7 +23,7 @@ export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConventio
 export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
-export { PolicySandbox } from "./sandbox.js";
+export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
 export { InMemorySkillsPlatform } from "./skills/platform.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
 export { AgentEvaluationRunner } from "./evaluation.js";
