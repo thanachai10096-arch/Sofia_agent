@@ -167,3 +167,66 @@ test("job API enforces owner isolation for reads, resume, cancel, and list", asy
   assert.equal(job.resumeCalls, 0, "unauthorized caller must not invoke resume");
   assert.equal(job.cancelCalls, 0, "unauthorized caller must not invoke cancel");
 });
+
+
+test("SSE runs share the per-key concurrency limit and release the slot on disconnect", async (t) => {
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const provider: ModelProvider = {
+    generate(_request, _route, options) {
+      markStarted();
+      const signal = options?.signal;
+      return new Promise((_, reject) => {
+        const onAbort = () => reject(new Error("provider aborted"));
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+  };
+  const server = createSofiaApi(dependencies(provider), {
+    apiKeys: { "test-token": ["agent:run"] },
+    maxConcurrentRunsPerKey: 1,
+    requestTimeoutMs: 5_000,
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const url = `http://127.0.0.1:${address.port}`;
+  const firstClient = new AbortController();
+  const first = await fetch(`${url}/v1/agent/runs/stream`, {
+    method: "POST",
+    headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+    body: JSON.stringify({ task: "long running stream" }),
+    signal: firstClient.signal,
+  });
+  assert.equal(first.status, 200);
+  await started;
+
+  const blocked = await fetch(`${url}/v1/agent/runs/stream`, {
+    method: "POST",
+    headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+    body: JSON.stringify({ task: "second stream must be blocked" }),
+  });
+  assert.equal(blocked.status, 429);
+  assert.deepEqual(await blocked.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+
+  firstClient.abort();
+  await first.body?.cancel().catch(() => undefined);
+  // Wait for disconnect propagation and slot release before retrying.
+  let retried: Response | undefined;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    retried = await fetch(`${url}/v1/agent/runs/stream`, {
+      method: "POST",
+      headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+      body: JSON.stringify({ task: "slot should be reusable" }),
+    });
+    if (retried.status !== 429) break;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(retried?.status, 200, "disconnect should release the concurrency slot");
+  await retried?.body?.cancel().catch(() => undefined);
+});
