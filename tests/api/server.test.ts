@@ -125,7 +125,7 @@ test("job API enforces owner isolation for reads, resume, cancel, and list", asy
       };
       return { ...job.current };
     },
-    async get(id: string) { return id === job.current?.id ? { ...job.current } : undefined; },
+    async get(id: string) { return job.current && id === job.current.id ? { ...job.current } : undefined; },
     async list() { return job.current ? [{ ...job.current }] : []; },
     async resume() { job.resumeCalls += 1; return { ...job.current! }; },
     async cancel() { job.cancelCalls += 1; return true; },
