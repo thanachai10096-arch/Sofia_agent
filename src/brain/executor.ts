@@ -22,6 +22,7 @@ import { compactRepositoryMap } from "./repository-intelligence.js";
 import { reviewCodeChange } from "../review/code-review.js";
 import type { RunStore } from "./run-store.js";
 import type { ProjectMemoryEntry, ProjectMemoryStore } from "./project-memory.js";
+import { SemanticProjectMemorySearch } from "./semantic-project-memory.js";
 import type { EvolutionEngine } from "./evolution.js";
 
 import type {
@@ -246,6 +247,7 @@ export class SofiaBrain {
   private projectContextLoaded = false;
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
+  private semanticMemorySearch?: SemanticProjectMemorySearch;
   private readonly selectedSkillIds = new Set<string>();
   private activeSkillId?: string;
 
@@ -356,8 +358,20 @@ export class SofiaBrain {
 
     if (!this.projectMemoryLoaded && this.dependencies.projectMemory) {
       this.projectMemoryLoaded = true;
+      this.semanticMemorySearch = new SemanticProjectMemorySearch(this.dependencies.projectMemory);
       try { this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.list()); }
       catch { this.projectMemory = []; }
+    }
+
+    let relevantMemory = this.projectMemory.slice(-12);
+    if (this.semanticMemorySearch) {
+      try {
+        const query = JSON.stringify(payload).slice(0, 2_000);
+        const matches = await this.wait(() => this.semanticMemorySearch!.find(query));
+        if (matches.length > 0) relevantMemory = matches;
+      } catch {
+        // Memory is best-effort; use the cached recent entries if retrieval fails.
+      }
     }
 
     for (;;) {
@@ -371,7 +385,7 @@ export class SofiaBrain {
           diagnoses: this.diagnoses,
           decisions: this.decisions,
           projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined,
-          projectMemory: this.projectMemory.slice(-12).map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, source: entry.source })),
+          projectMemory: relevantMemory.map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, source: entry.source })),
         },
       });
 
