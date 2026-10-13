@@ -31,3 +31,9 @@ test("legacy focused skills remain available for backwards compatibility", () =>
 test("skill selection bounds context size and input length", () => {
   assert.ok(matchSkills("unknown", "x".repeat(100_000), 999).length <= 8);
 });
+
+
+test("testing tasks prefer the test policy rather than a generic fallback", () => {
+  const skills = matchSkills("tool_error", "run tests and inspect the test suite", 5);
+  assert.equal(skills[0]?.id, "sofia.v1.test");
+});
