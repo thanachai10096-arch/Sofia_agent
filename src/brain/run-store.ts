@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,9 +28,14 @@ export class FileRunStore implements RunStore {
   async save(snapshot: BrainRunSnapshot): Promise<void> {
     await fs.mkdir(this.directory, { recursive: true });
     const target = this.file(snapshot.runId);
-    const temporary = target + ".tmp";
-    await fs.writeFile(temporary, JSON.stringify(snapshot), "utf8");
-    await fs.rename(temporary, target);
+    // Concurrent snapshots for one run must not share a temporary path.
+    const temporary = target + "." + randomUUID() + ".tmp";
+    try {
+      await fs.writeFile(temporary, JSON.stringify(snapshot), "utf8");
+      await fs.rename(temporary, target);
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
   }
 
   async load(runId: string): Promise<BrainRunSnapshot | undefined> {
