@@ -148,7 +148,6 @@ test("job API enforces owner isolation for reads, resume, cancel, and list", asy
       headers: {
         authorization: `Bearer ${token}`,
         ...(init.body ? { "content-type": "application/json" } : {}),
-        ...init.headers,
       },
     });
 
