@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { ContainerSandbox } from "../dist/src/sandbox.js";
+import { ContainerSandbox } from "../dist/sandbox.js";
 
 const image = process.env.SOFIA_SANDBOX_IMAGE;
 if (!image || !/@sha256:[a-f0-9]{64}$/i.test(image)) {
