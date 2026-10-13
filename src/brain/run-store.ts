@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,10 @@ export interface RunStore {
   load(runId: string): Promise<BrainRunSnapshot | undefined>;
   delete(runId: string): Promise<void>;
 }
+
+// Serialize replacement of the same snapshot target across store instances. Windows does not
+// reliably allow concurrent rename-over-existing-target operations (EPERM).
+const saveQueues = new Map<string, Promise<void>>();
 
 function key(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -26,11 +30,25 @@ export class FileRunStore implements RunStore {
   }
 
   async save(snapshot: BrainRunSnapshot): Promise<void> {
-    await fs.mkdir(this.directory, { recursive: true });
     const target = this.file(snapshot.runId);
-    const temporary = target + ".tmp";
-    await fs.writeFile(temporary, JSON.stringify(snapshot), "utf8");
-    await fs.rename(temporary, target);
+    const previous = saveQueues.get(target) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(async () => {
+      await fs.mkdir(this.directory, { recursive: true });
+      // Each write gets a unique temporary path, and replacement is serialized per target.
+      const temporary = target + "." + randomUUID() + ".tmp";
+      try {
+        await fs.writeFile(temporary, JSON.stringify(snapshot), "utf8");
+        await fs.rename(temporary, target);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+    });
+    saveQueues.set(target, operation);
+    try {
+      await operation;
+    } finally {
+      if (saveQueues.get(target) === operation) saveQueues.delete(target);
+    }
   }
 
   async load(runId: string): Promise<BrainRunSnapshot | undefined> {

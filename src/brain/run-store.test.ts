@@ -1,11 +1,11 @@
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { FileRunStore } from "./run-store.js";
 
-test("FileRunStore survives a new store instance", async () => {
+test("FileRunStore serializes concurrent writes across store instances", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-run-store-test-"));
   try {
     const snapshot = {
@@ -25,10 +25,15 @@ test("FileRunStore survives a new store instance", async () => {
       trace: [],
     };
 
-    await new FileRunStore("test", root).save(snapshot);
-    const loaded = await new FileRunStore("test", root).load(snapshot.runId);
+    const stores = Array.from({ length: 4 }, () => new FileRunStore("test", root));
+    await Promise.all(Array.from({ length: 20 }, (_, index) =>
+      stores[index % stores.length]!.save({ ...snapshot, checkpointId: `checkpoint-${index}` }),
+    ));
+    const loaded = await stores[0]!.load(snapshot.runId);
 
-    assert.deepEqual(loaded, snapshot);
+    assert.ok(loaded);
+    assert.match(loaded.checkpointId, /^checkpoint-(?:[0-9]|1[0-9])$/);
+    assert.equal(loaded.runId, snapshot.runId);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

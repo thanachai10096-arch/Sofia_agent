@@ -160,6 +160,7 @@ export class DurableJobRuntime implements JobRuntime {
       // get() returns a defensive copy; mutations must target the canonical live record.
       const record = this.jobs.get(id) ?? fetched;
       if (record.status === "completed") return { ...record };
+      if (record.status === "cancelled") throw new Error("Cancelled jobs cannot be resumed");
       if (!record.snapshot) throw new Error("Job has no resumable snapshot");
       // A terminal status may be persisted just before the previous worker's finally block
       // removes its controller. Only the canonical status determines whether resume is blocked.
@@ -210,7 +211,12 @@ export class DurableJobRuntime implements JobRuntime {
     const onSnapshot = async (snapshot: BrainRunSnapshot): Promise<void> => {
       record.snapshot = snapshot;
       record.updatedAt = new Date().toISOString();
-      await this.runStore?.save(snapshot);
+      try {
+        await this.runStore?.save(snapshot);
+      } catch {
+        // The job record also embeds its snapshot. Persist that fallback even when
+        // the dedicated snapshot store is temporarily unavailable.
+      }
       await this.state.save(record);
     };
 

@@ -1086,11 +1086,25 @@ export class SofiaBrain {
             );
           }
 
+          const previousStepFingerprints = new Map(
+            currentPlan.steps.map((step) => [step.id, digest(step)]),
+          );
           currentPlan = await this.replan(
             input.task,
             understanding,
             currentPlan,
             diagnosis,
+          );
+          const nextStepFingerprints = new Map(
+            currentPlan.steps.map((step) => [step.id, digest(step)]),
+          );
+          // A planner may reuse a step ID for a different action. Only preserve
+          // completion when the full step definition is unchanged across replans.
+          completedStepIds = new Set(
+            [...completedStepIds].filter((id) =>
+              previousStepFingerprints.has(id) &&
+              previousStepFingerprints.get(id) === nextStepFingerprints.get(id),
+            ),
           );
         }
       }

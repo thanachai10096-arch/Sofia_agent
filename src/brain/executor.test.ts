@@ -387,3 +387,128 @@ test("Brain emits a review gate after verification", async () => {
   assert.equal(report.completed, true);
   assert.ok(events.includes("brain.review.completed"));
 });
+
+
+test("Brain re-executes a completed step ID when a replan changes its action", async () => {
+  let replannedActionCalls = 0;
+  let failureCalls = 0;
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      const value = parsed.phase === "understand"
+        ? {
+            objective: "Complete the task after a recoverable failure",
+            constraints: [],
+            assumptions: [],
+            requiredCapabilities: ["file-write"],
+            requiredTools: ["workspace.write_file"],
+            risk: "low",
+            successCriteria: ["replanned action runs"],
+            ambiguities: [],
+          }
+        : parsed.phase === "replan"
+          ? {
+              strategy: "fix-implementation",
+              reason: "The original step ID now represents a different action.",
+              steps: [{
+                id: "completed-step",
+                objective: "Run the replacement action",
+                dependencies: [],
+                call: { tool: "workspace.list_files", input: { path: "replanned-step" } },
+              }],
+            }
+          : {
+              strategy: "initial",
+              reason: "Write then exercise a recoverable failure.",
+              steps: [
+                {
+                  id: "completed-step",
+                  objective: "Write a baseline file",
+                  dependencies: [],
+                  call: { tool: "workspace.write_file", input: { path: "done.txt", content: "done" } },
+                },
+                {
+                  id: "trigger-failure",
+                  objective: "Trigger one recoverable failure",
+                  dependencies: ["completed-step"],
+                  call: { tool: "test.fail_once", input: {} },
+                },
+              ],
+            };
+      return {
+        inputTokens: 10,
+        async invoke() {
+          return { value, usage: { inputTokens: 10, outputTokens: 20 } };
+        },
+      };
+    },
+  };
+
+  let evidence = 0;
+  const tools: ToolGateway = {
+    describe(name) {
+      if (name === "workspace.write_file" || name === "workspace.list_files" || name === "test.fail_once") {
+        return { effects: name === "workspace.write_file" ? ["write"] : ["read"] };
+      }
+      return undefined;
+    },
+    async execute(call): Promise<ToolResult> {
+      const evidenceId = "replan-evidence-" + (++evidence);
+      if (call.tool === "test.fail_once") {
+        failureCalls += 1;
+        return {
+          ok: false,
+          data: null,
+          evidenceId,
+          error: { category: "tool_error", message: "recoverable test failure" },
+        };
+      }
+      if (call.tool === "workspace.list_files" && call.input.path === "replanned-step") {
+        replannedActionCalls += 1;
+      }
+      if (call.tool === "git.diff") return { ok: true, data: { diff: "test diff" }, evidenceId };
+      return { ok: true, data: ["done.txt"], evidenceId };
+    },
+    async snapshot() {
+      return { id: "replan-snapshot-" + evidence, revision: String(evidence), evidenceId: "replan-snapshot-evidence" };
+    },
+    async changedFiles() {
+      return ["done.txt"];
+    },
+    async checkpoint() {
+      return { id: "replan-checkpoint", revision: "0" };
+    },
+    async rollback() {
+      return [];
+    },
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools, allowShell: false, allowNetwork: false },
+    limits: {
+      maxSteps: 6,
+      maxToolCalls: 20,
+      maxReplans: 2,
+      maxModelCalls: 6,
+      maxTokens: 2_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+  const report = await brain.run({
+    task: "Run replacement step after recovery",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "done.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("done.txt"), detail: "baseline file exists" };
+      },
+    }],
+  });
+
+  assert.equal(failureCalls, 1);
+  assert.equal(replannedActionCalls, 1, "changed action must not be skipped due to a reused step ID");
+  assert.equal(report.completed, true, report.summary);
+});
