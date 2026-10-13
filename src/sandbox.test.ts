@@ -197,7 +197,7 @@ test("ProcessSandbox passes only baseline and explicitly allowed environment var
     const result = await sandbox.run(
       process.execPath,
       ["-e", "process.stdout.write(JSON.stringify({allowed:process.env.SOFIA_SANDBOX_TEST_ALLOWED,unlisted:process.env.SOFIA_SANDBOX_TEST_UNLISTED,nodeOptions:process.env.NODE_OPTIONS,path:!!process.env.PATH}))"],
-      limits({ allowedEnvironmentVariables: ["SOFIA_SANDBOX_TEST_ALLOWED", "SOFIA_SANDBOX_TEST_UNLISTED", "NODE_OPTIONS"] }),
+      limits({ allowedEnvironmentVariables: ["SOFIA_SANDBOX_TEST_ALLOWED", "NODE_OPTIONS"] }),
     );
     const env = JSON.parse(result.stdout) as { allowed?: string; unlisted?: string; nodeOptions?: string; path?: boolean };
     assert.equal(env.allowed, "allowed-value");
