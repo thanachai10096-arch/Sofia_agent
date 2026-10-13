@@ -16,7 +16,18 @@ A model-agnostic execution layer for Zuse — with internal model routing, polic
 
 ---
 
+## Open source
 
+Sofia Agent is distributed under the [MIT License](LICENSE). You can inspect, use, modify, and redistribute the code subject to the license terms. Before redistributing the repository, review third-party dependency and artwork licenses as well.
+
+- **Contribute:** [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Report security issues:** [SECURITY.md](SECURITY.md)
+- **Open-source and commercial roadmap boundaries:** [docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md](docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md)
+
+The long-term direction is one shared Sofia Core behind local use, API/SDK, and future Web/Desktop/Mobile/chat clients. Paid hosted or enterprise services are potential offerings, not a claim that those services are already available. Model-provider usage and infrastructure may incur separate costs.
+
+---
+ 
 ## Meet the 14 Sofia characters
 
 <div align="center">
