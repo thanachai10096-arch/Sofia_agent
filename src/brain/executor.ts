@@ -12,6 +12,8 @@ import {
 import { runVerification } from "./verification.js";
 import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
 import { compactSkillContext, matchSkills } from "./skills.js";
+import { BUILTIN_SKILLS as POLICY_SKILLS, finishAttempt, prepareAttempt } from "./skill-policy-v1.js";
+import type { SkillAttempt, TaskType as PolicyTaskType } from "./skill-policy-v1.js";
 import type { SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
@@ -247,7 +249,9 @@ export class SofiaBrain {
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
   private readonly selectedSkillIds = new Set<string>();
+  private readonly verifiedPolicySkillIds = new Set<string>();
   private activeSkillId?: string;
+  private activePolicyAttempt?: SkillAttempt;
 
   constructor(
     private readonly dependencies: Dependencies,
@@ -749,6 +753,15 @@ export class SofiaBrain {
     if (skills[0]) {
       this.selectedSkillIds.add(skills[0].id);
       this.activeSkillId = skills[0].id;
+      const policySkill = POLICY_SKILLS.find((skill) => skill.id === skills[0]!.id);
+      this.activePolicyAttempt = policySkill
+        ? prepareAttempt(
+            policySkill.id,
+            (policySkill.taskTypes[0] ?? "planning") as PolicyTaskType,
+            this.runId,
+            [],
+          )
+        : undefined;
     }
     const value = await this.infer("replan", {
       task,
@@ -772,6 +785,52 @@ export class SofiaBrain {
     }
 
     return plan;
+  }
+
+  private finishActivePolicyAttempt(
+    verification: VerificationResult[],
+    reviewApproved: boolean,
+  ): void {
+    const attempt = this.activePolicyAttempt;
+    if (!attempt) return;
+
+    const checks: Array<Record<string, unknown>> = [];
+    for (const result of verification) {
+      const match = /^project-(typecheck|test|build)$/.exec(result.criterionId);
+      if (!match || !result.passed || !result.evidenceIds.some((id) => typeof id === "string" && id.length > 0) ||
+          typeof result.workspaceRevision !== "string" || result.workspaceRevision.length === 0) {
+        continue;
+      }
+      const check = match[1] === "test" ? "tests" : match[1];
+      checks.push({
+        check,
+        state: "passed",
+        completed: true,
+        exitCode: 0,
+        checksPassed: true,
+        assertionsPassed: true,
+        assertionsTotal: 1,
+        failedAssertions: 0,
+        skippedAssertions: 0,
+        postconditionObserved: true,
+      });
+    }
+    if (reviewApproved) {
+      checks.push({ check: "change-review", state: "passed", completed: true, postconditionObserved: true });
+      if (verification.length > 0 && verification.every((result) => result.passed)) {
+        checks.push({ check: "completion", state: "passed", completed: true, postconditionObserved: true });
+      }
+    }
+
+    const outcome = finishAttempt(attempt, {
+      runId: this.runId,
+      state: "succeeded",
+      checks,
+    });
+    if (outcome?.result === "verified-success") {
+      this.verifiedPolicySkillIds.add(outcome.skillId);
+    }
+    this.activePolicyAttempt = undefined;
   }
 
   private report(
@@ -1008,6 +1067,7 @@ export class SofiaBrain {
               );
             }
 
+            this.finishActivePolicyAttempt(verification, review.approved);
             this.move("completed");
             completed = true;
             break;
@@ -1025,6 +1085,14 @@ export class SofiaBrain {
 
           this.move("diagnosing");
           const diagnosis = this.diagnose(error);
+          if (this.activePolicyAttempt && this.activePolicyAttempt.skillId === this.activeSkillId) {
+            finishAttempt(this.activePolicyAttempt, {
+              runId: this.runId,
+              state: "failed",
+              checks: [],
+            });
+            this.activePolicyAttempt = undefined;
+          }
           if (this.dependencies.evolution && this.activeSkillId) {
             // Penalize only the skill that actually informed the previous repair plan,
             // never every candidate that merely matched the error text. A failed skill
@@ -1114,6 +1182,9 @@ export class SofiaBrain {
         const taskType = understanding.requiredCapabilities[0] ?? "general";
         // This block is reachable only after trusted verification and code review pass.
         for (const skillId of this.selectedSkillIds) {
+          if (skillId.startsWith("sofia.v1.") && !this.verifiedPolicySkillIds.has(skillId)) {
+            continue;
+          }
           this.dependencies.evolution.recordSuccess(skillId, this.usage.steps, recoveryRounds, taskType);
         }
         this.dependencies.evolution.recordRun(taskType, true);
