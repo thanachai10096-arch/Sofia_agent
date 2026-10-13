@@ -185,6 +185,8 @@ class FileJobStateStore {
       const records = await this.read();
       const record = records.find((item) => item.id === id);
       if (!record || record.status !== "running" || record.leaseOwnerToken !== ownerToken) return false;
+      const currentExpiry = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
+      if (!Number.isFinite(currentExpiry) || currentExpiry <= Date.now()) return false;
       const now = Date.now();
       record.heartbeatAt = new Date(now).toISOString();
       record.leaseExpiresAt = new Date(now + leaseMs).toISOString();
