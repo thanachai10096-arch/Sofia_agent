@@ -40,7 +40,7 @@ These capabilities must be checked against current tests and deployment configur
 
 ## Shared chat dispatcher
 
-`src/integrations/chat-adapter.ts` is a transport-neutral dispatcher intended for provider adapters. It expects a *verified* command envelope, checks an explicit access policy, limits task size, claims a provider message ID for deduplication, and submits through the same Sofia client API. The caller must implement platform signature verification and use a durable, atomic dedupe store with TTL in production. An in-memory dedupe map is suitable only for tests/single-process development.
+`src/integrations/chat-adapter.ts` is a transport-neutral dispatcher intended for provider adapters. It expects a *verified* command envelope, checks an explicit access policy, limits task size, claims a provider message ID for deduplication, and submits through the same Sofia client API. The caller must implement platform signature verification. `src/integrations/file-chat-deduplicator.ts` provides a durable, atomic local-filesystem implementation: exclusive file creation prevents concurrent duplicate claims and marker files survive process restarts. It intentionally does not expire successful claims, avoiding replay after an arbitrary TTL; operators must plan retention/cleanup, and multi-host deployments should use a shared database with a unique constraint. Release a claim only when the downstream request definitively failed and retry is safe. An in-memory dedupe map is suitable only for tests.
 
 ## Delivery order
 
