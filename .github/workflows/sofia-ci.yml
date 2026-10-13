@@ -32,6 +32,13 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Temporary lockfile migration export
+        run: |
+          echo "SOFIA_LOCKFILE_BASE64_BEGIN"
+          base64 -w0 package-lock.json
+          echo
+          echo "SOFIA_LOCKFILE_BASE64_END"
+
       - name: License check
         run: npm run license:check
 
