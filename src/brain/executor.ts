@@ -1093,6 +1093,9 @@ export class SofiaBrain {
               state: "failed",
               checks: [],
             });
+            // A later failed attempt invalidates an earlier success credit for this
+            // skill in the same run; the final learning gate must reflect the last outcome.
+            this.verifiedPolicySkillIds.delete(this.activeSkillId);
             this.activePolicyAttempt = undefined;
           }
           if (this.dependencies.evolution && this.activeSkillId) {
