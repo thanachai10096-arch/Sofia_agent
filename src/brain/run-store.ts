@@ -10,7 +10,11 @@ export interface RunStore {
   delete(runId: string): Promise<void>;
 }
 
-// Serialize replacement of the same snapshot target across store instances. Windows does not\n// reliably allow concurrent rename-over-existing-target operations (EPERM).\nconst saveQueues = new Map<string, Promise<void>>();\n\nfunction key(value: string): string {
+// Serialize replacement of the same snapshot target across store instances. Windows does not
+// reliably allow concurrent rename-over-existing-target operations (EPERM).
+const saveQueues = new Map<string, Promise<void>>();
+
+function key(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
