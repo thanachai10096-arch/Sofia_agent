@@ -211,7 +211,12 @@ export class DurableJobRuntime implements JobRuntime {
     const onSnapshot = async (snapshot: BrainRunSnapshot): Promise<void> => {
       record.snapshot = snapshot;
       record.updatedAt = new Date().toISOString();
-      await this.runStore?.save(snapshot);
+      try {
+        await this.runStore?.save(snapshot);
+      } catch {
+        // The job record also embeds its snapshot. Persist that fallback even when
+        // the dedicated snapshot store is temporarily unavailable.
+      }
       await this.state.save(record);
     };
 
