@@ -430,7 +430,6 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           runs.set(runId, run);
           persist(run);
           if (idempotencyId) idempotency.set(idempotencyId, runId);
-          activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
             ...input,
             ...(input.context !== undefined
