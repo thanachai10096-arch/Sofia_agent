@@ -91,6 +91,8 @@ test("ContainerSandbox constructs a restrictive Docker command and disables netw
     assert.deepEqual(result, { stdout: "ok", stderr: "", code: 0 });
     assert.equal(capturedArgs[0], "run");
     assert.ok(capturedArgs.includes("--pull=never"));
+    assert.ok(capturedArgs.includes("--name"));
+    assert.match(capturedArgs[capturedArgs.indexOf("--name") + 1] ?? "", /^sofia-sandbox-[0-9a-f-]{36}$/);
     assert.ok(capturedArgs.includes("--read-only"));
     assert.ok(capturedArgs.includes("--cap-drop=ALL"));
     assert.ok(capturedArgs.includes("--security-opt=no-new-privileges"));
@@ -127,6 +129,32 @@ test("ContainerSandbox requires a digest-pinned image and never silently pulls i
     assert.ok(args.includes("--pull=never"));
     const networkIndex = args.indexOf("--network");
     assert.equal(args[networkIndex + 1], "bridge");
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("ContainerSandbox removes a possibly orphaned container after timeout or abort errors", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "sofia-container-sandbox-"));
+  const calls: string[][] = [];
+  const sandbox = new ContainerSandbox({
+    image: "registry.example/sofia-runner@sha256:" + "c".repeat(64),
+    runner: async (args) => {
+      calls.push(args);
+      if (args[0] === "run") throw new Error("Container execution timed out.");
+      return { stdout: "", stderr: "", code: 0 };
+    },
+  });
+  try {
+    await assert.rejects(
+      () => sandbox.run("node", [], limits({ workspaceRoot })),
+      /Container execution timed out/,
+    );
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1]?.[0], "rm");
+    assert.equal(calls[1]?.[1], "--force");
+    assert.equal(calls[1]?.[2], calls[0]?.[calls[0]?.indexOf("--name") + 1]);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
