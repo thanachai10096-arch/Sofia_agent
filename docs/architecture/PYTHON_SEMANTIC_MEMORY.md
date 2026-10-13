@@ -20,11 +20,17 @@ retrieval uses the existing lexical `ProjectMemoryStore.find()` path. This makes
 Python optional for local/open-source users and avoids making core memory depend
 on model downloads or a separate service.
 
+## Benchmark before production
+
+A real-service benchmark is available at
+`python/ai-service/benchmarks/benchmark_memory.py`. It compares embedding-only
+ranking with cross-encoder reranking using Recall@3, MRR, and request latency.
+The bundled data is only a smoke dataset; add representative, human-labeled cases
+and compare cold-start/warm latency, memory, and operating cost before enabling
+semantic retrieval by default.
+
 ## Integration boundary
 
-The new class is an opt-in retrieval adapter. Callers that want semantic search
-can construct it around the existing store and call `find(query)`; existing
-callers are unchanged. Before making it the default for agent runs, benchmark
-retrieval quality, latency, memory use, and cost against representative project
-memories. Keep the Python endpoint on a private network and rotate the shared
-service token like any other secret.
+The adapter is opt-in at configuration time. Python returns ranking data only;
+TypeScript remains the authority for memory storage, permissions, approvals, and
+actions. Keep the service on a private network and rotate its bearer token.
