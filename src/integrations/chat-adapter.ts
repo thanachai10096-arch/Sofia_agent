@@ -17,7 +17,7 @@ export interface VerifiedChatCommand {
   /** Provider's channel/chat/thread ID. */
   conversationId: string;
   /** Command text after the platform adapter has removed its bot mention/prefix. */
-  command: "run";
+  command: string;
   /** User-requested task text. */
   task: string;
 }
