@@ -455,3 +455,31 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
   assert.equal(result.status, "completed");
   assert.equal(result.checkpointId, "restart-checkpoint");
 });
+
+
+test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
+  const namespace = "job-runtime-concurrent-workers-" + randomUUID();
+  const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain), undefined, namespace));
+
+  const submitted = await Promise.all(runtimes.map((runtime, index) =>
+    runtime.submit({ task: "concurrent worker submission " + index }),
+  ));
+  const reader = new DurableJobRuntime(() => ({
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain), undefined, namespace);
+  const persisted = await reader.list();
+  const persistedIds = new Set(persisted.map((record) => record.id));
+
+  assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
+  for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
+
+  const file = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  await rm(file, { force: true });
+  await rm(file + ".lock", { force: true });
+});
