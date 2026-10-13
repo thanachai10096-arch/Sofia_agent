@@ -25,6 +25,12 @@ This is an evidence log, not a legal opinion or a blanket claim that the reposit
 
 Limited public GitHub code searches were run for distinctive Skill Policy phrases and identifiers. No clear exact-expression match for the queried policy prose was found; a generic `boundedHistory`/`SkillOutcome` query returned an unrelated Java test. This is only a spot-check: code search is incomplete and does not establish independent authorship, legal compatibility, or the absence of similar code. No claim is made that a full repository-wide similarity scan has been completed.
 
+## Reproducible line-attribution inventory
+
+Run `npm run provenance:report` from a full Git clone. The script uses `git blame --line-porcelain` on tracked text/source files and writes a CSV containing path, line number, introducing commit, Git author metadata, commit summary, and a SHA-256 hash of each line. Pass a destination path as the first argument to choose the report location. It refuses shallow clones because their attribution is incomplete.
+
+This report is an audit aid, not a copyright detector. Git blame cannot establish that a commit author independently wrote the code, and a line hash does not compare it with third-party sources. Each suspicious range still needs comparison with upstream code and license terms, and unknown provenance still needs an owner attestation or clean-room replacement.
+
 ## Required audit procedure before a release
 
 1. Freeze the exact commit SHA being reviewed. Do not audit a moving branch.
