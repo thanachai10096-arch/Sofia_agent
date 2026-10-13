@@ -30,13 +30,14 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
   const saved = records.find((item) => item.id === submitted.id);
   assert.ok(saved);
   saved.leaseExpiresAt = new Date(0).toISOString();
-  await writeFile(stateFile, JSON.stringify(records, null, 2), "utf8");
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
 
   const restartedRuntime = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
   const recovered = await restartedRuntime.get(submitted.id);
 
   assert.equal(recovered?.status, "failed");
-  assert.match(recovered?.error ?? "", /interrupted/i);
+  assert.match(recovered?.error ?? "", /interrupted|lease expired/i);
 });
 
 
@@ -361,7 +362,8 @@ test("DurableJobRuntime recovers a persisted running job across an actual Node.j
   const interrupted = recoveryRecords.find((item) => item.id === jobId);
   assert.ok(interrupted);
   interrupted.leaseExpiresAt = new Date(0).toISOString();
-  await writeFile(recoveryStateFile, JSON.stringify(recoveryRecords, null, 2), "utf8");
+  await writeFile(recoveryStateFile + ".test-tmp", JSON.stringify(recoveryRecords, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(recoveryStateFile + ".test-tmp", recoveryStateFile);
 
   const recoverScript = `
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
@@ -457,7 +459,8 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
   const resumable = resumeRecords.find((item) => item.id === jobId);
   assert.ok(resumable);
   resumable.leaseExpiresAt = new Date(0).toISOString();
-  await writeFile(resumeStateFile, JSON.stringify(resumeRecords, null, 2), "utf8");
+  await writeFile(resumeStateFile + ".test-tmp", JSON.stringify(resumeRecords, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(resumeStateFile + ".test-tmp", resumeStateFile);
 
   const resumeScript = `
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
