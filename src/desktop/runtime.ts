@@ -8,6 +8,26 @@ import type { DesktopCapability, DesktopCommandResult, DesktopFileEntry, Desktop
 
 const DEFAULT_ALLOWED_EXECUTABLES = ["git", "node", "npm", "npx", "pnpm", "yarn", "python", "python3", "pytest", "tsc"];
 
+const BASE_CHILD_ENV = new Set([
+  "PATH", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+  "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "COMSPEC",
+  "PATHEXT", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+  "LANG", "LC_ALL", "TERM", "CI",
+]);
+
+// These variables can inject code or dynamic libraries into child processes.
+// They remain blocked even if a caller accidentally includes them in the extra allowlist.
+const BLOCKED_CHILD_ENV = /^(?:NODE_OPTIONS|NODE_PATH|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_.*|PYTHONPATH|PYTHONHOME|RUBYOPT|PERL5OPT)$/i;
+
+function buildChildEnvironment(extraAllowed: readonly string[] = []): NodeJS.ProcessEnv {
+  const allowed = new Set([...BASE_CHILD_ENV, ...extraAllowed].map((name) => name.toUpperCase()));
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) =>
+      allowed.has(name.toUpperCase()) && !BLOCKED_CHILD_ENV.test(name),
+    ),
+  );
+}
+
 export class DesktopRuntime {
   private readonly rootPromise: Promise<string>;
   private readonly allowedExecutables: Set<string>;
@@ -106,7 +126,7 @@ export class DesktopRuntime {
         options.signal?.removeEventListener("abort", abort);
         reject(error);
       };
-      const child = spawn(command, args, { cwd, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(command, args, { cwd, shell: false, windowsHide: true, env: buildChildEnvironment(this.config.allowedEnvironmentVariables), stdio: ["ignore", "pipe", "pipe"] });
       const append = (key: "stdout" | "stderr", chunk: Buffer) => {
         output.bytes += chunk.length;
         if (output.bytes > this.maxOutputBytes) {
