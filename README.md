@@ -285,9 +285,9 @@ GitHub Actions runs the same license, type, test, and build checks on pushes and
 
 ## `> License`
 
-Sofia Agents is distributed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) for the complete terms. The license permits use, modification, and redistribution subject to its conditions, including preserving required notices. Third-party dependencies remain subject to their own license terms.
+Sofia Agents is distributed under the **MIT License**. See [`LICENSE`](LICENSE) for the complete terms. The license permits use, modification, distribution, sublicensing, and sale, provided the copyright and permission notice are included with copies or substantial portions. The software is provided without warranty; third-party dependencies remain subject to their own license terms.
 
-SPDX identifier: `Apache-2.0`.
+SPDX identifier: `MIT`.
 
 ## `> Integration principle`
 
