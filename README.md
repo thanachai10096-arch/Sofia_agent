@@ -195,6 +195,16 @@ npm run build
 
 Use the repository's package scripts as the source of truth if a command differs in your environment.
 
+### Persistent local state
+
+By default, local job records, Brain run snapshots, and project memory are stored under the operating system's temporary directory. Temporary storage may be cleared by reboots, cleanup jobs, or container replacement, so it is not sufficient for production recovery. Configure an absolute, persistent directory before starting Sofia:
+
+```bash
+export SOFIA_STATE_DIR=/var/lib/sofia
+```
+
+Sofia creates separate store directories under that root and restricts local state files/directories on POSIX systems. Keep the directory on a persistent volume with appropriate OS permissions and backups. The file-backed runtime is still intended for a single active process; use a transactional shared store/queue before horizontally scaling workers.
+
 ### Enable browser automation
 
 Browser access is disabled by default. To opt in:
