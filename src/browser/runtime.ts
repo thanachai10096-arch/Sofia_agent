@@ -266,10 +266,14 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
   async launch(): Promise<BrowserSession> {
     const load = new Function("return import('playwright')") as () => Promise<any>;
     const playwright = await load();
-    const browser = await playwright.chromium.launch({ headless: this.headless });
-    const context = await browser.newContext();
-    // Apply the same URL policy to every request, including redirects and subresources.
-    await context.route("**/*", async (route: any) => {
+    const proxy = await createBrowserEgressProxy();
+    let browser: any;
+    let context: any;
+    try {
+      browser = await playwright.chromium.launch({ headless: this.headless, proxy: { server: proxy.url } });
+      context = await browser.newContext();
+      // Apply the same URL policy to every request, including redirects and subresources.
+      await context.route("**/*", async (route: any) => {
       try {
         const requestUrl = assertSafeBrowserUrl(route.request().url());
         await assertPublicResolvedHost(requestUrl.hostname);
@@ -277,7 +281,13 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
       } catch {
         await route.abort("blockedbyclient");
       }
-    });
+      });
+    } catch (error) {
+      await context?.close().catch(() => undefined);
+      await browser?.close().catch(() => undefined);
+      await proxy.close().catch(() => undefined);
+      throw error;
+    }
 
     return {
       id: crypto.randomUUID(),
@@ -308,7 +318,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
           close: async () => { await page.close(); },
         } satisfies BrowserPage;
       },
-      close: async () => { await context.close(); await browser.close(); },
+      close: async () => { try { await context.close(); await browser.close(); } finally { await proxy.close(); } },
     };
   }
 }
