@@ -96,10 +96,11 @@ function policyToLegacy(skill: PolicySkill): SofiaSkill {
     skill.id === "sofia.v1.workspace" || skill.id === "sofia.v1.git" ||
     skill.id === "sofia.v1.docs" ? "fix-implementation" :
     skill.id === "sofia.v1.plan" ? "initial" : "inspect-evidence";
-  const verification = skill.verification.filter(
-    (item): item is "typecheck" | "test" | "build" =>
-      item === "typecheck" || item === "test" || item === "build",
-  );
+  const verification: SofiaSkill["verification"] = skill.verification.flatMap((item) => {
+    if (item === "tests") return ["test"] as const;
+    if (item === "typecheck" || item === "build") return [item] as const;
+    return [];
+  });
   return {
     id: skill.id,
     name: skill.name,
