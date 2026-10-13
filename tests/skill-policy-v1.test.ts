@@ -90,12 +90,12 @@ test("history is bounded, metadata-only, and forged serialized outcomes cannot i
 
 test("only verified success or observed failure outcomes enter ranking history", () => {
   const failedAttempt = prepareAttempt("sofia.v1.test", "testing", "observed-failure", []);
-  const failed = finishAttempt(failedAttempt, completed([{ ...pass("tests"), exitCode: 1 }]));
+  const failed = finishAttempt(failedAttempt, { runId: failedAttempt.runId, state: "succeeded", checks: [{ ...pass("tests"), exitCode: 1 }] });
   assert.equal(failed?.result, "failure");
   assert.equal(boundedHistory([failed]).length, 1);
 
   const incompleteAttempt = prepareAttempt("sofia.v1.test", "testing", "incomplete-outcome", []);
-  const incomplete = finishAttempt(incompleteAttempt, completed([]));
+  const incomplete = finishAttempt(incompleteAttempt, { runId: incompleteAttempt.runId, state: "succeeded", checks: [] });
   assert.equal(incomplete?.result, "unverified");
   assert.deepEqual(boundedHistory([incomplete]), []);
 });
