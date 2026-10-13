@@ -1,3 +1,4 @@
+// Modified for Sofia Agents Skill Engine integration on 2026-10-13; provenance notes: docs/engineering/CODE_PROVENANCE_AUDIT.md.
 import type { FailureCategory, Strategy } from "./types.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { BUILTIN_SKILLS as POLICY_SKILLS, selectSkills as selectPolicySkills } from "./skill-policy-v1.js";
