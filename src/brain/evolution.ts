@@ -1,4 +1,4 @@
-import { promises as fs, readFileSync } from "node:fs";
+import { promises as fs, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -58,8 +58,107 @@ function setOwnValue<T>(record: Record<string, T>, key: string, value: T): void 
   });
 }
 
+const MAX_STATE_BYTES = 1_048_576;
+const MAX_SKILLS = 256;
+const MAX_TASK_TYPES = 128;
+const MAX_COUNT = 1_000_000;
+const MAX_HISTORY = 20;
+
+function plainRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null ? value as Record<string, unknown> : undefined;
+}
+
+function safeCount(value: unknown): number {
+  return Number.isSafeInteger(value) && Number(value) >= 0 ? Math.min(MAX_COUNT, Number(value)) : 0;
+}
+
+function safeMetric(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.min(MAX_COUNT, value)
+    : 0;
+}
+
+function safeTimestamp(value: unknown): string | undefined {
+  return typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value))
+    ? value
+    : undefined;
+}
+
+function sanitizeTaskStats(value: unknown): { attempts: number; successes: number; failures: number } {
+  const input = plainRecord(value);
+  const successes = safeCount(input?.successes);
+  const failures = safeCount(input?.failures);
+  return {
+    attempts: Math.max(safeCount(input?.attempts), Math.min(MAX_COUNT, successes + failures)),
+    successes,
+    failures,
+  };
+}
+
+function sanitizePerformance(id: string, value: unknown): SkillPerformance {
+  const input = plainRecord(value);
+  const successes = safeCount(input?.successes);
+  const failures = safeCount(input?.failures);
+  const taskTypes: Record<string, { attempts: number; successes: number; failures: number }> = Object.create(null) as Record<string, { attempts: number; successes: number; failures: number }>;
+  const rawTaskTypes = plainRecord(input?.taskTypes);
+  for (const [key, stats] of Object.entries(rawTaskTypes ?? {}).slice(0, MAX_TASK_TYPES)) {
+    if (key && key.length <= 80) setOwnValue(taskTypes, key, sanitizeTaskStats(stats));
+  }
+  const successHistory = Array.isArray(input?.successHistory)
+    ? input.successHistory.slice(-MAX_HISTORY).flatMap((entry) => {
+        const row = plainRecord(entry);
+        const at = safeTimestamp(row?.at);
+        if (!row || !at) return [];
+        return [{ at, steps: safeCount(row.steps), recoveryRounds: safeCount(row.recoveryRounds) }];
+      })
+    : [];
+  const failureHistory = Array.isArray(input?.failureHistory)
+    ? input.failureHistory.slice(-MAX_HISTORY).flatMap((entry) => {
+        const row = plainRecord(entry);
+        const at = safeTimestamp(row?.at);
+        if (!row || !at || typeof row.message !== "string") return [];
+        return [{ at, message: row.message.slice(0, 500) }];
+      })
+    : [];
+  const confidence = typeof input?.confidence === "number" && Number.isFinite(input.confidence)
+    ? clamp(input.confidence, 0, 1)
+    : 0.5;
+  return {
+    id: typeof input?.id === "string" && input.id.length <= 120 ? input.id : id,
+    attempts: Math.max(safeCount(input?.attempts), Math.min(MAX_COUNT, successes + failures)),
+    successes,
+    failures,
+    confidence,
+    avgSteps: safeMetric(input?.avgSteps),
+    avgRecoveryRounds: safeMetric(input?.avgRecoveryRounds),
+    ...(safeTimestamp(input?.lastSuccessAt) ? { lastSuccessAt: safeTimestamp(input?.lastSuccessAt) } : {}),
+    ...(safeTimestamp(input?.lastFailureAt) ? { lastFailureAt: safeTimestamp(input?.lastFailureAt) } : {}),
+    ...(typeof input?.lastFailure === "string" ? { lastFailure: input.lastFailure.slice(0, 500) } : {}),
+    successHistory,
+    failureHistory,
+    taskTypes,
+  };
+}
+
+function sanitizeSnapshot(value: unknown): EvolutionSnapshot {
+  const input = plainRecord(value);
+  const skills: Record<string, SkillPerformance> = Object.create(null) as Record<string, SkillPerformance>;
+  const rawSkills = plainRecord(input?.skills);
+  for (const [id, skill] of Object.entries(rawSkills ?? {}).slice(0, MAX_SKILLS)) {
+    if (id && id.length <= 120) setOwnValue(skills, id, sanitizePerformance(id, skill));
+  }
+  const taskTypes: Record<string, { attempts: number; successes: number; failures: number }> = Object.create(null) as Record<string, { attempts: number; successes: number; failures: number }>;
+  const rawTaskTypes = plainRecord(input?.taskTypes);
+  for (const [key, stats] of Object.entries(rawTaskTypes ?? {}).slice(0, MAX_TASK_TYPES)) {
+    if (key && key.length <= 80) setOwnValue(taskTypes, key, sanitizeTaskStats(stats));
+  }
+  return { version: 1, skills, taskTypes };
+}
+
 function normalizeTaskType(taskType: string): string {
-  const normalized = taskType.trim().toLowerCase().replace(/\s+/g, "-").slice(0, 80);
+  const normalized = (typeof taskType === "string" ? taskType : "").trim().toLowerCase().replace(/\s+/g, "-").slice(0, 80);
   return normalized || "general";
 }
 
@@ -73,21 +172,12 @@ export class EvolutionEngine {
     this.snapshot = { version: 1, skills: {}, taskTypes: {} };
     if (file) {
       try {
-        const loaded = JSON.parse(readFileSync(file, "utf8")) as Partial<EvolutionSnapshot>;
-        const skills = loaded.skills ?? {};
-        this.snapshot = {
-          version: 1,
-          skills: Object.fromEntries(Object.entries(skills).map(([id, skill]) => [id, {
-            ...skill,
-            id: skill.id ?? id,
-            taskTypes: skill.taskTypes ?? {},
-            successHistory: skill.successHistory ?? [],
-            failureHistory: skill.failureHistory ?? [],
-          }])),
-          taskTypes: loaded.taskTypes ?? {},
-        };
+        const info = statSync(file);
+        if (info.isFile() && info.size <= MAX_STATE_BYTES) {
+          this.snapshot = sanitizeSnapshot(JSON.parse(readFileSync(file, "utf8")) as unknown);
+        }
       } catch {
-        // A missing/corrupt learning file must never prevent Sofia from running.
+        // Missing, oversized, or corrupt learning state must never prevent Sofia from running.
       }
     }
   }
