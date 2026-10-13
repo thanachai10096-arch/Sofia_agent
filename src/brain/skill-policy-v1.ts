@@ -1,5 +1,5 @@
 // Modified for Sofia Agents Skill Engine integration on 2026-10-13; provenance notes: docs/engineering/CODE_PROVENANCE_AUDIT.md.
-// Provisional skill policy. It does not dispatch tools or persist outcomes.
+// Built-in skill policy catalog. ToolGateway remains authoritative for dispatch and permissions; EvolutionEngine owns persisted learning.
 export const TASK_TYPES = ["inspection","debugging","testing","git","research","terminal","workspace","api","security","planning","documentation","data"] as const;
 export const FAILURES = ["test","build","dependency","permission","integration","unknown"] as const;
 export const CHECKS = ["inspection","reproduction","tests","build","typecheck","change-review","sources","environment","filesystem","contract","security-review","completion","documentation","analysis"] as const;
