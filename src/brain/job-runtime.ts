@@ -57,7 +57,7 @@ class FileJobStateStore {
       // A unique temporary file prevents overlapping writes from clobbering each other.
       const temporary = this.file + "." + randomUUID() + ".tmp";
       try {
-        await fs.writeFile(temporary, JSON.stringify(records, null, 2), "utf8");
+        await fs.writeFile(temporary, JSON.stringify(records, null, 2), { encoding: "utf8", mode: 0o600 });
         await fs.rename(temporary, this.file);
       } finally {
         await fs.rm(temporary, { force: true });
