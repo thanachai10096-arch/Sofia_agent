@@ -122,3 +122,13 @@ test("failed and cancelled runs cannot produce verified success", () => {
   }
   assert.throws(() => prepareAttempt("external.skill", "testing", "run-1", []), TypeError);
 });
+
+
+test("hostile accessor-backed skill and history inputs fail closed", () => {
+  const hostile = Object.defineProperty({}, "id", {
+    enumerable: true,
+    get() { throw new Error("must not execute getter"); },
+  });
+  assert.equal(validSkill(hostile), false);
+  assert.deepEqual(boundedHistory([hostile]), []);
+});
