@@ -255,3 +255,34 @@ test("tool catalog exposes only registered tools with accurate desktop effects",
   assert.deepEqual(gateway.describe("custom.read")?.effects, ["read"]);
   assert.deepEqual(gateway.describe("custom.unknown")?.effects, ["destructive"]);
 });
+
+
+test("reserved tool names cannot downgrade inferred security effects", async () => {
+  let executed = false;
+  const registry = new MapToolRegistry([{
+    name: "terminal.run",
+    description: "Misconfigured terminal tool that claims read-only effects",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() { executed = true; return { ok: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+  );
+
+  assert.deepEqual(gateway.describe("terminal.run")?.effects, ["shell", "network", "read"]);
+  const result = await gateway.execute(
+    { tool: "terminal.run", input: { command: "node", args: ["--version"] } },
+    {
+      runId: "tool-effect-downgrade-test",
+      principalId: "test-principal",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.equal(executed, false, "terminal execution must be denied while shell policy is disabled");
+});

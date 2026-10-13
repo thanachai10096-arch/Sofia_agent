@@ -64,3 +64,18 @@ export function classifyToolEffects(name: string): ToolEffect[] {
   // Unknown registered tools are privileged until the operator explicitly declares effects.
   return ["destructive"];
 }
+
+
+/**
+ * A registered tool may add effects, but it must not downgrade the effects implied
+ * by Sofia's reserved tool namespaces. Custom tools outside those namespaces may
+ * declare their own effects; undeclared custom tools remain destructive by default.
+ */
+export function effectiveToolEffects(name: string, declared?: readonly ToolEffect[]): ToolEffect[] {
+  const inferred = classifyToolEffects(name);
+  if (!declared) return inferred;
+  const reserved = name.startsWith("browser.") || name.startsWith("desktop.") ||
+    name.startsWith("workspace.") || name.startsWith("git.") ||
+    name === "terminal.run" || name === "project.verify";
+  return reserved ? [...new Set<ToolEffect>([...inferred, ...declared])] : [...declared];
+}

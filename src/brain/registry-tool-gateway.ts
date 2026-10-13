@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { ExecutionPolicy } from "../security/policy.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import type { ToolRegistry } from "../tools/types.js";
-import { classifyToolEffects, toolPermission, riskRank } from "../security/policy.js";
+import { effectiveToolEffects, toolPermission, riskRank } from "../security/policy.js";
 import { assessAction, type RiskLevel } from "../security/guard.js";
 import { issueCapability, verifyCapability } from "../security/capability.js";
 import type { AgentDependencies } from "../agent/types.js";
@@ -33,8 +33,8 @@ export class RegistryToolGateway implements ToolGateway {
     private readonly security:SecurityController=new SecurityController(),
     private readonly audit?:SecurityAuditSink,
   ){this.checkpoints=checkpoints??new RuntimeCheckpointManager(dependencies.runtime);}
-  listTools(){return this.dependencies.tools.list().map((tool)=>({name:tool.name,description:tool.description,effects:tool.effects??classifyToolEffects(tool.name)}));}
-  describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:tool.effects??classifyToolEffects(name)};}
+  listTools(){return this.dependencies.tools.list().map((tool)=>({name:tool.name,description:tool.description,effects:effectiveToolEffects(tool.name,tool.effects)}));}
+  describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:effectiveToolEffects(name,tool.effects)};}
 
   async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{
     // Bind the approval hash and actual execution to one immutable input snapshot.
