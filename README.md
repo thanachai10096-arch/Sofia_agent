@@ -5,7 +5,7 @@
 
 **An agent runtime designed to plan, act, check results, and recover.**
 
-A model-agnostic execution layer for Zuse — with internal model routing, policy-controlled tools, durable jobs, browser automation, and a permission-gated local runtime. Capabilities depend on the configured providers, permissions, and runtime mode; the descriptions below are not a guarantee that every task will succeed.
+A model-agnostic AI agent runtime with internal model routing, policy-controlled tools, durable jobs, browser automation, and a permission-gated local runtime. Capabilities depend on the configured providers, permissions, and runtime mode; the descriptions below are not a guarantee that every task will succeed.
 
 ![Runtime](https://img.shields.io/badge/runtime-agent--first-16a34a?style=for-the-badge)
 ![TypeScript](https://img.shields.io/badge/TypeScript-typed-15803d?style=for-the-badge&logo=typescript&logoColor=white)
@@ -139,7 +139,7 @@ const codingMascot = getSofiaCharacter("pixel");
 
 ## `> Overview`
 
-Sofia is the internal agent runtime for **Zuse**. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
+Sofia Agent is a standalone agent runtime and platform. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
 
 > **Model routing is an internal policy.** End users do not choose models; Sofia decides how requests are handled.
 
@@ -182,7 +182,7 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 | **Recovery** | Durable local checkpoints and run snapshots; resume is guarded against duplicate concurrent resumes. |
 | **Security boundaries** | Centralized tool permissions plus policy/process runners and an opt-in Docker-backed container sandbox. Process mode is **not** represented as a container. |
 | **Platform services** | Agent profiles and templates, skills platform, cloud execution backend contract, and evaluation runner. |
-| **SDK & API** | A stable, model-agnostic public surface for clients such as Zuse. |
+| **SDK & API** | A stable, model-agnostic public surface for desktop, mobile, web, and third-party clients. |
 
 ## `> Quick start`
 
@@ -291,7 +291,7 @@ SPDX identifier: `MIT`.
 
 ## `> Integration principle`
 
-Zuse should use Sofia's stable API/SDK and let Sofia apply internal routing and execution policy. Keep model selection and privileged capabilities out of the end-user interface.
+Clients should use Sofia Agent's stable API/SDK and let Sofia apply internal model routing and execution policy. Keep model selection and privileged capabilities out of the end-user interface.
 
 ---
 
