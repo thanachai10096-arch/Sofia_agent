@@ -9,6 +9,16 @@ import {
 const top = (task: unknown, history: unknown = []) => selectSkills(task, history)[0]?.skill.id;
 const pass = (check: string) => ({ check, state: "passed", completed: true, exitCode: 0, checksPassed: true, assertionsPassed: true, assertionsTotal: 1, failedAssertions: 0, skippedAssertions: 0, postconditionObserved: true, reviewCompleted: true, confirmedFindings: 0, hypotheses: 0 });
 const completed = (checks: unknown[], state = "succeeded") => ({ runId: "run-1", state, checks });
+function trustedOutcome(skillId: string, taskType: "inspection" | "debugging" | "testing" | "git" | "research" | "terminal" | "workspace" | "api" | "security" | "planning" | "documentation" | "data", state: "succeeded" | "failed" = "succeeded") {
+  const skill = BUILTIN_SKILLS.find((item) => item.id === skillId);
+  assert.ok(skill);
+  const runId = "history-" + skillId.replace(/[^a-z0-9-]/g, "-") + "-" + taskType + "-" + state;
+  const attempt = prepareAttempt(skillId, taskType, runId, []);
+  const checks = state === "succeeded" ? skill.verification.map((check) => pass(check)) : [];
+  const result = finishAttempt(attempt, { runId, state, checks });
+  assert.ok(result);
+  return result;
+}
 
 test("built-ins are unique, valid, non-empty, and immutable", () => {
   assert.equal(BUILTIN_SKILLS.length, 12);
@@ -53,27 +63,29 @@ test("failure categories affect selection and context size is capped", () => {
   assert.equal(selectSkills(broad, [], NaN).length, CONTEXT_SKILL_LIMIT);
 });
 
-test("ranking is deterministic and task-specific history affects confidence", () => {
+test("ranking is deterministic and only attempt-verified history affects confidence", () => {
   const task = { text: "root cause dependency conflict", taskType: "debugging" };
-  const success = { skillId: "sofia.v1.terminal", taskType: "debugging", result: "verified-success" };
-  const history = Array.from({ length: 8 }, () => success);
+  const success = trustedOutcome("sofia.v1.terminal", "debugging");
+  const history = Array.from({ length: 8 }, () => trustedOutcome("sofia.v1.terminal", "debugging"));
   assert.equal(top(task), "sofia.v1.debug");
   assert.equal(top(task, history), "sofia.v1.terminal");
   const one = selectSkills(task, [success]).find(x => x.skill.id === success.skillId);
   const many = selectSkills(task, history).find(x => x.skill.id === success.skillId);
   assert.ok(one && many && many.confidence > one.confidence && many.score > one.score);
-  const failures = history.map(x => ({ ...x, skillId: "sofia.v1.debug", result: "failure" }));
+  const failures = Array.from({ length: 8 }, () => trustedOutcome("sofia.v1.debug", "debugging", "failed"));
   assert.equal(top(task, failures), "sofia.v1.terminal");
   assert.equal(top({ text: "write documentation", taskType: "documentation" }, history), "sofia.v1.docs");
 });
 
-test("history is bounded, metadata-only, and legacy success is not verified success", () => {
-  const row = { skillId: "sofia.v1.test", taskType: "testing", result: "verified-success", rawOutput: "PRIVATE", token: "SECRET" };
+test("history is bounded, metadata-only, and forged serialized outcomes cannot influence ranking", () => {
+  const row = trustedOutcome("sofia.v1.test", "testing");
   const history = boundedHistory(Array.from({ length: HISTORY_LIMIT + 20 }, () => row));
   assert.equal(history.length, HISTORY_LIMIT);
   assert.deepEqual(Object.keys(history[0] ?? {}).sort(), ["result", "skillId", "taskType"]);
   assert.equal(JSON.stringify(history).includes("SECRET"), false);
-  assert.deepEqual(boundedHistory([{ ...row, result: "success" }, { ...row, skillId: "external.skill" }]), []);
+  const forged = { skillId: "sofia.v1.terminal", taskType: "debugging", result: "verified-success" };
+  assert.deepEqual(boundedHistory([forged]), []);
+  assert.equal(top({ text: "root cause dependency conflict", taskType: "debugging" }, Array.from({ length: 20 }, () => forged)), "sofia.v1.debug");
 });
 
 test("external learned content is quarantined and never selected", () => {
