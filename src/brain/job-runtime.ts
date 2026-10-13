@@ -310,10 +310,12 @@ export class DurableJobRuntime implements JobRuntime {
 
   async get(id: string): Promise<JobRecord | undefined> {
     const existing = this.jobs.get(id);
-    if (existing) return { ...existing };
+    // A live local execution owns its in-memory view, but all other reads refresh
+    // from disk so cross-process cancellation and lease expiry become observable.
+    if (existing && this.controllers.has(id)) return { ...existing };
 
     const stored = await this.state.get(id);
-    if (!stored) return undefined;
+    if (!stored) return existing ? { ...existing } : undefined;
     const snapshot = stored.snapshot?.runId && this.runStore
       ? await this.runStore.load(stored.snapshot.runId)
       : undefined;
@@ -326,8 +328,7 @@ export class DurableJobRuntime implements JobRuntime {
   async list(): Promise<JobRecord[]> {
     const stored = await this.state.list();
     for (const persisted of stored) {
-      // Keep live in-memory records authoritative over older disk snapshots.
-      if (this.jobs.has(persisted.id)) continue;
+      if (this.controllers.has(persisted.id)) continue;
       const snapshot = persisted.snapshot?.runId && this.runStore
         ? await this.runStore.load(persisted.snapshot.runId)
         : undefined;
