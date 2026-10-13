@@ -221,4 +221,6 @@ test("policy skill success is learned only from observed test metrics and review
   assert.ok(skill, "the policy test skill should be selected and verified");
   assert.equal(skill.successes, 1);
   assert.equal(skill.failures, 0);
+  assert.equal(skill.taskTypes.testing?.successes, 1, "success should be scoped to the selected skill task type");
+  assert.equal(skill.taskTypes.coding?.successes ?? 0, 0, "capability labels must not be misused as task types");
 });
