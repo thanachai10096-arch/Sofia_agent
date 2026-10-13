@@ -12,7 +12,7 @@ import {
 
 import { runVerification } from "./verification.js";
 import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
-import { compactSkillContext, matchSkills } from "./skills.js";
+import { compactSkillContext, matchSkills, taskTypeForFailure } from "./skills.js";
 import { BUILTIN_SKILLS as POLICY_SKILLS, finishAttempt, prepareAttempt } from "./skill-policy-v1.js";
 import type { SkillAttempt, TaskType as PolicyTaskType } from "./skill-policy-v1.js";
 import type { SkillLedger } from "./learning.js";
@@ -745,7 +745,7 @@ export class SofiaBrain {
       count: this.usage.replans,
     });
 
-    const taskType = understanding.requiredCapabilities[0] ?? "general";
+    const taskType = taskTypeForFailure(diagnosis.category, diagnosis.message);
     let skills = matchSkills(diagnosis.category, diagnosis.message, 5, this.dependencies.skillLedger);
     if (this.dependencies.evolution) {
       const ranking = new Map(this.dependencies.evolution.rank(skills.map(skill => skill.id), taskType).map(item => [item.id, item.score]));
@@ -1102,7 +1102,7 @@ export class SofiaBrain {
             this.dependencies.evolution.recordFailure(
               this.activeSkillId,
               diagnosis.message,
-              understanding?.requiredCapabilities[0] ?? "general",
+              taskTypeForFailure(diagnosis.category, diagnosis.message),
             );
             this.selectedSkillIds.delete(this.activeSkillId);
             this.activeSkillId = undefined;
@@ -1181,13 +1181,22 @@ export class SofiaBrain {
 
       this.emit({ type: "brain.coding.loop.completed", count: codingIteration, passed: true });
       if (this.dependencies.evolution) {
-        const taskType = understanding.requiredCapabilities[0] ?? "general";
+        const eligibleSkillIds = [...this.selectedSkillIds].filter(
+          (skillId) => !skillId.startsWith("sofia.v1.") || this.verifiedPolicySkillIds.has(skillId),
+        );
+        const firstPolicyTaskType = eligibleSkillIds
+          .map((skillId) => POLICY_SKILLS.find((skill) => skill.id === skillId)?.taskTypes[0])
+          .find((value): value is PolicyTaskType => value !== undefined);
+        const taskType = firstPolicyTaskType ?? "coding";
         // This block is reachable only after trusted verification and code review pass.
-        for (const skillId of this.selectedSkillIds) {
-          if (skillId.startsWith("sofia.v1.") && !this.verifiedPolicySkillIds.has(skillId)) {
-            continue;
-          }
-          this.dependencies.evolution.recordSuccess(skillId, this.usage.steps, recoveryRounds, taskType);
+        for (const skillId of eligibleSkillIds) {
+          const policyTask = POLICY_SKILLS.find((skill) => skill.id === skillId);
+          this.dependencies.evolution.recordSuccess(
+            skillId,
+            this.usage.steps,
+            recoveryRounds,
+            policyTask?.taskTypes[0] ?? taskType,
+          );
         }
         this.dependencies.evolution.recordRun(taskType, true);
       }
