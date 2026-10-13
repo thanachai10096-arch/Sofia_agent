@@ -10,7 +10,7 @@ const errors = [];
 if (pkg.license !== "MIT") {
   errors.push(`package.json license must be "MIT" (found: ${String(pkg.license)})`);
 }
-if (!!license.includes("MIT License") || !license.includes("Permission is hereby granted, free of charge")) {
+if (!license.includes("MIT License") || !license.includes("Permission is hereby granted, free of charge")) {
   errors.push("LICENSE does not appear to contain the MIT License text");
 }
 if (errors.length) {
