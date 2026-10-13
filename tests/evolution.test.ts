@@ -177,3 +177,58 @@ test("evolution treats prototype property names as ordinary skill and task IDs",
   assert.equal(engine.getSnapshot().taskTypes["__proto__"]?.successes, 1);
   assert.equal((Object.prototype as { attempts?: number }).attempts, before);
 });
+
+
+test("persisted evolution state is sanitized before it can affect ranking", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-evolution-untrusted-"));
+  const file = join(directory, "evolution.json");
+  try {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(file, JSON.stringify({
+      version: 1,
+      skills: {
+        "untrusted-skill": {
+          id: "untrusted-skill",
+          attempts: -10,
+          successes: 9_999_999_999,
+          failures: -4,
+          confidence: 99,
+          avgSteps: -1,
+          avgRecoveryRounds: Number.NaN,
+          successHistory: [{ at: "not-a-date", steps: -1, recoveryRounds: -1 }],
+          failureHistory: [{ at: "2026-01-01T00:00:00.000Z", message: "x".repeat(2_000) }],
+          taskTypes: { coding: { attempts: -1, successes: 2, failures: 0 } },
+        },
+      },
+      taskTypes: { coding: { attempts: -1, successes: 2, failures: 0 } },
+    }), "utf8");
+    const engine = new EvolutionEngine(file);
+    const skill = engine.getSkill("untrusted-skill");
+    assert.ok(skill);
+    assert.equal(skill.attempts, 1_000_000);
+    assert.equal(skill.successes, 1_000_000);
+    assert.equal(skill.failures, 0);
+    assert.equal(skill.confidence, 1);
+    assert.equal(skill.avgSteps, 0);
+    assert.equal(skill.avgRecoveryRounds, 0);
+    assert.equal(skill.successHistory.length, 0);
+    assert.equal(skill.failureHistory[0]?.message.length, 500);
+    assert.deepEqual(skill.taskTypes.coding, { attempts: 2, successes: 2, failures: 0 });
+    assert.equal(Number.isFinite(engine.rank(["untrusted-skill"])[0]?.score), true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("oversized evolution files are ignored instead of fully parsed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-evolution-oversized-"));
+  const file = join(directory, "evolution.json");
+  try {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(file, " ".repeat(1_048_577), "utf8");
+    const engine = new EvolutionEngine(file);
+    assert.deepEqual(engine.getSnapshot(), { version: 1, skills: {}, taskTypes: {} });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
