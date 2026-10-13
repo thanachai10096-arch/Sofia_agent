@@ -112,7 +112,7 @@ test("required build/typecheck checks cannot be omitted or have nonzero exit sta
   for (const check of ["build", "typecheck"] as const) {
     for (const evidence of [undefined, { check, state: "passed", completed: true }, { ...pass(check), exitCode: 2 }]) {
       const a = prepareAttempt("sofia.v1.test", "testing", "run-1", [check]);
-      assert.equal(finishAttempt(a, completed(evidence ? [pass("tests"), evidence] : [pass("tests")]))?.result, evidence && Number((evidence as { exitCode?: number }).exitCode) === 2 ? "failure" : "unverified");
+      assert.equal(finishAttempt(a, completed(evidence ? [pass("tests"), evidence] : [pass("tests")]))?.result, evidence && typeof evidence === "object" && "exitCode" in evidence && evidence.exitCode === 2 ? "failure" : "unverified");
     }
     const a = prepareAttempt("sofia.v1.test", "testing", "run-1", [check]);
     assert.equal(finishAttempt(a, completed([pass("tests"), pass(check)]))?.result, "verified-success");
