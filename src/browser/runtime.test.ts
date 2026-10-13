@@ -78,10 +78,10 @@ test("browser egress proxy blocks CONNECT requests to private IP literals", asyn
       const socket = connectTcp(Number(address.port), address.hostname);
       let output = "";
       const timer = setTimeout(() => socket.destroy(new Error("Timed out waiting for proxy policy response.")), 3000);
-      socket.once("connect", () => socket.write("CONNECT 127.0.0.1:443 HTTP/1.1\\r\\nHost: 127.0.0.1:443\\r\\n\\r\\n"));
+      socket.once("connect", () => socket.write("CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n"));
       socket.on("data", (chunk) => {
         output += chunk.toString("utf8");
-        if (output.includes("\\r\\n\\r\\n")) {
+        if (output.includes("\r\n\r\n")) {
           clearTimeout(timer);
           socket.destroy();
           resolve(output);
@@ -92,7 +92,7 @@ test("browser egress proxy blocks CONNECT requests to private IP literals", asyn
         reject(error);
       });
     });
-    assert.match(response, /^HTTP\\/1\\.1 403 Forbidden/);
+    assert.match(response, /^HTTP\/1\.1 403 Forbidden/);
   } finally {
     await proxy.close();
   }
