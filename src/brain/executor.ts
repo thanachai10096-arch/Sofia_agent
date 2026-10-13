@@ -758,7 +758,7 @@ export class SofiaBrain {
       this.activePolicyAttempt = policySkill
         ? prepareAttempt(
             policySkill.id,
-            (policySkill.taskTypes[0] ?? "planning") as PolicyTaskType,
+            taskType,
             this.runId,
             [],
           )
