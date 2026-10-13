@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
 
@@ -474,6 +474,68 @@ test("DurableJobRuntime preserves concurrent submissions from independent runtim
 
   assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
   for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
+
+  const file = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  await rm(file, { force: true });
+  await rm(file + ".lock", { force: true });
+});
+
+
+test("DurableJobRuntime preserves submissions from separate Node.js processes", async () => {
+  const namespace = "job-runtime-process-concurrency-" + randomUUID();
+  const workerCount = 4;
+  const jobsPerWorker = 4;
+  const workerScript = `
+    import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
+    const namespace = ${JSON.stringify(namespace)};
+    const runtime = new DurableJobRuntime(() => ({
+      run: async () => new Promise(() => undefined),
+    }), undefined, namespace);
+    const jobs = await Promise.all(Array.from({ length: ${jobsPerWorker} }, (_, index) =>
+      runtime.submit({ task: "process worker " + process.pid + " job " + index }),
+    ));
+    process.stdout.write(JSON.stringify(jobs.map((job) => job.id)));
+  `;
+
+  const runWorker = () => new Promise<string>((resolve, reject) => {
+    const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", workerScript], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 15_000);
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) {
+        reject(new Error(stderr || `worker exited with code ${code}`));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+
+  const workerOutputs = await Promise.all(Array.from({ length: workerCount }, runWorker));
+  const submittedIds = workerOutputs.flatMap((output) => JSON.parse(output) as string[]);
+  const reader = new DurableJobRuntime(() => ({
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain), undefined, namespace);
+  const persisted = await reader.list();
+  const persistedIds = new Set(persisted.map((record) => record.id));
+
+  assert.equal(submittedIds.length, workerCount * jobsPerWorker);
+  assert.equal(persisted.length, submittedIds.length, "cross-process writes must not lose job records");
+  for (const id of submittedIds) assert.ok(persistedIds.has(id), "missing job submitted by child process " + id);
 
   const file = path.join(
     os.tmpdir(),
