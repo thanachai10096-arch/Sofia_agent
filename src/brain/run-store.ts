@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { BrainRunSnapshot } from "./run-state.js";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 export interface RunStore {
   save(snapshot: BrainRunSnapshot): Promise<void>;
@@ -21,7 +21,7 @@ function key(value: string): string {
 export class FileRunStore implements RunStore {
   private readonly directory: string;
 
-  constructor(namespace: string, root = path.join(os.tmpdir(), "sofia-agents-runs")) {
+  constructor(namespace: string, root = sofiaStateDirectory("runs")) {
     this.directory = path.join(root, key(namespace));
   }
 
