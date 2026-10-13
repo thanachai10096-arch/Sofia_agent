@@ -69,7 +69,7 @@ try {
         const responseBoundary = responseHeaders.indexOf("\r\n\r\n");
         if (responseBoundary < 0) return;
         const responseLine = responseHeaders.slice(0, responseBoundary).split("\r\n")[0] ?? "";
-        const match = /^HTTP\\/1\\.1 (\d{3})/.exec(responseLine);
+        const match = /^HTTP\/1\.1 (\d{3})/.exec(responseLine);
         clearTimeout(timer);
         secureSocket.destroy();
         if (!match) reject(new Error("Invalid HTTPS response status line: " + responseLine));
