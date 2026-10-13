@@ -82,7 +82,15 @@ class FileJobStateStore {
           if (!observedToken && age > 120_000) stale = true;
         } catch (readError) {
           if ((readError as NodeJS.ErrnoException).code === "ENOENT") continue;
-          stale = true;
+          // A newly-created lock can be observed before its JSON payload is fully
+          // written. Treat malformed/partial contents as busy until the file is old.
+          try {
+            const lockStat = await fs.stat(this.lockFile);
+            stale = Date.now() - lockStat.mtimeMs > 120_000;
+          } catch (statError) {
+            if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
+            throw statError;
+          }
         }
 
         if (stale) {
