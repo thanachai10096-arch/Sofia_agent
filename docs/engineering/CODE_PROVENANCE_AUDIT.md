@@ -18,9 +18,14 @@ This is an evidence log, not a legal opinion or a blanket claim that the reposit
 | `tests/skill-policy-v1.test.ts` | Full draft test file and test assumptions | Initial test origin remains unverified; additional regression cases are authored in this integration branch. |
 | `src/brain/skills.ts`, `src/brain/executor.ts` | Recovery selection adapter, policy prompt metadata, attempt receipts and success-learning gate | New integration changes are recorded in this branch; legacy source lines still need complete provenance attribution. |
 | `src/brain/evolution.ts`, `tests/evolution.test.ts` | Existing success/failure ranking and JSON persistence; added bounded-load regression coverage | Persisted state is size-bounded and sanitized before ranking. The origin of every pre-existing line remains unverified. |
-| `src/brain/verification.ts`, `src/brain/types.ts`, `src/brain/verification.test.ts` | Structured project-check evidence and propagation of actual assertion metrics | Missing test metrics remain absent; the policy learning gate does not invent assertion counts. Existing lines still need provenance attribution. |\n| `package.json`, `LICENSE`, `scripts/check-license.mjs` | Declared project license and current checker behavior | The project declares Apache-2.0; the current checker is not a source-provenance scanner. |
+| `src/brain/verification.ts`, `src/brain/types.ts`, `src/brain/verification.test.ts` | Structured project-check evidence and propagation of actual assertion metrics | Missing test metrics remain absent; the policy learning gate does not invent assertion counts. Existing lines still need provenance attribution. |
+| `package.json`, `LICENSE`, `scripts/check-license.mjs` | Declared project license and current checker behavior | The project declares Apache-2.0; the current checker is not a source-provenance scanner. |
 
-## External similarity spot-checks\n\nLimited public GitHub code searches were run for distinctive Skill Policy phrases and identifiers. No clear exact-expression match for the queried policy prose was found; a generic `boundedHistory`/`SkillOutcome` query returned an unrelated Java test. This is only a spot-check: code search is incomplete and does not establish independent authorship, legal compatibility, or the absence of similar code. No claim is made that a full repository-wide similarity scan has been completed.\n\n## Required audit procedure before a release
+## External similarity spot-checks
+
+Limited public GitHub code searches were run for distinctive Skill Policy phrases and identifiers. No clear exact-expression match for the queried policy prose was found; a generic `boundedHistory`/`SkillOutcome` query returned an unrelated Java test. This is only a spot-check: code search is incomplete and does not establish independent authorship, legal compatibility, or the absence of similar code. No claim is made that a full repository-wide similarity scan has been completed.
+
+## Required audit procedure before a release
 
 1. Freeze the exact commit SHA being reviewed. Do not audit a moving branch.
 2. Enumerate every tracked source, test, script, workflow, generated file, vendored file, and asset.
