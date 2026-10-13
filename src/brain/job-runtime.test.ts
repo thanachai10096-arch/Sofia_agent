@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, readFile, rm, stat } from "node:fs/promises";
+import { appendFile, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -17,8 +17,20 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
   const firstRuntime = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
   const submitted = await firstRuntime.submit({ task: "recover after process restart" });
 
-  // Allow the fire-and-forget execution to persist its running state.
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  // Wait until the worker has atomically claimed the job, then simulate a crashed
+  // worker by expiring its lease in the persisted record.
+  let active = await firstRuntime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && active?.status !== "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    active = await firstRuntime.get(submitted.id);
+  }
+  assert.equal(active?.status, "running");
+  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
+  const saved = records.find((item) => item.id === submitted.id);
+  assert.ok(saved);
+  saved.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(stateFile, JSON.stringify(records, null, 2), "utf8");
 
   const restartedRuntime = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
   const recovered = await restartedRuntime.get(submitted.id);
@@ -69,7 +81,7 @@ test("DurableJobRuntime rejects resume when a job has no saved checkpoint", asyn
   // submit() starts execution asynchronously; wait until the run has settled before
   // asserting that resume rejects for a missing checkpoint rather than a live run.
   let current = await runtime.get(submitted.id);
-  for (let attempt = 0; attempt < 100 && current?.status === "running"; attempt++) {
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt++) {
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
     current = await runtime.get(submitted.id);
   }
@@ -344,6 +356,13 @@ test("DurableJobRuntime recovers a persisted running job across an actual Node.j
   const jobId = start.stdout.trim();
   assert.ok(jobId, "first worker should print the persisted job ID");
 
+  const recoveryStateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const recoveryRecords = JSON.parse(await readFile(recoveryStateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
+  const interrupted = recoveryRecords.find((item) => item.id === jobId);
+  assert.ok(interrupted);
+  interrupted.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(recoveryStateFile, JSON.stringify(recoveryRecords, null, 2), "utf8");
+
   const recoverScript = `
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
     const runtime = new DurableJobRuntime(() => ({
@@ -432,6 +451,13 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
   assert.equal(started.status, 0, started.stderr || "checkpoint worker should exit cleanly");
   const jobId = started.stdout.trim();
   assert.ok(jobId, "checkpoint worker should print its job ID");
+
+  const resumeStateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const resumeRecords = JSON.parse(await readFile(resumeStateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
+  const resumable = resumeRecords.find((item) => item.id === jobId);
+  assert.ok(resumable);
+  resumable.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(resumeStateFile, JSON.stringify(resumeRecords, null, 2), "utf8");
 
   const resumeScript = `
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
