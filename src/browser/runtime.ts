@@ -280,7 +280,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
     let browser: any;
     let context: any;
     try {
-      browser = await playwright.chromium.launch({ headless: this.headless, proxy: { server: proxy.url } });
+      browser = await playwright.chromium.launch({ headless: this.headless, proxy: { server: proxy.url }, args: ["--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] });
       context = await browser.newContext();
       // Apply the same URL policy to every request, including redirects and subresources.
       await context.route("**/*", async (route: any) => {
