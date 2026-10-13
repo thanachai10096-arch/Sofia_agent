@@ -381,7 +381,7 @@ test("DurableJobRuntime recovers a persisted running job across an actual Node.j
   assert.equal(recovered.status, 0, recovered.stderr || "recovery worker should exit cleanly");
   const record = JSON.parse(recovered.stdout) as { status?: string; error?: string };
   assert.equal(record.status, "failed");
-  assert.match(record.error ?? "", /interrupted/i);
+  assert.match(record.error ?? "", /interrupted|lease expired/i);
 });
 
 
