@@ -293,7 +293,7 @@ export class ContainerSandbox implements Sandbox {
       "--memory=512m",
       "--cpus=1",
       "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-      "--mount", `type=bind,source=${workspaceRoot},target=/workspace,rw`,
+      "--mount", `type=bind,source=${workspaceRoot},target=/workspace`,
       "--workdir", "/workspace",
       this.options.image,
       command,
