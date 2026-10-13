@@ -59,7 +59,7 @@ export const BUILTIN_SKILLS:readonly Skill[]=Object.freeze([
  common("sofia.v1.data","Data and log analysis","Analyze scoped data reproducibly while minimizing sensitive data.",["analyze logs","log analysis","parse dataset","data quality"],["data"],[],"read-only",["Inspect schema, time range, provenance, and missing data without retaining secrets.","Distinguish observations from causal hypotheses.","Cross-check results and report uncertainty and exclusions."],["analysis"]),
 ]);
 export function assessLearnedSkill(v:unknown):"invalid"|"quarantined"{return validSkill(v)?"quarantined":"invalid";}
-export interface SkillOutcome {readonly skillId:string;readonly taskType:TaskType;readonly result:"verified-success"|"failure";}
+export interface SkillOutcome {readonly skillId:string;readonly taskType:TaskType;readonly result:"verified-success"|"failure"|"unverified";}
 export const HISTORY_LIMIT=100;
 export const CONTEXT_SKILL_LIMIT=3;
 const byId=(id:string):Skill|undefined=>BUILTIN_SKILLS.find(s=>s.id===id);
@@ -108,17 +108,46 @@ export function prepareAttempt(skillId:string,taskType:TaskType,runId:string,req
  if(!s||!member(TASK_TYPES,taskType)||typeof runId!=="string"||!/^[a-zA-Z0-9._:-]{1,128}$/.test(runId)||!members(requestedChecks,CHECKS,true))throw new TypeError("Invalid skill attempt");
  const a:SkillAttempt=Object.freeze({runId,skillId,taskType,requiredChecks:Object.freeze([...new Set([...s.verification,...requestedChecks])])});pending.add(a);return a;
 }
-function passedCheck(v:unknown):v is Record<string,unknown>&{check:Check}{
- if(!record(v)||!member(CHECKS,v.check)||v.state!=="passed"||v.completed!==true||v.assertionsPassed===false)return false;
- if(["tests","build","typecheck"].includes(v.check)&&v.exitCode!==0)return false;
- if(v.check==="tests"&&v.assertionsPassed!==true)return false;
- return v.exitCode===undefined||v.exitCode===0;
+function assessCheck(v:unknown):"passed"|"failure"|"unverified"{
+ if(!record(v)||!member(CHECKS,v.check))return "unverified";
+ if(v.state==="failed"||v.checksPassed===false||v.assertionsPassed===false||
+    (Number.isSafeInteger(v.exitCode)&&v.exitCode!==0)||
+    (Number.isSafeInteger(v.failedAssertions)&&Number(v.failedAssertions)>0)||
+    (Number.isSafeInteger(v.skippedAssertions)&&Number(v.skippedAssertions)>0))return "failure";
+ if(v.state!=="passed"||v.completed!==true)return "unverified";
+ if(["tests","build","typecheck"].includes(v.check)){
+  if(v.exitCode!==0||v.checksPassed!==true)return "unverified";
+ }
+ if(v.check==="tests"){
+  if(v.assertionsPassed!==true||!Number.isSafeInteger(v.assertionsTotal)||Number(v.assertionsTotal)<1||
+     v.failedAssertions!==0||v.skippedAssertions!==0)return "unverified";
+ }
+ if(v.check==="security-review"){
+  if(v.reviewCompleted!==true||!Number.isSafeInteger(v.confirmedFindings)||Number(v.confirmedFindings)<0||
+     !Number.isSafeInteger(v.hypotheses)||Number(v.hypotheses)<0)return "unverified";
+  // A completed review can still have findings; this is not a security-clear verdict.
+ }else if(!["tests","build","typecheck"].includes(v.check)&&v.postconditionObserved!==true){
+  return "unverified";
+ }
+ return "passed";
 }
 export function finishAttempt(attempt:SkillAttempt,observation:unknown):SkillOutcome|undefined{
- if(!pending.has(attempt)||!record(observation)||observation.runId!==attempt.runId||!member(["succeeded","failed","cancelled"],observation.state))return undefined;
- pending.delete(attempt);let passed=observation.state==="succeeded";const seen=new Set<Check>();
- if(!Array.isArray(observation.checks)||observation.checks.length>32)passed=false;
- else for(const c of observation.checks){if(!passedCheck(c)||seen.has(c.check)){passed=false;continue;}seen.add(c.check);}
- if(!attempt.requiredChecks.every(c=>seen.has(c)))passed=false;
- return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:passed?"verified-success":"failure"});
+ if(!pending.has(attempt)||!record(observation)||observation.runId!==attempt.runId||
+    !member(["succeeded","failed","cancelled","unknown"],observation.state))return undefined;
+ pending.delete(attempt);
+ if(observation.state==="failed")return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"failure"});
+ if(observation.state==="cancelled"||observation.state==="unknown")return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"unverified"});
+ if(!Array.isArray(observation.checks)||observation.checks.length>32)return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"unverified"});
+ const seen=new Set<Check>();let unverified=false;let failed=false;
+ for(const raw of observation.checks){
+  const result=assessCheck(raw);
+  if(result==="failure")failed=true;
+  if(result==="unverified"){unverified=true;continue;}
+  if(!record(raw)||!member(CHECKS,raw.check)){unverified=true;continue;}
+  if(seen.has(raw.check)){unverified=true;continue;}
+  seen.add(raw.check);
+ }
+ if(failed)return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"failure"});
+ if(unverified||!attempt.requiredChecks.every(check=>seen.has(check)))return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"unverified"});
+ return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"verified-success"});
 }
