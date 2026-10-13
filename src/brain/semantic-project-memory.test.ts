@@ -75,3 +75,20 @@ test("empty semantic queries return no results", async () => {
   });
   assert.deepEqual(await search.find("   "), []);
 });
+
+test("semantic retrieval respects the Python service 64-text embedding cap", async () => {
+  const entries = Array.from({ length: 80 }, (_, index) => entry(String(index), `document ${index}`));
+  const store = makeStore(entries);
+  let submittedCount = 0;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/v1/embeddings")) {
+      const body = JSON.parse(String(init?.body)) as { texts: string[] };
+      submittedCount = body.texts.length;
+      return new Response(JSON.stringify({ model: "fake", dimensions: 1, embeddings: body.texts.map(() => [1]) }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ model: "fake", results: [{ index: 0, score: 1 }] }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const search = new SemanticProjectMemorySearch(store, { baseUrl: "http://localhost:8000", token: "test", fetchImpl });
+  await search.find("query");
+  assert.equal(submittedCount, 64);
+});
