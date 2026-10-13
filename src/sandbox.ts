@@ -196,7 +196,7 @@ function runContainerCli(
     shell: false,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { PATH: process.env.PATH ?? "", ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}) },
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => new Set(["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"]).has(key.toUpperCase()))),
   });
 
   return new Promise((resolve, reject) => {
