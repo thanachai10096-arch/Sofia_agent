@@ -127,6 +127,12 @@ export interface VerificationResult {
   detail: string;
   evidenceIds: string[];
   workspaceRevision: string;
+  /** Structured fields copied only from the trusted project.verify result. */
+  exitCode?: number;
+  checksPassed?: boolean;
+  assertionsTotal?: number;
+  failedAssertions?: number;
+  skippedAssertions?: number;
 }
 
 export interface Diagnosis {
