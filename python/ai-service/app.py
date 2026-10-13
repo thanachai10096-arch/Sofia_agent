@@ -84,7 +84,11 @@ def _authorize(authorization: Annotated[str | None, Header()] = None) -> None:
             detail="AI service authentication is not configured.",
         )
     supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
-    if not authorization or not authorization.startswith("Bearer ") or not hmac.compare_digest(supplied, expected):
+    if (
+        not authorization
+        or not authorization.startswith("Bearer ")
+        or not hmac.compare_digest(supplied, expected)
+    ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized.")
 
 
@@ -98,7 +102,11 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.post("/v1/embeddings", response_model=EmbeddingResponse, dependencies=[Depends(_authorize)])
+    @app.post(
+        "/v1/embeddings",
+        response_model=EmbeddingResponse,
+        dependencies=[Depends(_authorize)],
+    )
     def embeddings(request: EmbeddingRequest) -> EmbeddingResponse:
         _validate_texts(request.texts)
         model = embedder_factory()
@@ -114,7 +122,11 @@ def create_app(
             embeddings=result,
         )
 
-    @app.post("/v1/rerank", response_model=RerankResponse, dependencies=[Depends(_authorize)])
+    @app.post(
+        "/v1/rerank",
+        response_model=RerankResponse,
+        dependencies=[Depends(_authorize)],
+    )
     def rerank(request: RerankRequest) -> RerankResponse:
         _validate_texts([request.query, *request.documents])
         model = reranker_factory()
