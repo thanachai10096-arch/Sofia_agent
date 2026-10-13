@@ -243,8 +243,7 @@ class FileJobStateStore {
       const index = records.findIndex((item) => item.id === record.id);
       if (index >= 0) {
         const current = records[index]!;
-        if (current.leaseOwnerToken && record.leaseOwnerToken !== current.leaseOwnerToken) return false;
-        if (current.leaseOwnerToken && !record.leaseOwnerToken) return false;
+        if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
         records[index] = { ...record };
       } else {
