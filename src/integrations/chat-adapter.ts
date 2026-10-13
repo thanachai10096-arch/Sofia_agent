@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * Transport-neutral, security-gated command dispatcher for chat integrations.
  *
@@ -26,7 +28,7 @@ export interface ChatRunStarter {
   start(input: {
     task: string;
     context?: string;
-  }): Promise<{ id: string; status: string; error?: string }>;
+  }, signal?: AbortSignal, options?: { idempotencyKey?: string }): Promise<{ id: string; status: string; error?: string }>;
 }
 
 export interface ChatAccessPolicy {
@@ -89,14 +91,18 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
     if (!(await options.deduplicator.claim(dedupeKey))) return { status: "duplicate" };
 
     try {
+      const idempotencyKey = "chat_" + createHash("sha256")
+        .update(`${command.platform}\\0${command.conversationId}\\0${command.messageId}`)
+        .digest("hex");
       const run = await options.client.start({
         task,
         context: `Origin: ${command.platform} chat integration. Conversation ID: ${command.conversationId}.`,
-      });
+      }, undefined, { idempotencyKey });
       return { status: "accepted", runId: run.id, runStatus: run.status };
     } catch (error) {
-      // Permit a safe retry if the API call failed before a run was accepted.
-      // Durable implementations should make claim/release atomic and bounded by TTL.
+      // The stable API idempotency key makes a retry safe if the server accepted
+      // the request but the response was lost. Durable dedupe is still required
+      // across adapter restarts because the API idempotency cache is process-local.
       await options.deduplicator.release(dedupeKey);
       throw error;
     }
