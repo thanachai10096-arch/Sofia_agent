@@ -9,6 +9,8 @@ export interface SandboxLimits {
   workspaceRoot: string;
   /** Optional workspace-relative working directory. */
   cwd?: string;
+  /** Additional environment variable names explicitly permitted for this child. */
+  allowedEnvironmentVariables?: string[];
 }
 
 export interface Sandbox {
@@ -43,10 +45,23 @@ export class PolicySandbox implements Sandbox {
  * enforce filesystem isolation or disable networking. Requests that require
  * network isolation therefore fail closed when allowNetwork is false.
  */
-function safeEnv(): NodeJS.ProcessEnv {
-  const blocked = /(?:TOKEN|SECRET|PASSWORD|PRIVATE.?KEY|API.?KEY|AUTHORIZATION|AWS_ACCESS_KEY|AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN)/i;
+const BASE_CHILD_ENV = new Set([
+  "PATH", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+  "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "COMSPEC",
+  "PATHEXT", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+  "LANG", "LC_ALL", "TERM", "CI",
+]);
+const BLOCKED_CHILD_ENV = /^(?:NODE_OPTIONS|NODE_PATH|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_.*|PYTHONPATH|PYTHONHOME|RUBYOPT|PERL5OPT)$/i;
+
+function safeEnv(extraAllowed: readonly string[] = []): NodeJS.ProcessEnv {
+  if (extraAllowed.some((name) => typeof name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))) {
+    throw new Error("Allowed environment variable names must be valid identifiers.");
+  }
+  const allowed = new Set([...BASE_CHILD_ENV, ...extraAllowed].map((name) => name.toUpperCase()));
   return Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !blocked.test(key)),
+    Object.entries(process.env).filter(([name]) =>
+      allowed.has(name.toUpperCase()) && !BLOCKED_CHILD_ENV.test(name),
+    ),
   );
 }
 
@@ -93,7 +108,7 @@ export class ProcessSandbox implements Sandbox {
       cwd: workingDirectory,
       shell: false,
       windowsHide: true,
-      env: safeEnv(),
+      env: safeEnv(limits.allowedEnvironmentVariables),
       stdio: ["ignore", "pipe", "pipe"],
     });
 

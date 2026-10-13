@@ -184,3 +184,39 @@ test("ContainerSandbox restricts working directories to existing workspace desce
     await rm(workspaceRoot, { recursive: true, force: true });
   }
 });
+
+
+test("ProcessSandbox passes only baseline and explicitly allowed environment variables", async () => {
+  const names = ["SOFIA_SANDBOX_TEST_ALLOWED", "SOFIA_SANDBOX_TEST_UNLISTED", "NODE_OPTIONS"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  process.env.SOFIA_SANDBOX_TEST_ALLOWED = "allowed-value";
+  process.env.SOFIA_SANDBOX_TEST_UNLISTED = "must-not-leak";
+  process.env.NODE_OPTIONS = "--trace-warnings";
+  try {
+    const sandbox = new ProcessSandbox();
+    const result = await sandbox.run(
+      process.execPath,
+      ["-e", "process.stdout.write(JSON.stringify({allowed:process.env.SOFIA_SANDBOX_TEST_ALLOWED,unlisted:process.env.SOFIA_SANDBOX_TEST_UNLISTED,nodeOptions:process.env.NODE_OPTIONS,path:!!process.env.PATH}))"],
+      limits({ allowedEnvironmentVariables: ["SOFIA_SANDBOX_TEST_ALLOWED", "NODE_OPTIONS"] }),
+    );
+    const env = JSON.parse(result.stdout) as { allowed?: string; unlisted?: string; nodeOptions?: string; path?: boolean };
+    assert.equal(env.allowed, "allowed-value");
+    assert.equal(env.unlisted, undefined, "unapproved parent variables must not be inherited");
+    assert.equal(env.nodeOptions, undefined, "runtime code-injection variables must remain blocked even when allowlisted");
+    assert.equal(env.path, true, "the baseline PATH must remain available for child tools");
+  } finally {
+    for (const name of names) {
+      const value = previous[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("ProcessSandbox rejects malformed allowed environment variable names", async () => {
+  const sandbox = new ProcessSandbox();
+  await assert.rejects(
+    () => sandbox.run(process.execPath, ["-e", "process.exit(0)"], limits({ allowedEnvironmentVariables: ["SAFE=NO"] })),
+    /valid identifiers/i,
+  );
+});
