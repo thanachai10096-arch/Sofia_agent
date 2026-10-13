@@ -265,3 +265,49 @@ test("DurableJobRuntime rejects resume for a cancelled job even when a checkpoin
   assert.ok(current?.snapshot, "cancelled job should retain its checkpoint");
   await assert.rejects(() => runtime.resume(submitted.id), /cancelled jobs cannot be resumed/i);
 });
+
+test("DurableJobRuntime preserves a resumable embedded checkpoint when the snapshot store fails", async () => {
+  const namespace = "job-runtime-snapshot-store-failure-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "snapshot-fallback-" + randomUUID(),
+    task: "checkpoint fallback",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: ["step-1"],
+    checkpointId: "embedded-fallback-checkpoint",
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const unavailableStore = {
+    async save() { throw new Error("snapshot disk unavailable"); },
+    async load() { return undefined; },
+    async delete() {},
+  };
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async () => {
+      await onRunSnapshot?.(snapshot);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), unavailableStore, namespace);
+
+  const submitted = await runtime.submit({ task: "checkpoint fallback" });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+  assert.equal(current?.snapshot?.checkpointId, snapshot.checkpointId);
+
+  const restarted = new DurableJobRuntime(() => ({
+    run: async () => ({ completed: false, state: "failed" }),
+  } as unknown as SofiaBrain), unavailableStore, namespace);
+  const recovered = await restarted.get(submitted.id);
+  assert.equal(recovered?.snapshot?.checkpointId, snapshot.checkpointId);
+});
