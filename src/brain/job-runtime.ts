@@ -107,7 +107,19 @@ class FileJobStateStore {
             const latest = JSON.parse(await fs.readFile(this.lockFile, "utf8")) as { token?: unknown };
             if (latest.token === observedToken) await fs.rm(this.lockFile, { force: true });
           } catch (cleanupError) {
-            if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") throw cleanupError;
+            if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") {
+              // Malformed stale locks have no token to compare. Only reclaim one
+              // after rechecking that the file is still older than the stale limit.
+              const lockStat = await fs.stat(this.lockFile).catch((statError: NodeJS.ErrnoException) => {
+                if (statError.code === "ENOENT") return undefined;
+                throw statError;
+              });
+              if (lockStat && Date.now() - lockStat.mtimeMs > 120_000) {
+                await fs.rm(this.lockFile, { force: true });
+              } else if (lockStat) {
+                throw cleanupError;
+              }
+            }
           }
           continue;
         }
