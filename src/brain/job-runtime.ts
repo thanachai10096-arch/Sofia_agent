@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import type { BrainRunInput, SofiaBrain } from "./executor.js";
 import type { BrainRunSnapshot } from "./run-state.js";
 import type { RunStore } from "./run-store.js";
@@ -30,10 +31,94 @@ export interface JobRuntime {
 
 class FileJobStateStore {
   private readonly file: string;
+  private readonly lockFile: string;
   private writes: Promise<void> = Promise.resolve();
 
   constructor(namespace: string, root = sofiaStateDirectory("jobs")) {
     this.file = path.join(root, createHash("sha256").update(namespace).digest("hex") + ".json");
+    this.lockFile = this.file + ".lock";
+  }
+
+  private async withFileLock<T>(operation: () => Promise<T>): Promise<T> {
+    const token = randomUUID();
+    const owner = { token, pid: process.pid, hostname: os.hostname(), createdAt: Date.now() };
+    const deadline = Date.now() + 10_000;
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+
+    await fs.mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
+    await fs.chmod(path.dirname(this.file), 0o700);
+
+    while (!handle) {
+      try {
+        handle = await fs.open(this.lockFile, "wx", 0o600);
+        await handle.writeFile(JSON.stringify(owner), "utf8");
+        await handle.close();
+        handle = undefined;
+        break;
+      } catch (error) {
+        await handle?.close().catch(() => undefined);
+        handle = undefined;
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+
+        let stale = false;
+        let observedToken: string | undefined;
+        try {
+          const lock = JSON.parse(await fs.readFile(this.lockFile, "utf8")) as {
+            token?: unknown; pid?: unknown; hostname?: unknown; createdAt?: unknown;
+          };
+          observedToken = typeof lock.token === "string" ? lock.token : undefined;
+          const age = Date.now() - (typeof lock.createdAt === "number" ? lock.createdAt : 0);
+          if (lock.hostname === os.hostname() && Number.isSafeInteger(lock.pid) && Number(lock.pid) > 0) {
+            try {
+              process.kill(Number(lock.pid), 0);
+            } catch (probeError) {
+              stale = (probeError as NodeJS.ErrnoException).code === "ESRCH";
+            }
+          } else if (age > 120_000) {
+            // Cross-host stale-lock recovery is best-effort; this file store is not a
+            // distributed lock service and must not be used as one across machines.
+            stale = true;
+          }
+          if (!observedToken && age > 120_000) stale = true;
+        } catch (readError) {
+          if ((readError as NodeJS.ErrnoException).code === "ENOENT") continue;
+          stale = true;
+        }
+
+        if (stale) {
+          try {
+            // Recheck the owner token before unlinking so we do not remove a lock
+            // that another process replaced after our first read.
+            const latest = JSON.parse(await fs.readFile(this.lockFile, "utf8")) as { token?: unknown };
+            if (latest.token === observedToken) await fs.rm(this.lockFile, { force: true });
+          } catch (cleanupError) {
+            if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") throw cleanupError;
+          }
+          continue;
+        }
+        if (Date.now() >= deadline) {
+          throw new Error("Timed out waiting for durable job-state file lock");
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      }
+    }
+
+    // The exclusive lock is now ours. Re-read under the lock before every
+    // read-modify-write so concurrent Node.js workers cannot overwrite each
+    // other's job records. The lock is intentionally limited to this local
+    // file store; multi-host coordination requires a shared transactional store.
+    try {
+      const current = JSON.parse(await fs.readFile(this.lockFile, "utf8")) as { token?: unknown };
+      if (current.token !== token) throw new Error("Lost durable job-state file lock");
+      return await operation();
+    } finally {
+      try {
+        const current = JSON.parse(await fs.readFile(this.lockFile, "utf8")) as { token?: unknown };
+        if (current.token === token) await fs.rm(this.lockFile, { force: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
   }
 
   private async read(): Promise<JobRecord[]> {
@@ -46,16 +131,15 @@ class FileJobStateStore {
   }
 
   async save(record: JobRecord): Promise<void> {
-    const operation = this.writes.then(async () => {
+    const operation = this.writes.then(() => this.withFileLock(async () => {
       const records = await this.read();
       const index = records.findIndex((item) => item.id === record.id);
       const durable = { ...record };
       if (index >= 0) records[index] = durable;
       else records.push(durable);
 
-      await fs.mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
-      await fs.chmod(path.dirname(this.file), 0o700);
-      // A unique temporary file prevents overlapping writes from clobbering each other.
+      // Unique temporary files plus the cross-process lock make the complete
+      // read-modify-write transaction atomic with respect to cooperating workers.
       const temporary = this.file + "." + randomUUID() + ".tmp";
       try {
         await fs.writeFile(temporary, JSON.stringify(records, null, 2), { encoding: "utf8", mode: 0o600 });
@@ -63,7 +147,7 @@ class FileJobStateStore {
       } finally {
         await fs.rm(temporary, { force: true });
       }
-    });
+    }));
     this.writes = operation.catch(() => undefined);
     return operation;
   }
