@@ -56,8 +56,15 @@ class FileJobStateStore {
         handle = undefined;
         break;
       } catch (error) {
+        const createdLock = handle !== undefined;
         await handle?.close().catch(() => undefined);
         handle = undefined;
+        if (createdLock) {
+          // If writing the owner record fails after exclusive creation, do not
+          // leave a malformed lock behind to block every future writer.
+          await fs.rm(this.lockFile, { force: true }).catch(() => undefined);
+          throw error;
+        }
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 
         let stale = false;
