@@ -276,6 +276,7 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly jobs = new Map<string, JobRecord>();
   private readonly controllers = new Map<string, AbortController>();
   private readonly resuming = new Set<string>();
+  private readonly starting = new Set<string>();
   private readonly state: FileJobStateStore;
 
   constructor(
@@ -316,9 +317,9 @@ export class DurableJobRuntime implements JobRuntime {
 
   async get(id: string): Promise<JobRecord | undefined> {
     const existing = this.jobs.get(id);
-    // A live local execution owns its in-memory view, but all other reads refresh
-    // from disk so cross-process cancellation and lease expiry become observable.
-    if (existing && this.controllers.has(id)) return { ...existing };
+    // Keep the canonical record stable while a local worker is atomically claiming it.
+    // After startup, non-local reads refresh from disk to observe cancellation/expiry.
+    if (existing && (this.controllers.has(id) || this.starting.has(id))) return { ...existing };
 
     const stored = await this.state.get(id);
     if (!stored) return existing ? { ...existing } : undefined;
@@ -334,7 +335,7 @@ export class DurableJobRuntime implements JobRuntime {
   async list(): Promise<JobRecord[]> {
     const stored = await this.state.list();
     for (const persisted of stored) {
-      if (this.controllers.has(persisted.id)) continue;
+      if (this.controllers.has(persisted.id) || this.starting.has(persisted.id)) continue;
       const snapshot = persisted.snapshot?.runId && this.runStore
         ? await this.runStore.load(persisted.snapshot.runId)
         : undefined;
@@ -387,7 +388,13 @@ export class DurableJobRuntime implements JobRuntime {
     if (record.status === "cancelled" || record.status === "completed") return;
     const leaseToken = randomUUID();
     const leaseMs = 15_000;
-    const claimed = await this.state.claim(record.id, leaseToken, leaseMs);
+    this.starting.add(record.id);
+    let claimed: JobRecord | undefined;
+    try {
+      claimed = await this.state.claim(record.id, leaseToken, leaseMs);
+    } finally {
+      this.starting.delete(record.id);
+    }
     if (!claimed) {
       const latest = await this.state.get(record.id);
       if (latest) Object.assign(record, latest);
