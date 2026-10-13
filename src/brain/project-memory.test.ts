@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileProjectMemoryStore, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
@@ -25,4 +25,16 @@ test("project memory writes valid JSON", async () => {
   const names = await files.readdir(root);
   const raw = await readFile(path.join(root, names[0]!), "utf8");
   assert.doesNotThrow(() => JSON.parse(raw));
+});
+
+
+test("project memory files use private permissions on POSIX", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-permissions-"));
+  const store = new FileProjectMemoryStore("private-project", root);
+  await store.save(memoryEntryFromConvention("private-project", "Do not expose private project context"));
+  if (process.platform !== "win32") {
+    const names = await readdir(root);
+    assert.equal((await stat(root)).mode & 0o777, 0o700);
+    assert.equal((await stat(path.join(root, names[0]!))).mode & 0o777, 0o600);
+  }
 });

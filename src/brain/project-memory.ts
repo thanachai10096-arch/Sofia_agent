@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs, readFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { FailureCategory, Strategy } from "./types.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { containsPromptInjection, redactSecrets } from "../security/guard.js";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 export interface ProjectMemoryEntry {
   id: string; project: string; kind: "convention" | "repair" | "decision"; content: string;
@@ -18,7 +18,7 @@ export interface ProjectMemoryStore {
 
 export class FileProjectMemoryStore implements ProjectMemoryStore {
   private readonly file: string;
-  constructor(project: string, root = path.join(os.tmpdir(), "sofia-agents-memory")) {
+  constructor(project: string, root = sofiaStateDirectory("memory")) {
     const key = createHash("sha256").update(project).digest("hex"); this.file = path.join(root, key + ".json");
   }
   private async read(): Promise<ProjectMemoryEntry[]> {
@@ -29,8 +29,16 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
     const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, 4000) };
     const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
-    await fs.mkdir(path.dirname(this.file),{recursive:true}); const tmp=this.file+".tmp";
-    await fs.writeFile(tmp,JSON.stringify(entries,null,2),"utf8"); await fs.rename(tmp,this.file);
+    const directory = path.dirname(this.file);
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    await fs.chmod(directory, 0o700);
+    const temporary = this.file + "." + randomUUID() + ".tmp";
+    try {
+      await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
+      await fs.rename(temporary, this.file);
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
   }
   async list(){return (await this.read()).filter(entry=>!containsPromptInjection(entry.content));}
   async find(query:string){

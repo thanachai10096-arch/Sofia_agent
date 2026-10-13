@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { BrainRunInput, SofiaBrain } from "./executor.js";
 import type { BrainRunSnapshot } from "./run-state.js";
 import type { RunStore } from "./run-store.js";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export interface JobRecord {
@@ -32,7 +32,7 @@ class FileJobStateStore {
   private readonly file: string;
   private writes: Promise<void> = Promise.resolve();
 
-  constructor(namespace: string, root = path.join(os.tmpdir(), "sofia-agents-jobs")) {
+  constructor(namespace: string, root = sofiaStateDirectory("jobs")) {
     this.file = path.join(root, createHash("sha256").update(namespace).digest("hex") + ".json");
   }
 
@@ -53,7 +53,8 @@ class FileJobStateStore {
       if (index >= 0) records[index] = durable;
       else records.push(durable);
 
-      await fs.mkdir(path.dirname(this.file), { recursive: true });
+      await fs.mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
+      await fs.chmod(path.dirname(this.file), 0o700);
       // A unique temporary file prevents overlapping writes from clobbering each other.
       const temporary = this.file + "." + randomUUID() + ".tmp";
       try {
