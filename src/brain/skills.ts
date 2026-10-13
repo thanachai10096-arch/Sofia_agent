@@ -17,6 +17,14 @@ export interface SofiaSkill {
   failureConditions?: readonly string[];
   recovery?: readonly string[];
   risk?: "read-only" | "may-write";
+  riskLevel?: PolicySkill["risk"];
+  requiredCapabilities?: PolicySkill["requiredCapabilities"];
+  requiredPermissions?: PolicySkill["requiredPermissions"];
+  resourceLimits?: PolicySkill["resourceLimits"];
+  retryLimit?: number;
+  compatibility?: PolicySkill["compatibility"];
+  trustLevel?: PolicySkill["trustLevel"];
+  provenance?: PolicySkill["provenance"];
 }
 
 const BUILTIN_SKILLS: readonly SofiaSkill[] = [
@@ -99,12 +107,6 @@ function policyToLegacy(skill: PolicySkill): SofiaSkill {
     integration: "tool_error",
     unknown: "unknown",
   };
-  const strategy: Strategy =
-    skill.id === "sofia.v1.terminal" ? "fix-environment" :
-    skill.id === "sofia.v1.debug" || skill.id === "sofia.v1.api" ||
-    skill.id === "sofia.v1.workspace" || skill.id === "sofia.v1.git" ||
-    skill.id === "sofia.v1.docs" ? "fix-implementation" :
-    skill.id === "sofia.v1.plan" ? "initial" : "inspect-evidence";
   const verification: SofiaSkill["verification"] = skill.verification.flatMap((item) => {
     if (item === "tests") return ["test"] as const;
     if (item === "typecheck" || item === "build") return [item] as const;
@@ -116,13 +118,21 @@ function policyToLegacy(skill: PolicySkill): SofiaSkill {
     description: skill.description,
     triggers: skill.triggers,
     categories: skill.id === "sofia.v1.plan" ? [] : skill.failureCategories.map((item) => categoryMap[item]!),
-    strategy,
+    strategy: skill.strategy,
     procedure: skill.procedure,
     verification,
     preconditions: skill.preconditions,
     failureConditions: skill.failureConditions,
     recovery: skill.recovery,
-    risk: skill.risk,
+    risk: skill.risk === "read" ? "read-only" : "may-write",
+    riskLevel: skill.risk,
+    requiredCapabilities: skill.requiredCapabilities,
+    requiredPermissions: skill.requiredPermissions,
+    resourceLimits: skill.resourceLimits,
+    retryLimit: skill.retryLimit,
+    compatibility: skill.compatibility,
+    trustLevel: skill.trustLevel,
+    provenance: skill.provenance,
   };
 }
 
@@ -212,6 +222,14 @@ export function compactSkillContext(skills: readonly SofiaSkill[]): unknown[] {
     ...(skill.failureConditions ? { failureConditions: skill.failureConditions } : {}),
     ...(skill.recovery ? { recovery: skill.recovery } : {}),
     ...(skill.risk ? { risk: skill.risk } : {}),
+    ...(skill.riskLevel ? { riskLevel: skill.riskLevel } : {}),
+    ...(skill.requiredCapabilities ? { requiredCapabilities: skill.requiredCapabilities } : {}),
+    ...(skill.requiredPermissions ? { requiredPermissions: skill.requiredPermissions } : {}),
+    ...(skill.resourceLimits ? { resourceLimits: skill.resourceLimits } : {}),
+    ...(skill.retryLimit !== undefined ? { retryLimit: skill.retryLimit } : {}),
+    ...(skill.compatibility ? { compatibility: skill.compatibility } : {}),
+    ...(skill.trustLevel ? { trustLevel: skill.trustLevel } : {}),
+    ...(skill.provenance ? { provenance: skill.provenance } : {}),
   }));
 }
 
