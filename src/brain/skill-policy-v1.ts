@@ -1,3 +1,4 @@
+// Modified for Sofia Agents Skill Engine integration on 2026-10-13; provenance notes: docs/engineering/CODE_PROVENANCE_AUDIT.md.
 // Provisional skill policy. It does not dispatch tools or persist outcomes.
 const TASK_TYPES = ["inspection","debugging","testing","git","research","terminal","workspace","api","security","planning","documentation","data"] as const;
 const FAILURES = ["test","build","dependency","permission","integration","unknown"] as const;
