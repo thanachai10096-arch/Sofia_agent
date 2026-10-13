@@ -6,6 +6,8 @@ export interface SandboxLimits {
   maxOutputBytes: number;
   allowNetwork: boolean;
   workspaceRoot: string;
+  /** Optional workspace-relative working directory. */
+  cwd?: string;
 }
 
 export interface Sandbox {
@@ -70,6 +72,14 @@ export class ProcessSandbox implements Sandbox {
     if (!limits.workspaceRoot.trim()) throw new Error("A workspace root is required.");
     const timeoutMs = positiveFinite(limits.timeoutMs, "timeoutMs");
     const maxOutputBytes = positiveFinite(limits.maxOutputBytes, "maxOutputBytes");
+    const { realpath, stat } = await import("node:fs/promises");
+    const workspaceRoot = await realpath(limits.workspaceRoot);
+    const workingDirectory = limits.cwd ? await realpath(path.resolve(workspaceRoot, limits.cwd)) : workspaceRoot;
+    const relativeWorkingDirectory = path.relative(workspaceRoot, workingDirectory);
+    if (relativeWorkingDirectory === ".." || relativeWorkingDirectory.startsWith(".." + path.sep) || path.isAbsolute(relativeWorkingDirectory)) {
+      throw new Error("Working directory escapes the configured workspace root.");
+    }
+    if (!(await stat(workingDirectory)).isDirectory()) throw new Error("Working directory must be a directory.");
 
     if (limits.allowNetwork !== true) {
       throw new Error(
@@ -79,7 +89,7 @@ export class ProcessSandbox implements Sandbox {
     if (signal?.aborted) throw new Error("Process execution was aborted.");
 
     const child = spawn(command, args, {
-      cwd: limits.workspaceRoot,
+      cwd: workingDirectory,
       shell: false,
       windowsHide: true,
       env: safeEnv(),
@@ -280,6 +290,12 @@ export class ContainerSandbox implements Sandbox {
     const { realpath, stat } = await import("node:fs/promises");
     const workspaceRoot = await realpath(limits.workspaceRoot);
     if (!(await stat(workspaceRoot)).isDirectory()) throw new Error("Workspace root must be a directory.");
+    const workingDirectory = limits.cwd ? await realpath(path.resolve(workspaceRoot, limits.cwd)) : workspaceRoot;
+    const relativeWorkingDirectory = path.relative(workspaceRoot, workingDirectory);
+    if (relativeWorkingDirectory === ".." || relativeWorkingDirectory.startsWith(".." + path.sep) || path.isAbsolute(relativeWorkingDirectory)) {
+      throw new Error("Working directory escapes the configured workspace root.");
+    }
+    if (!(await stat(workingDirectory)).isDirectory()) throw new Error("Working directory must be a directory.");
     // Docker's --mount syntax uses commas as delimiters and has no portable escape.
     if (workspaceRoot.includes(",")) throw new Error("Workspace path cannot contain a comma for container mounting.");
     if (signal?.aborted) throw new Error("Container execution was aborted.");
@@ -296,7 +312,7 @@ export class ContainerSandbox implements Sandbox {
       "--cpus=1",
       "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
       "--mount", `type=bind,source=${workspaceRoot},target=/workspace`,
-      "--workdir", "/workspace",
+      "--workdir", path.posix.join("/workspace", relativeWorkingDirectory.split(path.sep).join("/")),
       this.options.image,
       command,
       ...args,
