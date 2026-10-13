@@ -1,14 +1,14 @@
 // Modified for Sofia Agents Skill Engine integration on 2026-10-13; provenance notes: docs/engineering/CODE_PROVENANCE_AUDIT.md.
 // Provisional skill policy. It does not dispatch tools or persist outcomes.
-const TASK_TYPES = ["inspection","debugging","testing","git","research","terminal","workspace","api","security","planning","documentation","data"] as const;
-const FAILURES = ["test","build","dependency","permission","integration","unknown"] as const;
-const CHECKS = ["inspection","reproduction","tests","build","typecheck","change-review","sources","environment","filesystem","contract","security-review","completion","documentation","analysis"] as const;
-const CAPABILITIES = ["project.read","project.write","process.run","git.read","git.write","web.read","browser.control","desktop.control","database.read","database.write","cloud.read","cloud.write","jobs.observe","agents.delegate","memory.read","tools.inspect"] as const;
-const PERMISSIONS = ["workspace.read","workspace.write","process.execute","network.read","network.write","git.write","desktop.control","database.read","database.write","cloud.read","cloud.write","deploy","publish","delegate","memory.read"] as const;
-const STRATEGIES = ["initial","inspect-evidence","fix-implementation","fix-environment","alternative-tool"] as const;
+export const TASK_TYPES = ["inspection","debugging","testing","git","research","terminal","workspace","api","security","planning","documentation","data"] as const;
+export const FAILURES = ["test","build","dependency","permission","integration","unknown"] as const;
+export const CHECKS = ["inspection","reproduction","tests","build","typecheck","change-review","sources","environment","filesystem","contract","security-review","completion","documentation","analysis"] as const;
+export const CAPABILITIES = ["project.read","project.write","process.run","git.read","git.write","web.read","browser.control","desktop.control","database.read","database.write","cloud.read","cloud.write","jobs.observe","agents.delegate","memory.read","tools.inspect"] as const;
+export const PERMISSIONS = ["workspace.read","workspace.write","process.execute","network.read","network.write","git.write","desktop.control","database.read","database.write","cloud.read","cloud.write","deploy","publish","delegate","memory.read"] as const;
+export const STRATEGIES = ["initial","inspect-evidence","fix-implementation","fix-environment","alternative-tool"] as const;
 export type TaskType = typeof TASK_TYPES[number];
 export type Check = typeof CHECKS[number];
-type FailureCategory = typeof FAILURES[number];
+export type FailureCategory = typeof FAILURES[number];
 export type Capability = typeof CAPABILITIES[number];
 export type Permission = typeof PERMISSIONS[number];
 export type Strategy = typeof STRATEGIES[number];
@@ -135,7 +135,34 @@ export const BUILTIN_SKILLS:readonly Skill[]=Object.freeze([
  common("sofia.v1.docs","Documentation authoring","Write documentation consistent with inspected implementation.",["write documentation","update readme","author documentation","document behavior"],["documentation"],[],"write",["Inspect conventions and verify implementation.","Make a focused change with accurate examples and labeled limitations.","Review diff and disclose anything not checked."],["documentation","change-review"]),
  common("sofia.v1.data","Data and log analysis","Analyze scoped data reproducibly while minimizing sensitive data.",["analyze logs","log analysis","parse dataset","data quality"],["data"],[],"read",["Inspect schema, time range, provenance, and missing data without retaining secrets.","Distinguish observations from causal hypotheses.","Cross-check results and report uncertainty and exclusions."],["analysis"]),
 ]);
+
+export function catalogProblems(skills: readonly unknown[]): string[] {
+ const problems: string[] = [];
+ const seen = new Map<string, string>();
+ for (let index = 0; index < skills.length; index++) {
+  const skill = skills[index];
+  if (!validSkill(skill)) {
+   problems.push(`invalid-schema:${index}`);
+   continue;
+  }
+  const previous = seen.get(skill.id);
+  if (previous !== undefined) {
+   problems.push(previous === skill.version ? `duplicate-id:${skill.id}` : `version-conflict:${skill.id}`);
+  } else {
+   seen.set(skill.id, skill.version);
+  }
+ }
+ return problems;
+}
+const BUILTIN_PROBLEMS = catalogProblems(BUILTIN_SKILLS);
+if (BUILTIN_PROBLEMS.length > 0) throw new TypeError("Invalid built-in skill catalog: " + BUILTIN_PROBLEMS.join(", "));
+
 export function assessLearnedSkill(v:unknown):"invalid"|"quarantined"{return validSkill(v)?"quarantined":"invalid";}
+export function inspectExternalSkill(json: unknown):"invalid"|"quarantined" {
+ if(typeof json!=="string"||json.length>32_768)return "invalid";
+ try { return assessLearnedSkill(JSON.parse(json) as unknown); }
+ catch { return "invalid"; }
+}
 export interface SkillOutcome {readonly skillId:string;readonly taskType:TaskType;readonly result:"verified-success"|"failure"|"unverified";}
 export const HISTORY_LIMIT=100;
 export const CONTEXT_SKILL_LIMIT=3;
