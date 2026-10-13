@@ -44,8 +44,9 @@ try {
   const outsideRead = await sandbox.run("node", ["-e", "require('node:fs').readFileSync(process.argv[1], 'utf8')", hostSecret], limits);
   assert.notEqual(outsideRead.code, 0, "container unexpectedly read a host file outside the workspace mount");
 
-  const rootWrite = await sandbox.run("node", ["-e", "try { require('node:fs').writeFileSync('/sofia-rootfs-write-test', 'bad'); process.exit(1) } catch { process.exit(0) }"], limits);
-  assert.equal(rootWrite.code, 0, "container root filesystem was unexpectedly writable");
+  const rootMountProbe = "const fs=require('node:fs');const line=fs.readFileSync('/proc/mounts','utf8').split('\\n').find(x=>x.split(' ')[1]==='/');const options=line?.split(' ')[3]?.split(',')??[];process.exit(options.includes('ro')?0:1)";
+  const rootMount = await sandbox.run("node", ["-e", rootMountProbe], limits);
+  assert.equal(rootMount.code, 0, "container root filesystem mount is not read-only");
 
   const networkProbe = "const net=require('node:net');const s=net.connect({host:'1.1.1.1',port:443});s.setTimeout(1500);s.on('connect',()=>process.exit(1));s.on('error',()=>process.exit(0));s.on('timeout',()=>process.exit(0));setTimeout(()=>process.exit(0),2500)";
   const network = await sandbox.run("node", ["-e", networkProbe], limits);
