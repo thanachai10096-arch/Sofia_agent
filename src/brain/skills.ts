@@ -76,7 +76,7 @@ function learnedToSkill(skill: LearnedSkillCandidate): SofiaSkill {
   };
 }
 
-function policyTaskType(category: FailureCategory, message = ""): PolicyTaskType {
+export function taskTypeForFailure(category: FailureCategory, message = ""): PolicyTaskType {
   const normalized = message.toLowerCase();
   if (/\b(test|tests|testing|assertion|suite)\b/.test(normalized)) return "testing";
   if (/\b(api|integration|endpoint|contract)\b/.test(normalized)) return "api";
@@ -160,7 +160,7 @@ export function matchSkills(
   // ToolGateway remains the authority for actual capabilities and every dispatched action.
   const selectedPolicy = selectPolicySkills({
     text: safeMessage,
-    taskType: policyTaskType(category, safeMessage),
+    taskType: taskTypeForFailure(category, safeMessage),
     failureCategory: policyFailure(category),
   }, [], boundedLimit);
   const policyById = new Map<string, number>();
