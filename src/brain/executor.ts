@@ -545,9 +545,19 @@ export class SofiaBrain {
       );
     }
 
+    // Skills must guide the first plan as well as later recovery plans.
+    // Use the task text and the neutral category so keyword-triggered skills can
+    // help before a failure category exists; the gateway still enforces permissions.
+    const skills = matchSkills("unknown", input.task, 5, this.dependencies.skillLedger);
+    if (skills[0]) {
+      this.selectedSkillIds.add(skills[0].id);
+      this.activeSkillId = skills[0].id;
+    }
+
     const value = await this.infer("plan", {
       task: input.task,
       understanding,
+      matchedSkills: compactSkillContext(skills),
       availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
