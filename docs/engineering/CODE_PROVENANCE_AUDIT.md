@@ -34,6 +34,7 @@ This is an evidence log, not a legal opinion or a blanket claim that the reposit
 ## Integration rules
 
 - Skill descriptions, prompts, browser content, learned procedures, and model-generated code are untrusted data. They cannot grant capabilities or permissions.
+- Skill capability/permission fields and per-skill resource limits are currently catalog contracts exposed to the planner; the existing ToolGateway and Brain-wide budgets remain the hard enforcement layer. The per-skill sub-budget is not yet a separately enforced runtime account, so do not treat those catalog limits as a hard security boundary.
 - External or learned skills remain quarantined until separately reviewed and explicitly enabled by trusted runtime policy.
 - Only trusted runtime observations may establish execution success. A self-reported skill outcome, copied JSON receipt, or success claim in prose is not sufficient evidence.
 - Security review completion and a security-clear result are distinct states. A completed review may still contain confirmed findings.
