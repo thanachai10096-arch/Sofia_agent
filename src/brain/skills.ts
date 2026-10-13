@@ -119,13 +119,21 @@ export function matchSkills(
   ledger?: SkillLedger,
 ): SofiaSkill[] {
   const boundedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(8, Math.floor(limit))) : 3;
-  const lower = message.slice(0, 4000).toLowerCase();
+  const safeMessage = typeof message === "string" ? message.slice(0, 4000) : "";
+  const lower = safeMessage.toLowerCase();
+  let learned: LearnedSkillCandidate[] = [];
+  try {
+    const entries = ledger?.list() ?? [];
+    learned = Array.isArray(entries) ? entries.filter(isSafeLearnedCandidate) : [];
+  } catch {
+    // An unavailable or malformed learning ledger must not block recovery.
+  }
   const legacy = [
     ...BUILTIN_SKILLS,
-    ...(ledger?.list() ?? []).filter(isSafeLearnedCandidate).map(learnedToSkill),
+    ...learned.map(learnedToSkill),
   ];
   const selectedPolicy = selectPolicySkills({
-    text: message.slice(0, 4000),
+    text: safeMessage,
     taskType: policyTaskType(category),
     failureCategory: policyFailure(category),
   }, [], boundedLimit);
@@ -151,13 +159,32 @@ export function matchSkills(
 }
 
 function isSafeLearnedCandidate(value: LearnedSkillCandidate): boolean {
-  return !!value && typeof value === "object" &&
-    typeof value.name === "string" && value.name.length > 0 && value.name.length <= 100 &&
-    typeof value.trigger === "string" && value.trigger.length > 0 && value.trigger.length <= 240 &&
-    Array.isArray(value.procedure) && value.procedure.length > 0 && value.procedure.length <= 8 &&
-    value.procedure.every((item) => typeof item === "string" && item.length > 0 && item.length <= 240) &&
-    Array.isArray(value.evidenceIds) && value.evidenceIds.length > 0 && value.evidenceIds.length <= 32 &&
-    value.evidenceIds.every((item) => typeof item === "string" && item.length <= 128);
+  try {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (!Object.values(descriptors).every((descriptor) => "value" in descriptor)) return false;
+    const categories: readonly string[] = [
+      "syntax_error", "type_error", "runtime_error", "dependency_error", "permission_error",
+      "network_error", "tool_error", "wrong_assumption", "incomplete_solution",
+      "environment_error", "unknown",
+    ];
+    const strategies: readonly string[] = [
+      "initial", "inspect-evidence", "fix-implementation", "fix-environment", "alternative-tool",
+    ];
+    return typeof value.name === "string" && value.name.length > 0 && value.name.length <= 100 &&
+      typeof value.trigger === "string" && value.trigger.length > 0 && value.trigger.length <= 240 &&
+      categories.includes(value.category) && strategies.includes(value.strategy) &&
+      Array.isArray(value.procedure) && value.procedure.length > 0 && value.procedure.length <= 8 &&
+      value.procedure.every((item) => typeof item === "string" && item.length > 0 && item.length <= 240) &&
+      Array.isArray(value.verification) && value.verification.length <= 8 &&
+      value.verification.every((item) => typeof item === "string" && ["typecheck", "test", "build"].includes(item)) &&
+      Array.isArray(value.evidenceIds) && value.evidenceIds.length > 0 && value.evidenceIds.length <= 32 &&
+      value.evidenceIds.every((item) => typeof item === "string" && item.length > 0 && item.length <= 128);
+  } catch {
+    return false;
+  }
 }
 
 export function compactSkillContext(skills: readonly SofiaSkill[]): unknown[] {
