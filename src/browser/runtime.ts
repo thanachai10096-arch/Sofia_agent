@@ -133,7 +133,7 @@ export async function resolvePublicHostAddress(host: string): Promise<string> {
       throw new Error("Browser navigation to a host resolving to private or non-public IP addresses is blocked.");
     }
   }
-  const selected = addresses[0]?.address;
+  const selected = addresses.find((item) => item.family === 4)?.address ?? addresses[0]?.address;
   if (!selected) throw new Error("Browser navigation host has no public address.");
   return selected;
 }
@@ -194,6 +194,7 @@ export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
           response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
           upstreamResponse.pipe(response);
         });
+        upstream.setTimeout(15_000, () => upstream.destroy(new Error("Browser upstream request timed out.")));
         upstream.once("error", (error) => sendProxyError(response, 502, String(error)));
         request.pipe(upstream);
       } catch (error) {
