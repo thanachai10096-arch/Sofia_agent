@@ -2,7 +2,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
-  BUILTIN_SKILLS, CONTEXT_SKILL_LIMIT, HISTORY_LIMIT, assessLearnedSkill,
+  BUILTIN_SKILLS, CAPABILITIES, CHECKS, CONTEXT_SKILL_LIMIT, HISTORY_LIMIT, PERMISSIONS, assessLearnedSkill, catalogProblems, inspectExternalSkill,
   boundedHistory, finishAttempt, prepareAttempt, selectSkills, validSkill,
 } from "../src/brain/skill-policy-v1.js";
 
@@ -143,4 +143,35 @@ test("security review completion is not a claim that no vulnerabilities exist", 
   const a = prepareAttempt("sofia.v1.security", "security", "run-1", ["security-review"]);
   const evidence = { ...pass("security-review"), confirmedFindings: 2, hypotheses: 4 };
   assert.equal(finishAttempt(a, completed([evidence]))?.result, "verified-success");
+});
+
+
+test("built-in policy contracts declare bounded budgets and real capability/permission names", () => {
+  for (const skill of BUILTIN_SKILLS) {
+    assert.equal(skill.version, "1.0.0");
+    assert.ok(skill.requiredCapabilities.length > 0);
+    assert.ok(skill.requiredPermissions.length > 0);
+    assert.ok(skill.requiredCapabilities.every((capability) => CAPABILITIES.includes(capability)));
+    assert.ok(skill.requiredPermissions.every((permission) => PERMISSIONS.includes(permission)));
+    assert.ok(skill.resourceLimits.steps > 0 && skill.resourceLimits.steps <= 40);
+    assert.ok(skill.resourceLimits.toolCalls > 0 && skill.resourceLimits.toolCalls <= 100);
+    assert.ok(skill.resourceLimits.tokens > 0 && skill.resourceLimits.tokens <= 60_000);
+    assert.ok(skill.resourceLimits.timeoutMs > 0 && skill.resourceLimits.timeoutMs <= 120_000);
+    assert.ok(skill.verification.every((check) => CHECKS.includes(check)));
+    assert.equal(skill.compatibility.capabilityContract, "sofia-adapter-v1");
+    assert.equal(skill.trustLevel, "first-party");
+    assert.equal(skill.provenance.kind, "bundled");
+  }
+});
+
+test("catalog validation detects duplicate IDs and version conflicts", () => {
+  const first = BUILTIN_SKILLS[0]!;
+  assert.deepEqual(catalogProblems([first, first]), ["duplicate-id:" + first.id]);
+  assert.deepEqual(catalogProblems([first, { ...first, version: "2.0.0" }]), ["version-conflict:" + first.id]);
+});
+
+test("external skills are size-bounded and always quarantined when structurally valid", () => {
+  assert.equal(inspectExternalSkill(JSON.stringify(BUILTIN_SKILLS[0])), "quarantined");
+  assert.equal(inspectExternalSkill("{invalid"), "invalid");
+  assert.equal(inspectExternalSkill("x".repeat(32_769)), "invalid");
 });
