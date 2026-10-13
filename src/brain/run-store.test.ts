@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { FileRunStore } from "./run-store.js";
 
-test("FileRunStore survives a new store instance", async () => {
+test("FileRunStore serializes concurrent writes across store instances", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-run-store-test-"));
   try {
     const snapshot = {
