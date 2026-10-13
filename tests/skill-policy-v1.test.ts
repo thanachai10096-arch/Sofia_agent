@@ -6,7 +6,7 @@ import {
 } from "../src/brain/skill-policy-v1.js";
 
 const top = (task: unknown, history: unknown = []) => selectSkills(task, history)[0]?.skill.id;
-const pass = (check: string) => ({ check, state: "passed", completed: true, exitCode: 0, assertionsPassed: true });
+const pass = (check: string) => ({ check, state: "passed", completed: true, exitCode: 0, checksPassed: true, assertionsPassed: true, assertionsTotal: 1, failedAssertions: 0, skippedAssertions: 0, postconditionObserved: true, reviewCompleted: true, confirmedFindings: 0, hypotheses: 0 });
 const completed = (checks: unknown[], state = "succeeded") => ({ runId: "run-1", state, checks });
 
 test("built-ins are unique, valid, non-empty, and immutable", () => {
@@ -92,15 +92,19 @@ test("attempts require object identity and matching terminal observations", () =
 });
 
 test("missing, incomplete, failed, or duplicate verification cannot pass", () => {
-  const bad = [
-    [], [{ check: "tests", state: "passed", completed: true }],
-    [{ ...pass("tests"), completed: false }], [{ ...pass("tests"), assertionsPassed: false }],
-    [{ ...pass("tests"), exitCode: 1 }], [{ ...pass("tests"), state: "failed" }],
-    [{ check: "not-a-check", state: "passed", completed: true }], [pass("tests"), pass("tests")],
+  const cases: Array<{ checks: unknown[]; expected: "failure" | "unverified" }> = [
+    { checks: [], expected: "unverified" },
+    { checks: [{ check: "tests", state: "passed", completed: true }], expected: "unverified" },
+    { checks: [{ ...pass("tests"), completed: false }], expected: "unverified" },
+    { checks: [{ ...pass("tests"), assertionsPassed: false }], expected: "failure" },
+    { checks: [{ ...pass("tests"), exitCode: 1 }], expected: "failure" },
+    { checks: [{ ...pass("tests"), state: "failed" }], expected: "failure" },
+    { checks: [{ check: "not-a-check", state: "passed", completed: true }], expected: "unverified" },
+    { checks: [pass("tests"), pass("tests")], expected: "unverified" },
   ];
-  for (const checks of bad) {
+  for (const item of cases) {
     const a = prepareAttempt("sofia.v1.test", "testing", "run-1", ["tests"]);
-    assert.equal(finishAttempt(a, completed(checks))?.result, "failure");
+    assert.equal(finishAttempt(a, completed(item.checks))?.result, item.expected);
   }
 });
 
@@ -108,7 +112,7 @@ test("required build/typecheck checks cannot be omitted or have nonzero exit sta
   for (const check of ["build", "typecheck"] as const) {
     for (const evidence of [undefined, { check, state: "passed", completed: true }, { ...pass(check), exitCode: 2 }]) {
       const a = prepareAttempt("sofia.v1.test", "testing", "run-1", [check]);
-      assert.equal(finishAttempt(a, completed(evidence ? [pass("tests"), evidence] : [pass("tests")]))?.result, "failure");
+      assert.equal(finishAttempt(a, completed(evidence ? [pass("tests"), evidence] : [pass("tests")]))?.result, evidence && Number((evidence as { exitCode?: number }).exitCode) === 2 ? "failure" : "unverified");
     }
     const a = prepareAttempt("sofia.v1.test", "testing", "run-1", [check]);
     assert.equal(finishAttempt(a, completed([pass("tests"), pass(check)]))?.result, "verified-success");
@@ -118,7 +122,7 @@ test("required build/typecheck checks cannot be omitted or have nonzero exit sta
 test("failed and cancelled runs cannot produce verified success", () => {
   for (const state of ["failed", "cancelled"]) {
     const a = prepareAttempt("sofia.v1.test", "testing", "run-1", []);
-    assert.equal(finishAttempt(a, completed([pass("tests")], state))?.result, "failure");
+    assert.equal(finishAttempt(a, completed([pass("tests")], state))?.result, state === "failed" ? "failure" : "unverified");
   }
   assert.throws(() => prepareAttempt("external.skill", "testing", "run-1", []), TypeError);
 });
@@ -131,4 +135,11 @@ test("hostile accessor-backed skill and history inputs fail closed", () => {
   });
   assert.equal(validSkill(hostile), false);
   assert.deepEqual(boundedHistory([hostile]), []);
+});
+
+
+test("security review completion is not a claim that no vulnerabilities exist", () => {
+  const a = prepareAttempt("sofia.v1.security", "security", "run-1", ["security-review"]);
+  const evidence = { ...pass("security-review"), confirmedFindings: 2, hypotheses: 4 };
+  assert.equal(finishAttempt(a, completed([evidence]))?.result, "verified-success");
 });
