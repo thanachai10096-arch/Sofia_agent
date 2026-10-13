@@ -25,9 +25,9 @@ test("FileRunStore survives a new store instance", async () => {
       trace: [],
     };
 
-    const store = new FileRunStore("test", root);
+    const stores = Array.from({ length: 4 }, () => new FileRunStore("test", root));
     await Promise.all(Array.from({ length: 20 }, (_, index) =>
-      store.save({ ...snapshot, checkpointId: `checkpoint-${index}` }),
+      stores[index % stores.length]!.save({ ...snapshot, checkpointId: `checkpoint-${index}` }),
     ));
     const loaded = await stores[0]!.load(snapshot.runId);
 
