@@ -154,7 +154,8 @@ test("ContainerSandbox removes a possibly orphaned container after timeout or ab
     assert.equal(calls.length, 2);
     assert.equal(calls[1]?.[0], "rm");
     assert.equal(calls[1]?.[1], "--force");
-    assert.equal(calls[1]?.[2], calls[0]?.[calls[0]?.indexOf("--name") + 1]);
+    const runArgs = calls[0] ?? [];
+    assert.equal(calls[1]?.[2], runArgs[runArgs.indexOf("--name") + 1]);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
