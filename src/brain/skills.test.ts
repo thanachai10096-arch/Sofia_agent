@@ -26,6 +26,10 @@ test("expanded catalog includes distinct engineering and operations skills", () 
     "structured-data-validation",
     "documentation-accuracy",
     "bounded-task-planning",
+    "research-evidence-synthesis",
+    "workspace-file-operations",
+    "token-and-cost-budgeting",
+    "multi-agent-handoff",
   ]) {
     assert.ok(ids.has(id), `missing built-in skill: ${id}`);
   }
@@ -39,6 +43,13 @@ test("CI and security messages select relevant recovery procedures", () => {
 
 test("browser failure prefers browser recovery over generic network handling", () => {
   assert.equal(matchSkills("network_error", "Playwright page timeout; element not found")[0]?.id, "browser-workflow-recovery");
+});
+
+test("research, workspace, cost, and delegation requests match focused skills", () => {
+  assert.equal(matchSkills("unknown", "research latest evidence and compare sources")[0]?.id, "research-evidence-synthesis");
+  assert.equal(matchSkills("permission_error", "path traversal while editing file path in workspace")[0]?.id, "workspace-file-operations");
+  assert.equal(matchSkills("environment_error", "token budget and context window usage")[0]?.id, "token-and-cost-budgeting");
+  assert.equal(matchSkills("unknown", "delegate this bounded subtask to a subagent")[0]?.id, "multi-agent-handoff");
 });
 
 test("skill selection is bounded and deterministic", () => {
