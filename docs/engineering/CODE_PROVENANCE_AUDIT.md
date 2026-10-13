@@ -29,7 +29,7 @@ Limited public GitHub code searches were run for distinctive Skill Policy phrase
 
 Run `npm run provenance:report` from a full Git clone. The script uses `git blame --line-porcelain` on tracked text/source files and writes a CSV containing path, line number, introducing commit, Git author metadata, commit summary, and a SHA-256 hash of each line. Pass a destination path as the first argument to choose the report location. It refuses shallow clones because their attribution is incomplete.
 
-This report is an audit aid, not a copyright detector. Git blame cannot establish that a commit author independently wrote the code, and a line hash does not compare it with third-party sources. Each suspicious range still needs comparison with upstream code and license terms, and unknown provenance still needs an owner attestation or clean-room replacement.
+This report is an audit aid, not a copyright detector. Git blame cannot establish that a commit author independently wrote the code, and a line hash does not compare it with third-party sources. Each suspicious range still needs comparison with upstream code and license terms, and unknown provenance still needs an owner attestation or clean-room replacement. The Sofia CI workflow also uploads this line-attribution CSV as the `sofia-code-provenance-lines` artifact for pull requests and manual runs (retained for 14 days).
 
 ## Required audit procedure before a release
 
