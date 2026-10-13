@@ -110,3 +110,22 @@ test("SDK aborts stalled mobile requests at the configured timeout", async () =>
   });
   await assert.rejects(client.start({ task: "must not hang forever" }), /timed out/i);
 });
+
+test("async start forwards a validated idempotency key", async () => {
+  let request: RequestInit | undefined;
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (_input, init) => {
+      request = init;
+      return response(202, { id: "run-idempotent", status: "queued" });
+    },
+  });
+
+  await client.start({ task: "run once" }, undefined, { idempotencyKey: "chat_abc123" });
+  assert.equal((request?.headers as Record<string, string>)["idempotency-key"], "chat_abc123");
+  await assert.rejects(
+    client.start({ task: "bad key" }, undefined, { idempotencyKey: "invalid\\nkey" }),
+    /control characters/,
+  );
+});
