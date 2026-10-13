@@ -1,3 +1,4 @@
+// Modified for Sofia Agents Skill Engine integration on 2026-10-13; provenance notes: docs/engineering/CODE_PROVENANCE_AUDIT.md.
 import { promises as fs, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
