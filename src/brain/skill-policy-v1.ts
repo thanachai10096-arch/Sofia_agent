@@ -3,7 +3,7 @@
 export const TASK_TYPES = ["inspection","debugging","testing","git","research","terminal","workspace","api","security","planning","documentation","data"] as const;
 export const FAILURES = ["test","build","dependency","permission","integration","unknown"] as const;
 export const CHECKS = ["inspection","reproduction","tests","build","typecheck","change-review","sources","environment","filesystem","contract","security-review","completion","documentation","analysis"] as const;
-export const CAPABILITIES = ["project.read","project.write","process.run","git.read","git.write","web.read","browser.control","desktop.control","database.read","database.write","cloud.read","cloud.write","jobs.observe","agents.delegate","memory.read","tools.inspect"] as const;
+export const CAPABILITIES = ["project.read","project.write","process.run","git.read","git.write","web.read","network.write","browser.control","desktop.control","database.read","database.write","cloud.read","cloud.write","jobs.observe","agents.delegate","memory.read","tools.inspect"] as const;
 export const PERMISSIONS = ["workspace.read","workspace.write","process.execute","network.read","network.write","git.write","desktop.control","database.read","database.write","cloud.read","cloud.write","deploy","publish","delegate","memory.read"] as const;
 export const STRATEGIES = ["initial","inspect-evidence","fix-implementation","fix-environment","alternative-tool"] as const;
 export type TaskType = typeof TASK_TYPES[number];
@@ -74,7 +74,7 @@ function capabilitiesFor(id:string):readonly Capability[] {
   "sofia.v1.research":["web.read"],
   "sofia.v1.terminal":["project.read","process.run"],
   "sofia.v1.workspace":["project.read","project.write"],
-  "sofia.v1.api":["project.read","project.write","web.read"],
+  "sofia.v1.api":["project.read","project.write","web.read","network.write"],
   "sofia.v1.security":["project.read","tools.inspect"],
   "sofia.v1.plan":["project.read","jobs.observe"],
   "sofia.v1.docs":["project.read","project.write"],
@@ -84,7 +84,7 @@ function capabilitiesFor(id:string):readonly Capability[] {
 }
 const PERMISSION_FOR_CAPABILITY:Partial<Record<Capability,Permission>>={
  "project.read":"workspace.read","project.write":"workspace.write","process.run":"process.execute",
- "git.read":"workspace.read","git.write":"git.write","web.read":"network.read",
+ "git.read":"workspace.read","git.write":"git.write","web.read":"network.read","network.write":"network.write",
  "browser.control":"network.read","desktop.control":"desktop.control","database.read":"database.read",
  "database.write":"database.write","cloud.read":"cloud.read","cloud.write":"cloud.write",
  "agents.delegate":"delegate","memory.read":"memory.read","tools.inspect":"workspace.read",
