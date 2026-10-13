@@ -91,7 +91,7 @@ export class AgentEvaluationRunner implements EvaluationRunner {
     if (!testCase.probes || testCase.probes.length !== testCase.acceptanceCriteria.length) {
       return fail("Evaluation is unscorable: every acceptance criterion must have one explicit evidence-producing probe.");
     }
-    if (testCase.probes.some((probe) => !probe.id.trim() || !probe.description.trim() || !probe.tool.trim() || typeof probe.evaluate !== "function")) {
+    if (testCase.probes.some((probe) => !probe.id.trim() || !probe.description.trim() || !probe.probe.tool.trim() || typeof probe.evaluate !== "function")) {
       return fail("Evaluation case contains an invalid acceptance probe.");
     }
     if (testCase.expected?.minSteps !== undefined && testCase.expected.minSteps < 0) {
