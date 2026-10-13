@@ -41,3 +41,58 @@ test("verification stops after the first failed probe", async () => {
   assert.equal(results.length, 1);
   assert.equal(results[0]?.passed, false);
 });
+
+
+test("verification carries structured assertion metrics without inventing them", async () => {
+  const gateway: ToolGateway = {
+    describe() { return { effects: ["read"] }; },
+    async execute() {
+      return {
+        ok: true,
+        data: {
+          passed: true,
+          code: 0,
+          assertionsPassed: true,
+          assertionsTotal: 17,
+          failedAssertions: 0,
+          skippedAssertions: 0,
+        },
+        evidenceId: "verification-evidence",
+      };
+    },
+    async snapshot() {
+      return { id: "s1", revision: "r1", evidenceId: "snapshot-evidence" };
+    },
+    async changedFiles() { return []; },
+    async checkpoint() { return { id: "c1", revision: "r1" }; },
+    async rollback() { return []; },
+  };
+  const [result] = await runVerification(gateway, ["test"], new AbortController().signal, "run-test");
+  assert.equal(result?.passed, true);
+  assert.equal(result?.exitCode, 0);
+  assert.equal(result?.checksPassed, true);
+  assert.equal(result?.assertionsPassed, true);
+  assert.equal(result?.assertionsTotal, 17);
+  assert.equal(result?.failedAssertions, 0);
+  assert.equal(result?.skippedAssertions, 0);
+});
+
+test("verification leaves absent assertion metrics absent", async () => {
+  const gateway: ToolGateway = {
+    describe() { return { effects: ["read"] }; },
+    async execute() {
+      return { ok: true, data: { passed: true, code: 0 }, evidenceId: "verification-evidence" };
+    },
+    async snapshot() {
+      return { id: "s1", revision: "r1", evidenceId: "snapshot-evidence" };
+    },
+    async changedFiles() { return []; },
+    async checkpoint() { return { id: "c1", revision: "r1" }; },
+    async rollback() { return []; },
+  };
+  const [result] = await runVerification(gateway, ["test"], new AbortController().signal, "run-test");
+  assert.equal(result?.passed, true);
+  assert.equal(result?.assertionsTotal, undefined);
+  assert.equal(result?.failedAssertions, undefined);
+  assert.equal(result?.skippedAssertions, undefined);
+});
