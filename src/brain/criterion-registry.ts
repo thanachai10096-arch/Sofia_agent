@@ -1,4 +1,5 @@
-import type { AcceptanceCriterion, BrainRunSnapshot } from "./types.js";
+import type { AcceptanceCriterion } from "./types.js";
+import type { BrainRunSnapshot } from "./run-state.js";
 
 export type AcceptanceEvaluator = (data: unknown) => { passed: boolean; detail: string };
 
