@@ -245,7 +245,12 @@ class FileJobStateStore {
         const current = records[index]!;
         if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
-        records[index] = { ...record };
+        records[index] = {
+          ...record,
+          ...(record.status === "running" && current.status === "running"
+            ? { leaseExpiresAt: current.leaseExpiresAt, heartbeatAt: current.heartbeatAt }
+            : {}),
+        };
       } else {
         records.push({ ...record });
       }
@@ -420,6 +425,12 @@ export class DurableJobRuntime implements JobRuntime {
     };
 
     try {
+      const latest = await this.state.get(record.id);
+      if (!latest || latest.status !== "running" || latest.leaseOwnerToken !== leaseToken) {
+        if (latest) Object.assign(record, latest);
+        controller.abort(new Error("Job execution lease was lost or cancelled before dispatch"));
+        return;
+      }
       if (controller.signal.aborted || isJobCancelled(record)) {
         if (!isJobCancelled(record)) {
           record.status = "cancelled";
