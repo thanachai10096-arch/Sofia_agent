@@ -7,14 +7,15 @@ test("policy catalog is part of the real recovery skill selection path", () => {
   const skills = matchSkills("tool_error", "API integration contract mismatch", 5);
   assert.ok(skills.some((skill) => skill.id === "sofia.v1.api"));
   const context = compactSkillContext(skills);
-  const apiContext = context.find((item) =>
-    typeof item === "object" && item !== null && "id" in item && item.id === "sofia.v1.api",
+  const apiContext = context.find((item): item is Record<string, unknown> =>
+    typeof item === "object" && item !== null && !Array.isArray(item) &&
+    "id" in item && item.id === "sofia.v1.api",
   );
   assert.ok(apiContext);
-  assert.ok("preconditions" in apiContext);
-  assert.ok("failureConditions" in apiContext);
-  assert.ok("recovery" in apiContext);
-  assert.ok("risk" in apiContext);
+  assert.ok(Array.isArray(apiContext.preconditions));
+  assert.ok(Array.isArray(apiContext.failureConditions));
+  assert.ok(Array.isArray(apiContext.recovery));
+  assert.equal(apiContext.risk, "may-write");
 });
 
 test("security policy can be selected for permission-related recovery", () => {
