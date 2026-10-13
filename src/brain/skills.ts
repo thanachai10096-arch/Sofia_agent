@@ -67,7 +67,11 @@ function learnedToSkill(skill: LearnedSkillCandidate): SofiaSkill {
   };
 }
 
-function policyTaskType(category: FailureCategory): PolicyTaskType {
+function policyTaskType(category: FailureCategory, message = ""): PolicyTaskType {
+  const normalized = message.toLowerCase();
+  if (/\b(test|tests|testing|assertion|suite)\b/.test(normalized)) return "testing";
+  if (/\b(api|integration|endpoint|contract)\b/.test(normalized)) return "api";
+  if (/\b(browser|website|web research|documentation lookup)\b/.test(normalized)) return "research";
   if (category === "dependency_error" || category === "environment_error") return "terminal";
   if (category === "permission_error") return "security";
   if (category === "network_error") return "research";
@@ -143,7 +147,7 @@ export function matchSkills(
   ];
   const selectedPolicy = selectPolicySkills({
     text: safeMessage,
-    taskType: policyTaskType(category),
+    taskType: policyTaskType(category, safeMessage),
     failureCategory: policyFailure(category),
   }, [], boundedLimit);
   const policyById = new Map<string, number>();
