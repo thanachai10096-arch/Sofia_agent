@@ -130,6 +130,7 @@ export interface VerificationResult {
   /** Structured fields copied only from the trusted project.verify result. */
   exitCode?: number;
   checksPassed?: boolean;
+  assertionsPassed?: boolean;
   assertionsTotal?: number;
   failedAssertions?: number;
   skippedAssertions?: number;
