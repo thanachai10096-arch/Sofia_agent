@@ -92,7 +92,8 @@ export class SemanticProjectMemorySearch {
     try {
       const entries = await this.store.list();
       if (entries.length === 0) return [];
-      const candidates = entries.slice(-Math.max(this.maxCandidates, 64));
+      // The service accepts at most 64 texts; reserve one slot for the query embedding.
+      const candidates = entries.slice(-63);
       const embedded = await this.post<EmbeddingResponse>("/v1/embeddings", {
         texts: [normalized, ...candidates.map(entry => entry.content)],
         normalize: true,
