@@ -4,11 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-const TEXT_EXTENSIONS = new Set([
-  ".cjs", ".css", ".html", ".js", ".json", ".md", ".mjs", ".mts", ".ps1",
-  ".py", ".rs", ".scss", ".sh", ".sql", ".svg", ".toml", ".ts", ".tsx",
-  ".txt", ".xml", ".yaml", ".yml",
-]);
 const BINARY_EXTENSIONS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2",
   ".ttf", ".otf", ".pdf", ".zip", ".gz", ".wasm", ".mp4", ".mov",
@@ -79,7 +74,7 @@ if (shallow) {
 const tracked = git(["ls-files", "-z"]).split("\0").filter(Boolean);
 const files = tracked.filter((file) => {
   const extension = path.extname(file).toLowerCase();
-  return TEXT_EXTENSIONS.has(extension) && !BINARY_EXTENSIONS.has(extension);
+  return !BINARY_EXTENSIONS.has(extension);
 });
 if (files.length === 0) {
   console.error("PROVENANCE AUDIT FAILED: no tracked text/source files found.");
