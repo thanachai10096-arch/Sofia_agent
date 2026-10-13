@@ -148,6 +148,25 @@ test("hostile accessor-backed skill and history inputs fail closed", () => {
   });
   assert.equal(validSkill(hostile), false);
   assert.deepEqual(boundedHistory([hostile]), []);
+
+  const hostileArray: unknown[] = [];
+  Object.defineProperty(hostileArray, "0", {
+    enumerable: true,
+    configurable: true,
+    get() { throw new Error("must not execute array getter"); },
+  });
+  assert.deepEqual(boundedHistory(hostileArray), []);
+  assert.throws(
+    () => prepareAttempt("sofia.v1.test", "testing", "hostile-array", hostileArray as never),
+    TypeError,
+  );
+  const hostileProxy = new Proxy([], {
+    get(target, property, receiver) {
+      if (property === "slice") throw new Error("must not execute proxy trap");
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  assert.deepEqual(boundedHistory(hostileProxy), []);
 });
 
 
