@@ -156,6 +156,66 @@ test("DurableJobRuntime reserves the resume lock before asynchronous job lookup"
 });
 
 
+
+test("DurableJobRuntime prevents two callers from executing the same checkpoint concurrently", async () => {
+  const namespace = "job-runtime-duplicate-resume-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "duplicate-resume-" + randomUUID(),
+    task: "duplicate resume",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "duplicate-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  let callCount = 0;
+  let resumed!: () => void;
+  const resumeStarted = new Promise<void>((resolve) => { resumed = resolve; });
+  let release!: () => void;
+  const releaseResume = new Promise<void>((resolve) => { release = resolve; });
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      callCount += 1;
+      if (!input.resume) {
+        await onRunSnapshot?.(snapshot);
+        return { completed: false, state: "failed" };
+      }
+      resumed();
+      await releaseResume;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  const submitted = await runtime.submit({ task: "duplicate resume" });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+  assert.equal(current?.snapshot?.checkpointId, snapshot.checkpointId);
+
+  const first = runtime.resume(submitted.id);
+  await resumeStarted;
+  await assert.rejects(
+    () => runtime.resume(submitted.id),
+    /already being resumed/i,
+  );
+  assert.equal(callCount, 2, "only one resumed brain execution should start");
+  release();
+  const result = await first;
+  assert.equal(result.status, "completed");
+  assert.equal(callCount, 2);
+});
+
 test("DurableJobRuntime rejects resume for a cancelled job even when a checkpoint exists", async () => {
   const namespace = "job-runtime-cancelled-resume-" + randomUUID();
   let started!: () => void;
