@@ -1,3 +1,5 @@
+export { createChatCommandHandler } from "./integrations/chat-adapter.js";
+export type { ChatPlatform, VerifiedChatCommand, ChatCommandHandlerOptions, ChatDispatchResult, ChatAccessPolicy, ChatMessageDeduplicator, ChatRunStarter } from "./integrations/chat-adapter.js";
 export { SofiaAgent } from "./agent/core.js";
 export { classifyTask } from "./agent/classifier.js";
 export { ModelRouter } from "./models/router.js";
