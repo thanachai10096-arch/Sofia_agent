@@ -176,16 +176,20 @@ function makeOutcome(skillId:string,taskType:TaskType,result:SkillOutcome["resul
  return value;
 }
 export function boundedHistory(v:unknown):readonly SkillOutcome[]{
- if(!Array.isArray(v))return [];
- const out:SkillOutcome[]=[];
- for(const r of v.slice(-HISTORY_LIMIT)){
-  try {
-   if(!record(r)||!trustedOutcomes.has(r)||typeof r.skillId!=="string"||!byId(r.skillId)||!member(TASK_TYPES,r.taskType)||(r.result!=="verified-success"&&r.result!=="failure"))continue;
-   const safe=makeOutcome(r.skillId,r.taskType,r.result);
-   out.push(safe);
-  } catch { /* Ignore malformed or untrusted history rows. */ }
+ try {
+  if(!Array.isArray(v))return Object.freeze([]);
+  const out:SkillOutcome[]=[];
+  for(const r of v.slice(-HISTORY_LIMIT)){
+   try {
+    if(!record(r)||!trustedOutcomes.has(r)||typeof r.skillId!=="string"||!byId(r.skillId)||!member(TASK_TYPES,r.taskType)||(r.result!=="verified-success"&&r.result!=="failure"))continue;
+    out.push(makeOutcome(r.skillId,r.taskType,r.result));
+   } catch { /* Ignore malformed or untrusted history rows. */ }
+  }
+  return Object.freeze(out);
+ } catch {
+  // Proxies or accessor-backed arrays are untrusted input too.
+  return Object.freeze([]);
  }
- return Object.freeze(out);
 }
 export interface RankedSkill {readonly skill:Skill;readonly score:number;readonly evidenceCount:number;readonly confidence:number;}
 function normalize(s:string):string{return s.toLowerCase().replace(/[^a-z0-9]+/g," ").trim();}
@@ -217,9 +221,15 @@ export function selectSkills(task:unknown,rawHistory:unknown=[],limit=CONTEXT_SK
 export interface SkillAttempt {readonly runId:string;readonly skillId:string;readonly taskType:TaskType;readonly requiredChecks:readonly Check[];}
 const pending=new WeakSet<SkillAttempt>();
 export function prepareAttempt(skillId:string,taskType:TaskType,runId:string,requestedChecks:readonly Check[]):SkillAttempt{
- const s=byId(skillId);
- if(!s||!member(TASK_TYPES,taskType)||typeof runId!=="string"||!/^[a-zA-Z0-9._:-]{1,128}$/.test(runId)||!members(requestedChecks,CHECKS,true))throw new TypeError("Invalid skill attempt");
- const a:SkillAttempt=Object.freeze({runId,skillId,taskType,requiredChecks:Object.freeze([...new Set([...s.verification,...requestedChecks])])});pending.add(a);return a;
+ try {
+  const s=byId(skillId);
+  if(!s||!member(TASK_TYPES,taskType)||typeof runId!=="string"||!/^[a-zA-Z0-9._:-]{1,128}$/.test(runId)||!members(requestedChecks,CHECKS,true))throw new TypeError("Invalid skill attempt");
+  const a:SkillAttempt=Object.freeze({runId,skillId,taskType,requiredChecks:Object.freeze([...new Set([...s.verification,...requestedChecks])])});
+  pending.add(a);
+  return a;
+ } catch {
+  throw new TypeError("Invalid skill attempt");
+ }
 }
 function assessCheck(v:unknown):"passed"|"failure"|"unverified"{
  if(!record(v)||!member(CHECKS,v.check))return "unverified";
