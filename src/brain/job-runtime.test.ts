@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
 
@@ -310,4 +311,51 @@ test("DurableJobRuntime preserves a resumable embedded checkpoint when the snaps
   } as unknown as SofiaBrain), unavailableStore, namespace);
   const recovered = await restarted.get(submitted.id);
   assert.equal(recovered?.snapshot?.checkpointId, snapshot.checkpointId);
+});
+
+
+test("DurableJobRuntime recovers a persisted running job across an actual Node.js process restart", () => {
+  const namespace = "job-runtime-real-process-restart-" + randomUUID();
+  const startScript = `
+    import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
+    const namespace = ${JSON.stringify(namespace)};
+    const runtime = new DurableJobRuntime(() => ({
+      run: async () => new Promise(() => undefined),
+    }), undefined, namespace);
+    const job = await runtime.submit({ task: "recover across process restart" });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const current = await runtime.get(job.id);
+      if (current?.status === "running") break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    // Let the atomic state-file replacement finish before this worker exits.
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    process.stdout.write(job.id);
+  `;
+  const start = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", startScript], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.equal(start.status, 0, start.stderr || "first worker should exit cleanly");
+  const jobId = start.stdout.trim();
+  assert.ok(jobId, "first worker should print the persisted job ID");
+
+  const recoverScript = `
+    import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
+    const runtime = new DurableJobRuntime(() => ({
+      run: async () => ({ completed: true, state: "completed" }),
+    }), undefined, ${JSON.stringify(namespace)});
+    const job = await runtime.get(${JSON.stringify(jobId)});
+    process.stdout.write(JSON.stringify({ status: job?.status, error: job?.error }));
+  `;
+  const recovered = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", recoverScript], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.equal(recovered.status, 0, recovered.stderr || "recovery worker should exit cleanly");
+  const record = JSON.parse(recovered.stdout) as { status?: string; error?: string };
+  assert.equal(record.status, "failed");
+  assert.match(record.error ?? "", /interrupted/i);
 });
