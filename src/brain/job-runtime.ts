@@ -218,7 +218,7 @@ class FileJobStateStore {
       const records = await this.read();
       const record = records.find((item) => item.id === id);
       if (!record || record.status === "completed" || record.status === "failed" || record.status === "cancelled") {
-        return record ? { ...record } : undefined;
+        return undefined;
       }
       record.status = "cancelled";
       record.error ??= "Job cancelled by caller.";
@@ -245,6 +245,7 @@ class FileJobStateStore {
         const current = records[index]!;
         if (current.leaseOwnerToken && record.leaseOwnerToken !== current.leaseOwnerToken) return false;
         if (current.leaseOwnerToken && !record.leaseOwnerToken) return false;
+        if (current.status === "cancelled" && record.status !== "cancelled") return false;
         records[index] = { ...record };
       } else {
         records.push({ ...record });
@@ -414,11 +415,11 @@ export class DurableJobRuntime implements JobRuntime {
         // The job record also embeds its snapshot. Persist that fallback even when
         // the dedicated snapshot store is temporarily unavailable.
       }
-      await this.state.save(record);
+      const saved = await this.state.save(record);
+      if (!saved) controller.abort(new Error("Job execution lease was lost or cancelled"));
     };
 
     try {
-      await this.state.save(record);
       if (controller.signal.aborted || isJobCancelled(record)) {
         if (!isJobCancelled(record)) {
           record.status = "cancelled";
