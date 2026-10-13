@@ -1,7 +1,7 @@
-<!-- Sofia Agents — README -->
+<!-- Sofia Agent — README -->
 <div align="center">
 
-<h1 align="center"><img src="assets/sofia-title.svg" alt="Sofia Agents — large green code-style title" width="100%" /></h1>
+<h1 align="center"><img src="assets/sofia-title.svg" alt="Sofia Agent — large green code-style title" width="100%" /></h1>
 
 **An agent runtime designed to plan, act, check results, and recover.**
 
@@ -285,7 +285,7 @@ GitHub Actions runs the same license, type, test, and build checks on pushes and
 
 ## `> License`
 
-Sofia Agents is distributed under the **MIT License**. See [`LICENSE`](LICENSE) for the complete terms. The license permits use, modification, distribution, sublicensing, and sale, provided the copyright and permission notice are included with copies or substantial portions. The software is provided without warranty; third-party dependencies remain subject to their own license terms.
+Sofia Agent is distributed under the **MIT License**. See [`LICENSE`](LICENSE) for the complete terms. The license permits use, modification, distribution, sublicensing, and sale, provided the copyright and permission notice are included with copies or substantial portions. The software is provided without warranty; third-party dependencies remain subject to their own license terms.
 
 SPDX identifier: `MIT`.
 
@@ -297,7 +297,7 @@ Zuse should use Sofia's stable API/SDK and let Sofia apply internal routing and 
 
 <div align="center">
 
-**Sofia Agents** · Plan carefully. Act through policy. Verify the result.
+**Sofia Agent** · Plan carefully. Act through policy. Verify the result.
 
 <sub>Built for reliable, recoverable agent execution.</sub>
 
