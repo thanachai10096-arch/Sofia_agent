@@ -385,3 +385,73 @@ test("DurableJobRuntime stores job state with owner-only file permissions on POS
     await rm(file, { force: true });
   }
 });
+
+
+test("DurableJobRuntime resumes a saved checkpoint after a real process restart", () => {
+  const namespace = "job-runtime-resume-real-restart-" + randomUUID();
+  const startScript = `
+    import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
+    const namespace = ${JSON.stringify(namespace)};
+    const checkpointId = "restart-checkpoint";
+    const snapshot = {
+      version: 1,
+      runId: "run-" + checkpointId,
+      task: "resume after process restart",
+      understanding: {},
+      plan: {},
+      acceptanceCriteria: [],
+      completedStepIds: ["step-1"],
+      checkpointId,
+      usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+      observations: [],
+      diagnoses: [],
+      decisions: [],
+      recoveryRounds: 0,
+      trace: [],
+    };
+    const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+      run: async () => {
+        await onRunSnapshot(snapshot);
+        return new Promise(() => undefined);
+      },
+    }), undefined, namespace);
+    const job = await runtime.submit({ task: "resume after process restart" });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const current = await runtime.get(job.id);
+      if (current?.snapshot?.checkpointId === checkpointId) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    process.stdout.write(job.id);
+  `;
+  const started = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", startScript], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.equal(started.status, 0, started.stderr || "checkpoint worker should exit cleanly");
+  const jobId = started.stdout.trim();
+  assert.ok(jobId, "checkpoint worker should print its job ID");
+
+  const resumeScript = `
+    import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
+    const runtime = new DurableJobRuntime(() => ({
+      run: async (input) => ({
+        completed: Boolean(input.resume),
+        state: input.resume ? "completed" : "failed",
+        output: input.resume?.checkpointId,
+      }),
+    }), undefined, ${JSON.stringify(namespace)});
+    const job = await runtime.resume(${JSON.stringify(jobId)});
+    process.stdout.write(JSON.stringify({ status: job.status, checkpointId: job.result?.output }));
+  `;
+  const resumed = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", resumeScript], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.equal(resumed.status, 0, resumed.stderr || "resume worker should exit cleanly");
+  const result = JSON.parse(resumed.stdout) as { status?: string; checkpointId?: string };
+  assert.equal(result.status, "completed");
+  assert.equal(result.checkpointId, "restart-checkpoint");
+});
