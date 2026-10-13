@@ -105,3 +105,66 @@ test("SSE client disconnect aborts the in-flight model request", async (t) => {
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error("provider did not receive disconnect cancellation")), 2_000)),
   ]);
 });
+
+
+test("job API enforces owner isolation for reads, resume, cancel, and list", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const job: { current?: import("../../src/brain/job-runtime.js").JobRecord; resumeCalls: number; cancelCalls: number } = {
+    resumeCalls: 0,
+    cancelCalls: 0,
+  };
+  const jobRuntime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      job.current = {
+        id: "owned-job",
+        status: "failed",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        task: input.task,
+        ownerKeyId: input.ownerKeyId,
+      };
+      return { ...job.current };
+    },
+    async get(id: string) { return id === job.current?.id ? { ...job.current } : undefined; },
+    async list() { return job.current ? [{ ...job.current }] : []; },
+    async resume() { job.resumeCalls += 1; return { ...job.current! }; },
+    async cancel() { job.cancelCalls += 1; return true; },
+  };
+  const server = createSofiaApi(
+    { ...dependencies(provider), jobRuntime: jobRuntime as unknown as import("../../src/brain/job-runtime.js").JobRuntime },
+    { apiKeys: { "owner-token": ["agent:run"], "other-token": ["agent:run"] } },
+  );
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}`;
+  const request = (token: string, path: string, init: RequestInit = {}) =>
+    fetch(base + path, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(init.body ? { "content-type": "application/json" } : {}),
+        ...init.headers,
+      },
+    });
+
+  const created = await request("owner-token", "/v1/jobs", {
+    method: "POST",
+    body: JSON.stringify({ task: "owner-only job" }),
+  });
+  assert.equal(created.status, 202);
+  assert.equal((await request("owner-token", "/v1/jobs/owned-job")).status, 200);
+
+  assert.equal((await request("other-token", "/v1/jobs/owned-job")).status, 404);
+  assert.equal((await request("other-token", "/v1/jobs/owned-job/resume", { method: "POST" })).status, 404);
+  assert.equal((await request("other-token", "/v1/jobs/owned-job/cancel", { method: "POST" })).status, 404);
+  const listed = await request("other-token", "/v1/jobs");
+  assert.equal(listed.status, 200);
+  assert.deepEqual((await listed.json() as { jobs: unknown[] }).jobs, []);
+  assert.equal(job.resumeCalls, 0, "unauthorized caller must not invoke resume");
+  assert.equal(job.cancelCalls, 0, "unauthorized caller must not invoke cancel");
+});
