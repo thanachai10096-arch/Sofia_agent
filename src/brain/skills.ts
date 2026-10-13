@@ -1,7 +1,7 @@
 // Modified for Sofia Agents Skill Engine integration on 2026-10-13; provenance notes: docs/engineering/CODE_PROVENANCE_AUDIT.md.
 import type { FailureCategory, Strategy } from "./types.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
-import { BUILTIN_SKILLS as POLICY_SKILLS, selectSkills as selectPolicySkills } from "./skill-policy-v1.js";
+import { BUILTIN_SKILLS as POLICY_SKILLS, CAPABILITIES as POLICY_CAPABILITIES, selectSkills as selectPolicySkills } from "./skill-policy-v1.js";
 import type { Skill as PolicySkill, TaskType as PolicyTaskType } from "./skill-policy-v1.js";
 
 export interface SofiaSkill {
@@ -156,11 +156,11 @@ export function matchSkills(
     ...BUILTIN_SKILLS,
     ...learned.map(learnedToSkill),
   ];
-  const selectedPolicy = selectPolicySkills({
+  // Candidate discovery only: this legacy adapter supplies the catalog vocabulary, not an attestation.\n  // ToolGateway remains the authority for actual capabilities and every dispatched action.\n  const selectedPolicy = selectPolicySkills({
     text: safeMessage,
     taskType: policyTaskType(category, safeMessage),
     failureCategory: policyFailure(category),
-  }, [], boundedLimit);
+  }, POLICY_CAPABILITIES, boundedLimit);
   const policyById = new Map<string, number>();
   for (const item of selectedPolicy) policyById.set(item.skill.id, item.score);
   const policySkills = POLICY_SKILLS
