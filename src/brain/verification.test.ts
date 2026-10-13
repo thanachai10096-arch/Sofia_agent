@@ -1,3 +1,4 @@
+// Modified for Sofia Agents Skill Engine integration on 2026-10-13; provenance notes: docs/engineering/CODE_PROVENANCE_AUDIT.md.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runVerification, verificationCriteria } from "./verification.js";
