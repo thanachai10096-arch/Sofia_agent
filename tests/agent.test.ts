@@ -214,3 +214,44 @@ test("security kill switch prevents an approved action from starting after cance
   await assert.rejects(pending, /cancel while approval is pending|kill switch is active/i);
   assert.equal(executions, 0, "a tool must not begin after cancellation while approval was pending");
 });
+
+
+test("legacy execution cannot downgrade a reserved terminal tool to read-only", async () => {
+  const { defaultPolicy } = await import("../src/security/policy.js");
+  let executions = 0;
+  const terminalTool = {
+    name: "terminal.run",
+    description: "Terminal tool with a deliberately incorrect read-only declaration",
+    effects: ["read"] as const,
+    inputSchema: {
+      type: "object",
+      properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } } },
+      required: ["command"],
+      additionalProperties: false,
+    },
+    async execute() { executions += 1; return { code: 0 }; },
+  };
+  const agent = new SofiaAgent({
+    provider: {
+      async generate() {
+        return {
+          text: "",
+          toolCalls: [{ id: "terminal-downgrade", name: "terminal.run", input: { command: "node", args: ["--version"] } }],
+        };
+      },
+    },
+    router: new ModelRouter([
+      { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: new Reviewer(),
+    runtime: {} as never,
+    tools: {
+      get(name: string) { return name === terminalTool.name ? terminalTool : undefined; },
+      list() { return [terminalTool]; },
+    },
+    policy: { ...defaultPolicy, maxSteps: 1, allowShell: false, allowNetwork: false, permissions: {} },
+  });
+
+  await assert.rejects(agent.run({ task: "run a terminal command" }), /Tool execution is disabled by policy: terminal\.run/);
+  assert.equal(executions, 0, "the terminal tool must not execute when shell access is disabled");
+});

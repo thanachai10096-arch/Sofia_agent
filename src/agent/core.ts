@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
-import { assertSafeStep, assertToolAllowed, classifyToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission } from "../security/policy.js";
+import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission } from "../security/policy.js";
 import { actionHash, riskFor } from "../security/guard.js";
 import { validateToolInput } from "../tools/types.js";
 
@@ -192,7 +192,7 @@ export class SofiaAgent {
             // Freeze the model-produced action as a private snapshot before asking for approval.
             // The approval UI/handler receives a separate copy and cannot mutate what will execute.
             const actionInput = structuredClone(call.input);
-            const effects = tool.effects ?? classifyToolEffects(call.name);
+            const effects = effectiveToolEffects(call.name, tool.effects);
             assertToolAllowed(policy, call.name, effects);
             const permission = toolPermission(policy, call.name, effects);
             const risk = riskFor(effects, actionInput);
