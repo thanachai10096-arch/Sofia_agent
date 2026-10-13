@@ -1,4 +1,5 @@
-import { isIP } from "node:net";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { connect as connectTcp, isIP, type Socket } from "node:net";
 import { lookup } from "node:dns/promises";
 
 export interface BrowserPage {
@@ -94,6 +95,10 @@ export function assertSafeBrowserUrl(input: string): URL {
   }
 
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const effectivePort = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+  if ((url.protocol === "http:" && effectivePort !== 80) || (url.protocol === "https:" && effectivePort !== 443)) {
+    throw new Error("Browser navigation only supports standard HTTP port 80 and HTTPS port 443.");
+  }
   if (!host || host === "localhost" || host.endsWith(".localhost") ||
       host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".test") ||
       host.endsWith(".example") || host.endsWith(".invalid") ||
@@ -108,9 +113,12 @@ export function assertSafeBrowserUrl(input: string): URL {
   return url;
 }
 
-async function assertPublicResolvedHost(host: string): Promise<void> {
+export async function resolvePublicHostAddress(host: string): Promise<string> {
   const normalized = host.replace(/^\[|\]$/g, "");
-  if (isIP(normalized)) return; // Literal IPs are checked by assertSafeBrowserUrl.
+  const literalFamily = isIP(normalized);
+  if (literalFamily === 4 && isPrivateIpv4(normalized)) throw new Error("Browser egress to private or non-public IP addresses is blocked.");
+  if (literalFamily === 6 && isPrivateIpv6(normalized)) throw new Error("Browser egress to private or non-public IP addresses is blocked.");
+  if (literalFamily !== 0) return normalized;
   let addresses: Array<{ address: string; family: number }>;
   try {
     addresses = await lookup(normalized, { all: true, verbatim: true });
@@ -125,6 +133,13 @@ async function assertPublicResolvedHost(host: string): Promise<void> {
       throw new Error("Browser navigation to a host resolving to private or non-public IP addresses is blocked.");
     }
   }
+  const selected = addresses[0]?.address;
+  if (!selected) throw new Error("Browser navigation host has no public address.");
+  return selected;
+}
+
+async function assertPublicResolvedHost(host: string): Promise<void> {
+  await resolvePublicHostAddress(host);
 }
 
 export class PlaywrightBrowserRuntime implements BrowserRuntime {
