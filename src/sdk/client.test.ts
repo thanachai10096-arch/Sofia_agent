@@ -125,7 +125,7 @@ test("async start forwards a validated idempotency key", async () => {
   await client.start({ task: "run once" }, undefined, { idempotencyKey: "chat_abc123" });
   assert.equal((request?.headers as Record<string, string>)["idempotency-key"], "chat_abc123");
   await assert.rejects(
-    client.start({ task: "bad key" }, undefined, { idempotencyKey: "invalid\\nkey" }),
+    client.start({ task: "bad key" }, undefined, { idempotencyKey: "invalid" + String.fromCharCode(10) + "key" }),
     /control characters/,
   );
 });
