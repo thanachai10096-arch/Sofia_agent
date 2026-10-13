@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compactSkillContext, matchSkills } from "./skills.js";
+import { compactSkillContext, matchSkills, taskTypeForFailure } from "./skills.js";
 
 test("matches a targeted skill without model inference", () => {
   const skills = matchSkills("type_error", "TS2339 property does not exist");
@@ -33,4 +33,13 @@ test("malformed learning ledger entries cannot crash or influence recovery", () 
     list() { throw new Error("ledger unavailable"); },
   };
   assert.doesNotThrow(() => matchSkills("tool_error", "API integration contract mismatch", 5, brokenLedger));
+});
+
+
+test("failure classification uses semantic task types rather than capability labels", () => {
+  assert.equal(taskTypeForFailure("tool_error", "API integration contract mismatch"), "api");
+  assert.equal(taskTypeForFailure("tool_error", "Git branch merge conflict"), "git");
+  assert.equal(taskTypeForFailure("runtime_error", "test assertion failed"), "testing");
+  assert.equal(taskTypeForFailure("dependency_error", "Cannot find module"), "terminal");
+  assert.equal(taskTypeForFailure("permission_error", "permission denied"), "security");
 });
