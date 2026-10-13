@@ -156,7 +156,9 @@ export function matchSkills(
     ...BUILTIN_SKILLS,
     ...learned.map(learnedToSkill),
   ];
-  // Candidate discovery only: this legacy adapter supplies the catalog vocabulary, not an attestation.\n  // ToolGateway remains the authority for actual capabilities and every dispatched action.\n  const selectedPolicy = selectPolicySkills({
+  // Candidate discovery only: this legacy adapter supplies the catalog vocabulary, not an attestation.
+  // ToolGateway remains the authority for actual capabilities and every dispatched action.
+  const selectedPolicy = selectPolicySkills({
     text: safeMessage,
     taskType: policyTaskType(category, safeMessage),
     failureCategory: policyFailure(category),
