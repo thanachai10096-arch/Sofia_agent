@@ -94,6 +94,9 @@ export class AgentEvaluationRunner implements EvaluationRunner {
     if (testCase.probes.some((probe) => !probe.id.trim() || !probe.description.trim() || !probe.probe.tool.trim() || typeof probe.evaluate !== "function")) {
       return fail("Evaluation case contains an invalid acceptance probe.");
     }
+    if (testCase.probes.some((probe, index) => probe.description.trim() !== testCase.acceptanceCriteria[index]?.trim())) {
+      return fail("Each executable probe description must match its acceptance criterion.");
+    }
     if (testCase.expected?.minSteps !== undefined && testCase.expected.minSteps < 0) {
       return fail("Evaluation minSteps must be non-negative.");
     }
