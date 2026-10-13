@@ -195,6 +195,11 @@ export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
           upstreamResponse.pipe(response);
         });
         upstream.setTimeout(15_000, () => upstream.destroy(new Error("Browser upstream request timed out.")));
+        upstream.once("socket", (socket) => {
+          const upstreamSocket = socket as Socket;
+          upstreamSockets.add(upstreamSocket);
+          upstreamSocket.once("close", () => upstreamSockets.delete(upstreamSocket));
+        });
         upstream.once("error", (error) => sendProxyError(response, 502, String(error)));
         request.pipe(upstream);
       } catch (error) {
