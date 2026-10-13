@@ -78,6 +78,9 @@ jobs:
       - name: Verify real container isolation
         run: node scripts/container-sandbox-smoke.mjs
 
+      - name: Verify browser egress proxy against public HTTP and HTTPS
+        run: node scripts/browser-egress-proxy-smoke.mjs
+
   cross-platform:
     name: Cross-platform (${{ matrix.os }})
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
