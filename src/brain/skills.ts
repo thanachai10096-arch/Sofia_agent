@@ -160,10 +160,11 @@ export function matchSkills(
   return all
     .map((skill) => {
       const policyScore = policyById.get(skill.id);
+      if (policyScore !== undefined) return { skill, score: policyScore };
       const legacyScore =
         (skill.categories.includes(category) ? 100 : 0) +
         skill.triggers.filter((trigger) => lower.includes(trigger.toLowerCase())).length * 10;
-      return { skill, score: Math.max(legacyScore, policyScore ?? 0) };
+      return { skill, score: legacyScore };
     })
     .filter((item) => item.score > 0 && !seen.has(item.skill.id) && !!seen.add(item.skill.id))
     .sort((a, b) => b.score - a.score || a.skill.id.localeCompare(b.skill.id))
