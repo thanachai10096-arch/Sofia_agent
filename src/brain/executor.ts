@@ -802,18 +802,19 @@ export class SofiaBrain {
         continue;
       }
       const check = match[1] === "test" ? "tests" : match[1];
-      checks.push({
+      const evidence: Record<string, unknown> = {
         check,
-        state: "passed",
+        state: result.passed ? "passed" : "failed",
         completed: true,
-        exitCode: 0,
-        checksPassed: true,
-        assertionsPassed: true,
-        assertionsTotal: 1,
-        failedAssertions: 0,
-        skippedAssertions: 0,
-        postconditionObserved: true,
-      });
+        postconditionObserved: result.passed,
+      };
+      if (result.exitCode !== undefined) evidence.exitCode = result.exitCode;
+      if (result.checksPassed !== undefined) evidence.checksPassed = result.checksPassed;
+      if (result.assertionsPassed !== undefined) evidence.assertionsPassed = result.assertionsPassed;
+      if (result.assertionsTotal !== undefined) evidence.assertionsTotal = result.assertionsTotal;
+      if (result.failedAssertions !== undefined) evidence.failedAssertions = result.failedAssertions;
+      if (result.skippedAssertions !== undefined) evidence.skippedAssertions = result.skippedAssertions;
+      checks.push(evidence);
     }
     if (reviewApproved) {
       checks.push({ check: "change-review", state: "passed", completed: true, postconditionObserved: true });
