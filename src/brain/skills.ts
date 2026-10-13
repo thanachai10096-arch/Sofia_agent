@@ -12,6 +12,10 @@ export interface SofiaSkill {
   strategy: Strategy;
   procedure: readonly string[];
   verification: readonly ("typecheck" | "test" | "build")[];
+  preconditions?: readonly string[];
+  failureConditions?: readonly string[];
+  recovery?: readonly string[];
+  risk?: "read-only" | "may-write";
 }
 
 const BUILTIN_SKILLS: readonly SofiaSkill[] = [
@@ -110,6 +114,10 @@ function policyToLegacy(skill: PolicySkill): SofiaSkill {
     strategy,
     procedure: skill.procedure,
     verification,
+    preconditions: skill.preconditions,
+    failureConditions: skill.failureConditions,
+    recovery: skill.recovery,
+    risk: skill.risk,
   };
 }
 
@@ -194,6 +202,10 @@ export function compactSkillContext(skills: readonly SofiaSkill[]): unknown[] {
     strategy: skill.strategy,
     procedure: skill.procedure,
     verification: skill.verification,
+    ...(skill.preconditions ? { preconditions: skill.preconditions } : {}),
+    ...(skill.failureConditions ? { failureConditions: skill.failureConditions } : {}),
+    ...(skill.recovery ? { recovery: skill.recovery } : {}),
+    ...(skill.risk ? { risk: skill.risk } : {}),
   }));
 }
 
