@@ -270,7 +270,7 @@ export function finishAttempt(attempt:SkillAttempt,observation:unknown):SkillOut
   if(seen.has(raw.check)){unverified=true;continue;}
   seen.add(raw.check);
  }
- if(failed)return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"failure"});
+ if(failed)return makeOutcome(attempt.skillId,attempt.taskType,"failure");
  if(unverified||!attempt.requiredChecks.every(check=>seen.has(check)))return Object.freeze({skillId:attempt.skillId,taskType:attempt.taskType,result:"unverified"});
  return makeOutcome(attempt.skillId,attempt.taskType,"verified-success");
 }
