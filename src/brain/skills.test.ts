@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compactSkillContext, matchSkills } from "./skills.js";
+import { allBuiltinSkills, compactSkillContext, matchSkills } from "./skills.js";
 
 test("matches a targeted skill without model inference", () => {
   const skills = matchSkills("type_error", "TS2339 property does not exist");
@@ -12,4 +12,46 @@ test("matches a targeted skill without model inference", () => {
 test("dependency failures select dependency repair", () => {
   const skills = matchSkills("dependency_error", "Cannot find module");
   assert.equal(skills[0]?.id, "dependency-repair");
+});
+
+test("expanded catalog includes distinct engineering and operations skills", () => {
+  const ids = new Set(allBuiltinSkills().map((skill) => skill.id));
+  for (const id of [
+    "ci-failure-triage",
+    "git-change-safety",
+    "api-integration-repair",
+    "security-boundary-review",
+    "browser-workflow-recovery",
+    "repository-orientation",
+    "structured-data-validation",
+    "documentation-accuracy",
+    "bounded-task-planning",
+  ]) {
+    assert.ok(ids.has(id), `missing built-in skill: ${id}`);
+  }
+  assert.ok(ids.size >= 12, "catalog should retain the original skills and add new ones");
+});
+
+test("CI and security messages select relevant recovery procedures", () => {
+  assert.equal(matchSkills("environment_error", "GitHub Actions cross-platform build failed")[0]?.id, "ci-failure-triage");
+  assert.equal(matchSkills("permission_error", "permission denied while checking path traversal")[0]?.id, "security-boundary-review");
+});
+
+test("browser failure prefers browser recovery over generic network handling", () => {
+  assert.equal(matchSkills("network_error", "Playwright page timeout; element not found")[0]?.id, "browser-workflow-recovery");
+});
+
+test("skill selection is bounded and deterministic", () => {
+  const first = matchSkills("tool_error", "API request failed; timeout in GitHub Actions", 2).map((skill) => skill.id);
+  const second = matchSkills("tool_error", "API request failed; timeout in GitHub Actions", 2).map((skill) => skill.id);
+  assert.equal(first.length, 2);
+  assert.deepEqual(first, second);
+});
+
+test("compact context exposes procedure and verification but not full descriptions", () => {
+  const context = compactSkillContext(matchSkills("environment_error", "CI workflow failed"));
+  assert.ok(context.length > 0);
+  assert.ok("procedure" in (context[0] as object));
+  assert.ok("verification" in (context[0] as object));
+  assert.ok(!("description" in (context[0] as object)));
 });
