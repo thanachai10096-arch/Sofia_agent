@@ -103,6 +103,46 @@ function makeTools(): ToolGateway {
   };
 }
 
+test("initial planning receives matching built-in skills before any failure", async () => {
+  let plannedSkillIds: string[] = [];
+  const base = makeReasoner();
+  const reasoner: BrainReasoner = {
+    async prepare(request, options) {
+      const parsed = JSON.parse(request) as {
+        phase: string;
+        payload?: { matchedSkills?: Array<{ id: string }> };
+      };
+      if (parsed.phase === "plan") {
+        plannedSkillIds = (parsed.payload?.matchedSkills ?? []).map((skill) => skill.id);
+      }
+      return base.prepare(request, options);
+    },
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: {
+      maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Use Playwright browser workflow to create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.ok(plannedSkillIds.includes("browser-workflow-recovery"));
+});
+
 test("Brain completes a coding loop only after trusted verification", async () => {
   const brain = createSofiaBrain({
     dependencies: {
