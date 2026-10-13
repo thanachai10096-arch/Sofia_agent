@@ -10,7 +10,7 @@ export interface RunStore {
   delete(runId: string): Promise<void>;
 }
 
-function key(value: string): string {
+// Serialize replacement of the same snapshot target across store instances. Windows does not\n// reliably allow concurrent rename-over-existing-target operations (EPERM).\nconst saveQueues = new Map<string, Promise<void>>();\n\nfunction key(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
@@ -26,15 +26,24 @@ export class FileRunStore implements RunStore {
   }
 
   async save(snapshot: BrainRunSnapshot): Promise<void> {
-    await fs.mkdir(this.directory, { recursive: true });
     const target = this.file(snapshot.runId);
-    // Concurrent snapshots for one run must not share a temporary path.
-    const temporary = target + "." + randomUUID() + ".tmp";
+    const previous = saveQueues.get(target) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(async () => {
+      await fs.mkdir(this.directory, { recursive: true });
+      // Each write gets a unique temporary path, and replacement is serialized per target.
+      const temporary = target + "." + randomUUID() + ".tmp";
+      try {
+        await fs.writeFile(temporary, JSON.stringify(snapshot), "utf8");
+        await fs.rename(temporary, target);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+    });
+    saveQueues.set(target, operation);
     try {
-      await fs.writeFile(temporary, JSON.stringify(snapshot), "utf8");
-      await fs.rename(temporary, target);
+      await operation;
     } finally {
-      await fs.rm(temporary, { force: true });
+      if (saveQueues.get(target) === operation) saveQueues.delete(target);
     }
   }
 
