@@ -93,7 +93,7 @@ export class SofiaClient {
     return new URL(path, this.baseUrl);
   }
 
-  private headers() {
+  private headers(): Record<string, string> {
     return {
       authorization: `Bearer ${this.options.apiKey}`,
       "content-type": "application/json",
