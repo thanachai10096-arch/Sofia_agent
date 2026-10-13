@@ -150,6 +150,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   }
   const idempotency = new Map<string, string>();
   const activeByKey = new Map<string, number>();
+  const reserveRunSlot = (keyId: string): boolean => {
+    const active = activeByKey.get(keyId) ?? 0;
+    if (active >= maxConcurrentRunsPerKey) return false;
+    activeByKey.set(keyId, active + 1);
+    return true;
+  };
+  const releaseRunSlot = (keyId: string): void => {
+    const active = activeByKey.get(keyId) ?? 0;
+    if (active <= 1) activeByKey.delete(keyId);
+    else activeByKey.set(keyId, active - 1);
+  };
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
   const retention = integerSetting("runRetentionMs", config.runRetentionMs, 24 * 60 * 60 * 1000, 0, 365 * 24 * 60 * 60 * 1000);
@@ -197,8 +208,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         clearTimeout(timer);
         run.updatedAt = Date.now();
         persist(run);
-        const current = activeByKey.get(run.ownerKeyId) ?? 1;
-        if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
+        releaseRunSlot(run.ownerKeyId);
       }
     })();
   };
@@ -320,7 +330,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
+        if (!reserveRunSlot(auth.keyId)) {
+          res.setHeader("retry-after", "2");
+          return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
+        }
         try { usage.consume(auth.keyId); } catch {
+          releaseRunSlot(auth.keyId);
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
         }
         const runId = randomUUID();
@@ -367,6 +382,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         persist(run);
         clearTimeout(timer);
         res.off("close", abortOnDisconnect);
+        releaseRunSlot(auth.keyId);
         if (!res.destroyed) return res.end();
         return;
       }
@@ -393,12 +409,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
             if (existing) idempotency.delete(idempotencyId);
           }
-          const active = activeByKey.get(auth.keyId) ?? 0;
-          if (active >= maxConcurrentRunsPerKey) {
+          if (!reserveRunSlot(auth.keyId)) {
             res.setHeader("retry-after", "2");
             return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
           }
           try { usage.consume(auth.keyId); } catch (error) {
+            releaseRunSlot(auth.keyId);
             return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
           }
           const runId = randomUUID();
@@ -425,7 +441,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 202, publicResponse(run), origin, config);
         }
 
+        if (!reserveRunSlot(auth.keyId)) {
+          res.setHeader("retry-after", "2");
+          return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
+        }
         try { usage.consume(auth.keyId); } catch (error) {
+          releaseRunSlot(auth.keyId);
           return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
         }
 
@@ -454,6 +475,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           }, origin, config);
         } finally {
           clearTimeout(timer);
+          releaseRunSlot(auth.keyId);
         }
       }
 
