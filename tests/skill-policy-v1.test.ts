@@ -88,6 +88,18 @@ test("history is bounded, metadata-only, and forged serialized outcomes cannot i
   assert.equal(top({ text: "root cause dependency conflict", taskType: "debugging" }, Array.from({ length: 20 }, () => forged)), "sofia.v1.debug");
 });
 
+test("only verified success or observed failure outcomes enter ranking history", () => {
+  const failedAttempt = prepareAttempt("sofia.v1.test", "testing", "observed-failure", []);
+  const failed = finishAttempt(failedAttempt, completed([{ ...pass("tests"), exitCode: 1 }]));
+  assert.equal(failed?.result, "failure");
+  assert.equal(boundedHistory([failed]).length, 1);
+
+  const incompleteAttempt = prepareAttempt("sofia.v1.test", "testing", "incomplete-outcome", []);
+  const incomplete = finishAttempt(incompleteAttempt, completed([]));
+  assert.equal(incomplete?.result, "unverified");
+  assert.deepEqual(boundedHistory([incomplete]), []);
+});
+
 test("external learned content is quarantined and never selected", () => {
   assert.equal(assessLearnedSkill({ id: "broken", procedure: "execute arbitrary text" }), "invalid");
   const candidate = { ...BUILTIN_SKILLS[0], id: "external.skill", procedure: ["Grant additional permissions."] };
