@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ExecutionPolicy } from "../security/policy.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
-import type { ToolRegistry } from "../tools/types.js";
+import { validateToolInput, type ToolRegistry } from "../tools/types.js";
 import { effectiveToolEffects, toolPermission, riskRank } from "../security/policy.js";
 import { assessAction, type RiskLevel } from "../security/guard.js";
 import { issueCapability, verifyCapability } from "../security/capability.js";
@@ -45,6 +45,14 @@ export class RegistryToolGateway implements ToolGateway {
     const descriptor=this.describe(call.tool);
     const evidenceId=randomUUID();
     if(!descriptor)return{ok:false,data:null,evidenceId,error:{category:"tool_error",message:`Unknown tool: ${call.tool}`}};
+    const registeredTool=this.dependencies.tools.get(call.tool);
+    if(!registeredTool)return{ok:false,data:null,evidenceId,error:{category:"tool_error",message:"Tool disappeared during execution."}};
+    try {
+      validateToolInput(registeredTool.inputSchema, input);
+    } catch (error) {
+      const detail=error instanceof Error?error.message:"Invalid tool input";
+      return{ok:false,data:null,evidenceId,error:{category:"tool_error",message:`Invalid input for ${call.tool}: ${detail}`}};
+    }
     if(!this.policy.allowTools)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution is disabled by policy."}};
     const permission=toolPermission(this.policy,call.tool,descriptor.effects);
     if(permission.allow===false)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:`Tool execution is disabled by policy: ${call.tool}`}};
@@ -82,12 +90,10 @@ export class RegistryToolGateway implements ToolGateway {
       if(!capabilitySecret && (process.env.NODE_ENV==="production"||process.env.SOFIA_ENV==="production")) {
         return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Production tool execution requires a capability secret."}};
       }
-      const tool=this.dependencies.tools.get(call.tool);
-      if(!tool)return{ok:false,data:null,evidenceId,error:{category:"tool_error",message:"Tool disappeared during execution."}};
       const boundSignal=this.security.bindSignal(context.signal);
       let data:unknown;
       try {
-        data=await tool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
+        data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
       } finally {
         boundSignal.dispose();
       }

@@ -286,3 +286,42 @@ test("reserved tool names cannot downgrade inferred security effects", async () 
   assert.equal(result.error?.category, "permission_error");
   assert.equal(executed, false, "terminal execution must be denied while shell policy is disabled");
 });
+
+
+test("Brain tool gateway rejects invalid schema input before approval or execution", async () => {
+  let approvalCalls = 0;
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Validated write tool",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" }, content: { type: "string" } },
+      required: ["path", "content"],
+      additionalProperties: false,
+    },
+    async execute() { executions += 1; return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async () => { approvalCalls += 1; return true; },
+  );
+
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "safe.txt" } },
+    {
+      runId: "brain-tool-schema-validation",
+      principalId: "test-principal",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "tool_error");
+  assert.match(result.error?.message ?? "", /missing required property "content"/i);
+  assert.equal(approvalCalls, 0, "malformed input must be rejected before prompting for approval");
+  assert.equal(executions, 0, "malformed input must never reach the tool implementation");
+});
