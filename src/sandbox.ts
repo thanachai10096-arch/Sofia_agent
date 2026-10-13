@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 export interface SandboxLimits {
   timeoutMs: number;
@@ -283,8 +284,9 @@ export class ContainerSandbox implements Sandbox {
     if (workspaceRoot.includes(",")) throw new Error("Workspace path cannot contain a comma for container mounting.");
     if (signal?.aborted) throw new Error("Container execution was aborted.");
 
+    const containerName = `sofia-sandbox-${randomUUID()}`;
     const dockerArgs = [
-      "run", "--rm", "--pull=never",
+      "run", "--rm", "--pull=never", "--name", containerName,
       "--network", limits.allowNetwork ? "bridge" : "none",
       "--read-only",
       "--cap-drop=ALL",
@@ -299,11 +301,14 @@ export class ContainerSandbox implements Sandbox {
       command,
       ...args,
     ];
-    const result = await this.runner(dockerArgs, { timeoutMs, maxOutputBytes, signal });
-    if (result.code !== 0) {
-      // Preserve stdout/stderr for diagnostics while leaving non-zero exit codes visible to callers.
-      return result;
+    try {
+      // Preserve non-zero container exit codes for verification by the caller.
+      return await this.runner(dockerArgs, { timeoutMs, maxOutputBytes, signal });
+    } catch (error) {
+      // Killing the Docker CLI on timeout/abort can leave the container running.
+      // Best-effort cleanup is deliberately independent of the aborted task signal.
+      await this.runner(["rm", "--force", containerName], { timeoutMs: 5_000, maxOutputBytes: 4_096 }).catch(() => undefined);
+      throw error;
     }
-    return result;
   }
 }
