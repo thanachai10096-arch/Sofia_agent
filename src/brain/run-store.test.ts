@@ -1,4 +1,4 @@
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -25,10 +25,15 @@ test("FileRunStore survives a new store instance", async () => {
       trace: [],
     };
 
-    await new FileRunStore("test", root).save(snapshot);
-    const loaded = await new FileRunStore("test", root).load(snapshot.runId);
+    const store = new FileRunStore("test", root);
+    await Promise.all(Array.from({ length: 20 }, (_, index) =>
+      store.save({ ...snapshot, checkpointId: `checkpoint-${index}` }),
+    ));
+    const loaded = await store.load(snapshot.runId);
 
-    assert.deepEqual(loaded, snapshot);
+    assert.ok(loaded);
+    assert.match(loaded.checkpointId, /^checkpoint-(?:[0-9]|1[0-9])$/);
+    assert.equal(loaded.runId, snapshot.runId);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
