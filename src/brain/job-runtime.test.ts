@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash, randomUUID } from "node:crypto";
-import { rm, stat } from "node:fs/promises";
+import { appendFile, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -544,4 +544,94 @@ test("DurableJobRuntime preserves submissions from separate Node.js processes", 
   );
   await rm(file, { force: true });
   await rm(file + ".lock", { force: true });
+});
+
+
+test("DurableJobRuntime admits only one resumed execution across separate processes", async () => {
+  const namespace = "job-runtime-single-claim-" + randomUUID();
+  const markerFile = path.join(os.tmpdir(), namespace + ".started");
+  const snapshot = {
+    version: 1,
+    runId: "lease-test-" + randomUUID(),
+    task: "prove single worker claim",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "lease-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const seedRuntime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async () => {
+      await onRunSnapshot?.(snapshot);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+  const seeded = await seedRuntime.submit({ task: "prove single worker claim" });
+  let seedRecord = await seedRuntime.get(seeded.id);
+  for (let attempt = 0; attempt < 100 && seedRecord?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    seedRecord = await seedRuntime.get(seeded.id);
+  }
+  assert.equal(seedRecord?.status, "failed");
+  assert.equal(seedRecord?.snapshot?.checkpointId, snapshot.checkpointId);
+
+  const workerScript = `
+    import { appendFile } from "node:fs/promises";
+    import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
+    const runtime = new DurableJobRuntime(() => ({
+      run: async (input) => {
+        if (!input.resume) throw new Error("expected a resume checkpoint");
+        await appendFile(${JSON.stringify(markerFile)}, process.pid + "\\n");
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return { completed: true, state: "completed" };
+      },
+    }), undefined, ${JSON.stringify(namespace)});
+    try {
+      const result = await runtime.resume(${JSON.stringify(seeded.id)});
+      process.stdout.write(JSON.stringify({ status: result.status }));
+    } catch (error) {
+      process.stdout.write(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    }
+  `;
+
+  const runWorker = () => new Promise<string>((resolve, reject) => {
+    const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", workerScript], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 15_000);
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) reject(new Error(stderr || `worker exited with code ${code}`));
+      else resolve(stdout);
+    });
+  });
+
+  try {
+    const results = await Promise.all([runWorker(), runWorker()]);
+    const started = (await readFile(markerFile, "utf8")).trim().split("\n").filter(Boolean);
+    assert.equal(started.length, 1, "only one process may execute the same checkpoint");
+    assert.equal(results.filter((result) => JSON.parse(result).status === "completed").length, 1);
+    assert.equal(results.filter((result) => JSON.parse(result).error).length, 1);
+  } finally {
+    const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+    await rm(stateFile, { force: true });
+    await rm(stateFile + ".lock", { force: true });
+    await rm(markerFile, { force: true });
+  }
 });
