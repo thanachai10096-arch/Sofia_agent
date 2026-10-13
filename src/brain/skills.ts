@@ -1,5 +1,7 @@
 import type { FailureCategory, Strategy } from "./types.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
+import { BUILTIN_SKILLS as POLICY_SKILLS, selectSkills as selectPolicySkills } from "./skill-policy-v1.js";
+import type { Skill as PolicySkill, TaskType as PolicyTaskType } from "./skill-policy-v1.js";
 
 export interface SofiaSkill {
   id: string;
@@ -61,28 +63,101 @@ function learnedToSkill(skill: LearnedSkillCandidate): SofiaSkill {
   };
 }
 
+function policyTaskType(category: FailureCategory): PolicyTaskType {
+  if (category === "dependency_error" || category === "environment_error") return "terminal";
+  if (category === "permission_error") return "security";
+  if (category === "network_error") return "research";
+  if (category === "incomplete_solution" || category === "wrong_assumption") return "planning";
+  if (category === "syntax_error" || category === "type_error" || category === "runtime_error") return "debugging";
+  return "inspection";
+}
+
+function policyFailure(category: FailureCategory): "test" | "build" | "dependency" | "permission" | "integration" | "unknown" {
+  if (category === "dependency_error" || category === "environment_error") return "dependency";
+  if (category === "permission_error") return "permission";
+  if (category === "syntax_error" || category === "type_error") return "build";
+  if (category === "runtime_error" || category === "incomplete_solution") return "test";
+  if (category === "network_error" || category === "tool_error") return "integration";
+  return "unknown";
+}
+
+function policyToLegacy(skill: PolicySkill): SofiaSkill {
+  const categoryMap: Record<string, FailureCategory> = {
+    test: "runtime_error",
+    build: "type_error",
+    dependency: "dependency_error",
+    permission: "permission_error",
+    integration: "tool_error",
+    unknown: "unknown",
+  };
+  const strategy: Strategy =
+    skill.id === "sofia.v1.terminal" ? "fix-environment" :
+    skill.id === "sofia.v1.debug" || skill.id === "sofia.v1.api" ||
+    skill.id === "sofia.v1.workspace" || skill.id === "sofia.v1.git" ||
+    skill.id === "sofia.v1.docs" ? "fix-implementation" :
+    skill.id === "sofia.v1.plan" ? "initial" : "inspect-evidence";
+  const verification = skill.verification.filter(
+    (item): item is "typecheck" | "test" | "build" =>
+      item === "typecheck" || item === "test" || item === "build",
+  );
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    triggers: skill.triggers,
+    categories: skill.failureCategories.map((item) => categoryMap[item]),
+    strategy,
+    procedure: skill.procedure,
+    verification,
+  };
+}
+
 export function matchSkills(
   category: FailureCategory,
   message: string,
   limit = 3,
   ledger?: SkillLedger,
 ): SofiaSkill[] {
-  const lower = message.toLowerCase();
-  const all = [
+  const boundedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(8, Math.floor(limit))) : 3;
+  const lower = message.slice(0, 4000).toLowerCase();
+  const legacy = [
     ...BUILTIN_SKILLS,
-    ...(ledger?.list() ?? []).map(learnedToSkill),
+    ...(ledger?.list() ?? []).filter(isSafeLearnedCandidate).map(learnedToSkill),
   ];
+  const selectedPolicy = selectPolicySkills({
+    text: message.slice(0, 4000),
+    taskType: policyTaskType(category),
+    failureCategory: policyFailure(category),
+  }, [], boundedLimit);
+  const policyById = new Map<string, number>();
+  for (const item of selectedPolicy) policyById.set(item.skill.id, item.score);
+  const policySkills = POLICY_SKILLS
+    .filter((skill) => policyById.has(skill.id))
+    .map(policyToLegacy);
+  const all = [...legacy, ...policySkills];
+  const seen = new Set<string>();
   return all
-    .map((skill) => ({
-      skill,
-      score:
+    .map((skill) => {
+      const policyScore = policyById.get(skill.id);
+      const legacyScore =
         (skill.categories.includes(category) ? 100 : 0) +
-        skill.triggers.filter((trigger) => lower.includes(trigger.toLowerCase())).length * 10,
-    }))
-    .filter((item) => item.score > 0)
+        skill.triggers.filter((trigger) => lower.includes(trigger.toLowerCase())).length * 10;
+      return { skill, score: Math.max(legacyScore, policyScore ?? 0) };
+    })
+    .filter((item) => item.score > 0 && !seen.has(item.skill.id) && !!seen.add(item.skill.id))
     .sort((a, b) => b.score - a.score || a.skill.id.localeCompare(b.skill.id))
-    .slice(0, limit)
+    .slice(0, boundedLimit)
     .map((item) => item.skill);
+}
+
+function isSafeLearnedCandidate(value: LearnedSkillCandidate): boolean {
+  return !!value && typeof value === "object" &&
+    typeof value.name === "string" && value.name.length > 0 && value.name.length <= 100 &&
+    typeof value.trigger === "string" && value.trigger.length > 0 && value.trigger.length <= 240 &&
+    Array.isArray(value.procedure) && value.procedure.length > 0 && value.procedure.length <= 8 &&
+    value.procedure.every((item) => typeof item === "string" && item.length > 0 && item.length <= 240) &&
+    Array.isArray(value.evidenceIds) && value.evidenceIds.length > 0 && value.evidenceIds.length <= 32 &&
+    value.evidenceIds.every((item) => typeof item === "string" && item.length <= 128);
 }
 
 export function compactSkillContext(skills: readonly SofiaSkill[]): unknown[] {
