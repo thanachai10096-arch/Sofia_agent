@@ -230,3 +230,59 @@ test("SSE runs share the per-key concurrency limit and release the slot on disco
   assert.equal(retried?.status, 200, "disconnect should release the concurrency slot");
   await retried?.body?.cancel().catch(() => undefined);
 });
+
+
+test("synchronous runs share the per-key concurrency limit with async runs", async (t) => {
+  let markStarted!: () => void;
+  let finishModel!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const provider: ModelProvider = {
+    generate() {
+      markStarted();
+      return new Promise((resolve) => {
+        finishModel = () => resolve({ text: "completed after waiting" });
+      });
+    },
+  };
+  const server = createSofiaApi(dependencies(provider), {
+    apiKeys: { "test-token": ["agent:run"] },
+    maxConcurrentRunsPerKey: 1,
+    requestTimeoutMs: 5_000,
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const url = "http://127.0.0.1:" + address.port;
+  const headers = { authorization: "Bearer test-token", "content-type": "application/json" };
+  const accepted = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ task: "hold the single run slot", async: true }),
+  });
+  assert.equal(accepted.status, 202);
+  const acceptedRun = await accepted.json() as { id: string };
+  await started;
+
+  const blocked = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ task: "synchronous run must share the limit" }),
+  });
+  assert.equal(blocked.status, 429);
+  assert.deepEqual(await blocked.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+
+  finishModel();
+  let status = "running";
+  for (let attempt = 0; attempt < 50 && status === "running"; attempt += 1) {
+    const response = await fetch(url + "/v1/agent/runs/" + acceptedRun.id, {
+      headers: { authorization: "Bearer test-token" },
+    });
+    status = (await response.json() as { status: string }).status;
+    if (status === "running") await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(status, "completed");
+});
