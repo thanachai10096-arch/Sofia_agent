@@ -187,7 +187,7 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 ## `> Quick start`
 
 ```bash
-npm install
+npm ci
 npm run typecheck
 npm test
 npm run build
@@ -248,7 +248,7 @@ More details: [Desktop Runtime Foundation](docs/desktop-runtime.md).
 Run the complete local validation suite:
 
 ```bash
-npm install
+npm ci
 npm run license:check
 npm run typecheck
 npm test

@@ -4,6 +4,23 @@
 **Scope:** Sofia Agents repository only. This document does not change Zuse.
 **Evidence rule:** "Documented" means the repository documents a capability; it does not prove the capability has passed end-to-end tests in every environment. Treat benchmark claims as unproven until measured.
 
+## Recent verified hardening (2026-10-13)
+
+The following changes have been merged into `main` after branch-level CI passed on Ubuntu, Windows, and macOS:
+
+- [PR #66 — Runtime recovery](https://github.com/thanachai10096-arch/Sofia_agents/pull/66): cancelled jobs cannot be resumed; snapshot persistence has a fallback; writes to the same run snapshot are serialized; replanned steps are not incorrectly skipped when a step ID is reused for a different action.
+- [PR #67 — Process helper output and network policy](https://github.com/thanachai10096-arch/Sofia_agents/pull/67): output capture is bounded; requests that require network isolation fail closed when this helper cannot enforce it.
+- [PR #68 — ProcessSandbox limits](https://github.com/thanachai10096-arch/Sofia_agents/pull/68): enforces a combined output-byte limit, rejects timeout/abort as failures, uses a forced-kill fallback, and fails closed when network isolation is requested but unavailable.
+- [PR #69 — Reproducible dependencies](https://github.com/thanachai10096-arch/Sofia_agents/pull/69): commits `package-lock.json` and switches CI to `npm ci`.
+
+Evidence:
+- [Runtime recovery CI](https://github.com/thanachai10096-arch/Sofia_agents/actions/runs/38364742744) — all four jobs succeeded.
+- [Security helper CI](https://github.com/thanachai10096-arch/Sofia_agents/actions/runs/38365206348) — all four jobs succeeded.
+- [ProcessSandbox regression CI](https://github.com/thanachai10096-arch/Sofia_agents/actions/runs/38365656642) — all four jobs succeeded; the Ubuntu suite reported 174 tests passed and 0 failed.
+- [Lockfile / npm ci CI](https://github.com/thanachai10096-arch/Sofia_agents/actions/runs/38366148663) — all four jobs succeeded with the committed lockfile.
+
+**Remaining security limitation:** `ProcessSandbox` is still a child-process runner, not an OS/container sandbox. It does not enforce filesystem or network isolation. Do not expose it as a complete sandbox; production isolation still requires a real OS/container boundary and explicit network egress controls.
+
 ## Current architecture documented by the repository
 
 `Zuse / SDK -> Sofia API -> Agent -> Brain -> Tool Gateway -> central Policy -> capabilities`
@@ -16,15 +33,15 @@ The documented Brain lifecycle is `understand -> plan -> execute -> observe -> v
 |---|---|---|---|---|
 | Brain planning and repair loop | README documents the lifecycle, planner/executor, verification and repair | Implemented/documented; task-level reliability needs measured proof | Build a repeatable task suite and assert that verification is based on observable evidence, not model claims | P0 |
 | Tool registry and policy gateway | README describes one registry and one central policy gateway | Architectural foundation present | Test every tool path against the same policy; cover malformed arguments, cancellation, timeout, and denied actions | P0 |
-| CI and cross-platform support | package scripts define typecheck, test, build; CI workflows are present | Must be judged by current workflow results per commit/PR | Do not merge an unverified PR just because main is green; require typecheck, tests, build on Linux/macOS/Windows for each change | P0 |
-| Durable jobs and recovery | README documents snapshots/checkpoints and guarded resume; PR #7/#3 describe recovery hardening | Foundation documented; latest changes must be verified on their own branch | Test process restart, orphaned running jobs, duplicate resume, concurrent writes, cancellation and corrupted snapshots | P0 |
+| CI and cross-platform support | PR #69 merged; lockfile committed; CI uses `npm ci`; lockfile branch CI passed typecheck, tests and build on Ubuntu, macOS and Windows | Reproducible dependency resolution is now enforced in CI; local and production environments still need their own validation | Keep exact-commit Linux/macOS/Windows checks required for runtime/security changes; add explicit desktop packaging and live-service checks where relevant | P0 |
+| Durable jobs and recovery | PR #66 merged; branch CI passed on all three operating systems; regression coverage for cancelled resume, checkpoint fallback, serialized writes and replanned step IDs | Core race/recovery hardening landed; process-restart and multi-process storage behavior still need dedicated evidence | Test process restart, orphaned running jobs, cross-process coordination, cancellation and corrupted snapshots | P0 |
 | Browser automation | README documents Playwright navigation and interaction; browser is opt-in | Capability documented; real-world safety and E2E coverage need proof | Keep SSRF protections on every navigation/redirect/subresource; test timeouts, redirects, DNS edge cases, browser cleanup and screenshots | P0 |
 | Codebase understanding and editing | README documents repository intelligence and edit engine | Foundation documented | Validate multi-file edits with baseline tests, minimal diffs, rollback, and no success report until tests/verification pass | P0 |
 | Skills and learning | README documents built-in and persisted learned skills; platform includes skills and evaluation runner | Platform foundation documented; learning quality unproven | Add confidence calibration, outcome history, failure memory, ranking, versioning and rollback; promote skills only after evaluation | P1 |
 | Persistent memory | Learned skills are documented as persisted; general cross-session experience memory is not established by README alone | Partial / evidence insufficient | Add scoped memory for user/project/task, provenance, freshness, retrieval tests, deletion controls and protection against prompt injection in stored content | P1 |
 | Multi-agent delegation | PR list and README establish profiles/templates, but not proof of reliable general delegation | Not yet proven as production-grade capability | Implement bounded delegation with explicit task contracts, per-agent budgets, shared trace, conflict handling, cancellation and final independent review | P1 |
 | Computer / desktop operation | README links a permission-gated local runtime foundation; PR #11 describes native driver and pairing primitives | Foundation only; not a complete installed desktop agent | Complete authenticated loopback transport, installer/service lifecycle, revocation, platform permission tests and hands-on Windows/macOS/Linux validation. Do not expose a local driver directly on a public API | P1 |
-| Security and permissions | Central policy and sandbox abstractions documented; README explicitly says process sandbox is not a container | Partial, honest limitations documented | Threat model, workspace allowlists, secret redaction, audit trail, least privilege, network egress controls and negative tests for every privileged action | P0 |
+| Security and permissions | PRs #67 and #68 merged; tests cover output limits, timeout, abort, and fail-closed network-isolation requests; API/workspace security tests exist | Process resource limits are hardened, but this is not OS-level isolation and browser DNS checks are not a network egress firewall | Implement/validate a real OS/container sandbox, enforce network egress outside the browser process, and add negative tests for every privileged execution path | P0 |
 | Mobile/browser clients and streaming | README documents async runs, polling, cancellation, SSE and CORS | API surface documented; integration E2E not proven here | Test disconnect/reconnect, sleep/background, cancellation, CORS/auth, and ensure privileged API keys remain server-side | P1 |
 | Model routing and cost control | README says model-agnostic public surface and internal model routing | Design direction documented | Test routing policy, fallback/circuit breaker, per-run budgets, usage accounting and deterministic behavior when providers fail; model selection remains internal | P1 |
 | Evaluation and benchmarking | README lists an Evaluation runner | Runner existence documented; competitive performance not established | Create versioned benchmark tasks and baseline; compare success, regression rate, time, cost, safety and recovery against the same tasks | P0 |
