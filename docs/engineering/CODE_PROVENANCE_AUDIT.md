@@ -17,10 +17,10 @@ This is an evidence log, not a legal opinion or a blanket claim that the reposit
 | `src/brain/skill-policy-v1.ts` | Full draft file, schema validation, matching, history projection, attempt receipts and evidence handling | Origin of the initial PR #92 contribution remains unverified. Changes in this integration branch are recorded in Git history. |
 | `tests/skill-policy-v1.test.ts` | Full draft test file and test assumptions | Initial test origin remains unverified; additional regression cases are authored in this integration branch. |
 | `src/brain/skills.ts` | Existing legacy skill adapter and the changed integration path | Existing code predates this branch; the new adapter changes are recorded in this branch. A full repository-wide line-origin audit is still required. |
-| `src/brain/evolution.ts` | Existing success/failure ranking and JSON persistence behavior | Reviewed for integration semantics. This pass did not establish the origin of every pre-existing line. |
+| `src/brain/evolution.ts`, `tests/evolution.test.ts` | Existing success/failure ranking and JSON persistence; added bounded-load regression coverage | Persistence handling was hardened in this branch. The origin of every pre-existing line remains unverified. |
 | `package.json`, `LICENSE`, `scripts/check-license.mjs` | Declared project license and current checker behavior | The project declares Apache-2.0; the current checker is not a source-provenance scanner. |
 
-## Required audit procedure before a release
+## External similarity spot-checks\n\nLimited public GitHub code searches were run for distinctive Skill Policy phrases and identifiers. No clear exact-expression match for the queried policy prose was found; a generic `boundedHistory`/`SkillOutcome` query returned an unrelated Java test. This is only a spot-check: code search is incomplete and does not establish independent authorship, legal compatibility, or the absence of similar code. No claim is made that a full repository-wide similarity scan has been completed.\n\n## Required audit procedure before a release
 
 1. Freeze the exact commit SHA being reviewed. Do not audit a moving branch.
 2. Enumerate every tracked source, test, script, workflow, generated file, vendored file, and asset.
