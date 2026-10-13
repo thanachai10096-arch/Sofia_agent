@@ -1,7 +1,7 @@
 # Sofia Agent Capability Gap Matrix
 
 **Purpose:** strengthen Sofia by selectively adopting proven agent patterns without duplicating its existing runtime.
-**Scope:** Sofia Agents repository only. This document does not change Zuse.
+**Scope:** Sofia Agent repository only. This document does not change Zuse.
 **Evidence rule:** "Documented" means the repository documents a capability; it does not prove the capability has passed end-to-end tests in every environment. Treat benchmark claims as unproven until measured.
 
 ## Recent verified hardening (2026-10-13)
