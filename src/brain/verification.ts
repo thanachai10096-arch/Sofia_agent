@@ -59,6 +59,7 @@ export async function runVerification(
       workspaceRevision: snapshot.revision,
       ...(exitCode !== undefined ? { exitCode } : {}),
       ...(typeof data?.passed === "boolean" ? { checksPassed: data.passed } : {}),
+      ...(typeof data?.assertionsPassed === "boolean" ? { assertionsPassed: data.assertionsPassed } : {}),
       ...(count("assertionsTotal") !== undefined ? { assertionsTotal: count("assertionsTotal") } : {}),
       ...(count("failedAssertions") !== undefined ? { failedAssertions: count("failedAssertions") } : {}),
       ...(count("skippedAssertions") !== undefined ? { skippedAssertions: count("skippedAssertions") } : {}),
