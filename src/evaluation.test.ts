@@ -53,7 +53,7 @@ function evaluationCase(probes?: AcceptanceCriterion[]): EvaluationCase {
   return {
     id: "case-1",
     task: "Perform a verifiable task",
-    acceptanceCriteria: ["Criterion one"],
+    acceptanceCriteria: probes ? probes.map((probe) => probe.description) : ["Criterion one"],
     ...(probes ? { probes } : {}),
   };
 }
@@ -131,5 +131,23 @@ test("AgentEvaluationRunner rejects contradictory step expectations before spend
   const result = await runner.run({ ...evaluationCase(probes), expected: { minSteps: 5, maxSteps: 2 } });
   assert.equal(result.passed, false);
   assert.equal(result.score, 0);
+  assert.equal(calls, 0);
+});
+
+
+test("AgentEvaluationRunner rejects probes that do not match the declared acceptance criteria", async () => {
+  let calls = 0;
+  const probes = [criterion("criterion-1")];
+  const runner = new AgentEvaluationRunner(async () => {
+    calls += 1;
+    return agentResult(probes);
+  });
+  const result = await runner.run({
+    ...evaluationCase(probes),
+    acceptanceCriteria: ["A different acceptance criterion"],
+  });
+  assert.equal(result.passed, false);
+  assert.equal(result.score, 0);
+  assert.match(result.details, /probe description must match its acceptance criterion/);
   assert.equal(calls, 0);
 });
