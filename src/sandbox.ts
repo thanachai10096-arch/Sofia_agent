@@ -302,8 +302,12 @@ export class ContainerSandbox implements Sandbox {
     if (signal?.aborted) throw new Error("Container execution was aborted.");
 
     const containerName = `sofia-sandbox-${randomUUID()}`;
+    const containerUserArgs = typeof process.getuid === "function" && typeof process.getgid === "function"
+      ? ["--user", `${process.getuid()}:${process.getgid()}`]
+      : [];
     const dockerArgs = [
       "run", "--rm", "--pull=never", "--name", containerName,
+      ...containerUserArgs,
       "--network", limits.allowNetwork ? "bridge" : "none",
       "--read-only",
       "--cap-drop=ALL",
