@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { request as httpRequest } from "node:http";
+import { connect as connectTcp } from "node:net";
 import test from "node:test";
-import { assertSafeBrowserUrl } from "./runtime.js";
+import { assertSafeBrowserUrl, createBrowserEgressProxy, resolvePublicHostAddress } from "./runtime.js";
 
 test("browser URL policy allows public HTTP(S) destinations", () => {
   assert.equal(assertSafeBrowserUrl("https://example.com/path").hostname, "example.com");
@@ -28,5 +30,70 @@ test("browser URL policy rejects local, private and metadata destinations", () =
     "http://[2001:0::1]", "http://[2001:100::1]", "http://[2002:c0a8:101::1]", "http://[3fff::1]",
   ]) {
     assert.throws(() => assertSafeBrowserUrl(url), /local or internal|private or non-public/);
+  }
+});
+
+
+test("browser URL policy rejects non-standard web ports", () => {
+  for (const url of ["http://example.com:8080/", "https://example.com:8443/", "http://example.com:443/"]) {
+    assert.throws(() => assertSafeBrowserUrl(url), /standard HTTP port 80 and HTTPS port 443/);
+  }
+});
+
+test("pinned browser resolver rejects private literals and preserves public IP literals", async () => {
+  await assert.rejects(() => resolvePublicHostAddress("127.0.0.1"), /private or non-public IP/);
+  await assert.rejects(() => resolvePublicHostAddress("169.254.169.254"), /private or non-public IP/);
+  assert.equal(await resolvePublicHostAddress("8.8.8.8"), "8.8.8.8");
+});
+
+test("browser egress proxy blocks HTTP requests to private IP literals", async () => {
+  const proxy = await createBrowserEgressProxy();
+  const address = new URL(proxy.url);
+  try {
+    const status = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest({
+        host: address.hostname,
+        port: Number(address.port),
+        method: "GET",
+        path: "http://127.0.0.1/",
+        headers: { host: "127.0.0.1" },
+      }, (response) => {
+        response.resume();
+        response.once("end", () => resolve(response.statusCode ?? 0));
+      });
+      request.once("error", reject);
+      request.end();
+    });
+    assert.equal(status, 403);
+  } finally {
+    await proxy.close();
+  }
+});
+
+test("browser egress proxy blocks CONNECT requests to private IP literals", async () => {
+  const proxy = await createBrowserEgressProxy();
+  const address = new URL(proxy.url);
+  try {
+    const response = await new Promise<string>((resolve, reject) => {
+      const socket = connectTcp(Number(address.port), address.hostname);
+      let output = "";
+      const timer = setTimeout(() => socket.destroy(new Error("Timed out waiting for proxy policy response.")), 3000);
+      socket.once("connect", () => socket.write("CONNECT 127.0.0.1:443 HTTP/1.1\\r\\nHost: 127.0.0.1:443\\r\\n\\r\\n"));
+      socket.on("data", (chunk) => {
+        output += chunk.toString("utf8");
+        if (output.includes("\\r\\n\\r\\n")) {
+          clearTimeout(timer);
+          socket.destroy();
+          resolve(output);
+        }
+      });
+      socket.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+    assert.match(response, /^HTTP\\/1\\.1 403 Forbidden/);
+  } finally {
+    await proxy.close();
   }
 });
