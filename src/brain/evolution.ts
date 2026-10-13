@@ -89,9 +89,9 @@ function safeTimestamp(value: unknown): string | undefined {
 function sanitizeTaskStats(value: unknown): { attempts: number; successes: number; failures: number } {
   const input = plainRecord(value);
   const successes = safeCount(input?.successes);
-  const failures = safeCount(input?.failures);
+  const failures = Math.min(safeCount(input?.failures), MAX_COUNT - successes);
   return {
-    attempts: Math.max(safeCount(input?.attempts), Math.min(MAX_COUNT, successes + failures)),
+    attempts: Math.max(safeCount(input?.attempts), successes + failures),
     successes,
     failures,
   };
@@ -100,7 +100,7 @@ function sanitizeTaskStats(value: unknown): { attempts: number; successes: numbe
 function sanitizePerformance(id: string, value: unknown): SkillPerformance {
   const input = plainRecord(value);
   const successes = safeCount(input?.successes);
-  const failures = safeCount(input?.failures);
+  const failures = Math.min(safeCount(input?.failures), MAX_COUNT - successes);
   const taskTypes: Record<string, { attempts: number; successes: number; failures: number }> = Object.create(null) as Record<string, { attempts: number; successes: number; failures: number }>;
   const rawTaskTypes = plainRecord(input?.taskTypes);
   for (const [key, stats] of Object.entries(rawTaskTypes ?? {}).slice(0, MAX_TASK_TYPES)) {
@@ -127,7 +127,7 @@ function sanitizePerformance(id: string, value: unknown): SkillPerformance {
     : 0.5;
   return {
     id: typeof input?.id === "string" && input.id.length <= 120 ? input.id : id,
-    attempts: Math.max(safeCount(input?.attempts), Math.min(MAX_COUNT, successes + failures)),
+    attempts: Math.max(safeCount(input?.attempts), successes + failures),
     successes,
     failures,
     confidence,
