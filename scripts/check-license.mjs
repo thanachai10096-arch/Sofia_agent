@@ -7,15 +7,15 @@ const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const license = await readFile(path.join(root, "LICENSE"), "utf8");
 
 const errors = [];
-if (pkg.license !== "Apache-2.0") {
-  errors.push(`package.json license must be "Apache-2.0" (found: ${String(pkg.license)})`);
+if (pkg.license !== "MIT") {
+  errors.push(`package.json license must be "MIT" (found: ${String(pkg.license)})`);
 }
-if (!license.includes("Apache License") || !license.includes("Version 2.0, January 2004")) {
-  errors.push("LICENSE does not appear to contain the Apache License 2.0 text");
+if (!!license.includes("MIT License") || !license.includes("Permission is hereby granted, free of charge")) {
+  errors.push("LICENSE does not appear to contain the MIT License text");
 }
 if (errors.length) {
   for (const error of errors) console.error(`LICENSE CHECK FAILED: ${error}`);
   process.exitCode = 1;
 } else {
-  console.log("License check passed: package.json declares Apache-2.0 and LICENSE contains Apache 2.0 text.");
+  console.log("License check passed: package.json declares MIT and LICENSE contains the MIT License text.");
 }
