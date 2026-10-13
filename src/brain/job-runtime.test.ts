@@ -329,7 +329,7 @@ test("DurableJobRuntime preserves a resumable embedded checkpoint when the snaps
 });
 
 
-test("DurableJobRuntime recovers a persisted running job across an actual Node.js process restart", () => {
+test("DurableJobRuntime recovers a persisted running job across an actual Node.js process restart", async () => {
   const namespace = "job-runtime-real-process-restart-" + randomUUID();
   const startScript = `
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
@@ -406,7 +406,7 @@ test("DurableJobRuntime stores job state with owner-only file permissions on POS
 });
 
 
-test("DurableJobRuntime resumes a saved checkpoint after a real process restart", () => {
+test("DurableJobRuntime resumes a saved checkpoint after a real process restart", async () => {
   const namespace = "job-runtime-resume-real-restart-" + randomUUID();
   const startScript = `
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
