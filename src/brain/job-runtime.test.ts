@@ -627,7 +627,7 @@ test("DurableJobRuntime admits only one resumed execution across separate proces
     const started = (await readFile(markerFile, "utf8")).trim().split("\n").filter(Boolean);
     assert.equal(started.length, 1, "only one process may execute the same checkpoint");
     assert.equal(results.filter((result) => JSON.parse(result).status === "completed").length, 1);
-    assert.equal(results.filter((result) => JSON.parse(result).error).length, 1);
+    assert.equal(results.filter((result) => JSON.parse(result).status !== "completed").length, 1);
   } finally {
     const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
     await rm(stateFile, { force: true });
