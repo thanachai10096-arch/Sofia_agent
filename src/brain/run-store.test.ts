@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -34,6 +35,13 @@ test("FileRunStore serializes concurrent writes across store instances", async (
     assert.ok(loaded);
     assert.match(loaded.checkpointId, /^checkpoint-(?:[0-9]|1[0-9])$/);
     assert.equal(loaded.runId, snapshot.runId);
+
+    if (process.platform !== "win32") {
+      const privateDirectory = path.join(root, createHash("sha256").update("test").digest("hex"));
+      const snapshotFile = path.join(privateDirectory, createHash("sha256").update(snapshot.runId).digest("hex") + ".json");
+      assert.equal((await stat(privateDirectory)).mode & 0o777, 0o700, "snapshot directory must be owner-only");
+      assert.equal((await stat(snapshotFile)).mode & 0o777, 0o600, "snapshot file must be owner-readable/writable only");
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
