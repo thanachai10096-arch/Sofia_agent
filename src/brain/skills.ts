@@ -105,7 +105,7 @@ function policyToLegacy(skill: PolicySkill): SofiaSkill {
     name: skill.name,
     description: skill.description,
     triggers: skill.triggers,
-    categories: skill.failureCategories.map((item) => categoryMap[item]),
+    categories: skill.failureCategories.map((item) => categoryMap[item]!),
     strategy,
     procedure: skill.procedure,
     verification,
