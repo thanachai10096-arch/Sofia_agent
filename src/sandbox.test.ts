@@ -160,3 +160,27 @@ test("ContainerSandbox removes a possibly orphaned container after timeout or ab
     await rm(workspaceRoot, { recursive: true, force: true });
   }
 });
+
+
+test("ContainerSandbox restricts working directories to existing workspace descendants", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "sofia-container-sandbox-"));
+  await import("node:fs/promises").then(({ mkdir }) => mkdir(path.join(workspaceRoot, "packages"), { recursive: true }));
+  let capturedArgs: string[] = [];
+  const sandbox = new ContainerSandbox({
+    image: "registry.example/sofia-runner@sha256:" + "d".repeat(64),
+    runner: async (args) => {
+      capturedArgs = args;
+      return { stdout: "", stderr: "", code: 0 };
+    },
+  });
+  try {
+    await sandbox.run("node", ["--version"], limits({ workspaceRoot, cwd: "packages" }));
+    assert.equal(capturedArgs[capturedArgs.indexOf("--workdir") + 1], "/workspace/packages");
+    await assert.rejects(
+      () => sandbox.run("node", [], limits({ workspaceRoot, cwd: "../" })),
+      /Working directory escapes the configured workspace root/,
+    );
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
