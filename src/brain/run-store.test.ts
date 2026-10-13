@@ -29,7 +29,7 @@ test("FileRunStore survives a new store instance", async () => {
     await Promise.all(Array.from({ length: 20 }, (_, index) =>
       store.save({ ...snapshot, checkpointId: `checkpoint-${index}` }),
     ));
-    const loaded = await store.load(snapshot.runId);
+    const loaded = await stores[0]!.load(snapshot.runId);
 
     assert.ok(loaded);
     assert.match(loaded.checkpointId, /^checkpoint-(?:[0-9]|1[0-9])$/);
