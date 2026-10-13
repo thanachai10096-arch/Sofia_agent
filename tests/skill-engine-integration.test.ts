@@ -17,6 +17,13 @@ test("policy catalog is part of the real recovery skill selection path", () => {
   assert.ok(Array.isArray(apiContext.failureConditions));
   assert.ok(Array.isArray(apiContext.recovery));
   assert.equal(apiContext.risk, "may-write");
+  assert.equal(apiContext.riskLevel, "high");
+  assert.ok(Array.isArray(apiContext.requiredCapabilities));
+  assert.ok(Array.isArray(apiContext.requiredPermissions));
+  assert.equal(typeof apiContext.resourceLimits, "object");
+  assert.equal(apiContext.retryLimit, 0);
+  assert.deepEqual(apiContext.compatibility, { apiVersion: 1, capabilityContract: "sofia-adapter-v1" });
+  assert.equal(apiContext.trustLevel, "first-party");
 });
 
 test("security policy can be selected for permission-related recovery", () => {
