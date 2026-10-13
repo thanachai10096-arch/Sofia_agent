@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { rm, stat } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
@@ -358,4 +361,27 @@ test("DurableJobRuntime recovers a persisted running job across an actual Node.j
   const record = JSON.parse(recovered.stdout) as { status?: string; error?: string };
   assert.equal(record.status, "failed");
   assert.match(record.error ?? "", /interrupted/i);
+});
+
+
+test("DurableJobRuntime stores job state with owner-only file permissions on POSIX", async () => {
+  const namespace = "job-runtime-private-state-" + randomUUID();
+  const runtime = new DurableJobRuntime(() => ({
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain), undefined, namespace);
+  await runtime.submit({ task: "private persisted job" });
+  await new Promise<void>((resolve) => setTimeout(resolve, 40));
+
+  const file = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  try {
+    if (process.platform !== "win32") {
+      assert.equal((await stat(file)).mode & 0o777, 0o600, "job state must not be readable by other local users");
+    }
+  } finally {
+    await rm(file, { force: true });
+  }
 });

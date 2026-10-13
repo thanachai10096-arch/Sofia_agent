@@ -33,11 +33,13 @@ export class FileRunStore implements RunStore {
     const target = this.file(snapshot.runId);
     const previous = saveQueues.get(target) ?? Promise.resolve();
     const operation = previous.catch(() => undefined).then(async () => {
-      await fs.mkdir(this.directory, { recursive: true });
+      await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
+      // Existing store directories may have been created with permissive defaults.
+      await fs.chmod(this.directory, 0o700);
       // Each write gets a unique temporary path, and replacement is serialized per target.
       const temporary = target + "." + randomUUID() + ".tmp";
       try {
-        await fs.writeFile(temporary, JSON.stringify(snapshot), "utf8");
+        await fs.writeFile(temporary, JSON.stringify(snapshot), { encoding: "utf8", mode: 0o600 });
         await fs.rename(temporary, target);
       } finally {
         await fs.rm(temporary, { force: true });
