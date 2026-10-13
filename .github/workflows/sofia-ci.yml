@@ -81,6 +81,32 @@ jobs:
       - name: Verify browser egress proxy against public HTTP and HTTPS
         run: node scripts/browser-egress-proxy-smoke.mjs
 
+
+  browser-runtime-smoke:
+    name: Playwright browser egress integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify Playwright egress policy
+        run: node scripts/playwright-egress-runtime-smoke.mjs
+
   cross-platform:
     name: Cross-platform (${{ matrix.os }})
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
