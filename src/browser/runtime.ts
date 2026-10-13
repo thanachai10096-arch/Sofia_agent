@@ -1,4 +1,4 @@
-import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, request as httpRequest, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { connect as connectTcp, isIP, type Socket } from "node:net";
 import { lookup } from "node:dns/promises";
 
@@ -179,7 +179,7 @@ export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
         if (target.protocol !== "http:") throw new Error("Only HTTP proxy requests are supported without CONNECT.");
         if ((target.port ? Number(target.port) : 80) !== 80) throw new Error("Only standard HTTP port 80 is allowed.");
         const address = await resolvePublicHostAddress(target.hostname);
-        const headers = { ...request.headers, host: target.host };
+        const headers: OutgoingHttpHeaders = { ...request.headers, host: target.host };
         delete headers["proxy-authorization"];
         delete headers["proxy-connection"];
         const upstream = httpRequest({
