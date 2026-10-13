@@ -15,6 +15,9 @@ export interface JobRecord {
   updatedAt: string;
   task: string;
   ownerKeyId?: string;
+  leaseOwnerToken?: string;
+  leaseExpiresAt?: string;
+  heartbeatAt?: string;
   snapshot?: BrainRunSnapshot;
   result?: Awaited<ReturnType<SofiaBrain["run"]>>;
   error?: string;
@@ -148,6 +151,83 @@ class FileJobStateStore {
     }
   }
 
+  private async write(records: JobRecord[]): Promise<void> {
+    const temporary = this.file + "." + randomUUID() + ".tmp";
+    try {
+      await fs.writeFile(temporary, JSON.stringify(records, null, 2), { encoding: "utf8", mode: 0o600 });
+      await fs.rename(temporary, this.file);
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
+  }
+
+  async claim(id: string, ownerToken: string, leaseMs: number): Promise<JobRecord | undefined> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.status === "completed" || record.status === "cancelled") return undefined;
+      const now = Date.now();
+      const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
+      if (record.status === "running" && Number.isFinite(expires) && expires > now) return undefined;
+      record.status = "running";
+      record.leaseOwnerToken = ownerToken;
+      record.heartbeatAt = new Date(now).toISOString();
+      record.leaseExpiresAt = new Date(now + leaseMs).toISOString();
+      record.updatedAt = new Date(now).toISOString();
+      record.error = undefined;
+      await this.write(records);
+      return { ...record };
+    });
+  }
+
+  async heartbeat(id: string, ownerToken: string, leaseMs: number): Promise<boolean> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.status !== "running" || record.leaseOwnerToken !== ownerToken) return false;
+      const now = Date.now();
+      record.heartbeatAt = new Date(now).toISOString();
+      record.leaseExpiresAt = new Date(now + leaseMs).toISOString();
+      record.updatedAt = new Date(now).toISOString();
+      await this.write(records);
+      return true;
+    });
+  }
+
+  async markInterruptedIfExpired(id: string): Promise<JobRecord | undefined> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.status !== "running") return record ? { ...record } : undefined;
+      const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
+      if (Number.isFinite(expires) && expires > Date.now()) return { ...record };
+      record.status = "failed";
+      record.error = record.snapshot
+        ? "Job lease expired after a worker stopped heartbeating; resume it from the saved snapshot."
+        : "Job lease expired before a resumable snapshot was saved.";
+      record.leaseOwnerToken = undefined;
+      record.leaseExpiresAt = undefined;
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return { ...record };
+    });
+  }
+
+  async cancel(id: string): Promise<JobRecord | undefined> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.status === "completed" || record.status === "failed" || record.status === "cancelled") {
+        return record ? { ...record } : undefined;
+      }
+      record.status = "cancelled";
+      record.error ??= "Job cancelled by caller.";
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return { ...record };
+    });
+  }
+
   private async read(): Promise<JobRecord[]> {
     try {
       return JSON.parse(await fs.readFile(this.file, "utf8")) as JobRecord[];
@@ -157,25 +237,22 @@ class FileJobStateStore {
     }
   }
 
-  async save(record: JobRecord): Promise<void> {
+  async save(record: JobRecord): Promise<boolean> {
     const operation = this.writes.then(() => this.withFileLock(async () => {
       const records = await this.read();
       const index = records.findIndex((item) => item.id === record.id);
-      const durable = { ...record };
-      if (index >= 0) records[index] = durable;
-      else records.push(durable);
-
-      // Unique temporary files plus the cross-process lock make the complete
-      // read-modify-write transaction atomic with respect to cooperating workers.
-      const temporary = this.file + "." + randomUUID() + ".tmp";
-      try {
-        await fs.writeFile(temporary, JSON.stringify(records, null, 2), { encoding: "utf8", mode: 0o600 });
-        await fs.rename(temporary, this.file);
-      } finally {
-        await fs.rm(temporary, { force: true });
+      if (index >= 0) {
+        const current = records[index]!;
+        if (current.leaseOwnerToken && record.leaseOwnerToken !== current.leaseOwnerToken) return false;
+        if (current.leaseOwnerToken && !record.leaseOwnerToken) return false;
+        records[index] = { ...record };
+      } else {
+        records.push({ ...record });
       }
+      await this.write(records);
+      return true;
     }));
-    this.writes = operation.catch(() => undefined);
+    this.writes = operation.then(() => undefined, () => undefined);
     return operation;
   }
 
@@ -220,13 +297,12 @@ export class DurableJobRuntime implements JobRuntime {
   }
 
   private async recoverInterrupted(record: JobRecord): Promise<JobRecord> {
-    if ((record.status === "running" || record.status === "queued") && !this.controllers.has(record.id)) {
-      record.status = "failed";
-      record.error = record.snapshot
-        ? "Job was interrupted by a process restart; resume it from the saved snapshot."
-        : "Job was interrupted before a resumable snapshot was saved.";
-      record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
+    if (record.status === "running" && !this.controllers.has(record.id)) {
+      const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
+      if (!Number.isFinite(expires) || expires <= Date.now()) {
+        const recovered = await this.state.markInterruptedIfExpired(record.id);
+        if (recovered) Object.assign(record, recovered);
+      }
     }
     return record;
   }
@@ -286,16 +362,10 @@ export class DurableJobRuntime implements JobRuntime {
 
   async cancel(id: string): Promise<boolean> {
     const controller = this.controllers.get(id);
-    const fetched = this.jobs.get(id) ? { ...this.jobs.get(id)! } : await this.get(id);
-    if (!fetched) return false;
-    const record = this.jobs.get(id) ?? fetched;
-    if (record.status === "completed" || record.status === "failed" || record.status === "cancelled") return false;
-
-    // Keep the in-memory record authoritative even when cancellation races startup.
-    record.status = "cancelled";
-    record.error ??= "Job cancelled by caller.";
-    record.updatedAt = new Date().toISOString();
-    await this.state.save(record);
+    const persisted = await this.state.cancel(id);
+    if (!persisted || persisted.status !== "cancelled") return false;
+    const record = this.jobs.get(id);
+    if (record) Object.assign(record, persisted);
     controller?.abort(new Error("Job cancelled by caller"));
     return true;
   }
@@ -306,13 +376,28 @@ export class DurableJobRuntime implements JobRuntime {
     externalSignal?: AbortSignal,
     resume?: BrainRunSnapshot,
   ): Promise<void> {
-    if (record.status === "running" || record.status === "cancelled") return;
-    record.status = "running";
-    record.updatedAt = new Date().toISOString();
+    if (record.status === "cancelled" || record.status === "completed") return;
+    const leaseToken = randomUUID();
+    const leaseMs = 15_000;
+    const claimed = await this.state.claim(record.id, leaseToken, leaseMs);
+    if (!claimed) {
+      const latest = await this.state.get(record.id);
+      if (latest) Object.assign(record, latest);
+      return;
+    }
+    Object.assign(record, claimed);
 
     // Register cancellation before the first await so cancel() cannot miss startup.
     const controller = new AbortController();
     this.controllers.set(record.id, controller);
+    const heartbeat = setInterval(() => {
+      void this.state.heartbeat(record.id, leaseToken, leaseMs).then((ok) => {
+        if (!ok) controller.abort(new Error("Job execution lease was lost"));
+      }).catch(() => {
+        // A transient store error is not proof of lease loss; a later heartbeat retries.
+      });
+    }, Math.floor(leaseMs / 3));
+    heartbeat.unref?.();
     let onExternalAbort: (() => void) | undefined;
     if (externalSignal) {
       onExternalAbort = () => controller.abort(externalSignal.reason);
@@ -371,10 +456,10 @@ export class DurableJobRuntime implements JobRuntime {
       }
       await this.state.save(record);
     } finally {
+      clearInterval(heartbeat);
       if (externalSignal && onExternalAbort) {
         externalSignal.removeEventListener("abort", onExternalAbort);
       }
-      // An older run must not remove a controller installed by a fast resume.
       if (this.controllers.get(record.id) === controller) this.controllers.delete(record.id);
     }
   }
