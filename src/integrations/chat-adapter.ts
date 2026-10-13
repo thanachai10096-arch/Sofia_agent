@@ -92,7 +92,7 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
 
     try {
       const idempotencyKey = "chat_" + createHash("sha256")
-        .update(`${command.platform}\\0${command.conversationId}\\0${command.messageId}`)
+        .update(JSON.stringify([command.platform, command.conversationId, command.messageId]))
         .digest("hex");
       const run = await options.client.start({
         task,
