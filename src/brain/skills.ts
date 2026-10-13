@@ -80,6 +80,7 @@ export function taskTypeForFailure(category: FailureCategory, message = ""): Pol
   const normalized = message.toLowerCase();
   if (/\b(test|tests|testing|assertion|suite)\b/.test(normalized)) return "testing";
   if (/\b(api|integration|endpoint|contract)\b/.test(normalized)) return "api";
+  if (/\b(git|commit|branch|merge|rebase|pull request)\b/.test(normalized)) return "git";
   if (/\b(browser|website|web research|documentation lookup)\b/.test(normalized)) return "research";
   if (category === "dependency_error" || category === "environment_error") return "terminal";
   if (category === "permission_error") return "security";
