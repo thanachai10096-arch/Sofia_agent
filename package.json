@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-tests.mjs",
     "cli": "tsx src/cli/index.ts",
-    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs"
+    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs",
+    "provenance:report": "node scripts/audit-code-provenance.mjs"
   },
   "engines": {
     "node": ">=20"
