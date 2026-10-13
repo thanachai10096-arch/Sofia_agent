@@ -1,4 +1,5 @@
-import { isIP } from "node:net";
+import { createServer, request as httpRequest, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
+import { connect as connectTcp, isIP, type Socket } from "node:net";
 import { lookup } from "node:dns/promises";
 
 export interface BrowserPage {
@@ -94,6 +95,10 @@ export function assertSafeBrowserUrl(input: string): URL {
   }
 
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const effectivePort = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+  if ((url.protocol === "http:" && effectivePort !== 80) || (url.protocol === "https:" && effectivePort !== 443)) {
+    throw new Error("Browser navigation only supports standard HTTP port 80 and HTTPS port 443.");
+  }
   if (!host || host === "localhost" || host.endsWith(".localhost") ||
       host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".test") ||
       host.endsWith(".example") || host.endsWith(".invalid") ||
@@ -108,9 +113,12 @@ export function assertSafeBrowserUrl(input: string): URL {
   return url;
 }
 
-async function assertPublicResolvedHost(host: string): Promise<void> {
+export async function resolvePublicHostAddress(host: string): Promise<string> {
   const normalized = host.replace(/^\[|\]$/g, "");
-  if (isIP(normalized)) return; // Literal IPs are checked by assertSafeBrowserUrl.
+  const literalFamily = isIP(normalized);
+  if (literalFamily === 4 && isPrivateIpv4(normalized)) throw new Error("Browser egress to private or non-public IP addresses is blocked.");
+  if (literalFamily === 6 && isPrivateIpv6(normalized)) throw new Error("Browser egress to private or non-public IP addresses is blocked.");
+  if (literalFamily !== 0) return normalized;
   let addresses: Array<{ address: string; family: number }>;
   try {
     addresses = await lookup(normalized, { all: true, verbatim: true });
@@ -125,6 +133,141 @@ async function assertPublicResolvedHost(host: string): Promise<void> {
       throw new Error("Browser navigation to a host resolving to private or non-public IP addresses is blocked.");
     }
   }
+  const selected = addresses.find((item) => item.family === 4)?.address ?? addresses[0]?.address;
+  if (!selected) throw new Error("Browser navigation host has no public address.");
+  return selected;
+}
+
+async function assertPublicResolvedHost(host: string): Promise<void> {
+  await resolvePublicHostAddress(host);
+}
+
+
+export interface BrowserEgressProxy {
+  readonly url: string;
+  close(): Promise<void>;
+}
+
+function sendProxyError(response: ServerResponse, status: number, message: string): void {
+  if (response.headersSent) {
+    response.destroy();
+    return;
+  }
+  response.writeHead(status, { "content-type": "text/plain; charset=utf-8", connection: "close" });
+  response.end(message);
+}
+
+function sendSocketError(socket: Socket, status: number): void {
+  if (!socket.destroyed) {
+    const reason = status === 403 ? "Forbidden" : "Bad Gateway";
+    socket.end("HTTP/1.1 " + status + " " + reason + "\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+  }
+}
+
+/**
+ * Local egress proxy that resolves and validates a hostname, then connects to
+ * the selected numeric IP address. This closes the DNS-check/connect TOCTOU
+ * gap left by validating a URL while letting Chromium resolve the hostname.
+ */
+export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
+  let closed = false;
+  const clientSockets = new Set<Socket>();
+  const upstreamSockets = new Set<Socket>();
+  const server = createServer((request, response) => {
+    void (async () => {
+      try {
+        const target = assertSafeBrowserUrl(request.url ?? "");
+        if (target.protocol !== "http:") throw new Error("Only HTTP proxy requests are supported without CONNECT.");
+        if ((target.port ? Number(target.port) : 80) !== 80) throw new Error("Only standard HTTP port 80 is allowed.");
+        const address = await resolvePublicHostAddress(target.hostname);
+        if (closed || request.destroyed) return;
+        const headers: OutgoingHttpHeaders = { ...request.headers, host: target.host };
+        delete headers["proxy-authorization"];
+        delete headers["proxy-connection"];
+        const upstream = httpRequest({
+          hostname: address,
+          family: isIP(address),
+          port: 80,
+          method: request.method,
+          path: target.pathname + target.search,
+          headers,
+          timeout: 15_000,
+        }, (upstreamResponse) => {
+          response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+          upstreamResponse.pipe(response);
+        });
+        upstream.setTimeout(15_000, () => upstream.destroy(new Error("Browser upstream request timed out.")));
+        upstream.once("socket", (socket) => {
+          const upstreamSocket = socket as Socket;
+          upstreamSockets.add(upstreamSocket);
+          upstreamSocket.once("close", () => upstreamSockets.delete(upstreamSocket));
+        });
+        upstream.once("error", (error) => sendProxyError(response, 502, String(error)));
+        request.pipe(upstream);
+      } catch (error) {
+        sendProxyError(response, 403, error instanceof Error ? error.message : "Browser egress request blocked.");
+      }
+    })();
+  });
+
+  server.on("connection", (rawSocket) => {
+    const socket = rawSocket as Socket;
+    clientSockets.add(socket);
+    socket.once("close", () => clientSockets.delete(socket));
+  });
+
+  server.on("connect", (request: IncomingMessage, rawSocket, head: Buffer) => {
+    const client = rawSocket as Socket;
+    void (async () => {
+      try {
+        const target = assertSafeBrowserUrl("https://" + (request.url ?? "") + "/");
+        if ((target.port ? Number(target.port) : 443) !== 443) throw new Error("Only standard HTTPS port 443 is allowed.");
+        const address = await resolvePublicHostAddress(target.hostname);
+        if (closed || client.destroyed) return;
+        const upstream = connectTcp({ host: address, family: isIP(address), port: 443 });
+        upstreamSockets.add(upstream);
+        upstream.once("close", () => upstreamSockets.delete(upstream));
+        let connected = false;
+        upstream.once("error", () => {
+          if (!connected) sendSocketError(client, 502);
+          else client.destroy();
+        });
+        upstream.once("connect", () => {
+          connected = true;
+          client.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: Sofia\r\n\r\n");
+          if (head.length > 0) upstream.write(head);
+          upstream.pipe(client);
+          client.pipe(upstream);
+        });
+      } catch {
+        sendSocketError(client, 403);
+      }
+    })();
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    throw new Error("Could not bind the browser egress proxy.");
+  }
+  return {
+    url: "http://127.0.0.1:" + address.port,
+    async close() {
+      closed = true;
+      for (const socket of clientSockets) socket.destroy();
+      for (const socket of upstreamSockets) socket.destroy();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    },
+  };
 }
 
 export class PlaywrightBrowserRuntime implements BrowserRuntime {
@@ -133,10 +276,14 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
   async launch(): Promise<BrowserSession> {
     const load = new Function("return import('playwright')") as () => Promise<any>;
     const playwright = await load();
-    const browser = await playwright.chromium.launch({ headless: this.headless });
-    const context = await browser.newContext();
-    // Apply the same URL policy to every request, including redirects and subresources.
-    await context.route("**/*", async (route: any) => {
+    const proxy = await createBrowserEgressProxy();
+    let browser: any;
+    let context: any;
+    try {
+      browser = await playwright.chromium.launch({ headless: this.headless, proxy: { server: proxy.url }, args: ["--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] });
+      context = await browser.newContext();
+      // Apply the same URL policy to every request, including redirects and subresources.
+      await context.route("**/*", async (route: any) => {
       try {
         const requestUrl = assertSafeBrowserUrl(route.request().url());
         await assertPublicResolvedHost(requestUrl.hostname);
@@ -144,7 +291,13 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
       } catch {
         await route.abort("blockedbyclient");
       }
-    });
+      });
+    } catch (error) {
+      await context?.close().catch(() => undefined);
+      await browser?.close().catch(() => undefined);
+      await proxy.close().catch(() => undefined);
+      throw error;
+    }
 
     return {
       id: crypto.randomUUID(),
@@ -175,7 +328,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
           close: async () => { await page.close(); },
         } satisfies BrowserPage;
       },
-      close: async () => { await context.close(); await browser.close(); },
+      close: async () => { try { await context.close(); await browser.close(); } finally { await proxy.close(); } },
     };
   }
 }
