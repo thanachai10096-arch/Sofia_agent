@@ -110,7 +110,7 @@ function normalizePersistedSnapshot(value: unknown): EvolutionSnapshot {
             isRecord(item) && typeof item.at === "string" && typeof item.message === "string")
           .slice(-20)
         : [];
-      skills[key] = {
+      setOwnValue(skills, key, {
         id: typeof raw.id === "string" ? raw.id : key,
         ...counters,
         confidence,
@@ -122,7 +122,7 @@ function normalizePersistedSnapshot(value: unknown): EvolutionSnapshot {
         successHistory,
         failureHistory,
         taskTypes,
-      };
+      });
     }
   }
   const taskTypes: EvolutionSnapshot["taskTypes"] = {};
