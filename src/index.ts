@@ -4,6 +4,7 @@ export { ModelRouter } from "./models/router.js";
 export { Reviewer } from "./review/reviewer.js";
 export { createSofiaApi } from "./api/server.js";
 export { SofiaClient } from "./sdk/client.js";
+export type { SofiaClientOptions, SofiaRunInput, SofiaRunResponse, SofiaRunStatus, SofiaPollOptions, SofiaMemoryKind, SofiaMemoryEntry, SofiaMemoryListResponse } from "./sdk/client.js";
 export { createNodeWorkspaceRuntime } from "./platform/local-runtime.js";
 export { detectPlatform } from "./platform/runtime.js";
 export { SofiaModelGateway } from "./models/gateway.js";
