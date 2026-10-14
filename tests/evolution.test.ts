@@ -188,6 +188,10 @@ test("malformed persisted learning entries are ignored or normalized safely", as
       version: 999,
       skills: {
         broken: null,
+        ["__proto__"]: {
+          attempts: 1, successes: 1, failures: 0, confidence: 0.8,
+          avgSteps: 1, avgRecoveryRounds: 0,
+        },
         "valid-but-partial": {
           attempts: "not-a-number",
           successes: 4,
@@ -204,6 +208,7 @@ test("malformed persisted learning entries are ignored or normalized safely", as
 
     const engine = new EvolutionEngine(file);
     assert.equal(engine.getSkill("broken"), undefined);
+    assert.equal(engine.getSkill("__proto__")?.successes, 1);
     const skill = engine.getSkill("valid-but-partial");
     assert.ok(skill);
     assert.equal(skill.attempts, 0);
