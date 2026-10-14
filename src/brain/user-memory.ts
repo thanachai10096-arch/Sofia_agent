@@ -29,6 +29,14 @@ const MAX_ENTRIES = 200;
 const MAX_CONTENT_CHARS = 1200;
 const ALLOWED_KINDS = new Set<UserMemoryKind>(["preference", "fact", "goal", "instruction"]);
 
+function redactMemorySecrets(content: string): string {
+  return String(redactSecrets(content))
+    .replace(/\\bsk-[A-Za-z0-9_-]{16,}\\b/g, "[REDACTED]")
+    .replace(/\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g, "[REDACTED]")
+    .replace(/\\bgithub_pat_[A-Za-z0-9_]{20,}\\b/g, "[REDACTED]")
+    .replace(/\\bAKIA[0-9A-Z]{16}\\b/g, "[REDACTED]");
+}
+
 function userKey(userId: string): string {
   if (typeof userId !== "string" || !userId.trim() || userId.length > 512) {
     throw new Error("A valid user identity is required for user memory.");
@@ -79,7 +87,7 @@ export class FileUserMemoryStore implements UserMemoryStore {
     userKey(userId);
     if (!validEntry(entry)) throw new Error("Invalid user memory entry.");
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
-    const content = String(redactSecrets(entry.content)).trim().slice(0, MAX_CONTENT_CHARS);
+    const content = redactMemorySecrets(entry.content).trim().slice(0, MAX_CONTENT_CHARS);
     if (!content) throw new Error("User memory content is empty after sanitization.");
     const safeEntry: UserMemoryEntry = {
       ...entry,
