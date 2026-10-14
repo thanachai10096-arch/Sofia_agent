@@ -23,6 +23,7 @@ import { reviewCodeChange } from "../review/code-review.js";
 import type { RunStore } from "./run-store.js";
 import type { ProjectMemoryEntry, ProjectMemoryStore } from "./project-memory.js";
 import type { EvolutionEngine } from "./evolution.js";
+import { createUserMemoryEntry, explicitUserMemoryFromMessage, type UserMemoryEntry, type UserMemoryStore } from "./user-memory.js";
 
 import type {
   AcceptanceCriterion,
@@ -95,6 +96,7 @@ interface Dependencies {
   onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
   runStore?: RunStore;
   projectMemory?: ProjectMemoryStore;
+  userMemory?: UserMemoryStore;
   evolution?: EvolutionEngine;
 }
 
@@ -246,6 +248,9 @@ export class SofiaBrain {
   private projectContextLoaded = false;
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
+  private userMemoryEntries: UserMemoryEntry[] = [];
+  private userMemoryLoaded = false;
+  private currentPrincipalId?: string;
   private readonly selectedSkillIds = new Set<string>();
   private activeSkillId?: string;
 
@@ -354,6 +359,19 @@ export class SofiaBrain {
       }
     }
 
+    if (!this.userMemoryLoaded) {
+      this.userMemoryLoaded = true;
+      if (this.dependencies.userMemory && this.currentPrincipalId) {
+        try {
+          this.userMemoryEntries = (await this.wait(() => this.dependencies.userMemory!.list(this.currentPrincipalId!)))
+            .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+            .slice(0, 8);
+        } catch {
+          this.userMemoryEntries = [];
+        }
+      }
+    }
+
     if (!this.projectMemoryLoaded && this.dependencies.projectMemory) {
       this.projectMemoryLoaded = true;
       try { this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.list()); }
@@ -372,6 +390,7 @@ export class SofiaBrain {
           decisions: this.decisions,
           projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined,
           projectMemory: this.projectMemory.slice(-12).map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, source: entry.source })),
+          userMemory: this.userMemoryEntries.map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, updatedAt: entry.updatedAt })),
         },
       });
 
@@ -823,6 +842,7 @@ export class SofiaBrain {
     }
 
     this.started = true;
+    this.currentPrincipalId = input.principalId;
     const requestedSignal = input.signal ?? new AbortController().signal;
     requestedSignal.throwIfAborted();
     this.signal = requestedSignal;
@@ -873,6 +893,25 @@ export class SofiaBrain {
 
     try {
       this.emit({ type: "brain.started", state: "idle" });
+
+      // Persist only explicit remember requests. Ordinary conversation is never
+      // silently promoted into long-term personal memory.
+      if (this.dependencies.userMemory && this.currentPrincipalId) {
+        if (/^(?:please\\s+)?forget (?:everything|all) (?:you )?(?:remember|memories) about me[.! ]*$/i.test(input.task.trim()) ||
+            /^ลืม(?:ทุกอย่าง|ความทรงจำ)เกี่ยวกับฉัน[.! ]*$/u.test(input.task.trim())) {
+          await this.wait(() => this.dependencies.userMemory!.clear(this.currentPrincipalId!));
+          this.userMemoryEntries = [];
+          this.userMemoryLoaded = true;
+        } else {
+          const requestedMemory = explicitUserMemoryFromMessage(input.task);
+          if (requestedMemory) {
+            const entry = createUserMemoryEntry(requestedMemory.kind, requestedMemory.content);
+            await this.wait(() => this.dependencies.userMemory!.save(this.currentPrincipalId!, entry));
+            this.userMemoryEntries = [entry, ...this.userMemoryEntries.filter((item) => item.id !== entry.id)].slice(0, 8);
+            this.userMemoryLoaded = true;
+          }
+        }
+      }
 
       if (resumed) {
         if (resumed.version !== 1) throw new Stop("Unsupported run snapshot version");
