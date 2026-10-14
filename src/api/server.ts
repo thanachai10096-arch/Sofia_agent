@@ -246,7 +246,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const pathname = parsedUrl.pathname;
       const isMemoryRead = req.method === "GET" && pathname === "/v1/memory";
       const isMemoryMutation = req.method === "DELETE" &&
-        (pathname === "/v1/memory" || /^\\/v1\\/memory\\/[^/]+$/.test(pathname));
+        (pathname === "/v1/memory" || /^\/v1\/memory\/[^/]+$/.test(pathname));
       if (isMemoryRead && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
       }
