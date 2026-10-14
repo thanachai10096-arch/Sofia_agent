@@ -135,7 +135,9 @@ test("API memory routes enforce scopes and isolate each authenticated principal"
         "test-key": ["agent:read", "agent:run"],
         "read-only": ["agent:read"],
         "other-key": ["agent:read", "agent:run"],
+        "mobile-key": ["agent:read", "agent:run"],
       },
+      principalIdsByApiKey: { "test-key": "user:alice", "mobile-key": "user:alice" },
     });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
@@ -153,6 +155,15 @@ test("API memory routes enforce scopes and isolate each authenticated principal"
 
       const search = await fetch(`${baseUrl}/v1/memory?q=concise`, { headers: headers("test-key") });
       assert.equal((await search.json() as { entries: unknown[] }).entries.length, 1);
+
+      // Separate channel credentials can share memory only through a trusted
+      // server-side mapping; a client-supplied identity is ignored.
+      const mobile = await fetch(`${baseUrl}/v1/memory`, {
+        headers: { ...headers("mobile-key"), "x-sofia-user-id": "user:mallory" },
+      });
+      assert.equal((await mobile.json() as { entries: Array<{ content: string }> }).entries[0]?.content, "Prefers concise Thai responses");
+      const unmapped = await fetch(`${baseUrl}/v1/memory`, { headers: headers("other-key") });
+      assert.deepEqual((await unmapped.json() as { entries: unknown[] }).entries, []);
 
       const forbiddenDelete = await fetch(`${baseUrl}/v1/memory/${first.id}`, {
         method: "DELETE", headers: headers("read-only"),
