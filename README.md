@@ -261,6 +261,19 @@ Replace the example placeholder with the actual digest printed by your local Doc
 
 More details: [Desktop Runtime Foundation](docs/desktop-runtime.md).
 
+## `> Personal memory & recall`
+
+Sofia supports persistent, user-scoped memory in addition to project memory and learned repair history.
+
+- Explicitly ask Sofia to remember a preference or fact, for example: `Remember that I prefer concise Thai responses` or `จำไว้ว่า ฉันชอบคำตอบภาษาไทย`.
+- Later requests can use those saved details as context. Sofia loads a small, bounded set of recent memories rather than the entire memory file.
+- Ask Sofia to forget saved details with `Forget all memories about me` or `ลืมทุกอย่างเกี่ยวกับฉัน`.
+- Memory is local-first, scoped to the authenticated principal identity, and stored separately from project memory. On the API, the principal currently maps to the API key identity; use a separate key per user in a multi-user deployment to prevent sharing a memory namespace.
+- Sofia saves only clearly phrased, explicit remember requests; it does not automatically turn every conversation into long-term memory. Secret-like values are redacted, prompt-injection-like content is rejected, entries are bounded, and local files use restrictive permissions.
+- User memory is optional context, not an instruction or permission grant. ToolGateway and security policy remain authoritative. Do not store credentials, recovery codes, or other secrets.
+
+Programmatic integrations can use `FileUserMemoryStore`, `UserMemoryStore`, and `UserMemoryEntry` exported by the package to list, search, delete, or clear memories for a trusted principal.
+
 ## `> Evidence & limitations`
 
 - Verification results describe the checks actually executed; they are not a guarantee of correctness unless the checks independently establish the requested outcome.
