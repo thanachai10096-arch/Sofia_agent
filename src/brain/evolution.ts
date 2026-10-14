@@ -109,6 +109,7 @@ function normalizePersistedSnapshot(value: unknown): EvolutionSnapshot {
         ? raw.failureHistory.filter((item): item is { at: string; message: string } =>
             isRecord(item) && typeof item.at === "string" && typeof item.message === "string")
           .slice(-20)
+          .map((item) => ({ at: item.at, message: item.message.slice(0, 500) }))
         : [];
       setOwnValue(skills, key, {
         id: typeof raw.id === "string" ? raw.id : key,
