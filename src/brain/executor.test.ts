@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createSofiaBrain } from "./executor.js";
+import { EvolutionEngine } from "./evolution.js";
 import type { BrainReasoner, ToolGateway, ToolResult } from "./types.js";
 import type { SubagentRuntime } from "./subagents.js";
 
@@ -103,8 +104,13 @@ function makeTools(): ToolGateway {
   };
 }
 
-test("initial planning receives matching built-in skills before any failure", async () => {
+test("initial planning ranks relevant skills using verified outcome history", async () => {
   let plannedSkillIds: string[] = [];
+  const evolution = new EvolutionEngine();
+  for (let i = 0; i < 8; i++) {
+    evolution.recordSuccess("research-evidence-synthesis", 2, 0, "file-write");
+    evolution.recordFailure("browser-workflow-recovery", "browser recovery did not solve the task", "file-write");
+  }
   const base = makeReasoner();
   const reasoner: BrainReasoner = {
     async prepare(request, options) {
@@ -120,7 +126,7 @@ test("initial planning receives matching built-in skills before any failure", as
   };
 
   const brain = createSofiaBrain({
-    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    dependencies: { reasoner, tools: makeTools(), evolution, allowShell: false, allowNetwork: false },
     limits: {
       maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
       maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
@@ -128,7 +134,7 @@ test("initial planning receives matching built-in skills before any failure", as
   });
 
   const report = await brain.run({
-    task: "Use Playwright browser workflow to create hello.txt",
+    task: "Use Playwright browser workflow to research evidence and compare sources while creating hello.txt",
     acceptanceCriteria: [{
       id: "file-exists",
       description: "hello.txt exists",
@@ -141,6 +147,9 @@ test("initial planning receives matching built-in skills before any failure", as
 
   assert.equal(report.completed, true, report.summary);
   assert.ok(plannedSkillIds.includes("browser-workflow-recovery"));
+  assert.ok(plannedSkillIds.includes("research-evidence-synthesis"));
+  assert.equal(plannedSkillIds[0], "research-evidence-synthesis");
+  await evolution.flush();
 });
 
 test("Brain completes a coding loop only after trusted verification", async () => {
