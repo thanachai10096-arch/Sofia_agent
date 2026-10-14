@@ -216,7 +216,9 @@ export function matchSkills(
     .map((skill) => ({
       skill,
       score:
-        (skill.categories.includes(category) ? 100 : 0) +
+        // "unknown" is a lack of evidence, not a category match. Do not let
+        // every generic skill outrank concrete trigger matches on new tasks.
+        (category !== "unknown" && skill.categories.includes(category) ? 100 : 0) +
         skill.triggers.filter((trigger) => lower.includes(trigger.toLowerCase())).length * 10,
     }))
     .filter((item) => item.score > 0)
