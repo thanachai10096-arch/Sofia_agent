@@ -211,6 +211,35 @@ export class SofiaClient {
     return this.waitFor(() => this.getRun(id, options.signal), options);
   }
 
+  /** Lists saved memories for the authenticated principal. */
+  async listMemory(signal?: AbortSignal): Promise<SofiaMemoryListResponse> {
+    return this.request<SofiaMemoryListResponse>("/v1/memory", {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  /** Searches saved memories for the authenticated principal. */
+  async searchMemory(query: string, signal?: AbortSignal): Promise<SofiaMemoryListResponse> {
+    if (!query.trim()) return this.listMemory(signal);
+    const params = new URLSearchParams({ q: query.slice(0, 200) });
+    return this.request<SofiaMemoryListResponse>(`/v1/memory?${params.toString()}`, {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  /** Deletes one memory belonging to the authenticated principal. */
+  async deleteMemory(id: string, signal?: AbortSignal): Promise<{ ok: boolean; deleted: boolean }> {
+    return this.request<{ ok: boolean; deleted: boolean }>(`/v1/memory/${encodeURIComponent(id)}`, {
+      method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  /** Clears all memories belonging to the authenticated principal. */
+  async clearMemory(signal?: AbortSignal): Promise<{ ok: boolean; cleared: boolean }> {
+    return this.request<{ ok: boolean; cleared: boolean }>("/v1/memory", {
+      method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
   private async waitFor(
     fetchStatus: () => Promise<SofiaRunResponse>,
     options: SofiaPollOptions,
