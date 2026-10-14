@@ -275,7 +275,25 @@ Sofia supports persistent, user-scoped memory in addition to project memory and 
 - Sofia saves only clearly phrased, explicit remember requests; it does not automatically turn every conversation into long-term memory. Secret-like values are redacted, prompt-injection-like content is rejected, entries are bounded, and local files use restrictive permissions.
 - User memory is optional context, not an instruction or permission grant. ToolGateway and security policy remain authoritative. Do not store credentials, recovery codes, or other secrets.
 
-Programmatic integrations can use `FileUserMemoryStore`, `UserMemoryStore`, and `UserMemoryEntry` exported by the package to list, search, delete, or clear memories for a trusted principal.
+Programmatic integrations can use `FileUserMemoryStore`, `UserMemoryStore`, and `UserMemoryEntry` exported by the package to list, search, delete, or clear memories for a trusted principal. Web, desktop, and mobile clients can use the `SofiaClient` SDK without inventing their own memory routes:
+
+```ts
+import { SofiaClient } from "sofia-agent";
+
+const sofia = new SofiaClient({
+  baseUrl: process.env.SOFIA_API_URL!,
+  apiKey: process.env.SOFIA_API_KEY!,
+});
+
+const saved = await sofia.listMemory();
+const matching = await sofia.searchMemory("language preference");
+// Offer these operations behind an explicit confirmation in user-facing settings:
+if (matching.entries[0]) await sofia.deleteMemory(matching.entries[0].id);
+// Or, after confirming with the user:
+await sofia.clearMemory();
+```
+
+The SDK methods are `listMemory`, `searchMemory`, `deleteMemory`, and `clearMemory`. The API enforces principal isolation and scopes. Keep privileged API keys in a trusted backend, not in browser or mobile app bundles; client apps should call your authenticated backend, which can issue/route appropriately scoped credentials.
 
 ## `> Evidence & limitations`
 
