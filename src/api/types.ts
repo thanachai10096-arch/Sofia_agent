@@ -37,6 +37,13 @@ export interface ApiAuth {
 
 export interface SofiaApiConfig {
   apiKeys: Record<string, string[]>;
+  /**
+   * Optional trusted mapping from API key to a stable end-user identity.
+   * Configure only from a server-side authenticated identity provider. Never
+   * populate this map from request headers, query parameters, or request JSON.
+   * Keys omitted from this map remain isolated by their hashed API-key identity.
+   */
+  principalIdsByApiKey?: Record<string, string>;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
