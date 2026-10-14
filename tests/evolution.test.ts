@@ -221,7 +221,7 @@ test("malformed persisted learning entries are ignored or normalized safely", as
     assert.equal(skill.failureHistory.length, 1);
     assert.equal(skill.failureHistory[0]?.message.length, 500);
     assert.deepEqual(engine.getSnapshot().taskTypes.coding, { attempts: 0, successes: 0, failures: 0 });
-    assert.ok(engine.rank(["valid-but-partial"], "coding")[0]?.score >= 0);
+    assert.ok((engine.rank(["valid-but-partial"], "coding")[0]?.score ?? -1) >= 0);
     await engine.flush();
   } finally {
     await rm(directory, { recursive: true, force: true });
