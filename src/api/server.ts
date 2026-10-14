@@ -17,6 +17,7 @@ interface ActiveRun {
   createdAt: number;
   updatedAt: number;
   ownerKeyId: string;
+  principalId: string;
   desktopCapabilities: DesktopCapability[];
 }
 
@@ -63,7 +64,16 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   if (!token || !Object.prototype.hasOwnProperty.call(config.apiKeys, token)) return null;
   const scopes = config.apiKeys[token];
   if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === "string")) return null;
-  return { keyId: createHash("sha256").update(token).digest("hex").slice(0, 32), scopes };
+  const keyId = createHash("sha256").update(token).digest("hex").slice(0, 32);
+  const configuredPrincipal = config.principalIdsByApiKey &&
+    Object.prototype.hasOwnProperty.call(config.principalIdsByApiKey, token)
+      ? config.principalIdsByApiKey[token]
+      : undefined;
+  // This mapping is server configuration, never a client-supplied identity.
+  if (configuredPrincipal !== undefined &&
+      (typeof configuredPrincipal !== "string" || !configuredPrincipal.trim() ||
+       configuredPrincipal.length > 256 || /[\\x00-\\x1f\\x7f]/.test(configuredPrincipal))) return null;
+  return { keyId, principalId: configuredPrincipal?.trim() || keyId, scopes };
 }
 
 function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapability[] {
@@ -127,7 +137,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       id: run.id, status: run.status,
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
       ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
-      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+      ownerKeyId: run.ownerKeyId, principalId: run.principalId, desktopCapabilities: [...run.desktopCapabilities],
     };
     void runStore.save(record);
   };
@@ -144,6 +154,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(interrupted ? { error: "Run interrupted by server restart." } : record.error ? { error: record.error } : {}),
       controller: new AbortController(), createdAt: record.createdAt,
       updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
+      principalId: record.principalId ?? record.ownerKeyId,
       desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
     };
     runs.set(run.id, run); if (interrupted) persist(run);
@@ -170,7 +181,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
         const result = await agent.run({
-          principalId: run.ownerKeyId,
+          principalId: run.principalId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
@@ -281,8 +292,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!deps.userMemory) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
         const query = parsedUrl.searchParams.get("q")?.slice(0, 200) ?? "";
         const entries = query
-          ? await deps.userMemory.find(auth.keyId, query, 20)
-          : await deps.userMemory.list(auth.keyId);
+          ? await deps.userMemory.find(auth.principalId, query, 20)
+          : await deps.userMemory.list(auth.principalId);
         return json(res, 200, {
           entries: [...entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 50),
         }, origin, config);
@@ -290,7 +301,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (isMemoryMutation) {
         if (!deps.userMemory) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
         if (pathname === "/v1/memory") {
-          await deps.userMemory.clear(auth.keyId);
+          await deps.userMemory.clear(auth.principalId);
           return json(res, 200, { ok: true, cleared: true }, origin, config);
         }
         let memoryId: string;
@@ -299,7 +310,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         } catch {
           return json(res, 400, { error: "invalid_memory_id" }, origin, config);
         }
-        const deleted = await deps.userMemory.delete(auth.keyId, memoryId);
+        const deleted = await deps.userMemory.delete(auth.principalId, memoryId);
         if (!deleted) return json(res, 404, { error: "memory_not_found" }, origin, config);
         return json(res, 200, { ok: true, deleted: true }, origin, config);
       }
@@ -365,7 +376,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
+        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, principalId: auth.principalId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
         runs.set(runId, run);
         persist(run);
         res.writeHead(200, {
@@ -383,7 +394,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           run.status = "running";
           const result = await agent.run({
-            principalId: auth.keyId,
+            principalId: auth.principalId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
@@ -448,6 +459,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             createdAt: Date.now(),
             updatedAt: Date.now(),
             ownerKeyId: auth.keyId,
+            principalId: auth.principalId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
           };
           runs.set(runId, run);
