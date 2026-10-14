@@ -365,7 +365,7 @@ export class SofiaBrain {
         try {
           this.userMemoryEntries = (await this.wait(() => this.dependencies.userMemory!.list(this.currentPrincipalId!)))
             .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-            .slice(0, 8);
+            .slice(0, 6);
         } catch {
           this.userMemoryEntries = [];
         }
@@ -390,7 +390,7 @@ export class SofiaBrain {
           decisions: this.decisions,
           projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined,
           projectMemory: this.projectMemory.slice(-12).map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, source: entry.source })),
-          userMemory: this.userMemoryEntries.map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, updatedAt: entry.updatedAt })),
+          userMemory: this.userMemoryEntries.map((entry) => ({ kind: entry.kind, content: entry.content.slice(0, 500), confidence: entry.confidence, updatedAt: entry.updatedAt })),
         },
       });
 
