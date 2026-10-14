@@ -30,6 +30,7 @@ test("expanded catalog includes distinct engineering and operations skills", () 
     "workspace-file-operations",
     "token-and-cost-budgeting",
     "multi-agent-handoff",
+    "user-memory-and-preferences",
   ]) {
     assert.ok(ids.has(id), `missing built-in skill: ${id}`);
   }
@@ -50,6 +51,11 @@ test("research, workspace, cost, and delegation requests match focused skills", 
   assert.equal(matchSkills("permission_error", "path traversal while editing file path in workspace")[0]?.id, "workspace-file-operations");
   assert.equal(matchSkills("environment_error", "token budget and context window usage")[0]?.id, "token-and-cost-budgeting");
   assert.equal(matchSkills("unknown", "delegate this bounded subtask to a subagent")[0]?.id, "multi-agent-handoff");
+});
+
+test("explicit remember and forget requests select user memory skill", () => {
+  assert.equal(matchSkills("unknown", "Remember that I prefer concise Thai responses")[0]?.id, "user-memory-and-preferences");
+  assert.equal(matchSkills("unknown", "ลืมทุกอย่างเกี่ยวกับฉัน")[0]?.id, "user-memory-and-preferences");
 });
 
 test("skill selection is bounded and deterministic", () => {
