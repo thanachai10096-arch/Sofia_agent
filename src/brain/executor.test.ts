@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createUserMemoryEntry, FileUserMemoryStore } from "./user-memory.js";
 
 import { createSofiaBrain } from "./executor.js";
 import { EvolutionEngine } from "./evolution.js";
@@ -560,4 +564,53 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
   assert.equal(failureCalls, 1);
   assert.equal(replannedActionCalls, 1, "changed action must not be skipped due to a reused step ID");
   assert.equal(report.completed, true, report.summary);
+});
+
+
+test("Brain saves explicit user preferences and recalls them in the model context", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-brain-user-memory-"));
+  try {
+    const userMemory = new FileUserMemoryStore(directory);
+    const observedMemory: Array<{ kind: string; content: string }> = [];
+    const base = makeReasoner();
+    const reasoner: BrainReasoner = {
+      async prepare(request, options) {
+        const parsed = JSON.parse(request) as {
+          memory?: { userMemory?: Array<{ kind: string; content: string }> };
+        };
+        observedMemory.push(...(parsed.memory?.userMemory ?? []));
+        return base.prepare(request, options);
+      },
+    };
+    const brain = createSofiaBrain({
+      dependencies: { reasoner, tools: makeTools(), userMemory, allowShell: false, allowNetwork: false },
+      limits: {
+        maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+        maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+      },
+    });
+
+    const report = await brain.run({
+      principalId: "test-user-1",
+      task: "Remember that I prefer concise Thai responses",
+      acceptanceCriteria: [{
+        id: "file-exists",
+        description: "hello.txt exists",
+        probe: { tool: "workspace.list_files", input: { path: "." } },
+        evaluate(data) {
+          return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+        },
+      }],
+    });
+
+    assert.equal(report.completed, true, report.summary);
+    const stored = await userMemory.list("test-user-1");
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0]?.kind, "preference");
+    assert.equal(stored[0]?.content, "concise Thai responses");
+    assert.ok(observedMemory.some((entry) => entry.kind === "preference" && entry.content === "concise Thai responses"));
+    assert.deepEqual(await userMemory.list("different-user"), []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
