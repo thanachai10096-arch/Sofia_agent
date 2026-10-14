@@ -42,6 +42,8 @@ function validEntry(value: unknown): value is UserMemoryEntry {
   return typeof entry.id === "string" && entry.id.length > 0 &&
     typeof entry.content === "string" && entry.content.length > 0 &&
     typeof entry.kind === "string" && ALLOWED_KINDS.has(entry.kind as UserMemoryKind) &&
+    entry.source === "explicit-user-request" &&
+    typeof entry.confidence === "number" && Number.isFinite(entry.confidence) &&
     typeof entry.createdAt === "string" && typeof entry.updatedAt === "string" &&
     typeof entry.uses === "number" && Number.isFinite(entry.uses) && entry.uses >= 0;
 }
@@ -155,9 +157,10 @@ export class FileUserMemoryStore implements UserMemoryStore {
 export function explicitUserMemoryFromMessage(message: string): { kind: UserMemoryKind; content: string } | undefined {
   const trimmed = message.trim();
   const patterns: Array<{ regex: RegExp; kind: UserMemoryKind }> = [
-    { regex: /^(?:please\s+)?remember\s+(?:that\s+)?(.+)$/i, kind: "fact" },
     { regex: /^(?:please\s+)?remember\s+I\s+prefer\s+(.+)$/i, kind: "preference" },
     { regex: /^(?:please\s+)?remember\s+my\s+goal\s+is\s+(.+)$/i, kind: "goal" },
+    { regex: /^(?:please\s+)?remember\s+(?:that\s+)?(.+)$/i, kind: "fact" },
+    { regex: /^(?:help me )?remember that\s*(.+)$/i, kind: "fact" },
     { regex: /^(?:ช่วย)?จำไว้ว่า\s*(.+)$/u, kind: "fact" },
     { regex: /^จำไว้ว่าฉันชอบ\s*(.+)$/u, kind: "preference" },
     { regex: /^เป้าหมายของฉันคือ\s*(.+)$/u, kind: "goal" },
