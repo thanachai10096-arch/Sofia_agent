@@ -23,6 +23,7 @@ import { FileRunStore } from "../brain/run-store.js";
 import { DurableJobRuntime } from "../brain/job-runtime.js";
 import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
+import { FileUserMemoryStore } from "../brain/user-memory.js";
 import { EvolutionEngine } from "../brain/evolution.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
@@ -42,6 +43,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
+  const userMemory=new FileUserMemoryStore();
   const skillLedger=new PersistentSkillLedger(projectMemory);
   return ({signal,maxSteps,principalId,desktopCapabilities,onRunSnapshot})=>{
     const runLimit:BudgetLimit={maxTokens:intEnv("SOFIA_BRAIN_MAX_TOKENS",60000,1),maxCostNanoUsd:bigintEnv("SOFIA_BRAIN_MAX_COST_NANO_USD",NO_COST_CAP),maxCalls:intEnv("SOFIA_BRAIN_MAX_MODEL_CALLS",12,1),maxInFlight:intEnv("SOFIA_BRAIN_MAX_IN_FLIGHT",1,1)};
@@ -65,7 +67,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const subagents=createSubagentRuntime(reasoner,toolGateway);
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
-    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot},limits});
+    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,userMemory,evolution,onRunSnapshot},limits});
   };
 }
 
