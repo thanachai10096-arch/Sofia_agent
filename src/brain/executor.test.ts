@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createUserMemoryEntry, FileUserMemoryStore } from "./user-memory.js";
+import { FileUserMemoryStore } from "./user-memory.js";
 
 import { createSofiaBrain } from "./executor.js";
 import { EvolutionEngine } from "./evolution.js";
