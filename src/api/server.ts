@@ -72,7 +72,7 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   // This mapping is server configuration, never a client-supplied identity.
   if (configuredPrincipal !== undefined &&
       (typeof configuredPrincipal !== "string" || !configuredPrincipal.trim() ||
-       configuredPrincipal.length > 256 || /[\\x00-\\x1f\\x7f]/.test(configuredPrincipal))) return null;
+       configuredPrincipal.length > 256 || /[\x00-\x1f\x7f]/.test(configuredPrincipal))) return null;
   return { keyId, principalId: configuredPrincipal?.trim() || keyId, scopes };
 }
 
@@ -485,7 +485,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         try {
           const result = await agent.run({
-            principalId: auth.keyId,
+            principalId: auth.principalId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
