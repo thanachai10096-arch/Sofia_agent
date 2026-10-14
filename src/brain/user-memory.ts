@@ -31,10 +31,10 @@ const ALLOWED_KINDS = new Set<UserMemoryKind>(["preference", "fact", "goal", "in
 
 function redactMemorySecrets(content: string): string {
   return String(redactSecrets(content))
-    .replace(/\\bsk-[A-Za-z0-9_-]{16,}\\b/g, "[REDACTED]")
-    .replace(/\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g, "[REDACTED]")
-    .replace(/\\bgithub_pat_[A-Za-z0-9_]{20,}\\b/g, "[REDACTED]")
-    .replace(/\\bAKIA[0-9A-Z]{16}\\b/g, "[REDACTED]");
+    .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, "[REDACTED]")
+    .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "[REDACTED]")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED]");
 }
 
 function userKey(userId: string): string {
