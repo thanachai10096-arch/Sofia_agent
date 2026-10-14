@@ -63,6 +63,77 @@ function normalizeTaskType(taskType: string): string {
   return normalized || "general";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function nonNegativeNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : fallback;
+}
+
+function normalizeCounters(value: unknown): { attempts: number; successes: number; failures: number } {
+  const record = isRecord(value) ? value : {};
+  return {
+    attempts: nonNegativeNumber(record.attempts),
+    successes: nonNegativeNumber(record.successes),
+    failures: nonNegativeNumber(record.failures),
+  };
+}
+
+function normalizePersistedSnapshot(value: unknown): EvolutionSnapshot {
+  if (!isRecord(value)) return { version: 1, skills: {}, taskTypes: {} };
+  const skills: Record<string, SkillPerformance> = {};
+  if (isRecord(value.skills)) {
+    for (const [key, raw] of Object.entries(value.skills)) {
+      if (!isRecord(raw)) continue;
+      const counters = normalizeCounters(raw);
+      const confidence = typeof raw.confidence === "number" && Number.isFinite(raw.confidence)
+        ? clamp(raw.confidence, 0, 1)
+        : 0.5;
+      const taskTypes: SkillPerformance["taskTypes"] = {};
+      if (isRecord(raw.taskTypes)) {
+        for (const [taskType, stats] of Object.entries(raw.taskTypes)) {
+          setOwnValue(taskTypes, taskType, normalizeCounters(stats));
+        }
+      }
+      const successHistory = Array.isArray(raw.successHistory)
+        ? raw.successHistory.filter((item): item is { at: string; steps: number; recoveryRounds: number } =>
+            isRecord(item) && typeof item.at === "string" &&
+            typeof item.steps === "number" && Number.isFinite(item.steps) && item.steps >= 0 &&
+            typeof item.recoveryRounds === "number" && Number.isFinite(item.recoveryRounds) && item.recoveryRounds >= 0)
+          .slice(-20)
+        : [];
+      const failureHistory = Array.isArray(raw.failureHistory)
+        ? raw.failureHistory.filter((item): item is { at: string; message: string } =>
+            isRecord(item) && typeof item.at === "string" && typeof item.message === "string")
+          .slice(-20)
+        : [];
+      skills[key] = {
+        id: typeof raw.id === "string" ? raw.id : key,
+        ...counters,
+        confidence,
+        avgSteps: nonNegativeNumber(raw.avgSteps),
+        avgRecoveryRounds: nonNegativeNumber(raw.avgRecoveryRounds),
+        ...(typeof raw.lastSuccessAt === "string" ? { lastSuccessAt: raw.lastSuccessAt } : {}),
+        ...(typeof raw.lastFailureAt === "string" ? { lastFailureAt: raw.lastFailureAt } : {}),
+        ...(typeof raw.lastFailure === "string" ? { lastFailure: raw.lastFailure.slice(0, 500) } : {}),
+        successHistory,
+        failureHistory,
+        taskTypes,
+      };
+    }
+  }
+  const taskTypes: EvolutionSnapshot["taskTypes"] = {};
+  if (isRecord(value.taskTypes)) {
+    for (const [key, stats] of Object.entries(value.taskTypes)) {
+      setOwnValue(taskTypes, key, normalizeCounters(stats));
+    }
+  }
+  return { version: 1, skills, taskTypes };
+}
+
 export class EvolutionEngine {
   private snapshot: EvolutionSnapshot;
   private readonly file?: string;
@@ -73,19 +144,7 @@ export class EvolutionEngine {
     this.snapshot = { version: 1, skills: {}, taskTypes: {} };
     if (file) {
       try {
-        const loaded = JSON.parse(readFileSync(file, "utf8")) as Partial<EvolutionSnapshot>;
-        const skills = loaded.skills ?? {};
-        this.snapshot = {
-          version: 1,
-          skills: Object.fromEntries(Object.entries(skills).map(([id, skill]) => [id, {
-            ...skill,
-            id: skill.id ?? id,
-            taskTypes: skill.taskTypes ?? {},
-            successHistory: skill.successHistory ?? [],
-            failureHistory: skill.failureHistory ?? [],
-          }])),
-          taskTypes: loaded.taskTypes ?? {},
-        };
+        this.snapshot = normalizePersistedSnapshot(JSON.parse(readFileSync(file, "utf8")) as unknown);
       } catch {
         // A missing/corrupt learning file must never prevent Sofia from running.
       }
