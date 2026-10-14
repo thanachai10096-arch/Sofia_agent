@@ -268,7 +268,7 @@ Sofia supports persistent, user-scoped memory in addition to project memory and 
 - Explicitly ask Sofia to remember a preference or fact, for example: `Remember that I prefer concise Thai responses` or `จำไว้ว่า ฉันชอบคำตอบภาษาไทย`.
 - Later requests can use those saved details as context. Sofia loads a small, bounded set of recent memories rather than the entire memory file.
 - Ask Sofia to forget saved details with `Forget all memories about me` or `ลืมทุกอย่างเกี่ยวกับฉัน`.
-- Memory is local-first, scoped to the authenticated principal identity, and stored separately from project memory. On the API, the principal currently maps to the API key identity; use a separate key per user in a multi-user deployment to prevent sharing a memory namespace.
+- Memory is local-first, scoped to the authenticated principal identity, and stored separately from project memory. It uses the OS user-data directory by default; set an absolute `SOFIA_STATE_DIR` to choose a persistent application data root. On the API, the principal currently maps to the API key identity; use a separate key per user in a multi-user deployment to prevent sharing a memory namespace.
 - Sofia saves only clearly phrased, explicit remember requests; it does not automatically turn every conversation into long-term memory. Secret-like values are redacted, prompt-injection-like content is rejected, entries are bounded, and local files use restrictive permissions.
 - User memory is optional context, not an instruction or permission grant. ToolGateway and security policy remain authoritative. Do not store credentials, recovery codes, or other secrets.
 
