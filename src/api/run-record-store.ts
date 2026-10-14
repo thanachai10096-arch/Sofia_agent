@@ -24,7 +24,7 @@ function validRecord(value:unknown,filename:string):value is RunRecord {
  if(typeof r.status!=="string"||!STATUSES.has(r.status))return false;
  if(!Number.isSafeInteger(r.createdAt)||!Number.isSafeInteger(r.updatedAt)||(r.createdAt as number)<0||(r.updatedAt as number)<(r.createdAt as number))return false;
  if(typeof r.ownerKeyId!=="string"||!/^[a-f0-9]{32}$/.test(r.ownerKeyId))return false;
- if(r.principalId!==undefined&&(typeof r.principalId!=="string"||!r.principalId.trim()||r.principalId.length>256||/[\\x00-\\x1f\\x7f]/.test(r.principalId)))return false;
+ if(r.principalId!==undefined&&(typeof r.principalId!=="string"||!r.principalId.trim()||r.principalId.length>256||/[\x00-\x1f\x7f]/.test(r.principalId)))return false;
  if(!Array.isArray(r.desktopCapabilities)||!r.desktopCapabilities.every((x)=>typeof x==="string"&&CAPABILITIES.has(x)))return false;
  if(r.error!==undefined&&(typeof r.error!=="string"||r.error.length>20_000))return false;
  if(r.result!==undefined&&!validResult(r.result))return false;
