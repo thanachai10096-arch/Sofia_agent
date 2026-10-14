@@ -897,7 +897,7 @@ export class SofiaBrain {
       // Persist only explicit remember requests. Ordinary conversation is never
       // silently promoted into long-term personal memory.
       if (this.dependencies.userMemory && this.currentPrincipalId) {
-        if (/^(?:please\\s+)?forget (?:everything|all) (?:you )?(?:remember|memories) about me[.! ]*$/i.test(input.task.trim()) ||
+        if (/^(?:please\s+)?forget (?:everything|all) (?:you )?(?:remember|memories) about me[.! ]*$/i.test(input.task.trim()) ||
             /^ลืม(?:ทุกอย่าง|ความทรงจำ)เกี่ยวกับฉัน[.! ]*$/u.test(input.task.trim())) {
           await this.wait(() => this.dependencies.userMemory!.clear(this.currentPrincipalId!));
           this.userMemoryEntries = [];
