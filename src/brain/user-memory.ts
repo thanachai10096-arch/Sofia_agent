@@ -157,8 +157,8 @@ export class FileUserMemoryStore implements UserMemoryStore {
 export function explicitUserMemoryFromMessage(message: string): { kind: UserMemoryKind; content: string } | undefined {
   const trimmed = message.trim();
   const patterns: Array<{ regex: RegExp; kind: UserMemoryKind }> = [
-    { regex: /^(?:please\s+)?remember\s+I\s+prefer\s+(.+)$/i, kind: "preference" },
-    { regex: /^(?:please\s+)?remember\s+my\s+goal\s+is\s+(.+)$/i, kind: "goal" },
+    { regex: /^(?:please\s+)?remember\s+(?:that\s+)?I\s+prefer\s+(.+)$/i, kind: "preference" },
+    { regex: /^(?:please\s+)?remember\s+(?:that\s+)?my\s+goal\s+is\s+(.+)$/i, kind: "goal" },
     { regex: /^(?:please\s+)?remember\s+(?:that\s+)?(.+)$/i, kind: "fact" },
     { regex: /^(?:help me )?remember that\s*(.+)$/i, kind: "fact" },
     { regex: /^(?:ช่วย)?จำไว้ว่า\s*(.+)$/u, kind: "fact" },
