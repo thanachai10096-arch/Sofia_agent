@@ -34,3 +34,15 @@ test("API run validation rejects malformed acceptance criteria", () => {
     }],
   }).valid, true);
 });
+
+test("API run validation rejects duplicate acceptance criterion IDs", () => {
+  const criterion = {
+    id: "build",
+    description: "Build succeeds",
+    probe: { tool: "shell", input: { command: "npm run build" } },
+  };
+  assert.equal(validateAgentRunInput({
+    task: "run",
+    acceptanceCriteria: [criterion, { ...criterion, description: "A second criterion" }],
+  }).valid, false);
+});
