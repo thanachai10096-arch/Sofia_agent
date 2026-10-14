@@ -110,3 +110,41 @@ test("SDK aborts stalled mobile requests at the configured timeout", async () =>
   });
   await assert.rejects(client.start({ task: "must not hang forever" }), /timed out/i);
 });
+
+
+test("SDK lists and searches personal memory with URL-encoded queries", async () => {
+  const requests: string[] = [];
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (input, init) => {
+      requests.push(String(input));
+      assert.equal((init?.headers as Record<string, string>).authorization, "Bearer test-key");
+      return response(200, { entries: [{ id: "memory-1", kind: "preference", content: "Prefers Thai", source: "explicit-user-request", confidence: 1, createdAt: "2026-10-14T00:00:00.000Z", updatedAt: "2026-10-14T00:00:00.000Z", uses: 0 }] });
+    },
+  });
+  const listed = await client.listMemory();
+  assert.equal(listed.entries[0]?.content, "Prefers Thai");
+  const searched = await client.searchMemory("ไทย & concise");
+  assert.equal(searched.entries.length, 1);
+  assert.match(requests[0] ?? "", /\/v1\/memory$/);
+  assert.match(requests[1] ?? "", /q=%E0%B9%84%E0%B8%97%E0%B8%A2\+%26\+concise/);
+});
+
+test("SDK deletes one memory and clears the principal memory namespace", async () => {
+  const requests: Array<{ url: string; method: string }> = [];
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (input, init) => {
+      requests.push({ url: String(input), method: init?.method ?? "GET" });
+      return response(200, init?.method === "DELETE" && String(input).includes("/memory/") ? { ok: true, deleted: true } : { ok: true, cleared: true });
+    },
+  });
+  assert.deepEqual(await client.deleteMemory("entry/with spaces"), { ok: true, deleted: true });
+  assert.deepEqual(await client.clearMemory(), { ok: true, cleared: true });
+  assert.match(requests[0]?.url ?? "", /\/v1\/memory\/entry%2Fwith%20spaces$/);
+  assert.equal(requests[0]?.method, "DELETE");
+  assert.equal(requests[1]?.url, "https://api.example.test/v1/memory");
+  assert.equal(requests[1]?.method, "DELETE");
+});
