@@ -842,7 +842,7 @@ export class SofiaBrain {
     }
 
     this.started = true;
-    this.currentPrincipalId = input.principalId ?? process.env.SOFIA_USER_ID?.trim() ?? "local-default";
+    this.currentPrincipalId = input.principalId ?? (process.env.SOFIA_USER_ID?.trim() || "local-default");
     const requestedSignal = input.signal ?? new AbortController().signal;
     requestedSignal.throwIfAborted();
     this.signal = requestedSignal;
