@@ -24,6 +24,23 @@ export interface SofiaRunResponse {
   error?: string;
 }
 
+export type SofiaMemoryKind = "preference" | "fact" | "goal" | "instruction";
+
+export interface SofiaMemoryEntry {
+  id: string;
+  kind: SofiaMemoryKind;
+  content: string;
+  source: "explicit-user-request";
+  confidence: number;
+  createdAt: string;
+  updatedAt: string;
+  uses: number;
+}
+
+export interface SofiaMemoryListResponse {
+  entries: SofiaMemoryEntry[];
+}
+
 export interface SofiaPollOptions {
   intervalMs?: number;
   maxIntervalMs?: number;
