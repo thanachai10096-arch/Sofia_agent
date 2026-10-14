@@ -242,6 +242,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
+      const parsedUrl = new URL(req.url ?? "/", "http://sofia.local");
+      const pathname = parsedUrl.pathname;
+      const isMemoryRead = req.method === "GET" && pathname === "/v1/memory";
+      const isMemoryMutation = req.method === "DELETE" &&
+        (pathname === "/v1/memory" || /^\\/v1\\/memory\\/[^/]+$/.test(pathname));
+      if (isMemoryRead && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+      }
+      if (isMemoryMutation && !auth.scopes.includes("agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
+
       // Authorization scopes are enforced at the API boundary, not merely used to
       // derive desktop capabilities. Admin scopes do not implicitly grant run access.
       const isRunRequest = req.method === "POST" && (req.url === "/v1/agent/runs" || req.url === "/v1/agent/runs/stream" || req.url === "/v1/jobs");
@@ -263,6 +275,33 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
+
+      if (isMemoryRead) {
+        if (!deps.userMemory) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
+        const query = parsedUrl.searchParams.get("q")?.slice(0, 200) ?? "";
+        const entries = query
+          ? await deps.userMemory.find(auth.keyId, query, 20)
+          : await deps.userMemory.list(auth.keyId);
+        return json(res, 200, {
+          entries: [...entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 50),
+        }, origin, config);
+      }
+      if (isMemoryMutation) {
+        if (!deps.userMemory) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
+        if (pathname === "/v1/memory") {
+          await deps.userMemory.clear(auth.keyId);
+          return json(res, 200, { ok: true, cleared: true }, origin, config);
+        }
+        let memoryId: string;
+        try {
+          memoryId = decodeURIComponent(pathname.slice("/v1/memory/".length));
+        } catch {
+          return json(res, 400, { error: "invalid_memory_id" }, origin, config);
+        }
+        const deleted = await deps.userMemory.delete(auth.keyId, memoryId);
+        if (!deleted) return json(res, 404, { error: "memory_not_found" }, origin, config);
+        return json(res, 200, { ok: true, deleted: true }, origin, config);
       }
 
       const adminScope = config.securityAdminScope ?? "security:admin";
