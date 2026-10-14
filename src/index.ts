@@ -20,6 +20,8 @@ export { buildRepositoryMap, compactRepositoryMap } from "./brain/repository-int
 export { createEditPatch, applyEditPatch, unifiedDiff } from "./brain/edit-engine.js";
 export { reviewCodeChange } from "./review/code-review.js";
 export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
+export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
+export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
