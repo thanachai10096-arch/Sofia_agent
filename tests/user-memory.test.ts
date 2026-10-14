@@ -60,8 +60,8 @@ test("user memory supports deletion and full forget", async () => {
 
 test("explicit memory requests are recognized in English and Thai only", () => {
   assert.deepEqual(explicitUserMemoryFromMessage("Remember that I prefer TypeScript"), {
-    kind: "fact",
-    content: "I prefer TypeScript",
+    kind: "preference",
+    content: "TypeScript",
   });
   assert.deepEqual(explicitUserMemoryFromMessage("จำไว้ว่า ฉันชอบคำตอบภาษาไทย"), {
     kind: "fact",
