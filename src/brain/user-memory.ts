@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { sofiaStateDirectory } from "../platform/state-directory.js";
+import os from "node:os";
 import { containsPromptInjection, redactSecrets } from "../security/guard.js";
 
 export type UserMemoryKind = "preference" | "fact" | "goal" | "instruction";
@@ -37,6 +37,23 @@ function redactMemorySecrets(content: string): string {
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED]");
 }
 
+function defaultUserMemoryDirectory(): string {
+  const configured = process.env.SOFIA_STATE_DIR?.trim();
+  if (configured) {
+    if (!path.isAbsolute(configured)) throw new Error("SOFIA_STATE_DIR must be an absolute path.");
+    return path.join(configured, "sofia-agents-user-memory");
+  }
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Sofia Agents", "user-memory");
+  }
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "Sofia Agents", "user-memory");
+  }
+  const dataHome = process.env.XDG_DATA_HOME?.trim();
+  const root = dataHome && path.isAbsolute(dataHome) ? dataHome : path.join(os.homedir(), ".local", "share");
+  return path.join(root, "sofia-agents", "user-memory");
+}
+
 function userKey(userId: string): string {
   if (typeof userId !== "string" || !userId.trim() || userId.length > 512) {
     throw new Error("A valid user identity is required for user memory.");
@@ -62,7 +79,7 @@ function validEntry(value: unknown): value is UserMemoryEntry {
  * explicitly requested memories should be written by callers.
  */
 export class FileUserMemoryStore implements UserMemoryStore {
-  constructor(private readonly root = sofiaStateDirectory("user-memory")) {}
+  constructor(private readonly root = defaultUserMemoryDirectory()) {}
 
   private fileFor(userId: string): string {
     return path.join(this.root, userKey(userId) + ".json");
