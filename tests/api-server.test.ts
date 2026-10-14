@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -123,7 +124,7 @@ test("API E2E authenticates, starts an async run, deduplicates retries, and isol
 test("API memory routes enforce scopes and isolate each authenticated principal", async () => {
   const directory = await mkdtemp(join(tmpdir(), "sofia-api-memory-"));
   const memory = new FileUserMemoryStore(directory);
-  const ownerId = "user:alice";
+  const ownerId = createHash("sha256").update("sofia-principal:user:alice").digest("hex").slice(0, 32);
   try {
     const first = createUserMemoryEntry("preference", "Prefers concise Thai responses");
     await memory.save(ownerId, first);
