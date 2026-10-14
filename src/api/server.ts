@@ -73,7 +73,7 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   if (configuredPrincipal !== undefined &&
       (typeof configuredPrincipal !== "string" || !configuredPrincipal.trim() ||
        configuredPrincipal.length > 256 || /[\x00-\x1f\x7f]/.test(configuredPrincipal))) return null;
-  return { keyId, principalId: configuredPrincipal?.trim() || keyId, scopes };
+  return { keyId, principalId: configuredPrincipal === undefined ? keyId : createHash("sha256").update("sofia-principal:" + configuredPrincipal.trim()).digest("hex").slice(0, 32), scopes };
 }
 
 function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapability[] {
