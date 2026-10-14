@@ -124,7 +124,7 @@ test("API E2E authenticates, starts an async run, deduplicates retries, and isol
 test("API memory routes enforce scopes and isolate each authenticated principal", async () => {
   const directory = await mkdtemp(join(tmpdir(), "sofia-api-memory-"));
   const memory = new FileUserMemoryStore(directory);
-  const ownerId = createHash("sha256").update("test-key").digest("hex").slice(0, 32);
+  const ownerId = "user:alice";
   try {
     const first = createUserMemoryEntry("preference", "Prefers concise Thai responses");
     await memory.save(ownerId, first);
