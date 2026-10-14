@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import type { AddressInfo } from "node:net";
 import { createSofiaApi } from "../src/api/server.js";
 import type { AgentDependencies } from "../src/agent/types.js";
 import type { SofiaBrain } from "../src/brain/executor.js";
+import { createUserMemoryEntry, FileUserMemoryStore } from "../src/brain/user-memory.js";
 
 function dependencies(): AgentDependencies {
   const fakeBrain = {
@@ -112,5 +117,67 @@ test("API E2E authenticates, starts an async run, deduplicates retries, and isol
     assert.equal(disallowedOrigin.headers.get("access-control-allow-origin"), null);
   } finally {
     await closeServer();
+  }
+});
+
+
+test("API memory routes enforce scopes and isolate each authenticated principal", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-api-memory-"));
+  const memory = new FileUserMemoryStore(directory);
+  const ownerId = createHash("sha256").update("test-key").digest("hex").slice(0, 32);
+  try {
+    const first = createUserMemoryEntry("preference", "Prefers concise Thai responses");
+    await memory.save(ownerId, first);
+    const deps = dependencies();
+    deps.userMemory = memory;
+    const server = createSofiaApi(deps, {
+      apiKeys: {
+        "test-key": ["agent:read", "agent:run"],
+        "read-only": ["agent:read"],
+        "other-key": ["agent:read", "agent:run"],
+      },
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const headers = (key: string) => ({ authorization: `Bearer ${key}` });
+    try {
+      const listed = await fetch(`${baseUrl}/v1/memory`, { headers: headers("test-key") });
+      assert.equal(listed.status, 200);
+      const body = await listed.json() as { entries: Array<{ id: string; content: string }> };
+      assert.equal(body.entries.length, 1);
+      assert.equal(body.entries[0]?.content, "Prefers concise Thai responses");
+
+      const search = await fetch(`${baseUrl}/v1/memory?q=concise`, { headers: headers("test-key") });
+      assert.equal((await search.json() as { entries: unknown[] }).entries.length, 1);
+
+      const forbiddenDelete = await fetch(`${baseUrl}/v1/memory/${first.id}`, {
+        method: "DELETE", headers: headers("read-only"),
+      });
+      assert.equal(forbiddenDelete.status, 403);
+
+      const isolated = await fetch(`${baseUrl}/v1/memory`, { headers: headers("other-key") });
+      assert.deepEqual((await isolated.json() as { entries: unknown[] }).entries, []);
+
+      const deleted = await fetch(`${baseUrl}/v1/memory/${first.id}`, {
+        method: "DELETE", headers: headers("test-key"),
+      });
+      assert.equal(deleted.status, 200);
+      assert.deepEqual(await memory.list(ownerId), []);
+
+      await memory.save(ownerId, createUserMemoryEntry("fact", "Uses TypeScript"));
+      const cleared = await fetch(`${baseUrl}/v1/memory`, {
+        method: "DELETE", headers: headers("test-key"),
+      });
+      assert.equal(cleared.status, 200);
+      assert.deepEqual(await memory.list(ownerId), []);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
