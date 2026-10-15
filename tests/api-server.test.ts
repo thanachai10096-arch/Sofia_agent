@@ -9,6 +9,7 @@ import { createSofiaApi } from "../src/api/server.js";
 import type { AgentDependencies } from "../src/agent/types.js";
 import type { SofiaBrain } from "../src/brain/executor.js";
 import { createUserMemoryEntry, FileUserMemoryStore } from "../src/brain/user-memory.js";
+import { SofiaClient } from "../src/sdk/client.js";
 
 function dependencies(): AgentDependencies {
   const fakeBrain = {
@@ -189,6 +190,64 @@ test("API memory routes enforce scopes and isolate each authenticated principal"
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("SDK-to-API memory integration supports shared channel identity and destructive controls", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-sdk-memory-e2e-"));
+  const memory = new FileUserMemoryStore(directory);
+  const principalId = createHash("sha256").update("sofia-principal:account:alice").digest("hex").slice(0, 32);
+  const first = createUserMemoryEntry("preference", "Prefers concise Thai responses");
+  const second = createUserMemoryEntry("goal", "Build Sofia Agents for Windows and mobile");
+  await memory.save(principalId, first);
+  await memory.save(principalId, second);
+
+  const deps = dependencies();
+  deps.userMemory = memory;
+  const server = createSofiaApi(deps, {
+    apiKeys: {
+      "web-key": ["agent:read", "agent:run"],
+      "mobile-key": ["agent:read", "agent:run"],
+      "isolated-key": ["agent:read", "agent:run"],
+    },
+    principalIdsByApiKey: {
+      "web-key": "account:alice",
+      "mobile-key": "account:alice",
+    },
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address() as AddressInfo;
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const webClient = new SofiaClient({ apiKey: "web-key", baseUrl });
+  const mobileClient = new SofiaClient({ apiKey: "mobile-key", baseUrl });
+  const isolatedClient = new SofiaClient({ apiKey: "isolated-key", baseUrl });
+
+  try {
+    const listed = await webClient.listMemory();
+    assert.deepEqual(new Set(listed.entries.map((entry) => entry.id)), new Set([first.id, second.id]));
+
+    const searched = await mobileClient.searchMemory("concise Thai");
+    assert.equal(searched.entries.length, 1);
+    assert.equal(searched.entries[0]?.id, first.id);
+
+    // The SDK cannot select an identity; the server's trusted key mapping
+    // determines the shared principal, while unmapped credentials stay isolated.
+    assert.deepEqual((await isolatedClient.listMemory()).entries, []);
+
+    assert.deepEqual(await mobileClient.deleteMemory(first.id), { ok: true, deleted: true });
+    assert.deepEqual((await webClient.listMemory()).entries.map((entry) => entry.id), [second.id]);
+
+    assert.deepEqual(await webClient.clearMemory(), { ok: true, cleared: true });
+    assert.deepEqual((await mobileClient.listMemory()).entries, []);
+    assert.deepEqual(await memory.list(principalId), []);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });
   }
 });
