@@ -148,10 +148,15 @@ test("conversation synchronous turns enforce the per-key concurrency limit witho
 
     try {
       await started;
-      const rejected = await request(baseUrl, "test-token-a", path, "POST", { role: "user", content: "Second turn should be rejected" });
+      const secondCreated = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+      const secondPayload = await secondCreated.json() as { conversation: { id: string } };
+      const rejected = await request(baseUrl, "test-token-a", `/v1/conversations/${secondPayload.conversation.id}/messages`, "POST", { role: "user", content: "Second turn should be rejected" });
       assert.equal(rejected.status, 429);
       const rejection = await rejected.json() as { error: string };
       assert.equal(rejection.error, "concurrency_limit");
+      const secondSaved = await request(baseUrl, "test-token-a", `/v1/conversations/${secondPayload.conversation.id}`);
+      const secondSavedPayload = await secondSaved.json() as { conversation: { messages: Array<{ content: string }> } };
+      assert.deepEqual(secondSavedPayload.conversation.messages, []);
     } finally {
       release();
     }
