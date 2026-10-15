@@ -27,8 +27,9 @@ The current branch contains an in-memory, bounded agent message protocol and a d
 - [x] Add regression tests for scope, freshness, payload size, duplicate IDs, queue limits, privileged tools, and delegation budgets.
 - [x] Snapshot queued messages to prevent post-validation mutation; re-check message freshness and job deadline on consumption.
 - [x] Reject malformed/non-finite hop values and invalid delegation budgets at runtime.
-- [x] Run npm ci, npm run license:check, npm run typecheck, npm test, and npm run build in CI; workflow run #873 passed on the current branch commit. Cross-platform Windows/macOS/Ubuntu, browser egress, and Docker sandbox integration jobs also passed.
+- [x] Run npm ci, npm run license:check, npm run typecheck, npm test, and npm run build in CI; workflow run #873 passed for commit `f78ebaeea3224d5b6a34feed0ef692258ac7cc6f`. Cross-platform Windows/macOS/Ubuntu, browser egress, and Docker sandbox integration jobs also passed. The later privileged-tool denial hardening commits still require their own CI confirmation.
 - [x] Review message-size and budget configuration validation, including invalid limits, bounded envelope metadata, evidence ID caps, and policy-snapshot regression tests.
+- [x] Make host-level privileged-tool denials non-overridable by caller-supplied delegation policy; added regression coverage for permissive policy attempts. CI for this latest hardening change is pending.
 
 **Exit criteria:** required CI green on Ubuntu, macOS, and Windows; tests reproducibly pass; no claim of runtime integration yet.
 
