@@ -143,7 +143,11 @@ export class ConversationService {
       return undefined;
     }
     const marker = "\\n\\n[Response truncated in conversation history.]";
-    const suffix = marker.slice(0, this.maxMessageCharacters);
+    const suffix = this.maxMessageCharacters >= marker.length
+      ? marker
+      : this.maxMessageCharacters >= "[truncated]".length
+        ? "[truncated]"
+        : "…".repeat(this.maxMessageCharacters);
     const bounded = content.length <= this.maxMessageCharacters
       ? content
       : content.slice(0, Math.max(0, this.maxMessageCharacters - suffix.length)) + suffix;
