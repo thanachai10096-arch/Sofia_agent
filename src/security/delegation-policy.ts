@@ -12,10 +12,19 @@ export interface DelegationPolicy {
   allowedRoles: ReadonlySet<string>;
   neverDelegateTools: ReadonlySet<string>;
 }
+const NON_DELEGABLE_TOOLS = new Set([
+  "security.policy.update",
+  "security.kill_switch.revive",
+  "secrets.read",
+  "credentials.export",
+]);
+
 export const DEFAULT_DELEGATION_POLICY: DelegationPolicy = {
   maxHops: 5, maxDelegationsPerAgent: 8,
   allowedRoles: new Set(["planner", "researcher", "coder", "tester", "security", "reviewer", "specialist"]),
-  neverDelegateTools: new Set(["security.policy.update", "security.kill_switch.revive", "secrets.read", "credentials.export"]),
+  // This public default is configurable for additional restrictions, but the
+  // authorizer always enforces NON_DELEGABLE_TOOLS as a non-overridable floor.
+  neverDelegateTools: new Set(NON_DELEGABLE_TOOLS),
 };
 /** Authorizes coordination only; tool execution still requires the central Tool Gateway. */
 export class DelegationAuthorizer {
@@ -43,7 +52,8 @@ export class DelegationAuthorizer {
       maxHops: policy.maxHops,
       maxDelegationsPerAgent: policy.maxDelegationsPerAgent,
       allowedRoles: new Set(policy.allowedRoles),
-      neverDelegateTools: new Set(policy.neverDelegateTools),
+      // Caller policy can add restrictions, never remove host-level denials.
+      neverDelegateTools: new Set([...NON_DELEGABLE_TOOLS, ...policy.neverDelegateTools]),
     });
   }
 
