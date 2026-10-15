@@ -148,8 +148,9 @@ test("rejects invalid coordination limits and unbounded envelope metadata", () =
 
 
 test("bus snapshots host scope, agent identities, and limits at construction", () => {
+  const mutableAllowedTools = ["workspace.read"];
   const mutableScope: AgentTaskScope = {
-    jobId: "job-1", objective: "Original objective", allowedTools: ["workspace.read"],
+    jobId: "job-1", objective: "Original objective", allowedTools: mutableAllowedTools,
     maxHops: 4, deadlineEpochMs: 5_000,
   };
   const mutableAgents = new Map<string, AgentIdentity>([
@@ -160,7 +161,7 @@ test("bus snapshots host scope, agent identities, and limits at construction", (
   const bus = new AgentMessageBus(mutableScope, mutableAgents, mutableLimits);
 
   mutableScope.jobId = "other-job";
-  mutableScope.allowedTools.push("secrets.read");
+  mutableAllowedTools.push("secrets.read");
   mutableAgents.delete("pixel");
   mutableLimits.maxMessages = 0;
 
