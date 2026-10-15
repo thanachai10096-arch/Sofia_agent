@@ -63,11 +63,15 @@ export function validateAgentMessage(
   message: unknown, scope: AgentTaskScope, registeredAgents: ReadonlyMap<string, AgentIdentity>,
   limits: CoordinationLimits = DEFAULT_COORDINATION_LIMITS, now = Date.now(),
 ): asserts message is AgentMessage {
+  if (!validCoordinationLimits(limits)) {
+    throw new CoordinationError("Invalid coordination limits.", "BUDGET_EXCEEDED");
+  }
   if (!isRecord(message) || message.version !== 1 ||
-      typeof message.id !== "string" || !message.id ||
-      typeof message.correlationId !== "string" || !message.correlationId ||
-      typeof message.jobId !== "string" || typeof message.from !== "string" ||
-      typeof message.to !== "string" ||
+      typeof message.id !== "string" || !message.id || message.id.length > 256 ||
+      typeof message.correlationId !== "string" || !message.correlationId || message.correlationId.length > 256 ||
+      typeof message.jobId !== "string" || !message.jobId || message.jobId.length > 256 ||
+      typeof message.from !== "string" || !message.from || message.from.length > 256 ||
+      typeof message.to !== "string" || !message.to || message.to.length > 256 ||
       !["task", "proposal", "evidence", "handoff", "review", "status", "result"].includes(String(message.kind)) ||
       typeof message.createdAt !== "number" || !Number.isFinite(message.createdAt) || !("payload" in message)) {
     throw new CoordinationError("Invalid agent message envelope.", "INVALID_MESSAGE");
@@ -78,9 +82,15 @@ export function validateAgentMessage(
   if (payloadSize(message.payload) > limits.maxPayloadBytes) throw new CoordinationError("Message payload exceeds configured limit.", "BUDGET_EXCEEDED");
   if (scope.deadlineEpochMs !== undefined && now > scope.deadlineEpochMs) throw new CoordinationError("Task deadline has passed.", "BUDGET_EXCEEDED");
   if (scope.maxHops < 0 || scope.maxHops > limits.maxHops) throw new CoordinationError("Task hop limit exceeds policy.", "BUDGET_EXCEEDED");
-  if (message.evidenceIds !== undefined && (!Array.isArray(message.evidenceIds) || message.evidenceIds.some(id => typeof id !== "string" || !id))) {
-    throw new CoordinationError("Evidence references must be non-empty strings.", "INVALID_MESSAGE");
+  if (message.evidenceIds !== undefined && (!Array.isArray(message.evidenceIds) || message.evidenceIds.length > 256 || message.evidenceIds.some(id => typeof id !== "string" || !id || id.length > 256))) {
+    throw new CoordinationError("Evidence references must be bounded non-empty strings.", "INVALID_MESSAGE");
   }
+}
+function validCoordinationLimits(limits: CoordinationLimits): boolean {
+  return Number.isSafeInteger(limits.maxMessages) && limits.maxMessages >= 1 &&
+    Number.isSafeInteger(limits.maxHops) && limits.maxHops >= 0 &&
+    Number.isSafeInteger(limits.maxPayloadBytes) && limits.maxPayloadBytes >= 1 &&
+    Number.isSafeInteger(limits.maxAgeMs) && limits.maxAgeMs >= 1;
 }
 /** Bounded in-memory queue. Durable deployments must persist deduplication with the queue. */
 export class AgentMessageBus {
