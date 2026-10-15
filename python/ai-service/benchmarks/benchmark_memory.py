@@ -45,7 +45,11 @@ def is_allowed_service_url(value: str) -> bool:
         _ = parsed_url.port
     except ValueError:
         return False
-    if not parsed_url.hostname or parsed_url.username is not None or parsed_url.password is not None:
+    if (
+        not parsed_url.hostname
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+    ):
         return False
     if parsed_url.scheme == "https":
         return True
