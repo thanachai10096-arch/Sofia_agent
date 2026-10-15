@@ -136,7 +136,7 @@ test("SDK exposes owner-scoped conversation operations and async polling", async
         return response(200, { conversationId: "conversation-123", runId: "run-123", status: "completed", assistantMessage: { id: "message-2", role: "assistant", content: "hi", createdAt: 3 } });
       }
       if (url.endsWith("/stream")) {
-        return new Response("data: {\\"type\\":\\"status\\",\\"status\\":\\"completed\\"}\\n\\n", {
+        return new Response(`data: ${JSON.stringify({ type: "status", status: "completed" })}\n\n`, {
           status: 200, headers: { "content-type": "text/event-stream; charset=utf-8" },
         });
       }
