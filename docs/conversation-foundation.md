@@ -12,6 +12,26 @@ This module is a provider-independent foundation for natural-language conversati
 - An in-memory store for tests and a file-backed JSON store for single-process local deployments.
 - Optional authenticated HTTP endpoints, enabled by passing `conversationStore` to `SofiaApiConfig`.
 
+## Local API integration
+
+Use `createSofiaLocalApi` when running one local API process and you want persistent file-backed conversations and run records without wiring the stores manually:
+
+```ts
+import { createSofiaAgentDependencies, createSofiaLocalApi } from "sofia-agent";
+
+const deps = createSofiaAgentDependencies(/* provider/model configuration */);
+const server = createSofiaLocalApi(deps, {
+  apiKeys: {
+    [process.env.SOFIA_API_KEY!]: ["agent:run", "agent:read"],
+  },
+});
+server.listen(3000, "127.0.0.1");
+```
+
+Set `SOFIA_STATE_DIR` to an absolute persistent directory, or pass `{ stateDirectory: "/path/to/state" }` as the third argument. The factory creates `api-runs/` and `conversations/` beneath that directory. It preserves any explicit `runStore` or `conversationStore` passed in the config. This factory enables conversation endpoints intentionally; `createSofiaApi` remains opt-in and returns `503` for conversation routes when no store is supplied.
+
+Do not expose a local API on a public interface without appropriate authentication, origin policy, TLS/network controls, and permissions. File-backed stores are single-process only and are not suitable for multi-replica/serverless deployment.
+
 ## HTTP API
 
 All routes require a Bearer API key. The owner ID is derived from the authenticated key hash; the client cannot select another owner.
