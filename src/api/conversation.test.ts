@@ -242,3 +242,50 @@ test("long successful model output is preserved as a successful turn with bounde
     assert.match(result.assistantMessage.content, /truncated in conversation history/);
   }, { generate: async () => ({ text: output, assistantMessage: { role: "assistant", content: output } }) });
 });
+
+
+test("conversation rejects a second active turn in the same session without appending it", async () => {
+  let notifyStarted!: () => void;
+  const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+
+  await withApi(async (baseUrl) => {
+    const created = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+    const payload = await created.json() as { conversation: { id: string } };
+    const path = `/v1/conversations/${payload.conversation.id}/messages`;
+    const first = await request(baseUrl, "test-token-a", path, "POST", {
+      role: "user", content: "First asynchronous turn", async: true,
+    });
+    assert.equal(first.status, 202);
+    await started;
+
+    const second = await request(baseUrl, "test-token-a", path, "POST", {
+      role: "user", content: "This must not enter history yet",
+    });
+    assert.equal(second.status, 409);
+    assert.equal((await second.json() as { error: string }).error, "conversation_turn_in_progress");
+
+    const whileRunning = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}`);
+    const runningSession = await whileRunning.json() as { conversation: { messages: Array<{ content: string }> } };
+    assert.deepEqual(runningSession.conversation.messages.map((message) => message.content), ["First asynchronous turn"]);
+    release();
+
+    const firstPayload = await first.json() as { pollUrl: string };
+    let status = "queued";
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const polled = await request(baseUrl, "test-token-a", firstPayload.pollUrl);
+      const value = await polled.json() as { status: string };
+      status = value.status;
+      if (status === "completed" || status === "failed" || status === "cancelled") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(status, "completed");
+  }, {
+    generate: async () => {
+      notifyStarted();
+      await gate;
+      return { text: "Sofia response", assistantMessage: { role: "assistant", content: "Sofia response" } };
+    },
+  });
+});
