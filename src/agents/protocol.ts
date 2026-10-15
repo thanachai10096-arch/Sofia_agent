@@ -104,6 +104,12 @@ export class AgentMessageBus {
     if (!validCoordinationLimits(limits)) {
       throw new CoordinationError("Invalid coordination limits.", "BUDGET_EXCEEDED");
     }
+    if (!validTaskScope(scope)) {
+      throw new CoordinationError("Invalid agent task scope.", "SCOPE_VIOLATION");
+    }
+    if (!validAgentRegistry(agents)) {
+      throw new CoordinationError("Invalid agent identity registry.", "POLICY_DENIED");
+    }
     // Freeze a host-owned policy snapshot; callers must not be able to widen
     // the job scope or agent capabilities by mutating their original objects.
     this.scope = Object.freeze({
