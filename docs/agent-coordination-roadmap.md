@@ -5,7 +5,7 @@ Scope: safely evolve the current coordination protocol into a real multi-agent c
 
 ## Current verified boundary
 
-The current branch contains an in-memory, bounded agent message protocol and a delegation authorizer, plus regression tests and a security design note. These are primitives only. They do not yet wire agent-to-agent coordination into every Brain/API/job-runtime path, persist a message queue, or prove end-to-end safety. Do not advertise multi-agent orchestration as generally available until the gates below pass.
+The current branch contains an in-memory, bounded agent message protocol and a delegation authorizer, plus regression tests and a security design note. These include coordination primitives and the existing Brain's single-specialist failure-recovery hook. The ACP bus/authorizer are not yet the routing authority for that hook, the message queue is not durable, and end-to-end safety is not yet proven. Do not advertise multi-agent orchestration as generally available until the gates below pass.
 
 ## Non-negotiable invariants
 
@@ -33,10 +33,10 @@ The current branch contains an in-memory, bounded agent message protocol and a d
 
 ### Phase 1 — Wire into the real Brain (P0)
 
-- [ ] Trace the existing SofiaBrain, SubagentRuntime, ToolGateway, and DurableJobRuntime paths before editing production flow.
+- [x] Trace the existing SofiaBrain, SubagentRuntime, ToolGateway, and DurableJobRuntime paths before editing production flow.
 - [ ] Introduce one per-job coordinator owned by Brain; do not create an independent route to execute tools.
 - [ ] Bind coordinator scope to authenticated principal, active job ID, allowed tools, workspace boundary, cancellation signal, and deadline.
-- [ ] Convert current subagent outputs into typed proposals/evidence messages. Treat every model-produced field as untrusted and validate schemas at runtime.
+- [x] Validate specialist result envelopes at the Brain boundary: expected role, non-empty bounded summary, plain-object action input, bounded reason, JSON serializability, and a 16 KiB proposal cap. Reject malformed output before it can be considered for execution.\n- [ ] Route Brain delegation through the ACP message bus and explicit delegation authorizer, with job identity and per-job scope bound by host-owned state.
 - [ ] Keep action execution exclusively in Brain/Tool Gateway; subagents cannot call tool implementations directly.
 - [ ] Ensure cancellation/deadline closes the bus, aborts model work, and prevents queued proposals from executing.
 - [ ] Persist enough trace state to explain the job after restart; explicitly decide whether queued messages are replayed or discarded. Never replay side effects without idempotency checks.
