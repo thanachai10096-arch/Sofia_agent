@@ -158,13 +158,14 @@ export class FileWorkflowPlanStore implements WorkflowPlanStore {
   }
 
   async delete(id: string): Promise<void> {
+    let locked = false;
     try {
       await fs.access(this.lockDirectory(id));
-      throw new Error("Cannot delete a workflow with an active or unreconciled run lock");
+      locked = true;
     } catch (error) {
-      if ((error as Error).message.includes("active or unreconciled")) throw error;
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    if (locked) throw new Error("Cannot delete a workflow with an active or unreconciled run lock");
     try {
       await fs.unlink(this.file(id));
     } catch (error) {
