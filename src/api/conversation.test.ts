@@ -91,3 +91,28 @@ test("conversation mutations require agent:run scope and validate JSON shapes", 
     assert.equal(invalid.status, 400);
   });
 });
+
+
+test("conversation API supports async turns and reconnectable polling", async () => {
+  await withApi(async (baseUrl) => {
+    const created = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+    const payload = await created.json() as { conversation: { id: string } };
+    const submitted = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}/messages`, "POST", {
+      role: "user", content: "Continue in the background", async: true,
+    });
+    assert.equal(submitted.status, 202);
+    const accepted = await submitted.json() as { run: { id: string; status: string }; pollUrl: string };
+    assert.ok(accepted.pollUrl.includes(accepted.run.id));
+
+    let polled: { status: string; assistantMessage?: { content: string } } | undefined;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const response = await request(baseUrl, "test-token-a", accepted.pollUrl);
+      assert.equal(response.status, 200);
+      polled = await response.json() as { status: string; assistantMessage?: { content: string } };
+      if (polled.status === "completed" && polled.assistantMessage) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(polled?.status, "completed");
+    assert.equal(polled?.assistantMessage?.content, "Sofia response");
+  });
+});
