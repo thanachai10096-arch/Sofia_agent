@@ -78,10 +78,14 @@ For live progress, call `openConversationTurnStream(conversation.id, runId, sign
 - The file-backed store uses atomic file replacement and restrictive POSIX permissions where supported. It is intended for one process on a trusted local filesystem.
 - For multi-process, serverless, or cloud deployment, implement a transactional database-backed `ConversationStore` and test access control, durability, concurrency, and deletion semantics.
 
-## Next integration steps
+## Remaining production work
 
-1. Move long-running turns to the existing async job lifecycle so mobile clients can disconnect and reconnect.
-2. Add streaming events and reconnect support without tying job lifetime to the client connection.
-3. Persist structured execution events and job/run references in the conversation.
-4. Preserve approval checks, cancellation, usage budgets, run ownership, and secret filtering.
-5. Add cross-platform CI and load tests against a durable store before enabling the feature in production.
+The conversation API, async turns, bounded execution events, polling, reconnectable SSE, and run/conversation references are implemented in this foundation. The local file-backed implementation is intentionally single-process.
+
+Before production multi-user or cloud deployment:
+
+1. Implement a transactional shared database-backed `ConversationStore` and durable queue; do not share the local JSON store across replicas.
+2. Make accepted-run persistence and queue handoff transactional so a successful `202 Accepted` cannot be returned before the job is durably recorded.
+3. Add explicit recovery/requeue semantics only when execution checkpoints and idempotent tool actions are available. Until then, restart recovery marks in-flight runs failed as interrupted; it does not claim to resume them.
+4. Add load, crash-injection, and concurrent-writer tests for the production storage adapter.
+5. Keep API credentials server-side for browser clients and retain Sofia Core's permission, approval, cancellation, usage-budget, ownership, and secret-filtering enforcement.
