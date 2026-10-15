@@ -211,3 +211,20 @@ test("rejects malformed task scopes and inconsistent agent identities", () => {
     (error: unknown) => error instanceof CoordinationError && error.code === "POLICY_DENIED",
   );
 });
+
+
+test("preserves host-authenticated principal binding in the scope snapshot", () => {
+  const principalScope: AgentTaskScope = { ...scope, principalId: "user-123" };
+  const bus = new AgentMessageBus(principalScope, agents);
+  principalScope.principalId = "attacker";
+  const message = createAgentMessage({
+    correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel",
+    kind: "task", payload: {},
+  });
+  bus.publish(message);
+  assert.equal(bus.takeFor("pixel")?.jobId, "job-1");
+  assert.throws(
+    () => new AgentMessageBus({ ...scope, principalId: "x".repeat(257) }, agents),
+    (error: unknown) => error instanceof CoordinationError && error.code === "SCOPE_VIOLATION",
+  );
+});
