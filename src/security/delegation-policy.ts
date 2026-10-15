@@ -1,0 +1,41 @@
+import type { AgentIdentity, AgentTaskScope } from "../agents/protocol.js";
+
+export type DelegationDecision = { allowed: true; reason: string } | { allowed: false; reason: string };
+export interface DelegationRequest {
+  requesterId: string; recipientId: string; jobId: string; requestedTools: readonly string[]; hop: number; purpose: string;
+}
+export interface DelegationPolicy {
+  maxHops: number;
+  maxDelegationsPerAgent: number;
+  allowedRoles: ReadonlySet<string>;
+  neverDelegateTools: ReadonlySet<string>;
+}
+export const DEFAULT_DELEGATION_POLICY: DelegationPolicy = {
+  maxHops: 5, maxDelegationsPerAgent: 8,
+  allowedRoles: new Set(["planner", "researcher", "coder", "tester", "security", "reviewer", "specialist"]),
+  neverDelegateTools: new Set(["security.policy.update", "security.kill_switch.revive", "secrets.read", "credentials.export"]),
+};
+/** Authorizes coordination only; tool execution still requires the central Tool Gateway. */
+export class DelegationAuthorizer {
+  private readonly counts = new Map<string, number>();
+  constructor(private readonly agents: ReadonlyMap<string, AgentIdentity>, private readonly scope: AgentTaskScope, private readonly policy: DelegationPolicy = DEFAULT_DELEGATION_POLICY) {}
+  authorize(request: DelegationRequest): DelegationDecision {
+    const requester = this.agents.get(request.requesterId);
+    const recipient = this.agents.get(request.recipientId);
+    if (!requester || !recipient) return { allowed: false, reason: "Unknown agent identity." };
+    if (request.jobId !== this.scope.jobId) return { allowed: false, reason: "Delegation is outside the active job." };
+    if (request.requesterId === request.recipientId) return { allowed: false, reason: "Self-delegation is not allowed." };
+    if (!request.purpose.trim() || request.purpose.length > 1000) return { allowed: false, reason: "Purpose is missing or too long." };
+    if (request.hop < 0 || request.hop >= Math.min(this.policy.maxHops, this.scope.maxHops)) return { allowed: false, reason: "Delegation hop limit reached." };
+    if (recipient.role === "orchestrator" || !this.policy.allowedRoles.has(recipient.role)) return { allowed: false, reason: "Recipient role is not eligible." };
+    if (request.requestedTools.some(tool => this.policy.neverDelegateTools.has(tool))) return { allowed: false, reason: "Request includes a non-delegable privileged tool." };
+    if (request.requestedTools.some(tool => !this.scope.allowedTools.includes(tool) || !requester.capabilities.includes(tool) || !recipient.capabilities.includes(tool))) {
+      return { allowed: false, reason: "Requested tool is outside job scope or agent capabilities." };
+    }
+    const count = this.counts.get(request.requesterId) ?? 0;
+    if (count >= this.policy.maxDelegationsPerAgent) return { allowed: false, reason: "Per-agent delegation budget exceeded." };
+    this.counts.set(request.requesterId, count + 1);
+    return { allowed: true, reason: "Delegation is within registered identity, scope, and budget." };
+  }
+  resetJobCounters(): void { this.counts.clear(); }
+}
