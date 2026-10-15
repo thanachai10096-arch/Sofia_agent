@@ -145,3 +145,50 @@ test("rejects invalid coordination limits and unbounded envelope metadata", () =
   });
   assert.throws(() => bus.publish(tooLongId), (error: unknown) => error instanceof CoordinationError && error.code === "INVALID_MESSAGE");
 });
+
+
+test("bus snapshots host scope, agent identities, and limits at construction", () => {
+  const mutableScope: AgentTaskScope = {
+    jobId: "job-1", objective: "Original objective", allowedTools: ["workspace.read"],
+    maxHops: 4, deadlineEpochMs: 5_000,
+  };
+  const mutableAgents = new Map<string, AgentIdentity>([
+    ["sofia", { id: "sofia", role: "orchestrator", capabilities: ["workspace.read"] }],
+    ["pixel", { id: "pixel", role: "coder", capabilities: ["workspace.read"] }],
+  ]);
+  const mutableLimits = { maxMessages: 2, maxHops: 4, maxPayloadBytes: 1024, maxAgeMs: 1000 };
+  const bus = new AgentMessageBus(mutableScope, mutableAgents, mutableLimits);
+
+  mutableScope.jobId = "other-job";
+  mutableScope.allowedTools.push("secrets.read");
+  mutableAgents.delete("pixel");
+  mutableLimits.maxMessages = 0;
+
+  const message = createAgentMessage({
+    id: "scope-snapshot",
+    correlationId: "job-1",
+    jobId: "job-1",
+    from: "sofia",
+    to: "pixel",
+    kind: "task",
+    payload: {},
+    createdAt: 1_000,
+  });
+  bus.publish(message, 1_000);
+  assert.equal(bus.takeFor("pixel", 1_100)?.id, "scope-snapshot");
+});
+
+test("close discards queued work and prevents later consumption", () => {
+  const bus = new AgentMessageBus(scope, agents);
+  bus.publish(createAgentMessage({
+    correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel",
+    kind: "proposal", payload: { tool: "workspace.write" },
+  }));
+  assert.equal(bus.pendingCount(), 1);
+  bus.close();
+  assert.equal(bus.pendingCount(), 0);
+  assert.throws(
+    () => bus.takeFor("pixel"),
+    (error: unknown) => error instanceof CoordinationError && error.code === "CANCELLED",
+  );
+});
