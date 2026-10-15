@@ -19,6 +19,8 @@ interface ActiveRun {
   updatedAt: number;
   ownerKeyId: string;
   desktopCapabilities: DesktopCapability[];
+  conversationId?: string;
+  assistantMessageId?: string;
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -164,7 +166,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     ...(run.error ? { error: run.error } : {}),
   });
 
-  const startRun = (run: ActiveRun, input: AgentRunInput) => {
+  const startRun = (run: ActiveRun, input: AgentRunInput, onSettled?: (run: ActiveRun) => void) => {
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
@@ -199,6 +201,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         clearTimeout(timer);
         run.updatedAt = Date.now();
         persist(run);
+        onSettled?.(run);
         const current = activeByKey.get(run.ownerKeyId) ?? 1;
         if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
       }
@@ -294,6 +297,32 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
+      const conversationTurnMatch = req.url?.split("?")[0]?.match(/^\\/v1\\/conversations\\/([0-9a-f-]{36})\\/turns\\/([0-9a-f-]{36})$/i);
+      if (conversationTurnMatch && req.method === "GET") {
+        if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
+        if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+        }
+        const conversationId = conversationTurnMatch[1]!;
+        const runId = conversationTurnMatch[2]!;
+        const conversation = conversations.get(auth.keyId, conversationId);
+        const run = runs.get(runId);
+        if (!conversation || !run || run.ownerKeyId !== auth.keyId || run.conversationId !== conversationId) {
+          return json(res, 404, { error: "conversation_turn_not_found" }, origin, config);
+        }
+        const assistantMessage = run.status === "completed" && run.assistantMessageId
+          ? conversation.messages.find((message) => message.id === run.assistantMessageId)
+          : undefined;
+        return json(res, 200, {
+          conversationId,
+          runId,
+          status: run.status,
+          ...(assistantMessage ? { assistantMessage } : {}),
+          ...(run.result ? { result: run.result } : {}),
+          ...(run.error ? { error: run.error } : {}),
+        }, origin, config);
+      }
+
       const conversationPath = req.url?.split("?")[0]?.split("/") ?? [];
       const conversationMatch = conversationPath[1] === "v1" && conversationPath[2] === "conversations" && conversationPath.length >= 4 && conversationPath.length <= 5 && (conversationPath.length === 4 || conversationPath[4] === "messages") && /^[0-9a-f-]{36}$/i.test(conversationPath[3] ?? "")
         ? [req.url ?? "", conversationPath[3] ?? "", conversationPath.length === 5 ? "messages" : undefined]
@@ -327,6 +356,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (!input || typeof input !== "object" || Array.isArray(input) || input.role !== "user" || typeof input.content !== "string") {
             return json(res, 400, { error: "user_message_required" }, origin, config);
           }
+          const asyncTurn = (input as { async?: unknown }).async === true;
           try {
             usage.consume(auth.keyId);
           } catch (error) {
@@ -344,6 +374,51 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           // Route the user's natural-language turn through the existing Sofia Agent.
           // The conversation layer stores context; it does not introduce a second planner.
           const context = conversations.buildContext(auth.keyId, conversationId);
+          if (asyncTurn) {
+            const active = activeByKey.get(auth.keyId) ?? 0;
+            if (active >= maxConcurrentRunsPerKey) {
+              res.setHeader("retry-after", "2");
+              return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000, userMessage }, origin, config);
+            }
+            const runId = randomUUID();
+            const run: ActiveRun = {
+              id: runId,
+              status: "queued",
+              controller: new AbortController(),
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              ownerKeyId: auth.keyId,
+              desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+              conversationId,
+            };
+            runs.set(runId, run);
+            persist(run);
+            activeByKey.set(auth.keyId, active + 1);
+            startRun(run, {
+              task: input.content,
+              context: JSON.stringify(context.messages),
+            }, (settled) => {
+              if (settled.status !== "completed" || !settled.result || settled.assistantMessageId) return;
+              try {
+                const assistant = conversations.append(auth.keyId, conversationId, {
+                  role: "assistant",
+                  content: settled.result.output,
+                });
+                settled.assistantMessageId = assistant.id;
+                settled.updatedAt = Date.now();
+                persist(settled);
+              } catch {
+                // Keep the run result available; a deleted/cleared conversation must not fail the run.
+              }
+            });
+            return json(res, 202, {
+              conversationId,
+              userMessage,
+              run: publicResponse(run),
+              pollUrl: `/v1/conversations/${conversationId}/turns/${runId}`,
+              contextTruncated: context.truncated,
+            }, origin, config);
+          }
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
           try {
