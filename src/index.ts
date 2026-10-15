@@ -50,3 +50,7 @@ export { MemorySecurityAudit } from "./security/audit.js";
 export { assessAction, containsPromptInjection, redactSecrets, riskFor } from "./security/guard.js";
 export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/guard.js";
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
+export { AgentMessageBus, CoordinationError, createAgentMessage, validateAgentMessage, DEFAULT_COORDINATION_LIMITS } from "./agents/protocol.js";
+export type { AgentIdentity, AgentTaskScope, AgentMessage, AgentMessageKind, AgentRole, CoordinationLimits } from "./agents/protocol.js";
+export { DelegationAuthorizer, DEFAULT_DELEGATION_POLICY } from "./security/delegation-policy.js";
+export type { DelegationRequest, DelegationDecision, DelegationPolicy } from "./security/delegation-policy.js";
