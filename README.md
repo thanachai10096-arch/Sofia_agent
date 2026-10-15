@@ -1,7 +1,7 @@
 <!-- Sofia Agent — README -->
 <div align="center">
 
-<table align="center" border="0"><tr><td align="center" valign="middle" width="112"><img src="assets/characters/a01-beanie-white.png" alt="Sofia character mascot" width="100" /></td><td align="center" valign="middle"><img src="assets/sofia-title.svg" alt="Sofia Agent — large green code-style title" width="100%" /></td></tr></table>
+<h1 align="center"><img src="assets/sofia-title.svg" alt="Sofia Agent — large green code-style title" width="100%" /></h1>
 
 **An agent runtime designed to plan, act, check results, and recover.**
 
@@ -16,126 +16,6 @@ A model-agnostic AI agent runtime with internal model routing, policy-controlled
 
 ---
 
-
-## Meet the 14 Sofia characters
-
-<div align="center">
-
-**One Sofia ecosystem. Fourteen distinct character identities.**
-
-The original Agent Workspace character artwork now lives in this repository as transparent PNG assets, ready for light or dark UI surfaces.
-
-</div>
-
-<table>
-  <tr>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a01-beanie-white.png" alt="Sofia — Orchestrator" width="76" /><br/>
-  <strong>Sofia</strong><br/>
-  <sub>Orchestrator</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a02-glasses-blue.png" alt="Nova — Planning" width="76" /><br/>
-  <strong>Nova</strong><br/>
-  <sub>Planning</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a03-cap-shadow.png" alt="Pixel — Coding" width="76" /><br/>
-  <strong>Pixel</strong><br/>
-  <sub>Coding</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a04-cap-back-pink.png" alt="Lumi — Design" width="76" /><br/>
-  <strong>Lumi</strong><br/>
-  <sub>Design</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a05-curly-pink.png" alt="Mira — Research" width="76" /><br/>
-  <strong>Mira</strong><br/>
-  <sub>Research</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a06-bob-pink.png" alt="Echo — Browser" width="76" /><br/>
-  <strong>Echo</strong><br/>
-  <sub>Browser</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a07-cap-pink.png" alt="Data — Data" width="76" /><br/>
-  <strong>Data</strong><br/>
-  <sub>Data</sub>
-</td>
-  </tr>
-  <tr>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a08-curly-mint.png" alt="Mint — Testing" width="76" /><br/>
-  <strong>Mint</strong><br/>
-  <sub>Testing</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a09-spiky-pink.png" alt="Bloom — Writing" width="76" /><br/>
-  <strong>Bloom</strong><br/>
-  <sub>Writing</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a10-spiky-violet.png" alt="Iris — Analysis" width="76" /><br/>
-  <strong>Iris</strong><br/>
-  <sub>Analysis</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a11-curly-lilac.png" alt="Orbit — Memory" width="76" /><br/>
-  <strong>Orbit</strong><br/>
-  <sub>Memory</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a12-beanie-violet.png" alt="Velvet — Security" width="76" /><br/>
-  <strong>Velvet</strong><br/>
-  <sub>Security</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a13-bob-violet.png" alt="Spark — Tooling" width="76" /><br/>
-  <strong>Spark</strong><br/>
-  <sub>Tooling</sub>
-</td>
-<td align="center" width="14.28%">
-  <img src="assets/characters/a14-tuft-lilac.png" alt="Pulse — Operations" width="76" /><br/>
-  <strong>Pulse</strong><br/>
-  <sub>Operations</sub>
-</td>
-  </tr>
-</table>
-
-<details>
-<summary><strong>Character roles and developer usage</strong></summary>
-
-| Character | Focus | Asset |
-|---|---|---|
-| Sofia | Orchestrator | [a01-beanie-white.png](assets/characters/a01-beanie-white.png) |
-| Nova | Planning | [a02-glasses-blue.png](assets/characters/a02-glasses-blue.png) |
-| Pixel | Coding | [a03-cap-shadow.png](assets/characters/a03-cap-shadow.png) |
-| Lumi | Design | [a04-cap-back-pink.png](assets/characters/a04-cap-back-pink.png) |
-| Mira | Research | [a05-curly-pink.png](assets/characters/a05-curly-pink.png) |
-| Echo | Browser | [a06-bob-pink.png](assets/characters/a06-bob-pink.png) |
-| Data | Data | [a07-cap-pink.png](assets/characters/a07-cap-pink.png) |
-| Mint | Testing | [a08-curly-mint.png](assets/characters/a08-curly-mint.png) |
-| Bloom | Writing | [a09-spiky-pink.png](assets/characters/a09-spiky-pink.png) |
-| Iris | Analysis | [a10-spiky-violet.png](assets/characters/a10-spiky-violet.png) |
-| Orbit | Memory | [a11-curly-lilac.png](assets/characters/a11-curly-lilac.png) |
-| Velvet | Security | [a12-beanie-violet.png](assets/characters/a12-beanie-violet.png) |
-| Spark | Tooling | [a13-bob-violet.png](assets/characters/a13-bob-violet.png) |
-| Pulse | Operations | [a14-tuft-lilac.png](assets/characters/a14-tuft-lilac.png) |
-
-- **Artwork directory:** `assets/characters/`
-- **Typed registry:** [`src/characters/registry.ts`](src/characters/registry.ts)
-- **Important:** these are character identities for the product UI. They do not imply that 14 separate runtime agents are currently running.
-
-```ts
-import { SOFIA_CHARACTERS, getSofiaCharacter } from "./characters/registry.js";
-
-console.log(SOFIA_CHARACTERS.length); // 14
-const codingMascot = getSofiaCharacter("pixel");
-```
-
-</details>
 
 ## `> Overview`
 
