@@ -118,7 +118,9 @@ class FileJobStateStore {
             await reclaimHandle.close();
             reclaimHandle = undefined;
           } catch (reclaimError) {
+            const createdReclaimFile = reclaimHandle !== undefined;
             await reclaimHandle?.close().catch(() => undefined);
+            if (createdReclaimFile) await fs.rm(reclaimFile, { force: true }).catch(() => undefined);
             if ((reclaimError as NodeJS.ErrnoException).code === "EEXIST") {
               if (Date.now() >= deadline) throw new Error("Timed out waiting for durable job-state stale-lock reclamation");
               await new Promise<void>((resolve) => setTimeout(resolve, 20));
