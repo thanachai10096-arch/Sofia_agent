@@ -311,7 +311,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      const conversationStreamMatch = req.url?.split("?")[0]?.match(/^\\/v1\\/conversations\\/([0-9a-f-]{36})\\/turns\\/([0-9a-f-]{36})\\/stream$/i);
+      const conversationStreamMatch = req.url?.split("?")[0]?.match(/^\/v1\/conversations\/([0-9a-f-]{36})\/turns\/([0-9a-f-]{36})\/stream$/i);
       if (conversationStreamMatch && req.method === "GET") {
         if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
         if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
@@ -331,7 +331,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           "x-accel-buffering": "no",
         });
         const send = (value: unknown) => {
-          if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(value)}\\n\\n`);
+          if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(value)}\n\n`);
         };
         for (const [index, event] of run.events.entries()) send({ type: "event", runId, sequence: index, event });
         const sendTerminal = () => {
@@ -362,7 +362,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         runSubscribers.set(runId, subscribers);
         const heartbeat = setInterval(() => {
           if (res.destroyed || res.writableEnded) return;
-          res.write(": keep-alive\\n\\n");
+          res.write(": keep-alive\n\n");
           if (sendTerminal()) cleanup();
         }, 10_000);
         const cleanup = () => {
@@ -374,7 +374,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return;
       }
 
-      const conversationTurnMatch = req.url?.split("?")[0]?.match(/^\\/v1\\/conversations\\/([0-9a-f-]{36})\\/turns\\/([0-9a-f-]{36})$/i);
+      const conversationTurnMatch = req.url?.split("?")[0]?.match(/^\/v1\/conversations\/([0-9a-f-]{36})\/turns\/([0-9a-f-]{36})$/i);
       if (conversationTurnMatch && req.method === "GET") {
         if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
         if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
