@@ -1,11 +1,15 @@
-<!-- Sofia Agent — README -->
+<!-- Sofia Agent — README hero: keep every image in its own paragraph to prevent side-by-side layout on mobile -->
 <div align="center">
 
-<img src="assets/sofia-mascots-animated.svg" alt="Sofia Agent mascots" width="280" />
+<p align="center">
+  <img src="assets/sofia-mascots-animated.svg" alt="Sofia Agent mascot team" width="100%" />
+</p>
 
-<img src="assets/sofia-title.svg" alt="SOFIA AGENT — dimensional green binary title" width="100%" />
+<p align="center">
+  <img src="assets/sofia-title.svg" alt="SOFIA AGENT — dimensional neon-green binary lettering" width="100%" />
+</p>
 
-<p><code>&gt; Your AI Agent for Coding, Research, and More_</code></p>
+<p align="center"><code>&gt; Your AI Agent for Coding, Research, and More_</code></p>
 
 **An agent runtime designed to plan, act, check results, and recover.**
 
