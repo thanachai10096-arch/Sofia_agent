@@ -65,7 +65,13 @@ export class FileConversationStore implements ConversationStore {
         return undefined;
       }
       return clone(parsed);
-    } catch {
+    } catch (error) {
+      // Invalid JSON is a corrupt record; remove it so repeated reads do not
+      // keep encountering the same poisoned file. Other filesystem errors are
+      // treated as unavailable rather than deleting a potentially valid record.
+      if (error instanceof SyntaxError) {
+        try { unlinkSync(filename); } catch { /* best effort */ }
+      }
       return undefined;
     }
   }
