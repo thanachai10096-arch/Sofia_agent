@@ -5,7 +5,7 @@
 
 <img src="assets/sofia-title.svg" alt="SOFIA AGENT — dimensional green binary title" width="100%" />
 
-<p><code style="color:#39ff78">&gt; Your AI Agent for Coding, Research, and More_</code></p>
+<p><code>&gt; Your AI Agent for Coding, Research, and More_</code></p>
 
 **An agent runtime designed to plan, act, check results, and recover.**
 
