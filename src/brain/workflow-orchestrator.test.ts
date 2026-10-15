@@ -126,6 +126,42 @@ test("concurrent run requests do not execute the same workflow twice in one orch
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("separate orchestrators cannot execute the same workflow concurrently", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-cross-process-"));
+  try {
+    const firstStore = new FileWorkflowPlanStore("shared-workflow", root);
+    const secondStore = new FileWorkflowPlanStore("shared-workflow", root);
+    let calls = 0;
+    let markEntered!: () => void;
+    let releaseExecution!: () => void;
+    const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+    const gate = new Promise<void>((resolve) => { releaseExecution = resolve; });
+    const first = new WorkflowOrchestrator({
+      store: firstStore,
+      executeStep: async () => { calls++; markEntered(); await gate; return {}; },
+    });
+    const second = new WorkflowOrchestrator({
+      store: secondStore,
+      executeStep: async () => { calls++; return {}; },
+    });
+    await first.create(createWorkflowPlan("shared", [
+      { id: "step", title: "Step", description: "Must run once", idempotent: true },
+    ], { id: "shared-plan" }));
+
+    const firstRun = first.run("shared-plan");
+    await entered;
+    const duplicate = await second.run("shared-plan");
+    assert.equal(duplicate.executed, 0);
+    assert.match(duplicate.stoppedReason ?? "", /claimed by another process/);
+    assert.equal(calls, 1);
+
+    releaseExecution();
+    const result = await firstRun;
+    assert.equal(result.plan.status, "completed");
+    assert.equal(calls, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("interrupted unknown side effects block automatic replay", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-"));
   try {
