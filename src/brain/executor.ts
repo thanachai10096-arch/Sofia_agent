@@ -15,6 +15,8 @@ import { compactSkillContext, matchSkills } from "./skills.js";
 import type { SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
+import { AgentMessageBus, createAgentMessage, type AgentIdentity, type AgentRole, type AgentTaskScope } from "../agents/protocol.js";
+import { DelegationAuthorizer } from "../security/delegation-policy.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 import type { BrainRunSnapshot } from "./run-state.js";
 import type { RepositoryMap } from "./repository-intelligence.js";
@@ -545,19 +547,89 @@ export class SofiaBrain {
 
     this.usage.modelCalls += 1;
     const role = roleForTask(task, failureCategory);
-    const result: unknown = await this.wait(() =>
-      runtime.run({
-        role,
-        task,
-        context,
-        signal: this.signal,
-      }),
-    );
+    // Bind this one specialist round-trip to host-owned run identity and scope.
+    // Coordination grants no tools: any returned proposal must still pass the
+    // existing Brain allowlist, Tool Gateway policy, and normal approval flow.
+    const specialistRole: AgentRole = role === "explorer" || role === "researcher"
+      ? "researcher"
+      : role === "architect"
+        ? "planner"
+        : role === "debugger"
+          ? "specialist"
+          : role;
+    const orchestratorId = `brain:${this.runId}`;
+    const specialistId = `specialist:${this.runId}`;
+    const identities = new Map<string, AgentIdentity>([
+      [orchestratorId, { id: orchestratorId, role: "orchestrator", capabilities: [] }],
+      [specialistId, { id: specialistId, role: specialistRole, capabilities: [] }],
+    ]);
+    const scope: AgentTaskScope = {
+      jobId: this.runId,
+      objective: task.slice(0, 4_000),
+      allowedTools: [],
+      maxHops: 1,
+      deadlineEpochMs: Date.now() + this.limits.timeoutMs,
+    };
+    const bus = new AgentMessageBus(scope, identities);
+    const authorizer = new DelegationAuthorizer(identities, scope);
+    try {
+      const decision = authorizer.authorize({
+        requesterId: orchestratorId,
+        recipientId: specialistId,
+        jobId: this.runId,
+        requestedTools: [],
+        hop: 0,
+        purpose: `Bounded failure recovery: ${task.slice(0, 900)}`,
+      });
+      if (!decision.allowed) {
+        throw new RecoverableFailure("permission_error", "Specialist delegation denied by host policy");
+      }
 
-    const validated = validateSubagentResult(result, role);
-    this.emit({ type: "brain.subagent.completed" });
+      bus.publish(createAgentMessage({
+        correlationId: this.runId,
+        jobId: this.runId,
+        from: orchestratorId,
+        to: specialistId,
+        kind: "task",
+        payload: { role, task, context },
+      }));
+      const taskMessage = bus.takeFor(specialistId);
+      if (!taskMessage || taskMessage.kind !== "task") {
+        throw new RecoverableFailure("tool_error", "Specialist task message was unavailable");
+      }
+      const result: unknown = await this.wait(() =>
+        runtime.run({
+          role,
+          task,
+          context,
+          signal: this.signal,
+        }),
+      );
 
-    return validated;
+      // The result is still untrusted data. The message bus bounds it, and the
+      // Brain validates its schema and role before considering any proposal.
+      bus.publish(createAgentMessage({
+        correlationId: this.runId,
+        jobId: this.runId,
+        from: specialistId,
+        to: orchestratorId,
+        kind: "result",
+        payload: { result },
+      }));
+      const resultMessage = bus.takeFor(orchestratorId);
+      if (!resultMessage || resultMessage.kind !== "result" ||
+          !resultMessage.payload || typeof resultMessage.payload !== "object" ||
+          !("result" in resultMessage.payload)) {
+        throw new RecoverableFailure("tool_error", "Specialist result message was invalid");
+      }
+
+      const validated = validateSubagentResult(resultMessage.payload.result, role);
+      this.emit({ type: "brain.subagent.completed" });
+      return validated;
+    } finally {
+      // Per-run queues never outlive the active Brain run.
+      bus.close();
+    }
   }
 
   private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string): Promise<void> {
