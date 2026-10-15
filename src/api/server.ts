@@ -132,6 +132,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
       ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
       ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+      ...(run.conversationId ? { conversationId: run.conversationId } : {}),
+      ...(run.assistantMessageId ? { assistantMessageId: run.assistantMessageId } : {}),
     };
     void runStore.save(record);
   };
@@ -149,6 +151,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       controller: new AbortController(), createdAt: record.createdAt,
       updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
       desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+      ...(record.conversationId ? { conversationId: record.conversationId } : {}),
+      ...(record.assistantMessageId ? { assistantMessageId: record.assistantMessageId } : {}),
     };
     runs.set(run.id, run); if (interrupted) persist(run);
   }
