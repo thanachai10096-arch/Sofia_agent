@@ -92,7 +92,7 @@ function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"])
     description: criterion.description,
     probe: criterion.probe,
     evaluate: (value: unknown) => ({
-      passed: Boolean((value as { passed?: unknown })?.passed),
+      passed: (value as { passed?: unknown } | null)?.passed === true,
       detail: "API acceptance probe",
     }),
   }));
@@ -434,6 +434,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 400, { error: "user_message_required" }, origin, config);
           }
           const asyncTurn = (input as { async?: unknown }).async === true;
+          // Check capacity before consuming quota or mutating conversation history.
+          // No await occurs between this check and the later increment.
+          const active = activeByKey.get(auth.keyId) ?? 0;
+          if (active >= maxConcurrentRunsPerKey) {
+            res.setHeader("retry-after", "2");
+            return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
+          }
           try {
             usage.consume(auth.keyId);
           } catch (error) {
@@ -451,12 +458,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           // Route the user's natural-language turn through the existing Sofia Agent.
           // The conversation layer stores context; it does not introduce a second planner.
           const context = conversations.buildContext(auth.keyId, conversationId);
+          // Count synchronous and asynchronous conversation turns against the same
+          // per-key limit used by the ordinary run endpoints.
+          activeByKey.set(auth.keyId, active + 1);
           if (asyncTurn) {
-            const active = activeByKey.get(auth.keyId) ?? 0;
-            if (active >= maxConcurrentRunsPerKey) {
-              res.setHeader("retry-after", "2");
-              return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000, userMessage }, origin, config);
-            }
             const runId = randomUUID();
             const run: ActiveRun = {
               id: runId,
@@ -471,7 +476,6 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             };
             runs.set(runId, run);
             persist(run);
-            activeByKey.set(auth.keyId, active + 1);
             startRun(run, {
               task: input.content,
               context: JSON.stringify(context.messages),
@@ -530,6 +534,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             }, origin, config);
           } finally {
             clearTimeout(timer);
+            const current = activeByKey.get(auth.keyId) ?? 1;
+            if (current <= 1) activeByKey.delete(auth.keyId);
+            else activeByKey.set(auth.keyId, current - 1);
           }
         }
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
