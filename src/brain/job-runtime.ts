@@ -104,24 +104,81 @@ class FileJobStateStore {
         }
 
         if (stale) {
+          // Serialize stale-lock reclamation itself. A token recheck alone is not
+          // atomic with unlink: two reclaimers could both observe the old token,
+          // then the slower one could delete a replacement owner's lock.
+          const reclaimFile = this.lockFile + ".reclaim";
+          let reclaimHandle: Awaited<ReturnType<typeof fs.open>> | undefined;
+          const reclaimToken = randomUUID();
           try {
-            // Recheck the owner token before unlinking so we do not remove a lock
-            // that another process replaced after our first read.
-            const latest = JSON.parse(await fs.readFile(this.lockFile, "utf8")) as { token?: unknown };
-            if (latest.token === observedToken) await fs.rm(this.lockFile, { force: true });
-          } catch (cleanupError) {
-            if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") {
-              // Malformed stale locks have no token to compare. Only reclaim one
-              // after rechecking that the file is still older than the stale limit.
-              const lockStat = await fs.stat(this.lockFile).catch((statError: NodeJS.ErrnoException) => {
-                if (statError.code === "ENOENT") return undefined;
-                throw statError;
-              });
-              if (lockStat && Date.now() - lockStat.mtimeMs > 120_000) {
-                await fs.rm(this.lockFile, { force: true });
-              } else if (lockStat) {
-                throw cleanupError;
+            reclaimHandle = await fs.open(reclaimFile, "wx", 0o600);
+            await reclaimHandle.writeFile(JSON.stringify({
+              token: reclaimToken,
+              pid: process.pid,
+              hostname: os.hostname(),
+              createdAt: Date.now(),
+            }), "utf8");
+            await reclaimHandle.close();
+            reclaimHandle = undefined;
+          } catch (reclaimError) {
+            const createdReclaimFile = reclaimHandle !== undefined;
+            await reclaimHandle?.close().catch(() => undefined);
+            if (createdReclaimFile) await fs.rm(reclaimFile, { force: true }).catch(() => undefined);
+            if ((reclaimError as NodeJS.ErrnoException).code === "EEXIST") {
+              if (Date.now() >= deadline) throw new Error("Timed out waiting for durable job-state stale-lock reclamation");
+              await new Promise<void>((resolve) => setTimeout(resolve, 20));
+              continue;
+            }
+            throw reclaimError;
+          }
+
+          try {
+            // Re-evaluate the current lock while holding the single reclaimer
+            // slot. Do not trust the stale observation made before acquiring it.
+            try {
+              const latest = JSON.parse(await fs.readFile(this.lockFile, "utf8")) as {
+                token?: unknown; pid?: unknown; hostname?: unknown; createdAt?: unknown;
+              };
+              const latestToken = typeof latest.token === "string" ? latest.token : undefined;
+              const latestAge = Date.now() - (typeof latest.createdAt === "number" ? latest.createdAt : 0);
+              let latestStale = false;
+              if (latest.hostname === os.hostname() && Number.isSafeInteger(latest.pid) && Number(latest.pid) > 0) {
+                try {
+                  process.kill(Number(latest.pid), 0);
+                } catch (probeError) {
+                  latestStale = (probeError as NodeJS.ErrnoException).code === "ESRCH";
+                }
+              } else if (latestAge > 120_000) {
+                latestStale = true;
               }
+              if (!latestToken && latestAge > 120_000) latestStale = true;
+              if (latestStale && latestToken === observedToken) {
+                await fs.rm(this.lockFile, { force: true });
+              }
+            } catch (recheckError) {
+              if ((recheckError as NodeJS.ErrnoException).code === "ENOENT") {
+                // Another process already removed the stale lock.
+              } else {
+                // Only reclaim malformed locks after rechecking their current age
+                // while all cooperating reclaimers are serialized.
+                let lockStat;
+                try {
+                  lockStat = await fs.stat(this.lockFile);
+                } catch (statError) {
+                  if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
+                  throw statError;
+                }
+                if (Date.now() - lockStat.mtimeMs > 120_000) {
+                  await fs.rm(this.lockFile, { force: true });
+                }
+              }
+            }
+          } finally {
+            try {
+              const currentReclaimer = JSON.parse(await fs.readFile(reclaimFile, "utf8")) as { token?: unknown };
+              if (currentReclaimer.token === reclaimToken) await fs.rm(reclaimFile, { force: true });
+            } catch (cleanupError) {
+              if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") throw cleanupError;
             }
           }
           continue;
