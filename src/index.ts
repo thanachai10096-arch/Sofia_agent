@@ -3,6 +3,7 @@ export { classifyTask } from "./agent/classifier.js";
 export { ModelRouter } from "./models/router.js";
 export { Reviewer } from "./review/reviewer.js";
 export { createSofiaApi } from "./api/server.js";
+export { createSofiaLocalApi } from "./api/local.js";
 export { SofiaClient } from "./sdk/client.js";
 export { createNodeWorkspaceRuntime } from "./platform/local-runtime.js";
 export { detectPlatform } from "./platform/runtime.js";
