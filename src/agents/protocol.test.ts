@@ -228,3 +228,13 @@ test("preserves host-authenticated principal binding in the scope snapshot", () 
     (error: unknown) => error instanceof CoordinationError && error.code === "SCOPE_VIOLATION",
   );
 });
+
+
+test("denies delegation when the authenticated principal does not match the job scope", () => {
+  const principalScope: AgentTaskScope = { ...scope, principalId: "user-123" };
+  const authorizer = new DelegationAuthorizer(agents, principalScope);
+  const base = { requesterId: "sofia", recipientId: "pixel", jobId: "job-1", requestedTools: [], hop: 0, purpose: "Bounded work" };
+  assert.equal(authorizer.authorize(base).allowed, false);
+  assert.equal(authorizer.authorize({ ...base, principalId: "attacker" }).allowed, false);
+  assert.equal(authorizer.authorize({ ...base, principalId: "user-123" }).allowed, true);
+});
