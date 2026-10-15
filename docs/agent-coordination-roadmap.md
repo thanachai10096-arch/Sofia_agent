@@ -5,7 +5,7 @@ Scope: safely evolve the current coordination protocol into a real multi-agent c
 
 ## Current verified boundary
 
-The current branch contains an in-memory, bounded agent message protocol and a delegation authorizer, plus regression tests and a security design note. The Brain's bounded single-specialist failure-recovery hook now routes its task/result exchange through a per-run message bus and authorizer. Messages are snapshotted at publication and revalidated when consumed. This is not durable multi-agent orchestration: principal/workspace binding, cancellation-race integration tests, persisted trace/recovery, feature-flag rollout, and full end-to-end safety proof remain outstanding. Do not advertise multi-agent orchestration as generally available until the gates below pass.
+The current branch contains an in-memory, bounded agent message protocol and a delegation authorizer, plus regression tests and a security design note. The Brain's bounded single-specialist failure-recovery hook routes its task/result exchange through a per-run message bus and authorizer. Messages are snapshotted at publication and revalidated when consumed. The authenticated principal is now carried in host-owned task scope and checked by the delegation authorizer when that scope is principal-bound. Workspace-root binding, full job ownership enforcement, cancellation-race integration proof, persisted trace/recovery, feature-flag rollout, and full end-to-end safety proof remain outstanding. Do not advertise multi-agent orchestration as generally available until the gates below pass.
 
 ## Non-negotiable invariants
 
@@ -36,9 +36,11 @@ The current branch contains an in-memory, bounded agent message protocol and a d
 
 - [x] Trace the existing SofiaBrain, SubagentRuntime, ToolGateway, and DurableJobRuntime paths before editing production flow.
 - [x] Route the bounded single-specialist recovery exchange through a per-run coordinator owned by Brain; no independent tool-execution route is created.
-- [ ] Bind coordinator scope to authenticated principal, active job ID, allowed tools, workspace boundary, cancellation signal, and deadline.
+- [ ] Complete coordinator binding to authenticated principal, active job ID, allowed tools, workspace boundary, cancellation signal, and deadline (principal scope/authorizer matching implemented; workspace-root and end-to-end ownership enforcement remain).
 - [x] Validate specialist result envelopes at the Brain boundary: expected role, non-empty bounded summary, plain-object action input, bounded reason, JSON serializability, and a 16 KiB proposal cap. Reject malformed output before it can be considered for execution.
-- [x] Route the bounded Brain specialist exchange through the ACP message bus and explicit delegation authorizer, with run identity and deadline scope bound by host-owned state. Principal and workspace binding are still pending.
+- [x] Route the bounded Brain specialist exchange through the ACP message bus and explicit delegation authorizer, with run identity and deadline scope bound by host-owned state.
+- [x] Carry the host-authenticated principal into specialist task scope and deny delegation requests whose principal does not match a principal-bound scope.
+- [ ] Derive and enforce the workspace root from the trusted workspace runtime; do not accept a workspace root from model or agent payloads.
 - [ ] Keep action execution exclusively in Brain/Tool Gateway; subagents cannot call tool implementations directly.
 - [ ] Ensure cancellation/deadline closes the bus, aborts model work, and prevents queued proposals from executing.
 - [ ] Persist enough trace state to explain the job after restart; explicitly decide whether queued messages are replayed or discarded. Never replay side effects without idempotency checks.
