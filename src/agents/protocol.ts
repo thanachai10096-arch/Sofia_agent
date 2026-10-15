@@ -11,6 +11,8 @@ export interface AgentIdentity {
 }
 export interface AgentTaskScope {
   jobId: string;
+  /** Host-authenticated principal that owns this job; never supplied by an agent message. */
+  principalId?: string;
   objective: string;
   allowedTools: readonly string[];
   workspaceRoot?: string;
@@ -94,6 +96,7 @@ function validCoordinationLimits(limits: CoordinationLimits): boolean {
 }
 function validTaskScope(scope: AgentTaskScope): boolean {
   return typeof scope.jobId === "string" && scope.jobId.length > 0 && scope.jobId.length <= 256 &&
+    (scope.principalId === undefined || (typeof scope.principalId === "string" && scope.principalId.length > 0 && scope.principalId.length <= 256)) &&
     typeof scope.objective === "string" && scope.objective.trim().length > 0 && scope.objective.length <= 4_000 &&
     Array.isArray(scope.allowedTools) &&
     scope.allowedTools.every(tool => typeof tool === "string" && tool.length > 0 && tool.length <= 256) &&
