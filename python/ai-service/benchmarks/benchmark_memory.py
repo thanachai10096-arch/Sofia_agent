@@ -39,6 +39,23 @@ def request_json(
     return result, (time.perf_counter() - started) * 1000
 
 
+def is_allowed_service_url(value: str) -> bool:
+    try:
+        parsed_url = urlparse(value)
+        _ = parsed_url.port
+    except ValueError:
+        return False
+    if not parsed_url.hostname or parsed_url.username is not None or parsed_url.password is not None:
+        return False
+    if parsed_url.scheme == "https":
+        return True
+    return parsed_url.scheme == "http" and parsed_url.hostname in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }
+
+
 def cosine(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = math.sqrt(sum(x * x for x in a))
@@ -65,17 +82,9 @@ def main() -> int:
     if not base_url or not token:
         print("Set SOFIA_AI_SERVICE_URL and SOFIA_AI_SERVICE_TOKEN.", file=sys.stderr)
         return 2
-    try:
-        parsed_url = urlparse(base_url)
-        _ = parsed_url.port
-    except ValueError:
-        print("Invalid AI service URL.", file=sys.stderr)
-        return 2
-    local_http_hosts = {"localhost", "127.0.0.1", "::1"}
-    is_local_http = parsed_url.scheme == "http" and parsed_url.hostname in local_http_hosts
-    if parsed_url.scheme != "https" and not is_local_http:
+    if not is_allowed_service_url(base_url):
         print(
-            "Refusing non-HTTPS AI service URL (HTTP is allowed only on localhost).",
+            "Refusing AI service URL: HTTPS is required except for localhost HTTP.",
             file=sys.stderr,
         )
         return 2
