@@ -255,7 +255,7 @@ export class SofiaClient {
     content: string,
     options: { async?: boolean; signal?: AbortSignal } = {},
   ): Promise<{ conversationId: string; userMessage: SofiaConversationMessage; assistantMessage: SofiaConversationMessage; result: SofiaRunResponse["result"]; contextTruncated: boolean } | SofiaConversationTurnAccepted> {
-    return this.request(
+    return this.request<{ conversationId: string; userMessage: SofiaConversationMessage; assistantMessage: SofiaConversationMessage; result: SofiaRunResponse["result"]; contextTruncated: boolean } | SofiaConversationTurnAccepted>(
       `/v1/conversations/${encodeURIComponent(id)}/messages`,
       {
         method: "POST",
