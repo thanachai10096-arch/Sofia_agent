@@ -45,3 +45,27 @@ test("closed bus refuses further messages", () => {
   bus.close();
   assert.throws(() => bus.publish(createAgentMessage({ correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel", kind: "task", payload: {} })), /closed/);
 });
+
+test("rejects expired, oversized, and past-deadline messages", () => {
+  const limits = { maxMessages: 5, maxHops: 4, maxPayloadBytes: 16, maxAgeMs: 1000 };
+  const bus = new AgentMessageBus(scope, agents, limits);
+  const expired = createAgentMessage({ correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel", kind: "task", payload: {}, createdAt: 1 });
+  assert.throws(() => bus.publish(expired, 5000), (error: unknown) => error instanceof CoordinationError && error.code === "INVALID_MESSAGE");
+  const oversized = createAgentMessage({ correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel", kind: "task", payload: { text: "x".repeat(100) } });
+  assert.throws(() => bus.publish(oversized), (error: unknown) => error instanceof CoordinationError && error.code === "BUDGET_EXCEEDED");
+  const expiredScope: AgentTaskScope = { ...scope, deadlineEpochMs: 100 };
+  const deadlineBus = new AgentMessageBus(expiredScope, agents);
+  const inTime = createAgentMessage({ correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel", kind: "task", payload: {} });
+  assert.throws(() => deadlineBus.publish(inTime, 101), (error: unknown) => error instanceof CoordinationError && error.code === "BUDGET_EXCEEDED");
+});
+test("enforces the per-agent delegation budget and hop boundary", () => {
+  const authorizer = new DelegationAuthorizer(agents, scope, {
+    maxHops: 2, maxDelegationsPerAgent: 1,
+    allowedRoles: new Set(["coder", "security"]),
+    neverDelegateTools: new Set(["secrets.read"]),
+  });
+  const first = { requesterId: "sofia", recipientId: "pixel", jobId: "job-1", requestedTools: ["workspace.write"], hop: 0, purpose: "Do scoped work" };
+  assert.equal(authorizer.authorize(first).allowed, true);
+  assert.equal(authorizer.authorize(first).allowed, false);
+  assert.equal(authorizer.authorize({ ...first, requesterId: "pixel", recipientId: "velvet", requestedTools: ["workspace.read"], hop: 2 }).allowed, false);
+});
