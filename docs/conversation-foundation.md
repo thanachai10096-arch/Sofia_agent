@@ -23,7 +23,7 @@ All routes require a Bearer API key. The owner ID is derived from the authentica
 - `DELETE /v1/conversations/:id/messages` — clear message history (`agent:run`).
 - `DELETE /v1/conversations/:id` — delete an owned session (`agent:run`).
 
-If no conversation store is configured, these routes return `503 conversation_store_unavailable`. A message append currently persists the user message and returns bounded context; it does not yet call a model or launch an agent.
+If no conversation store is configured, these routes return `503 conversation_store_unavailable`. A turn runs synchronously within the HTTP request, bounded by the configured request timeout and API usage limiter. Long-running/mobile-resilient turns should move to the existing async job/run lifecycle before production use.
 
 ## Security and trust boundaries
 
@@ -37,8 +37,8 @@ If no conversation store is configured, these routes return `503 conversation_st
 
 ## Next integration steps
 
-1. Connect a user message to the existing Sofia Agent/Brain lifecycle.
-2. Persist the assistant's final response and structured execution events in the same conversation.
-3. Add streaming events and reconnect support without tying job lifetime to the client connection.
+1. Move long-running turns to the existing async job lifecycle so mobile clients can disconnect and reconnect.
+2. Add streaming events and reconnect support without tying job lifetime to the client connection.
+3. Persist structured execution events and job/run references in the conversation.
 4. Preserve approval checks, cancellation, usage budgets, run ownership, and secret filtering.
-5. Add integration tests against the configured API and a durable store before enabling the feature in production.
+5. Add cross-platform CI and load tests against a durable store before enabling the feature in production.
