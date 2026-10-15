@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createSofiaApi } from "./server.js";
 import type { AgentDependencies } from "../agent/types.js";
 import { InMemoryConversationStore } from "../conversation/session.js";
+import type { RunRecordStore } from "./run-record-store.js";
 
 async function withApi(
   run: (baseUrl: string) => Promise<void>,
@@ -10,6 +11,7 @@ async function withApi(
     generate?: () => Promise<{ text: string; assistantMessage: { role: string; content: string } }>;
     maxConcurrentRunsPerKey?: number;
     maxRunsPerKeyPerDay?: number;
+    runStore?: RunRecordStore;
   } = {},
 ): Promise<void> {
   const server = createSofiaApi({
@@ -26,6 +28,7 @@ async function withApi(
       "read-only-token": ["agent:read"],
     },
     conversationStore: new InMemoryConversationStore(),
+    ...(options.runStore ? { runStore: options.runStore } : {}),
     ...(options.maxConcurrentRunsPerKey === undefined ? {} : { maxConcurrentRunsPerKey: options.maxConcurrentRunsPerKey }),
     ...(options.maxRunsPerKeyPerDay === undefined ? {} : { maxRunsPerKeyPerDay: options.maxRunsPerKeyPerDay }),
   });
@@ -337,6 +340,30 @@ test("cancelling an async conversation turn stops the run and preserves a termin
       notifyStarted();
       await gate;
       return { text: "This response must not be appended", assistantMessage: { role: "assistant", content: "This response must not be appended" } };
+    },
+  });
+});
+
+test("async run admission returns 503 and does not start work when durable persistence fails", async () => {
+  let generated = false;
+  const failingStore: RunRecordStore = {
+    save: async () => { throw new Error("disk unavailable"); },
+    remove: async () => undefined,
+    loadAllSync: () => [],
+  };
+  await withApi(async (baseUrl) => {
+    const response = await request(baseUrl, "test-token-a", "/v1/agent/runs", "POST", {
+      task: "This must not start",
+      async: true,
+    });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as { error: string }).error, "run_persistence_unavailable");
+    assert.equal(generated, false);
+  }, {
+    runStore: failingStore,
+    generate: async () => {
+      generated = true;
+      return { text: "Unexpected generation", assistantMessage: { role: "assistant", content: "Unexpected generation" } };
     },
   });
 });
