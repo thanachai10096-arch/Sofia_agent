@@ -55,7 +55,7 @@ test("rejects expired, oversized, and past-deadline messages", () => {
   assert.throws(() => bus.publish(oversized), (error: unknown) => error instanceof CoordinationError && error.code === "BUDGET_EXCEEDED");
   const expiredScope: AgentTaskScope = { ...scope, deadlineEpochMs: 100 };
   const deadlineBus = new AgentMessageBus(expiredScope, agents);
-  const inTime = createAgentMessage({ correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel", kind: "task", payload: {} });
+  const inTime = createAgentMessage({ correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel", kind: "task", payload: {}, createdAt: 101 });
   assert.throws(() => deadlineBus.publish(inTime, 101), (error: unknown) => error instanceof CoordinationError && error.code === "BUDGET_EXCEEDED");
 });
 test("enforces the per-agent delegation budget and hop boundary", () => {
