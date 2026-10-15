@@ -179,6 +179,29 @@ test("interrupted unknown side effects block automatic replay", async () => {
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("already-aborted workflow cancels and persists every unstarted step", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-pre-cancel-"));
+  try {
+    const store = new FileWorkflowPlanStore("pre-cancel", root);
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    const orchestrator = new WorkflowOrchestrator({
+      store,
+      executeStep: async () => { calls++; return {}; },
+    });
+    await orchestrator.create(createWorkflowPlan("pre-cancel", [
+      { id: "a", title: "A", description: "Do not start", idempotent: true },
+      { id: "b", title: "B", description: "Also do not start", dependsOn: ["a"], idempotent: true },
+    ], { id: "pre-cancel-plan" }));
+    const result = await orchestrator.run("pre-cancel-plan", { signal: controller.signal });
+    assert.equal(calls, 0);
+    assert.equal(result.plan.status, "cancelled");
+    assert.deepEqual(result.plan.steps.map((step) => step.status), ["cancelled", "cancelled"]);
+    assert.deepEqual((await store.load("pre-cancel-plan"))?.steps.map((step) => step.status), ["cancelled", "cancelled"]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("orchestrator persists cancellation while a step is in flight", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-"));
   try {
@@ -194,9 +217,12 @@ test("orchestrator persists cancellation while a step is in flight", async () =>
     });
     await orchestrator.create(createWorkflowPlan("cancel", [
       { id: "step", title: "Step", description: "Long-running action", idempotent: true },
+      { id: "next", title: "Next", description: "Must not start after cancellation", dependsOn: ["step"], idempotent: true },
     ], { id: "cancel-plan" }));
     const result = await orchestrator.run("cancel-plan", { signal: controller.signal });
     assert.equal(result.plan.steps[0]?.status, "cancelled");
+    assert.equal(result.plan.steps[1]?.status, "cancelled");
+    assert.equal(result.plan.status, "cancelled");
     assert.match(result.stoppedReason ?? "", /partial side effects/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
