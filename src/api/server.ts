@@ -328,12 +328,55 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 400, { error: "user_message_required" }, origin, config);
           }
           try {
-            const message = conversations.append(auth.keyId, conversationId, { role: "user", content: input.content });
-            return json(res, 201, { message, context: conversations.buildContext(auth.keyId, conversationId) }, origin, config);
+            usage.consume(auth.keyId);
+          } catch (error) {
+            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+          }
+          let userMessage;
+          try {
+            userMessage = conversations.append(auth.keyId, conversationId, { role: "user", content: input.content });
           } catch (error) {
             const message = error instanceof Error ? error.message : "Invalid conversation message.";
             const status = /not found/i.test(message) ? 404 : 400;
             return json(res, status, { error: status === 404 ? "conversation_not_found" : "invalid_message", message }, origin, config);
+          }
+
+          // Route the user's natural-language turn through the existing Sofia Agent.
+          // The conversation layer stores context; it does not introduce a second planner.
+          const context = conversations.buildContext(auth.keyId, conversationId);
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+          try {
+            const result = await agent.run({
+              principalId: auth.keyId,
+              desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+              task: input.content,
+              context: JSON.stringify(context.messages),
+              signal: controller.signal,
+            });
+            if (controller.signal.aborted) {
+              return json(res, 504, { error: "conversation_turn_timeout", userMessage }, origin, config);
+            }
+            const assistantMessage = conversations.append(auth.keyId, conversationId, {
+              role: "assistant",
+              content: result.output,
+            });
+            return json(res, 200, {
+              conversationId,
+              userMessage,
+              assistantMessage,
+              result,
+              contextTruncated: context.truncated,
+            }, origin, config);
+          } catch (error) {
+            return json(res, controller.signal.aborted ? 504 : 502, {
+              error: controller.signal.aborted ? "conversation_turn_timeout" : "conversation_turn_failed",
+              message: controller.signal.aborted ? "Sofia did not finish before the request timeout." : error instanceof Error ? error.message : "Agent failed",
+              conversationId,
+              userMessage,
+            }, origin, config);
+          } finally {
+            clearTimeout(timer);
           }
         }
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
