@@ -610,6 +610,56 @@ test("Brain saves explicit user preferences and recalls them in the model contex
     assert.equal(stored[0]?.content, "concise Thai responses");
     assert.ok(observedMemory.some((entry) => entry.kind === "preference" && entry.content === "concise Thai responses"));
     assert.deepEqual(await userMemory.list("different-user"), []);
+
+    // A fresh Brain instance must recall the same user's persisted memory.
+    const beforeRecallRun = observedMemory.length;
+    const recallBrain = createSofiaBrain({
+      dependencies: { reasoner, tools: makeTools(), userMemory, allowShell: false, allowNetwork: false },
+      limits: {
+        maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+        maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+      },
+    });
+    const recallReport = await recallBrain.run({
+      principalId: "test-user-1",
+      task: "Create hello.txt",
+      acceptanceCriteria: [{
+        id: "file-exists",
+        description: "hello.txt exists",
+        probe: { tool: "workspace.list_files", input: { path: "." } },
+        evaluate(data) {
+          return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+        },
+      }],
+    });
+    assert.equal(recallReport.completed, true, recallReport.summary);
+    assert.ok(
+      observedMemory.slice(beforeRecallRun).some((entry) => entry.kind === "preference" && entry.content === "concise Thai responses"),
+      "a new run for the same principal must receive persisted memory in its model context",
+    );
+
+    // Forget-all is explicit and must remove persistent data for this principal.
+    const forgetBrain = createSofiaBrain({
+      dependencies: { reasoner: makeReasoner(), tools: makeTools(), userMemory, allowShell: false, allowNetwork: false },
+      limits: {
+        maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+        maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+      },
+    });
+    const forgetReport = await forgetBrain.run({
+      principalId: "test-user-1",
+      task: "Forget all memories about me",
+      acceptanceCriteria: [{
+        id: "file-exists",
+        description: "hello.txt exists",
+        probe: { tool: "workspace.list_files", input: { path: "." } },
+        evaluate(data) {
+          return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+        },
+      }],
+    });
+    assert.equal(forgetReport.completed, true, forgetReport.summary);
+    assert.deepEqual(await userMemory.list("test-user-1"), []);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
