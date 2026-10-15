@@ -5,7 +5,14 @@ import type { AgentDependencies } from "../agent/types.js";
 import { InMemoryConversationStore } from "../conversation/session.js";
 
 async function withApi(run: (baseUrl: string) => Promise<void>): Promise<void> {
-  const server = createSofiaApi({} as AgentDependencies, {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Sofia response", assistantMessage: { role: "assistant", content: "Sofia response" } }) },
+    router: {
+      select: () => ({ id: "test-route", capabilities: ["fast"], costWeight: 0, latencyWeight: 0, qualityWeight: 1, healthy: true }),
+      markUnhealthy: () => undefined,
+    },
+    reviewer: { review: async () => ({ approved: true, reason: "Test response accepted." }) },
+  } as unknown as AgentDependencies, {
     apiKeys: {
       "test-token-a": ["agent:run", "agent:read"],
       "test-token-b": ["agent:run", "agent:read"],
@@ -47,10 +54,12 @@ test("conversation API creates, appends, retrieves, clears, and deletes sessions
     const appended = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}/messages`, "POST", {
       role: "user", content: "Inspect this repository",
     });
-    assert.equal(appended.status, 201);
-    const messagePayload = await appended.json() as { message: { role: string; content: string } };
-    assert.equal(messagePayload.message.role, "user");
-    assert.equal(messagePayload.message.content, "Inspect this repository");
+    assert.equal(appended.status, 200);
+    const messagePayload = await appended.json() as { userMessage: { role: string; content: string }; assistantMessage: { role: string; content: string } };
+    assert.equal(messagePayload.userMessage.role, "user");
+    assert.equal(messagePayload.userMessage.content, "Inspect this repository");
+    assert.equal(messagePayload.assistantMessage.role, "assistant");
+    assert.equal(messagePayload.assistantMessage.content, "Sofia response");
 
     const retrieved = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}`);
     assert.equal(retrieved.status, 200);
