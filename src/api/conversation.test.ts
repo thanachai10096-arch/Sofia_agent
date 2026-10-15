@@ -4,9 +4,15 @@ import { createSofiaApi } from "./server.js";
 import type { AgentDependencies } from "../agent/types.js";
 import { InMemoryConversationStore } from "../conversation/session.js";
 
-async function withApi(run: (baseUrl: string) => Promise<void>): Promise<void> {
+async function withApi(
+  run: (baseUrl: string) => Promise<void>,
+  options: {
+    generate?: () => Promise<{ text: string; assistantMessage: { role: string; content: string } }>;
+    maxConcurrentRunsPerKey?: number;
+  } = {},
+): Promise<void> {
   const server = createSofiaApi({
-    provider: { generate: async () => ({ text: "Sofia response", assistantMessage: { role: "assistant", content: "Sofia response" } }) },
+    provider: { generate: options.generate ?? (async () => ({ text: "Sofia response", assistantMessage: { role: "assistant", content: "Sofia response" } })) },
     router: {
       select: () => ({ id: "test-route", capabilities: ["fast"], costWeight: 0, latencyWeight: 0, qualityWeight: 1, healthy: true }),
       markUnhealthy: () => undefined,
@@ -19,6 +25,7 @@ async function withApi(run: (baseUrl: string) => Promise<void>): Promise<void> {
       "read-only-token": ["agent:read"],
     },
     conversationStore: new InMemoryConversationStore(),
+    ...(options.maxConcurrentRunsPerKey === undefined ? {} : { maxConcurrentRunsPerKey: options.maxConcurrentRunsPerKey }),
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -121,5 +128,43 @@ test("conversation API supports async turns and reconnectable polling", async ()
     const streamed = await stream.text();
     assert.match(streamed, /"status":"completed"/);
     assert.match(streamed, /"content":"Sofia response"/);
+  });
+});
+
+
+test("conversation synchronous turns enforce the per-key concurrency limit without consuming a rejected turn", async () => {
+  let notifyStarted!: () => void;
+  const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+
+  await withApi(async (baseUrl) => {
+    const created = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+    const payload = await created.json() as { conversation: { id: string } };
+    const path = `/v1/conversations/${payload.conversation.id}/messages`;
+    const firstTurn = request(baseUrl, "test-token-a", path, "POST", { role: "user", content: "First slow turn" });
+
+    try {
+      await started;
+      const rejected = await request(baseUrl, "test-token-a", path, "POST", { role: "user", content: "Second turn should be rejected" });
+      assert.equal(rejected.status, 429);
+      const rejection = await rejected.json() as { error: string };
+      assert.equal(rejection.error, "concurrency_limit");
+    } finally {
+      release();
+    }
+
+    const first = await firstTurn;
+    assert.equal(first.status, 200);
+    const saved = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}`);
+    const savedPayload = await saved.json() as { conversation: { messages: Array<{ role: string; content: string }> } };
+    assert.deepEqual(savedPayload.conversation.messages.map((message) => message.content), ["First slow turn", "Sofia response"]);
+  }, {
+    maxConcurrentRunsPerKey: 1,
+    generate: async () => {
+      notifyStarted();
+      await gate;
+      return { text: "Sofia response", assistantMessage: { role: "assistant", content: "Sofia response" } };
+    },
   });
 });
