@@ -193,3 +193,21 @@ test("close discards queued work and prevents later consumption", () => {
     (error: unknown) => error instanceof CoordinationError && error.code === "CANCELLED",
   );
 });
+
+
+test("rejects malformed task scopes and inconsistent agent identities", () => {
+  assert.throws(
+    () => new AgentMessageBus({ ...scope, maxHops: Number.NaN }, agents),
+    (error: unknown) => error instanceof CoordinationError && error.code === "SCOPE_VIOLATION",
+  );
+  assert.throws(
+    () => new AgentMessageBus({ ...scope, deadlineEpochMs: Number.NaN }, agents),
+    (error: unknown) => error instanceof CoordinationError && error.code === "SCOPE_VIOLATION",
+  );
+  const inconsistent = new Map(agents);
+  inconsistent.set("pixel-alias", agents.get("pixel")!);
+  assert.throws(
+    () => new AgentMessageBus(scope, inconsistent),
+    (error: unknown) => error instanceof CoordinationError && error.code === "POLICY_DENIED",
+  );
+});
