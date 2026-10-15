@@ -86,6 +86,8 @@ export class WorkflowOrchestrator {
           return { plan, executed, waitingForApproval: retry.requiresApproval, stoppedReason: retry.reason };
         }
         plan = transitionWorkflowStep(plan, interrupted.id, "failed", { now: this.now(), error: "Execution interrupted before side effects; safe retry must be explicitly replanned." });
+        await this.deps.store.save(plan);
+        return { plan, executed, waitingForApproval: false, stoppedReason: "Interrupted step was reconciled as not started; create an explicit retry plan before continuing." };
       }
       await this.deps.store.save(plan);
     }
