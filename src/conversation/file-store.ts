@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ConversationMessage, ConversationSession, ConversationStore } from "./types.js";
 
@@ -54,12 +54,19 @@ export class FileConversationStore implements ConversationStore {
   get(id: string): ConversationSession | undefined {
     const filename = this.file(id);
     try {
-      const statSize = readFileSync(filename);
-      if (statSize.byteLength > MAX_FILE_BYTES) {
+      // Check metadata before reading bytes so an unexpectedly huge local file
+      // cannot force an unbounded allocation. Re-check the actual buffer size
+      // after reading to cover a file that grows between stat and read.
+      if (statSync(filename).size > MAX_FILE_BYTES) {
         try { unlinkSync(filename); } catch { /* best effort */ }
         return undefined;
       }
-      const parsed: unknown = JSON.parse(statSize.toString("utf8"));
+      const bytes = readFileSync(filename);
+      if (bytes.byteLength > MAX_FILE_BYTES) {
+        try { unlinkSync(filename); } catch { /* best effort */ }
+        return undefined;
+      }
+      const parsed: unknown = JSON.parse(bytes.toString("utf8"));
       if (!validSession(parsed, path.basename(filename))) {
         try { unlinkSync(filename); } catch { /* best effort */ }
         return undefined;
