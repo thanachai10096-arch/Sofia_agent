@@ -536,6 +536,7 @@ export class SofiaBrain {
   private async delegateSubagent(
     task: string,
     context: Record<string, unknown>,
+    principalId?: string,
     failureCategory?: string,
   ): Promise<SubagentResult | undefined> {
     const runtime = this.dependencies.subagents;
@@ -565,6 +566,7 @@ export class SofiaBrain {
     ]);
     const scope: AgentTaskScope = {
       jobId: this.runId,
+      ...(principalId ? { principalId } : {}),
       objective: task.slice(0, 4_000),
       allowedTools: [],
       maxHops: 1,
