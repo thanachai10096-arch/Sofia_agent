@@ -85,7 +85,7 @@ The conversation API, async turns, bounded execution events, polling, reconnecta
 Before production multi-user or cloud deployment:
 
 1. Implement a transactional shared database-backed `ConversationStore` and durable queue; do not share the local JSON store across replicas.
-2. Make accepted-run persistence and queue handoff transactional so a successful `202 Accepted` cannot be returned before the job is durably recorded.
+2. The async `/v1/agent/runs` admission path awaits the configured run store before returning `202 Accepted`; storage errors return `503 run_persistence_unavailable`. This improves persistence guarantees but is not a transactional queue handoff: the local file store remains single-process, and the run store and scheduler are not one atomic transaction.
 3. Add explicit recovery/requeue semantics only when execution checkpoints and idempotent tool actions are available. Until then, restart recovery marks in-flight runs failed as interrupted; it does not claim to resume them.
 4. Add load, crash-injection, and concurrent-writer tests for the production storage adapter.
 5. Keep API credentials server-side for browser clients and retain Sofia Core's permission, approval, cancellation, usage-budget, ownership, and secret-filtering enforcement.

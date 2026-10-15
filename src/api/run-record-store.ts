@@ -34,16 +34,28 @@ function validRecord(value:unknown,filename:string):value is RunRecord {
  if(r.status==="failed"&&r.error===undefined)return false;
  return true;
 }
-/** Atomic best-effort JSON persistence for one API server instance. */
+/** Atomic JSON persistence that reports write failures for one API server instance. */
 export class FileRunRecordStore implements RunRecordStore {
  private chain:Promise<void>=Promise.resolve();
  constructor(private readonly directory:string){mkdirSync(directory,{recursive:true,mode:0o700});try{chmodSync(directory,0o700);}catch{/* permissions unavailable on this platform */}}
  private file(id:string){if(!SAFE_ID.test(id))throw new Error("Unsafe run id.");return path.join(this.directory,id+".json");}
  save(record:RunRecord):Promise<void>{
-  this.chain=this.chain.then(async()=>{try{const target=this.file(record.id),tmp=target+"."+process.pid+".tmp";await fs.writeFile(tmp,JSON.stringify(record),{encoding:"utf8",mode:0o600});try{await fs.chmod(tmp,0o600);}catch{}await fs.rename(tmp,target);}catch{/* best effort; in-memory state remains authoritative */}});
-  return this.chain;
+  const operation=this.chain.catch(()=>undefined).then(async()=>{
+   const target=this.file(record.id),tmp=target+"."+process.pid+".tmp";
+   await fs.writeFile(tmp,JSON.stringify(record),{encoding:"utf8",mode:0o600});
+   try{await fs.chmod(tmp,0o600);}catch{/* permissions unavailable on this platform */}
+   await fs.rename(tmp,target);
+  });
+  this.chain=operation.catch(()=>undefined);
+  return operation;
  }
- remove(id:string):Promise<void>{this.chain=this.chain.then(async()=>{try{await fs.unlink(this.file(id));}catch{/* already absent */}});return this.chain;}
+ remove(id:string):Promise<void>{
+  const operation=this.chain.catch(()=>undefined).then(async()=>{
+   try{await fs.unlink(this.file(id));}catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
+  });
+  this.chain=operation.catch(()=>undefined);
+  return operation;
+ }
  loadAllSync():RunRecord[]{
   const out:RunRecord[]=[];let names:string[];try{names=readdirSync(this.directory);}catch{return out;}
   for(const name of names){const full=path.join(this.directory,name);if(!name.endsWith(".json")){if(name.endsWith(".tmp"))try{unlinkSync(full);}catch{};continue;}

@@ -126,18 +126,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
   const conversations = config.conversationStore ? new ConversationService(config.conversationStore) : undefined;
+  const toRunRecord = (run: ActiveRun): RunRecord => ({
+    id: run.id, status: run.status,
+    ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
+    ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
+    ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+    ...(run.conversationId ? { conversationId: run.conversationId } : {}),
+    ...(run.assistantMessageId ? { assistantMessageId: run.assistantMessageId } : {}),
+    events: [...run.events],
+  });
   const persist = (run: ActiveRun) => {
-    if (!runStore) return;
-    const record: RunRecord = {
-      id: run.id, status: run.status,
-      ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
-      ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
-      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
-      ...(run.conversationId ? { conversationId: run.conversationId } : {}),
-      ...(run.assistantMessageId ? { assistantMessageId: run.assistantMessageId } : {}),
-      events: [...run.events],
-    };
-    void runStore.save(record);
+    if (runStore) void runStore.save(toRunRecord(run)).catch(() => undefined);
+  };
+  const persistRequired = async (run: ActiveRun) => {
+    if (runStore) await runStore.save(toRunRecord(run));
   };
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
@@ -711,7 +713,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             events: [],
           };
           runs.set(runId, run);
-          persist(run);
+          try {
+            await persistRequired(run);
+          } catch {
+            runs.delete(runId);
+            return json(res, 503, { error: "run_persistence_unavailable" }, origin, config);
+          }
           if (idempotencyId) idempotency.set(idempotencyId, runId);
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
