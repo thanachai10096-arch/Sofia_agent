@@ -126,7 +126,7 @@ export function transitionWorkflowStep(
   plan: WorkflowPlan,
   stepId: string,
   next: WorkflowStepStatus,
-  details: { now?: string; checkpointId?: string; error?: string; evidenceIds?: readonly string[] } = {},
+  details: { now?: string; checkpointId?: string; approved?: boolean; error?: string; evidenceIds?: readonly string[] } = {},
 ): WorkflowPlan {
   const index = plan.steps.findIndex((step) => step.id === stepId);
   if (index < 0) throw new Error(`Unknown workflow step: ${stepId}`);
