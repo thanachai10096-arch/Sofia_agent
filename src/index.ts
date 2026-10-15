@@ -45,6 +45,9 @@ export type * from "./api/types.js";
 export type * from "./platform/runtime.js";
 export type * from "./tools/types.js";
 
+export { ConversationService, InMemoryConversationStore } from "./conversation/session.js";
+export type * from "./conversation/types.js";
+
 export { SecurityController } from "./security/controller.js";
 export { MemorySecurityAudit } from "./security/audit.js";
 export { assessAction, containsPromptInjection, redactSecrets, riskFor } from "./security/guard.js";
