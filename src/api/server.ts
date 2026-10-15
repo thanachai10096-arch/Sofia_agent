@@ -360,16 +360,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const subscriber = (event: import("../agent/types.js").AgentEvent) => send({ type: "event", runId, event });
         subscribers.add(subscriber);
         runSubscribers.set(runId, subscribers);
-        const heartbeat = setInterval(() => {
+        let heartbeat: ReturnType<typeof setInterval> | undefined;
+        const cleanup = () => {
+          if (heartbeat) clearInterval(heartbeat);
+          subscribers.delete(subscriber);
+          if (subscribers.size === 0) runSubscribers.delete(runId);
+        };
+        heartbeat = setInterval(() => {
           if (res.destroyed || res.writableEnded) return;
           res.write(": keep-alive\n\n");
           if (sendTerminal()) cleanup();
         }, 10_000);
-        const cleanup = () => {
-          clearInterval(heartbeat);
-          subscribers.delete(subscriber);
-          if (subscribers.size === 0) runSubscribers.delete(runId);
-        };
         res.on("close", cleanup);
         return;
       }
