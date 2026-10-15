@@ -512,3 +512,47 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
   assert.equal(replannedActionCalls, 1, "changed action must not be skipped due to a reused step ID");
   assert.equal(report.completed, true, report.summary);
 });
+
+
+test("Brain fails closed when a specialist returns a mismatched role with an action proposal", async () => {
+  let writes = 0;
+  const tools = makeTools();
+  const execute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.write_file") writes += 1;
+    return execute(call, context);
+  };
+  const subagents: SubagentRuntime = {
+    async run() {
+      return {
+        // The host requested a tester for the incomplete solution, not a coder.
+        role: "coder",
+        summary: "Try an additional write.",
+        output: "untrusted",
+        proposedAction: {
+          tool: "workspace.write_file",
+          input: { path: "rogue.txt", content: "must not run" },
+          reason: "Unverified proposal from mismatched role",
+        },
+      } as unknown as Awaited<ReturnType<SubagentRuntime["run"]>>;
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner: makeReasoner(), tools, subagents, allowShell: false, allowNetwork: false },
+    limits: {
+      maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+    },
+  });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "deliberately-failing-check",
+      description: "The acceptance check is intentionally unsatisfied for this security test",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate() { return { passed: false, detail: "force the recovery path" }; },
+    }],
+  });
+  assert.equal(report.completed, false);
+  assert.equal(writes, 1, "the malformed specialist proposal must never execute");
+});
