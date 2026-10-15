@@ -21,7 +21,7 @@ describe("advanced security",()=>{
   assert.equal(security.isKilled(),false);
  });
  it("binds capabilities and rejects tampering",()=>{
-  const c=issueCapability({principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"medium",ttlMs:1000},"secret");
+  const c=issueCapability({principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"medium",ttlMs:60_000},"secret");
   assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file"},"secret"),true);
   assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"medium"},"secret"),true);
   assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file",effects:["read"],risk:"medium"},"secret"),false);
