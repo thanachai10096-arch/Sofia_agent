@@ -21,10 +21,11 @@ const plan = {
   ],
 };
 
-function makeReasoner(): BrainReasoner {
+function makeReasoner(onRequest?: (parsed: Record<string, unknown>) => void): BrainReasoner {
   return {
     async prepare(request) {
-      const parsed = JSON.parse(request) as { phase: string };
+      const parsed = JSON.parse(request) as Record<string, unknown> & { phase: string };
+      onRequest?.(parsed);
       const value =
         parsed.phase === "understand"
           ? {
@@ -511,4 +512,48 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
   assert.equal(failureCalls, 1);
   assert.equal(replannedActionCalls, 1, "changed action must not be skipped due to a reused step ID");
   assert.equal(report.completed, true, report.summary);
+});
+
+
+test("Brain receives bounded conversation context as untrusted reference", async () => {
+  const captured: Array<Record<string, unknown>> = [];
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner((request) => captured.push(request)),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const context = JSON.stringify([{ role: "user", content: "Remember the filename should be hello.txt" }]);
+  const report = await brain.run({
+    task: "Create hello.txt",
+    context,
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  const request = captured[0];
+  assert.ok(request);
+  const prior = request.conversationContext as { trust?: string; messages?: string } | undefined;
+  assert.equal(prior?.messages, context);
+  assert.match(prior?.trust ?? "", /untrusted prior conversation/);
 });
