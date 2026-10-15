@@ -58,6 +58,25 @@ test("explicit remember and forget requests select user memory skill", () => {
   assert.equal(matchSkills("unknown", "ลืมทุกอย่างเกี่ยวกับฉัน")[0]?.id, "user-memory-and-preferences");
 });
 
+
+test("workflow automation requests select workflow design skill", () => {
+  assert.equal(matchSkills("unknown", "Design a workflow automation with approval branches and retries")[0]?.id, "workflow-design-and-automation");
+  assert.equal(matchSkills("unknown", "ออกแบบขั้นตอนงานอัตโนมัติ")[0]?.id, "workflow-design-and-automation");
+});
+
+test("workflow orchestration requests select integration skill", () => {
+  assert.equal(matchSkills("network_error", "webhook event-driven workflow orchestration")[0]?.id, "workflow-orchestration-and-integrations");
+  assert.equal(matchSkills("unknown", "เชื่อมระบบและตั้งเวลาทำงาน")[0]?.id, "workflow-orchestration-and-integrations");
+});
+
+test("workflow failure selects safe diagnosis and recovery", () => {
+  assert.equal(matchSkills("runtime_error", "workflow failed at step 3; workflow timeout")[0]?.id, "workflow-failure-recovery");
+  const skill = allBuiltinSkills().find((item) => item.id === "workflow-failure-recovery");
+  assert.ok(skill);
+  assert.ok(skill.procedure.some((step) => step.includes("side effect")));
+  assert.ok(skill.procedure.some((step) => step.includes("checkpoint")));
+});
+
 test("skill selection is bounded and deterministic", () => {
   const first = matchSkills("tool_error", "API request failed; timeout in GitHub Actions", 2).map((skill) => skill.id);
   const second = matchSkills("tool_error", "API request failed; timeout in GitHub Actions", 2).map((skill) => skill.id);
