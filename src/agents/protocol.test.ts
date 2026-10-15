@@ -69,3 +69,17 @@ test("enforces the per-agent delegation budget and hop boundary", () => {
   assert.equal(authorizer.authorize(first).allowed, false);
   assert.equal(authorizer.authorize({ ...first, requesterId: "pixel", recipientId: "velvet", requestedTools: ["workspace.read"], hop: 2 }).allowed, false);
 });
+
+test("rejects non-finite hops and malformed delegation payloads", () => {
+  const authorizer = new DelegationAuthorizer(agents, scope);
+  const base = { requesterId: "sofia", recipientId: "pixel", jobId: "job-1", requestedTools: ["workspace.write"], hop: 0, purpose: "Scoped work" };
+  assert.equal(authorizer.authorize({ ...base, hop: Number.NaN }).allowed, false);
+  assert.equal(authorizer.authorize({ ...base, hop: Number.POSITIVE_INFINITY }).allowed, false);
+  assert.equal(authorizer.authorize({ ...base, requestedTools: ["" as string] }).allowed, false);
+  assert.equal(authorizer.authorize({ ...base, purpose: "   " }).allowed, false);
+  const invalidPolicy = new DelegationAuthorizer(agents, scope, {
+    maxHops: Number.NaN, maxDelegationsPerAgent: 8,
+    allowedRoles: new Set(["coder"]), neverDelegateTools: new Set(),
+  });
+  assert.equal(invalidPolicy.authorize(base).allowed, false);
+});
