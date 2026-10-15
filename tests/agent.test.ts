@@ -255,3 +255,57 @@ test("legacy execution cannot downgrade a reserved terminal tool to read-only", 
   await assert.rejects(agent.run({ task: "run a terminal command" }), /Tool execution is disabled by policy: terminal\.run/);
   assert.equal(executions, 0, "the terminal tool must not execute when shell access is disabled");
 });
+
+
+test("an observer abort at tool.started prevents approval UI and tool execution", async () => {
+  const { defaultPolicy } = await import("../src/security/policy.js");
+  const controller = new AbortController();
+  let approvals = 0;
+  let executions = 0;
+  const writeTool = {
+    name: "workspace.write_file",
+    description: "Write a file",
+    effects: ["write"] as const,
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" }, content: { type: "string" } },
+      required: ["path", "content"],
+      additionalProperties: false,
+    },
+    async execute() { executions += 1; return { written: true }; },
+  };
+  const agent = new SofiaAgent({
+    provider: {
+      async generate() {
+        return {
+          text: "",
+          toolCalls: [{ id: "quota-stop", name: "workspace.write_file", input: { path: "safe.txt", content: "data" } }],
+        };
+      },
+    },
+    router: new ModelRouter([
+      { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: new Reviewer(),
+    runtime: {} as never,
+    tools: {
+      get(name: string) { return name === writeTool.name ? writeTool : undefined; },
+      list() { return [writeTool]; },
+    },
+    policy: { ...defaultPolicy, maxSteps: 1, allowFileWrite: true, maxRisk: "high", permissions: {} },
+    approval: async () => { approvals += 1; return true; },
+  });
+
+  await assert.rejects(
+    agent.run({
+      task: "write a file",
+      signal: controller.signal,
+      onEvent: (event) => {
+        if (event.type === "tool.started") controller.abort(new Error("tool quota exceeded"));
+      },
+    }),
+    /tool quota exceeded/,
+  );
+  assert.equal(approvals, 0, "quota abort must be honored before requesting approval");
+  assert.equal(executions, 0, "quota abort must prevent the tool side effect");
+});
