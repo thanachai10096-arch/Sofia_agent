@@ -5,12 +5,6 @@
   <img src="assets/sofia-mascots-animated.svg" alt="Sofia Agent mascot team" width="100%" />
 </p>
 
-<p align="center">
-  <img src="assets/sofia-title.svg" alt="SOFIA AGENT — dimensional neon-green binary lettering" width="100%" />
-</p>
-
-<p align="center"><code>&gt; Your AI Agent for Coding, Research, and More_</code></p>
-
 **An agent runtime designed to plan, act, check results, and recover.**
 
 A model-agnostic AI agent runtime with internal model routing, policy-controlled tools, durable jobs, browser automation, and a permission-gated local runtime. Capabilities depend on the configured providers, permissions, and runtime mode; the descriptions below are not a guarantee that every task will succeed.
