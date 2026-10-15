@@ -443,6 +443,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
           }
           try {
+            conversations.validateAppend(auth.keyId, conversationId, { role: "user", content: input.content });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Invalid conversation message.";
+            const status = /not found/i.test(message) ? 404 : 400;
+            return json(res, status, { error: status === 404 ? "conversation_not_found" : "invalid_message", message }, origin, config);
+          }
+          try {
             usage.consume(auth.keyId);
           } catch (error) {
             return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
@@ -483,15 +490,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             }, (settled) => {
               if (settled.status !== "completed" || !settled.result || settled.assistantMessageId) return;
               try {
-                const assistant = conversations.append(auth.keyId, conversationId, {
-                  role: "assistant",
-                  content: settled.result.output,
-                });
-                settled.assistantMessageId = assistant.id;
-                settled.updatedAt = Date.now();
-                persist(settled);
+                const assistant = conversations.appendAssistantResponse(auth.keyId, conversationId, settled.result.output, userMessage.id);
+                if (assistant) {
+                  settled.assistantMessageId = assistant.id;
+                  settled.updatedAt = Date.now();
+                  persist(settled);
+                }
               } catch {
-                // Keep the run result available; a deleted/cleared conversation must not fail the run.
+                // Keep the run result available; a deleted conversation must not fail the run.
               }
             });
             return json(res, 202, {
@@ -515,14 +521,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             if (controller.signal.aborted) {
               return json(res, 504, { error: "conversation_turn_timeout", userMessage }, origin, config);
             }
-            const assistantMessage = conversations.append(auth.keyId, conversationId, {
-              role: "assistant",
-              content: result.output,
-            });
+            const assistantMessage = conversations.appendAssistantResponse(auth.keyId, conversationId, result.output, userMessage.id);
             return json(res, 200, {
               conversationId,
               userMessage,
-              assistantMessage,
+              ...(assistantMessage ? { assistantMessage } : {}),
               result,
               contextTruncated: context.truncated,
             }, origin, config);

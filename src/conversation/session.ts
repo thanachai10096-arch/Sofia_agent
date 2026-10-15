@@ -96,13 +96,18 @@ export class ConversationService {
     return this.store.listByOwner(ownerId).slice(0, this.maxListedSessions).map(cloneSession);
   }
 
-  append(ownerId: string, sessionId: string, input: AppendMessageInput): ConversationMessage {
+  validateAppend(ownerId: string, sessionId: string, input: AppendMessageInput): string {
     this.assertOwner(ownerId);
     if (!input || !["user", "assistant", "tool"].includes(input.role)) {
       throw new Error("Unsupported conversation message role.");
     }
+    this.requireOwned(ownerId, sessionId);
+    return this.cleanText(input.content, this.maxMessageCharacters, "message");
+  }
+
+  append(ownerId: string, sessionId: string, input: AppendMessageInput): ConversationMessage {
+    const content = this.validateAppend(ownerId, sessionId, input);
     const session = this.requireOwned(ownerId, sessionId);
-    const content = this.cleanText(input.content, this.maxMessageCharacters, "message");
     const toolName = input.role === "tool" ? this.cleanText(input.toolName ?? "", 120, "tool name") : undefined;
     const message: ConversationMessage = {
       id: randomUUID(),
@@ -121,6 +126,27 @@ export class ConversationService {
     session.updatedAt = message.createdAt;
     this.store.save(session);
     return { ...message };
+  }
+
+  /**
+   * Bound assistant output for history persistence and suppress stale completions
+   * if the originating user message was cleared while the model was running.
+   */
+  appendAssistantResponse(
+    ownerId: string,
+    sessionId: string,
+    content: string,
+    expectedUserMessageId?: string,
+  ): ConversationMessage | undefined {
+    const session = this.requireOwned(ownerId, sessionId);
+    if (expectedUserMessageId && !session.messages.some((message) => message.id === expectedUserMessageId)) {
+      return undefined;
+    }
+    const marker = "\\n\\n[Response truncated in conversation history.]";
+    const bounded = content.length <= this.maxMessageCharacters
+      ? content
+      : content.slice(0, Math.max(1, this.maxMessageCharacters - marker.length)) + marker;
+    return this.append(ownerId, sessionId, { role: "assistant", content: bounded });
   }
 
   buildContext(ownerId: string, sessionId: string): ConversationContext {

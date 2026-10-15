@@ -56,3 +56,27 @@ test("rejects invalid owners, empty messages, and oversized messages", () => {
   assert.throws(() => service.append("user-1", session.id, { role: "user", content: " " }), /empty/i);
   assert.throws(() => service.append("user-1", session.id, { role: "user", content: "too long" }), /limit/i);
 });
+
+
+test("validates messages without mutating history and bounds oversized assistant responses", () => {
+  const service = new ConversationService(new InMemoryConversationStore(), { maxMessageCharacters: 12 });
+  const session = service.create("user-1");
+  assert.throws(() => service.validateAppend("user-1", session.id, { role: "user", content: "   " }), /empty/i);
+  assert.equal(service.get("user-1", session.id)?.messages.length, 0);
+  service.validateAppend("user-1", session.id, { role: "user", content: "valid" });
+  assert.equal(service.get("user-1", session.id)?.messages.length, 0);
+  const user = service.append("user-1", session.id, { role: "user", content: "valid" });
+  const assistant = service.appendAssistantResponse("user-1", session.id, "x".repeat(100), user.id);
+  assert.ok(assistant);
+  assert.ok(assistant.content.length <= 12);
+  assert.match(assistant.content, /truncated/);
+});
+
+test("suppresses late assistant responses after the originating user message is cleared", () => {
+  const service = new ConversationService();
+  const session = service.create("user-1");
+  const user = service.append("user-1", session.id, { role: "user", content: "slow request" });
+  service.clear("user-1", session.id);
+  assert.equal(service.appendAssistantResponse("user-1", session.id, "late response", user.id), undefined);
+  assert.equal(service.get("user-1", session.id)?.messages.length, 0);
+});

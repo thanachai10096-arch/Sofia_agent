@@ -9,6 +9,7 @@ async function withApi(
   options: {
     generate?: () => Promise<{ text: string; assistantMessage: { role: string; content: string } }>;
     maxConcurrentRunsPerKey?: number;
+    maxRunsPerKeyPerDay?: number;
   } = {},
 ): Promise<void> {
   const server = createSofiaApi({
@@ -26,6 +27,7 @@ async function withApi(
     },
     conversationStore: new InMemoryConversationStore(),
     ...(options.maxConcurrentRunsPerKey === undefined ? {} : { maxConcurrentRunsPerKey: options.maxConcurrentRunsPerKey }),
+    ...(options.maxRunsPerKeyPerDay === undefined ? {} : { maxRunsPerKeyPerDay: options.maxRunsPerKeyPerDay }),
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -167,4 +169,76 @@ test("conversation synchronous turns enforce the per-key concurrency limit witho
       return { text: "Sofia response", assistantMessage: { role: "assistant", content: "Sofia response" } };
     },
   });
+});
+
+
+test("invalid messages do not consume run quota", async () => {
+  await withApi(async (baseUrl) => {
+    const created = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+    const payload = await created.json() as { conversation: { id: string } };
+    const invalid = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}/messages`, "POST", {
+      role: "user", content: "   ",
+    });
+    assert.equal(invalid.status, 400);
+    const usage = await request(baseUrl, "test-token-a", "/v1/usage");
+    const stats = await usage.json() as { runs: number };
+    assert.equal(stats.runs, 0);
+  }, { maxRunsPerKeyPerDay: 1 });
+});
+
+test("clearing an async conversation while a turn runs prevents an orphaned assistant reply", async () => {
+  let notifyStarted!: () => void;
+  const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+
+  await withApi(async (baseUrl) => {
+    const created = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+    const payload = await created.json() as { conversation: { id: string } };
+    const submitted = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}/messages`, "POST", {
+      role: "user", content: "Slow task", async: true,
+    });
+    const accepted = await submitted.json() as { run: { id: string }; pollUrl: string };
+    try {
+      await started;
+      const cleared = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}/messages`, "DELETE");
+      assert.equal(cleared.status, 200);
+    } finally {
+      release();
+    }
+    let status = "";
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const response = await request(baseUrl, "test-token-a", accepted.pollUrl);
+      const result = await response.json() as { status: string };
+      status = result.status;
+      if (status === "completed") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(status, "completed");
+    const history = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}`);
+    const saved = await history.json() as { conversation: { messages: unknown[] } };
+    assert.deepEqual(saved.conversation.messages, []);
+  }, {
+    generate: async () => {
+      notifyStarted();
+      await gate;
+      return { text: "Sofia response", assistantMessage: { role: "assistant", content: "Sofia response" } };
+    },
+  });
+});
+
+test("long successful model output is preserved as a successful turn with bounded history", async () => {
+  const output = "x".repeat(25_000);
+  await withApi(async (baseUrl) => {
+    const created = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+    const payload = await created.json() as { conversation: { id: string } };
+    const response = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}/messages`, "POST", {
+      role: "user", content: "Generate a long response",
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json() as { assistantMessage: { content: string }; result: { output: string } };
+    assert.equal(result.result.output.length, 25_000);
+    assert.ok(result.assistantMessage.content.length <= 20_000);
+    assert.match(result.assistantMessage.content, /truncated in conversation history/);
+  }, { generate: async () => ({ text: output, assistantMessage: { role: "assistant", content: output } }) });
 });
