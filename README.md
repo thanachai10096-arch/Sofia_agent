@@ -197,6 +197,17 @@ Sofia's built-in skill matcher includes focused workflow support for designing a
 
 These are guidance skills selected by task text and failure category; they do not by themselves connect an integration or execute an automation. Actual actions still require configured tools, credentials, permissions, and runtime support. Treat external inputs as untrusted, never put secrets in workflow logs, require approval for consequential or irreversible operations, and test duplicate events and partial failures before production use.
 
+### Workflow plan primitives
+
+The SDK exports a validated workflow-plan model for applications that want to build a workflow UI or orchestrator:
+
+- `createWorkflowPlan(title, steps)` validates unique IDs, dependency references, cycles, and a bounded step count.
+- `readyWorkflowSteps(plan)` returns steps whose dependencies have succeeded.
+- `transitionWorkflowStep(plan, stepId, status)` enforces legal state transitions, tracks bounded evidence/error details, and requires a checkpoint ID before a consequential step enters `running`.
+- `assessWorkflowRetry(...)` blocks automatic retries when side effects are unknown, already completed, or not idempotent; consequential retries require a checkpoint and still require approval.
+
+These are deterministic planning and policy primitives, **not a workflow execution service**. They do not run tools, persist plans, create checkpoints, or collect approval by themselves. The caller must persist state durably, create/verify checkpoints through the configured runtime, enforce authorization and approval at the execution boundary, impose retry/time budgets, and verify downstream state.
+
 ## `> Quick start`
 
 ```bash
