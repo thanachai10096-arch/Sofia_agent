@@ -191,6 +191,9 @@ Sofia's built-in skill matcher includes focused workflow support for designing a
 - **Workflow design & automation** — define triggers, inputs, branches, owners, approval gates, success criteria, and test cases before enabling automation.
 - **Workflow orchestration & integrations** — coordinate webhooks, scheduled jobs, external systems, durable state, correlation IDs, deduplication, rate limits, and bounded retries.
 - **Workflow failure diagnosis & recovery** — inspect traces, detect whether a failed step already caused a side effect, resume from verified checkpoints, and verify final state.
+- **Workflow observability & alerting** — define actionable success/error/latency signals, correlate runs and steps, and create redacted, owner-routed alerts.
+- **Workflow security & secrets** — apply least privilege, secret references, webhook verification, log redaction, and approval gates for risky production actions.
+- **Workflow testing & controlled release** — test branches, duplicate events, timeouts, and partial outages; use dry runs, staged rollout, rollback plans, and regression tests.
 
 These are guidance skills selected by task text and failure category; they do not by themselves connect an integration or execute an automation. Actual actions still require configured tools, credentials, permissions, and runtime support. Treat external inputs as untrusted, never put secrets in workflow logs, require approval for consequential or irreversible operations, and test duplicate events and partial failures before production use.
 
