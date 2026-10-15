@@ -206,6 +206,9 @@ The SDK exports a validated workflow-plan model for applications that want to bu
 - `transitionWorkflowStep(plan, stepId, status)` enforces legal state transitions, tracks bounded evidence/error details, and requires both a checkpoint ID and an explicit `approved: true` flag before a consequential step enters `running`.
 - `assessWorkflowRetry(...)` blocks automatic retries when side effects are unknown, already completed, or not idempotent; consequential retries require a checkpoint and still require approval.
 
+For durable local storage, the package also exports `FileWorkflowPlanStore` and the `WorkflowPlanStore` interface. It namespaces plans, hashes filenames, validates persisted shape and identity on read, serializes same-process writes per plan, and uses atomic replacement with restrictive local file permissions. The file-backed store is intended for a single active process; it is not a distributed lock or transactional multi-worker database. Set `SOFIA_STATE_DIR` to an absolute persistent directory if plans must survive temporary-directory cleanup.
+
+
 These are deterministic planning and policy primitives, **not a workflow execution service**. They do not run tools, persist plans, create checkpoints, or collect approval by themselves. The caller must persist state durably, create/verify checkpoints through the configured runtime, enforce authorization and approval at the execution boundary, impose retry/time budgets, and verify downstream state.
 
 ## `> Quick start`
