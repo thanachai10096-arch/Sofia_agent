@@ -2,6 +2,8 @@ import type { AgentIdentity, AgentTaskScope } from "../agents/protocol.js";
 
 export type DelegationDecision = { allowed: true; reason: string } | { allowed: false; reason: string };
 export interface DelegationRequest {
+  /** Host-authenticated principal; must match the active job scope when bound. */
+  principalId?: string;
   requesterId: string; recipientId: string; jobId: string; requestedTools: readonly string[]; hop: number; purpose: string;
 }
 export interface DelegationPolicy {
@@ -41,6 +43,7 @@ export class DelegationAuthorizer {
     const recipient = this.agents.get(request.recipientId);
     if (!requester || !recipient) return { allowed: false, reason: "Unknown agent identity." };
     if (request.jobId !== this.scope.jobId) return { allowed: false, reason: "Delegation is outside the active job." };
+    if (this.scope.principalId !== undefined && request.principalId !== this.scope.principalId) return { allowed: false, reason: "Delegation principal does not match the active job owner." };
     if (request.requesterId === request.recipientId) return { allowed: false, reason: "Self-delegation is not allowed." };
     if (!request.purpose.trim() || request.purpose.length > 1000) return { allowed: false, reason: "Purpose is missing or too long." };
     if (request.hop >= Math.min(this.policy.maxHops, this.scope.maxHops)) return { allowed: false, reason: "Delegation hop limit reached." };
