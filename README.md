@@ -184,6 +184,16 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 | **Platform services** | Agent profiles and templates, skills platform, cloud execution backend contract, and evaluation runner. |
 | **SDK & API** | A stable, model-agnostic public surface for desktop, mobile, web, and third-party clients. |
 
+## `> Workflow skills`
+
+Sofia's built-in skill matcher includes focused workflow support for designing automations, orchestrating integrations, and recovering failed runs:
+
+- **Workflow design & automation** — define triggers, inputs, branches, owners, approval gates, success criteria, and test cases before enabling automation.
+- **Workflow orchestration & integrations** — coordinate webhooks, scheduled jobs, external systems, durable state, correlation IDs, deduplication, rate limits, and bounded retries.
+- **Workflow failure diagnosis & recovery** — inspect traces, detect whether a failed step already caused a side effect, resume from verified checkpoints, and verify final state.
+
+These are guidance skills selected by task text and failure category; they do not by themselves connect an integration or execute an automation. Actual actions still require configured tools, credentials, permissions, and runtime support. Treat external inputs as untrusted, never put secrets in workflow logs, require approval for consequential or irreversible operations, and test duplicate events and partial failures before production use.
+
 ## `> Quick start`
 
 ```bash
