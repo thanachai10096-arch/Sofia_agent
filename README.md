@@ -259,6 +259,11 @@ Sofia supports long-running work for desktop and mobile browser clients:
 | `GET` | `/v1/agent/runs/:id` | Inspect or reconnect to a run. |
 | `DELETE` | `/v1/agent/runs/:id` | Cancel a queued or running task. |
 | `POST` | `/v1/agent/runs/stream` | Receive live Server-Sent Events (SSE). |
+| `GET` | `/v1/workflows` | List durable workflow plans for the authenticated principal (`agent:read` or `agent:run`). |
+| `POST` | `/v1/workflows` | Validate and create a workflow plan (`agent:run`). |
+| `GET` | `/v1/workflows/:id` | Read a plan owned by the authenticated principal. |
+| `POST` | `/v1/workflows/:id/run` | Execute a plan through the configured workflow runtime (`agent:run`). |
+| `DELETE` | `/v1/workflows/:id` | Delete a plan when it has no active or unreconciled run lock (`agent:run`). |
 | `GET` | `/v1/memory` or `/v1/memory?q=...` | List or search memories for the authenticated principal (`agent:read` or `agent:run`). |
 | `DELETE` | `/v1/memory/:id` | Delete one saved memory (`agent:run`). |
 | `DELETE` | `/v1/memory` | Clear the authenticated principal’s saved memories (`agent:run`). |
