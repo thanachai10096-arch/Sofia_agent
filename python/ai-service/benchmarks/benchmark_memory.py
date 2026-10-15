@@ -14,12 +14,15 @@ import time
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 CASES_PATH = ROOT / "memory-cases.json"
 
 
-def request_json(base_url: str, token: str, route: str, body: dict[str, Any]) -> tuple[dict[str, Any], float]:
+def request_json(
+    base_url: str, token: str, route: str, body: dict[str, Any]
+) -> tuple[dict[str, Any], float]:
     payload = json.dumps(body).encode("utf-8")
     request = urllib.request.Request(
         base_url.rstrip("/") + route,
@@ -62,8 +65,19 @@ def main() -> int:
     if not base_url or not token:
         print("Set SOFIA_AI_SERVICE_URL and SOFIA_AI_SERVICE_TOKEN.", file=sys.stderr)
         return 2
-    if not base_url.startswith("https://") and not base_url.startswith("http://localhost") and not base_url.startswith("http://127.0.0.1"):
-        print("Refusing non-HTTPS AI service URL (HTTP is allowed only on localhost).", file=sys.stderr)
+    try:
+        parsed_url = urlparse(base_url)
+        _ = parsed_url.port
+    except ValueError:
+        print("Invalid AI service URL.", file=sys.stderr)
+        return 2
+    local_http_hosts = {"localhost", "127.0.0.1", "::1"}
+    is_local_http = parsed_url.scheme == "http" and parsed_url.hostname in local_http_hosts
+    if parsed_url.scheme != "https" and not is_local_http:
+        print(
+            "Refusing non-HTTPS AI service URL (HTTP is allowed only on localhost).",
+            file=sys.stderr,
+        )
         return 2
 
     cases = json.loads(CASES_PATH.read_text(encoding="utf-8"))
@@ -100,7 +114,11 @@ def main() -> int:
         )
         rerank_ms.append(elapsed)
         results = reranked.get("results", [])
-        if any(not isinstance(item.get("index"), int) or not 0 <= item["index"] < len(documents) for item in results):
+        if any(
+            not isinstance(item.get("index"), int)
+            or not 0 <= item["index"] < len(documents)
+            for item in results
+        ):
             raise ValueError(f"Malformed reranker indices for case {case['id']}")
         rerank_scores.append(
             metrics([documents[item["index"]]["id"] for item in results], relevant)
@@ -112,13 +130,18 @@ def main() -> int:
     report = {
         "cases": len(cases),
         "embedding_latency_ms_mean": round(statistics.mean(embed_ms), 2),
-        "embedding_latency_ms_p95_observed": round(sorted(embed_ms)[math.ceil(0.95 * len(embed_ms)) - 1], 2),
+        "embedding_latency_ms_p95_observed": round(
+            sorted(embed_ms)[math.ceil(0.95 * len(embed_ms)) - 1], 2
+        ),
         "rerank_latency_ms_mean": round(statistics.mean(rerank_ms), 2),
         "semantic_recall_at_3": round(avg("recall@3", semantic_scores), 3),
         "reranked_recall_at_3": round(avg("recall@3", rerank_scores), 3),
         "semantic_mrr": round(avg("mrr", semantic_scores), 3),
         "reranked_mrr": round(avg("mrr", rerank_scores), 3),
-        "note": "Small smoke benchmark only; expand and label cases from real project tasks before production decisions.",
+        "note": (
+            "Small smoke benchmark only; expand and label cases from real project tasks "
+            "before production decisions."
+        ),
     }
     print(json.dumps(report, indent=2))
     return 0
