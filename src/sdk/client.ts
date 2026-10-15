@@ -24,6 +24,39 @@ export interface SofiaRunResponse {
   error?: string;
 }
 
+export interface SofiaConversationMessage {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  createdAt: number;
+  toolName?: string;
+}
+
+export interface SofiaConversation {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: SofiaConversationMessage[];
+}
+
+export interface SofiaConversationTurn {
+  conversationId: string;
+  runId: string;
+  status: SofiaRunStatus;
+  assistantMessage?: SofiaConversationMessage;
+  result?: SofiaRunResponse["result"];
+  error?: string;
+}
+
+export interface SofiaConversationTurnAccepted {
+  conversationId: string;
+  userMessage: SofiaConversationMessage;
+  run: SofiaRunResponse;
+  pollUrl: string;
+  contextTruncated: boolean;
+}
+
 export interface SofiaPollOptions {
   intervalMs?: number;
   maxIntervalMs?: number;
@@ -194,10 +227,109 @@ export class SofiaClient {
     return this.waitFor(() => this.getRun(id, options.signal), options);
   }
 
-  private async waitFor(
-    fetchStatus: () => Promise<SofiaRunResponse>,
+  async listConversations(signal?: AbortSignal): Promise<SofiaConversation[]> {
+    const response = await this.request<{ conversations: SofiaConversation[] }>("/v1/conversations", {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+    return response.conversations;
+  }
+
+  async createConversation(title?: string, signal?: AbortSignal): Promise<SofiaConversation> {
+    const response = await this.request<{ conversation: SofiaConversation }>("/v1/conversations", {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify(title === undefined ? {} : { title }),
+    }, signal);
+    return response.conversation;
+  }
+
+  async getConversation(id: string, signal?: AbortSignal): Promise<SofiaConversation> {
+    const response = await this.request<{ conversation: SofiaConversation }>(`/v1/conversations/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+    return response.conversation;
+  }
+
+  async sendConversationMessage(
+    id: string,
+    content: string,
+    options: { async?: boolean; signal?: AbortSignal } = {},
+  ): Promise<{ conversationId: string; userMessage: SofiaConversationMessage; assistantMessage: SofiaConversationMessage; result: SofiaRunResponse["result"]; contextTruncated: boolean } | SofiaConversationTurnAccepted> {
+    return this.request(
+      `/v1/conversations/${encodeURIComponent(id)}/messages`,
+      {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({ role: "user", content, ...(options.async ? { async: true } : {}) }),
+      },
+      options.signal,
+    );
+  }
+
+  async getConversationTurn(conversationId: string, runId: string, signal?: AbortSignal): Promise<SofiaConversationTurn> {
+    return this.request<SofiaConversationTurn>(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(runId)}`,
+      { headers: { authorization: `Bearer ${this.options.apiKey}` } },
+      signal,
+    );
+  }
+
+  async waitForConversationTurn(
+    conversationId: string,
+    runId: string,
+    options: SofiaPollOptions = {},
+  ): Promise<SofiaConversationTurn> {
+    return this.waitFor(() => this.getConversationTurn(conversationId, runId, options.signal), options);
+  }
+
+  async openConversationTurnStream(
+    conversationId: string,
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<Response> {
+    if (signal?.aborted) throw abortError(signal);
+    const response = await this.fetchImpl(this.url(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(runId)}/stream`,
+    ), {
+      method: "GET",
+      headers: { authorization: `Bearer ${this.options.apiKey}`, accept: "text/event-stream" },
+      signal,
+    });
+    if (!response.ok) {
+      let message = `Sofia API error ${response.status}`;
+      try {
+        const data: unknown = await response.json();
+        if (data && typeof data === "object" && "error" in data && typeof data.error === "string") message = data.error;
+      } catch { /* retain status-based message */ }
+      throw new SofiaApiError(message, response.status);
+    }
+    if (!response.headers.get("content-type")?.includes("text/event-stream")) {
+      throw new SofiaApiError("Sofia conversation stream returned an unexpected content type.", response.status);
+    }
+    return response;
+  }
+
+  async clearConversation(id: string, signal?: AbortSignal): Promise<SofiaConversation> {
+    const response = await this.request<{ conversation: SofiaConversation }>(
+      `/v1/conversations/${encodeURIComponent(id)}/messages`,
+      { method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` } },
+      signal,
+    );
+    return response.conversation;
+  }
+
+  async deleteConversation(id: string, signal?: AbortSignal): Promise<void> {
+    await this.request(
+      `/v1/conversations/${encodeURIComponent(id)}`,
+      { method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` } },
+      signal,
+    );
+  }
+
+  private async waitFor<T extends { status: SofiaRunStatus }>(
+    fetchStatus: () => Promise<T>,
     options: SofiaPollOptions,
-  ): Promise<SofiaRunResponse> {
+  ): Promise<T> {
     const initialInterval = Math.max(100, options.intervalMs ?? 1_000);
     const maxInterval = Math.max(initialInterval, options.maxIntervalMs ?? 10_000);
     const timeoutMs = Math.max(1, options.timeoutMs ?? 30 * 60 * 1_000);
