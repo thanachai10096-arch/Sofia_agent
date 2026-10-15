@@ -143,9 +143,10 @@ export class ConversationService {
       return undefined;
     }
     const marker = "\\n\\n[Response truncated in conversation history.]";
+    const suffix = marker.slice(0, this.maxMessageCharacters);
     const bounded = content.length <= this.maxMessageCharacters
       ? content
-      : content.slice(0, Math.max(1, this.maxMessageCharacters - marker.length)) + marker;
+      : content.slice(0, Math.max(0, this.maxMessageCharacters - suffix.length)) + suffix;
     return this.append(ownerId, sessionId, { role: "assistant", content: bounded });
   }
 
