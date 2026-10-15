@@ -22,6 +22,8 @@ export interface WorkflowStepDefinition {
   /** True for actions that can mutate external systems, publish, spend, or delete. */
   consequential?: boolean;
   risk?: WorkflowRisk;
+  /** Optional concrete tool action. Generic planning steps may omit this and use a custom executor. */
+  action?: { tool: string; input: Record<string, unknown> };
 }
 
 export interface WorkflowStepRecord extends Omit<WorkflowStepDefinition, "dependsOn"> {
