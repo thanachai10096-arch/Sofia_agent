@@ -1,5 +1,6 @@
 import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
+import type { WorkflowOrchestratorDependencies } from "../brain/workflow-orchestrator.js";
 
 export interface AgentRunInput {
   task: string;
@@ -58,4 +59,8 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Configure real ToolGateway execution, checkpointing, reconciliation, and principal-bound approval. If absent, workflow endpoints fail closed. */
+  workflowRuntime?: (principalId: string) => Omit<WorkflowOrchestratorDependencies, "store">;
+  /** Optional persistent root for per-principal workflow plans. */
+  workflowStateRoot?: string;
 }

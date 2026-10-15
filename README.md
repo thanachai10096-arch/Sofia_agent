@@ -244,6 +244,10 @@ npm ci\nnpx playwright install chromium
 
 Only enable browser capability in environments where its permissions and policy are configured appropriately. Playwright traffic is routed through a local egress proxy that validates DNS answers and connects to the selected numeric IP, blocks private/internal destinations, and limits web traffic to HTTP port 80 and HTTPS port 443. Chromium QUIC and non-proxied WebRTC UDP are disabled to reduce direct-network bypasses. Sites that require non-standard ports may not work. Keep host/container egress controls enabled for defense in depth.
 
+## `> Workflow API (opt-in)`
+
+The authenticated API can expose durable workflow plans when the host configures `workflowRuntime(principalId)`. It adds `GET/POST /v1/workflows`, `GET/DELETE /v1/workflows/:id`, and `POST /v1/workflows/:id/run`. Plans are stored in a per-principal `FileWorkflowPlanStore`; request JSON cannot choose the principal. The workflow runtime callback must build a ToolGateway-backed executor and an approval provider bound to the passed authenticated principal and the exact plan/step/checkpoint. If no callback is configured, these routes return `503 workflow_runtime_unavailable` and do not execute actions. The local file store is not a distributed transactional database; do not horizontally scale without a shared transactional store and queue.
+
 ## `> API — reconnectable runs`
 
 Sofia supports long-running work for desktop and mobile browser clients:

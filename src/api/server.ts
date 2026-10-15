@@ -7,6 +7,9 @@ import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } 
 import { UsageLimiter } from "./usage.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
+import { createWorkflowPlan, type WorkflowStepDefinition } from "../brain/workflow-plan.js";
+import { FileWorkflowPlanStore } from "../brain/workflow-plan-store.js";
+import { WorkflowOrchestrator } from "../brain/workflow-orchestrator.js";
 
 interface ActiveRun {
   id: string;
@@ -255,6 +258,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const parsedUrl = new URL(req.url ?? "/", "http://sofia.local");
       const pathname = parsedUrl.pathname;
+      const isWorkflowCollection = pathname === "/v1/workflows";
+      const workflowMatch = pathname.match(/^\/v1\/workflows\/([^/]+)(?:\/(run))?$/);
+      const isWorkflowRoute = isWorkflowCollection || workflowMatch !== null;
+      if (isWorkflowRoute && req.method === "GET" && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+      }
+      if (isWorkflowRoute && req.method !== "GET" && !auth.scopes.includes("agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
       const isMemoryRead = req.method === "GET" && pathname === "/v1/memory";
       const isMemoryMutation = req.method === "DELETE" &&
         (pathname === "/v1/memory" || /^\/v1\/memory\/[^/]+$/.test(pathname));
@@ -286,6 +298,50 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
+
+      if (isWorkflowRoute) {
+        if (!config.workflowRuntime) return json(res, 503, { error: "workflow_runtime_unavailable" }, origin, config);
+        const workflowStore = new FileWorkflowPlanStore(auth.principalId, config.workflowStateRoot);
+        // Runtime dependencies are constructed from the authenticated principal, never request-supplied identity.
+        const workflow = new WorkflowOrchestrator({
+          store: workflowStore,
+          ...config.workflowRuntime(auth.principalId),
+        });
+        if (isWorkflowCollection && req.method === "GET") {
+          return json(res, 200, { workflows: await workflow.list() }, origin, config);
+        }
+        if (isWorkflowCollection && req.method === "POST") {
+          const input = await body(req, maxBytes) as { title?: unknown; steps?: unknown };
+          if (typeof input.title !== "string" || !Array.isArray(input.steps)) {
+            return json(res, 400, { error: "invalid_workflow", message: "title and steps[] are required" }, origin, config);
+          }
+          const plan = createWorkflowPlan(input.title, input.steps as WorkflowStepDefinition[]);
+          await workflow.create(plan);
+          return json(res, 201, { workflow: plan }, origin, config);
+        }
+        if (!workflowMatch) return json(res, 404, { error: "workflow_not_found" }, origin, config);
+        let workflowId: string;
+        try {
+          workflowId = decodeURIComponent(workflowMatch[1]!);
+        } catch {
+          return json(res, 400, { error: "invalid_workflow_id" }, origin, config);
+        }
+        if (!workflowId || workflowId.length > 256) return json(res, 400, { error: "invalid_workflow_id" }, origin, config);
+        if (workflowMatch[2] === "run" && req.method === "POST") {
+          const result = await workflow.run(workflowId);
+          return json(res, 200, result, origin, config);
+        }
+        if (workflowMatch[2] === undefined && req.method === "GET") {
+          const plan = await workflow.get(workflowId);
+          if (!plan) return json(res, 404, { error: "workflow_not_found" }, origin, config);
+          return json(res, 200, { workflow: plan }, origin, config);
+        }
+        if (workflowMatch[2] === undefined && req.method === "DELETE") {
+          await workflow.delete(workflowId);
+          return json(res, 200, { ok: true, deleted: true }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
 
       if (isMemoryRead) {

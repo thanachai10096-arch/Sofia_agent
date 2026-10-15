@@ -69,6 +69,14 @@ export class WorkflowOrchestrator {
     return this.deps.store.load(id);
   }
 
+  async list(): Promise<WorkflowPlan[]> {
+    return this.deps.store.list();
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.deps.store.delete(id);
+  }
+
   async run(id: string, options: { signal?: AbortSignal } = {}): Promise<WorkflowExecutionSummary> {
     if (this.activeRuns.has(id)) {
       const plan = await this.deps.store.load(id);
