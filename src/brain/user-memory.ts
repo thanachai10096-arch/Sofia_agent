@@ -28,6 +28,7 @@ export interface UserMemoryStore {
 const MAX_ENTRIES = 200;
 const MAX_CONTENT_CHARS = 1200;
 const ALLOWED_KINDS = new Set<UserMemoryKind>(["preference", "fact", "goal", "instruction"]);
+const USER_MEMORY_WRITES = new Map<string, Promise<void>>();
 
 function redactMemorySecrets(content: string): string {
   return String(redactSecrets(content))
@@ -79,23 +80,21 @@ function validEntry(value: unknown): value is UserMemoryEntry {
  * explicitly requested memories should be written by callers.
  */
 export class FileUserMemoryStore implements UserMemoryStore {
-  private readonly writes = new Map<string, Promise<void>>();
-
   constructor(private readonly root = defaultUserMemoryDirectory()) {}
 
   private async withUserWriteLock<T>(userId: string, operation: () => Promise<T>): Promise<T> {
-    const key = userKey(userId);
-    const previous = this.writes.get(key) ?? Promise.resolve();
+    const key = path.resolve(this.root) + ":" + userKey(userId);
+    const previous = USER_MEMORY_WRITES.get(key) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const tail = previous.then(() => gate);
-    this.writes.set(key, tail);
+    USER_MEMORY_WRITES.set(key, tail);
     await previous;
     try {
       return await operation();
     } finally {
       release();
-      if (this.writes.get(key) === tail) this.writes.delete(key);
+      if (USER_MEMORY_WRITES.get(key) === tail) USER_MEMORY_WRITES.delete(key);
     }
   }
 
