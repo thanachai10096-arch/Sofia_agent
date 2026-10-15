@@ -4,7 +4,7 @@ import path from "node:path";
 import type { AgentRunStatus } from "./types.js";
 import type { AgentResult } from "../agent/types.js";
 
-export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; conversationId?:string; assistantMessageId?:string; }
+export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; conversationId?:string; assistantMessageId?:string; events?:AgentResult["events"]; }
 export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; }
 const SAFE_ID=/^[A-Za-z0-9-]{8,64}$/;
 const STATUSES=new Set(["queued","running","completed","failed","cancelled"]);
@@ -27,6 +27,7 @@ function validRecord(value:unknown,filename:string):value is RunRecord {
  if(!Array.isArray(r.desktopCapabilities)||!r.desktopCapabilities.every((x)=>typeof x==="string"&&CAPABILITIES.has(x)))return false;
  if(r.conversationId!==undefined&&(typeof r.conversationId!=="string"||!SAFE_ID.test(r.conversationId)))return false;
  if(r.assistantMessageId!==undefined&&(typeof r.assistantMessageId!=="string"||!SAFE_ID.test(r.assistantMessageId)))return false;
+ if(r.events!==undefined&&(!Array.isArray(r.events)||r.events.length>500||!r.events.every((event)=>!!event&&typeof event==="object"&&!Array.isArray(event)&&typeof event.type==="string"&&EVENT_TYPES.has(event.type)&&typeof event.message==="string"&&event.message.length<=20_000&&(event.step===undefined||Number.isSafeInteger(event.step))&&(event.metadata===undefined||(!!event.metadata&&typeof event.metadata==="object"&&!Array.isArray(event.metadata))))))return false;
  if(r.error!==undefined&&(typeof r.error!=="string"||r.error.length>20_000))return false;
  if(r.result!==undefined&&!validResult(r.result))return false;
  if(r.status==="completed"&&r.result===undefined)return false;
