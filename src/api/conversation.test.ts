@@ -114,5 +114,12 @@ test("conversation API supports async turns and reconnectable polling", async ()
     }
     assert.equal(polled?.status, "completed");
     assert.equal(polled?.assistantMessage?.content, "Sofia response");
+
+    const stream = await request(baseUrl, "test-token-a", accepted.pollUrl + "/stream");
+    assert.equal(stream.status, 200);
+    assert.match(stream.headers.get("content-type") ?? "", /text\/event-stream/i);
+    const streamed = await stream.text();
+    assert.match(streamed, /"status":"completed"/);
+    assert.match(streamed, /"content":"Sofia response"/);
   });
 });
