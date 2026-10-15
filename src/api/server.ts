@@ -7,6 +7,7 @@ import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } 
 import { UsageLimiter } from "./usage.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
+import { ConversationService } from "../conversation/session.js";
 
 interface ActiveRun {
   id: string;
@@ -121,6 +122,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
+  const conversations = config.conversationStore ? new ConversationService(config.conversationStore) : undefined;
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
     const record: RunRecord = {
@@ -263,6 +265,72 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
+
+      // Conversation storage endpoints are optional until a durable store is configured.
+      // The authenticated API key hash is the owner boundary; client-supplied owner IDs are ignored.
+      if (req.url === "/v1/conversations" && (req.method === "GET" || req.method === "POST")) {
+        if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
+        if (req.method === "GET") {
+          if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+            return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+          }
+          return json(res, 200, { conversations: conversations.list(auth.keyId) }, origin, config);
+        }
+        if (!auth.scopes.includes("agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+        }
+        const input = await body(req, maxBytes) as { title?: unknown };
+        if (input.title !== undefined && typeof input.title !== "string") {
+          return json(res, 400, { error: "invalid_title" }, origin, config);
+        }
+        try {
+          return json(res, 201, { conversation: conversations.create(auth.keyId, typeof input.title === "string" ? input.title : undefined) }, origin, config);
+        } catch (error) {
+          return json(res, 400, { error: "invalid_conversation", message: error instanceof Error ? error.message : "Invalid conversation" }, origin, config);
+        }
+      }
+
+      const conversationMatch = req.url?.match(/^\\/v1\\/conversations\\/([0-9a-f-]{36})(?:\\/(messages))?$/i);
+      if (conversationMatch) {
+        if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
+        const conversationId = conversationMatch[1] ?? "";
+        const messagesPath = conversationMatch[2] === "messages";
+        if (req.method === "GET" && !messagesPath) {
+          if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+            return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+          }
+          const conversation = conversations.get(auth.keyId, conversationId);
+          return conversation ? json(res, 200, { conversation }, origin, config) : json(res, 404, { error: "conversation_not_found" }, origin, config);
+        }
+        if (!auth.scopes.includes("agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+        }
+        if (req.method === "DELETE" && !messagesPath) {
+          return conversations.delete(auth.keyId, conversationId)
+            ? json(res, 200, { ok: true }, origin, config)
+            : json(res, 404, { error: "conversation_not_found" }, origin, config);
+        }
+        if (req.method === "DELETE" && messagesPath) {
+          try { return json(res, 200, { conversation: conversations.clear(auth.keyId, conversationId) }, origin, config); }
+          catch { return json(res, 404, { error: "conversation_not_found" }, origin, config); }
+        }
+        if (req.method === "POST" && messagesPath) {
+          const input = await body(req, maxBytes) as { role?: unknown; content?: unknown };
+          // Clients may submit only user messages; assistant/tool messages are server-owned.
+          if (input.role !== "user" || typeof input.content !== "string") {
+            return json(res, 400, { error: "user_message_required" }, origin, config);
+          }
+          try {
+            const message = conversations.append(auth.keyId, conversationId, { role: "user", content: input.content });
+            return json(res, 201, { message, context: conversations.buildContext(auth.keyId, conversationId) }, origin, config);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Invalid conversation message.";
+            const status = /not found/i.test(message) ? 404 : 400;
+            return json(res, status, { error: status === 404 ? "conversation_not_found" : "invalid_message", message }, origin, config);
+          }
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
 
       const adminScope = config.securityAdminScope ?? "security:admin";
