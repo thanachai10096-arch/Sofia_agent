@@ -274,3 +274,42 @@ test("delegation authorizer snapshots caller-owned policy and scope", () => {
     requestedTools: ["secrets.read"], hop: 0, purpose: "Attempt privileged read",
   }).allowed, false);
 });
+
+
+test("host-level privileged-tool denials cannot be removed by a permissive delegation policy", () => {
+  const broadScope: AgentTaskScope = {
+    jobId: "job-privileged",
+    objective: "Test that host policy remains authoritative",
+    allowedTools: ["workspace.read", "secrets.read", "credentials.export", "security.policy.update"],
+    maxHops: 4,
+  };
+  const broadAgents = new Map<string, AgentIdentity>([
+    ["sofia", { id: "sofia", role: "orchestrator", capabilities: [...broadScope.allowedTools] }],
+    ["pixel", { id: "pixel", role: "coder", capabilities: [...broadScope.allowedTools] }],
+  ]);
+  const permissiveAuthorizer = new DelegationAuthorizer(broadAgents, broadScope, {
+    maxHops: 4,
+    maxDelegationsPerAgent: 8,
+    allowedRoles: new Set(["coder"]),
+    neverDelegateTools: new Set(),
+  });
+
+  for (const tool of ["secrets.read", "credentials.export", "security.policy.update", "security.kill_switch.revive"]) {
+    assert.equal(permissiveAuthorizer.authorize({
+      requesterId: "sofia",
+      recipientId: "pixel",
+      jobId: "job-privileged",
+      requestedTools: [tool],
+      hop: 0,
+      purpose: "Try to bypass the host-level denial",
+    }).allowed, false, tool);
+  }
+  assert.equal(permissiveAuthorizer.authorize({
+    requesterId: "sofia",
+    recipientId: "pixel",
+    jobId: "job-privileged",
+    requestedTools: ["workspace.read"],
+    hop: 0,
+    purpose: "Read allowed workspace evidence",
+  }).allowed, true);
+});
