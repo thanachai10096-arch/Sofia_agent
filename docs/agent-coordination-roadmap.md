@@ -27,7 +27,7 @@ The current branch contains an in-memory, bounded agent message protocol and a d
 - [x] Add regression tests for scope, freshness, payload size, duplicate IDs, queue limits, privileged tools, and delegation budgets.
 - [x] Snapshot queued messages to prevent post-validation mutation; re-check message freshness and job deadline on consumption.
 - [x] Reject malformed/non-finite hop values and invalid delegation budgets at runtime.
-- [ ] Run npm ci, npm run license:check, npm run typecheck, npm test, and npm run build in CI; resolve every failure before merge.
+- [x] Run npm ci, npm run license:check, npm run typecheck, npm test, and npm run build in CI; workflow run #873 passed on the current branch commit. Cross-platform Windows/macOS/Ubuntu, browser egress, and Docker sandbox integration jobs also passed.
 - [x] Review message-size and budget configuration validation, including invalid limits, bounded envelope metadata, evidence ID caps, and policy-snapshot regression tests.
 
 **Exit criteria:** required CI green on Ubuntu, macOS, and Windows; tests reproducibly pass; no claim of runtime integration yet.
