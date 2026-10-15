@@ -79,7 +79,25 @@ function validEntry(value: unknown): value is UserMemoryEntry {
  * explicitly requested memories should be written by callers.
  */
 export class FileUserMemoryStore implements UserMemoryStore {
+  private readonly writes = new Map<string, Promise<void>>();
+
   constructor(private readonly root = defaultUserMemoryDirectory()) {}
+
+  private async withUserWriteLock<T>(userId: string, operation: () => Promise<T>): Promise<T> {
+    const key = userKey(userId);
+    const previous = this.writes.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.then(() => gate);
+    this.writes.set(key, tail);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.writes.get(key) === tail) this.writes.delete(key);
+    }
+  }
 
   private fileFor(userId: string): string {
     return path.join(this.root, userKey(userId) + ".json");
@@ -112,22 +130,13 @@ export class FileUserMemoryStore implements UserMemoryStore {
       confidence: Number.isFinite(entry.confidence) ? Math.max(0, Math.min(1, entry.confidence)) : 0.5,
       uses: Math.max(0, Math.floor(entry.uses)),
     };
-    const entries = await this.read(userId);
-    const index = entries.findIndex((item) => item.id === safeEntry.id);
-    if (index >= 0) entries[index] = safeEntry;
-    else entries.push(safeEntry);
-    const bounded = entries.slice(-MAX_ENTRIES);
-    await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
-    await fs.chmod(this.root, 0o700);
-    const file = this.fileFor(userId);
-    const temporary = file + "." + randomUUID() + ".tmp";
-    try {
-      await fs.writeFile(temporary, JSON.stringify(bounded, null, 2), { encoding: "utf8", mode: 0o600 });
-      await fs.chmod(temporary, 0o600);
-      await fs.rename(temporary, file);
-    } finally {
-      await fs.rm(temporary, { force: true });
-    }
+    await this.withUserWriteLock(userId, async () => {
+      const entries = await this.read(userId);
+      const index = entries.findIndex((item) => item.id === safeEntry.id);
+      if (index >= 0) entries[index] = safeEntry;
+      else entries.push(safeEntry);
+      await this.writeEntries(userId, entries.slice(-MAX_ENTRIES));
+    });
   }
 
   async list(userId: string): Promise<UserMemoryEntry[]> {
@@ -152,16 +161,20 @@ export class FileUserMemoryStore implements UserMemoryStore {
 
   async delete(userId: string, id: string): Promise<boolean> {
     userKey(userId);
-    const entries = await this.read(userId);
-    const next = entries.filter((entry) => entry.id !== id);
-    if (next.length === entries.length) return false;
-    await this.writeEntries(userId, next);
-    return true;
+    return this.withUserWriteLock(userId, async () => {
+      const entries = await this.read(userId);
+      const next = entries.filter((entry) => entry.id !== id);
+      if (next.length === entries.length) return false;
+      await this.writeEntries(userId, next);
+      return true;
+    });
   }
 
   async clear(userId: string): Promise<void> {
     userKey(userId);
-    await fs.rm(this.fileFor(userId), { force: true });
+    await this.withUserWriteLock(userId, async () => {
+      await fs.rm(this.fileFor(userId), { force: true });
+    });
   }
 
   private async writeEntries(userId: string, entries: UserMemoryEntry[]): Promise<void> {
@@ -186,8 +199,9 @@ export function explicitUserMemoryFromMessage(message: string): { kind: UserMemo
     { regex: /^(?:please\s+)?remember\s+(?:that\s+)?my\s+goal\s+is\s+(.+)$/i, kind: "goal" },
     { regex: /^(?:please\s+)?remember\s+(?:that\s+)?(.+)$/i, kind: "fact" },
     { regex: /^(?:help me )?remember that\s*(.+)$/i, kind: "fact" },
-    { regex: /^(?:ช่วย)?จำไว้ว่า\s*(.+)$/u, kind: "fact" },
+    { regex: /^จำไว้ว่า\s*ฉันชอบ\s*(.+)$/u, kind: "preference" },
     { regex: /^จำไว้ว่าฉันชอบ\s*(.+)$/u, kind: "preference" },
+    { regex: /^(?:ช่วย)?จำไว้ว่า\s*(.+)$/u, kind: "fact" },
     { regex: /^เป้าหมายของฉันคือ\s*(.+)$/u, kind: "goal" },
   ];
   for (const { regex, kind } of patterns) {
