@@ -220,6 +220,53 @@ function ensureString(value: unknown, label: string): string {
   return value;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function validateSubagentResult(value: unknown, expectedRole: SubagentResult["role"]): SubagentResult {
+  if (!isPlainRecord(value) || value.role !== expectedRole ||
+      typeof value.summary !== "string" || !value.summary.trim()) {
+    throw new RecoverableFailure("tool_error", "Specialist returned an invalid result envelope");
+  }
+
+  let proposedAction: SubagentResult["proposedAction"];
+  if (value.proposedAction !== undefined) {
+    const proposal = value.proposedAction;
+    if (!isPlainRecord(proposal) ||
+        typeof proposal.tool !== "string" || !proposal.tool.trim() || proposal.tool.length > 128 ||
+        !isPlainRecord(proposal.input) ||
+        typeof proposal.reason !== "string" || !proposal.reason.trim() || proposal.reason.length > 1000) {
+      throw new RecoverableFailure("tool_error", "Specialist returned a malformed action proposal");
+    }
+    let bytes: number;
+    try {
+      bytes = Buffer.byteLength(JSON.stringify({ tool: proposal.tool, input: proposal.input, reason: proposal.reason }), "utf8");
+    } catch {
+      throw new RecoverableFailure("tool_error", "Specialist action proposal is not serializable");
+    }
+    if (bytes > 16 * 1024) {
+      throw new RecoverableFailure("tool_error", "Specialist action proposal exceeds the size limit");
+    }
+    proposedAction = {
+      tool: proposal.tool,
+      input: proposal.input,
+      reason: proposal.reason,
+    };
+  }
+
+  // Do not retain arbitrary model output in the Brain recovery state. Only the
+  // bounded summary and a separately validated proposal are needed downstream.
+  return {
+    role: expectedRole,
+    summary: value.summary.slice(0, 6_000),
+    output: undefined,
+    ...(proposedAction ? { proposedAction } : {}),
+  };
+}
+
 export class SofiaBrain {
   readonly runId = randomUUID();
 
@@ -498,7 +545,7 @@ export class SofiaBrain {
 
     this.usage.modelCalls += 1;
     const role = roleForTask(task, failureCategory);
-    const result = await this.wait(() =>
+    const result: unknown = await this.wait(() =>
       runtime.run({
         role,
         task,
@@ -507,9 +554,10 @@ export class SofiaBrain {
       }),
     );
 
+    const validated = validateSubagentResult(result, role);
     this.emit({ type: "brain.subagent.completed" });
 
-    return result;
+    return validated;
   }
 
   private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string): Promise<void> {
