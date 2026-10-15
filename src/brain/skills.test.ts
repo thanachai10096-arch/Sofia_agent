@@ -108,7 +108,7 @@ test("workflow monitoring requests select observability skill", () => {
 
 test("workflow credential requests select security skill", () => {
   assert.equal(matchSkills("unknown", "workflow security and credential handling")[0]?.id, "workflow-security-and-secret-handling");
-  assert.ok(matchSkills("permission_error", "ความปลอดภัย workflow และจัดการ secret")[0]?.id === "workflow-security-and-secret-handling");
+  assert.equal(matchSkills("unknown", "ความปลอดภัย workflow และจัดการ secret")[0]?.id, "workflow-security-and-secret-handling");
 });
 
 test("workflow release requests select staged testing skill", () => {
