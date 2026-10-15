@@ -213,6 +213,11 @@ export class SofiaAgent {
               metadata: { tool: call.name },
             });
 
+            // Event observers may enforce a hard quota or host policy by aborting
+            // the run. Honor that decision before showing approval UI or starting
+            // any further side effect.
+            request.signal?.throwIfAborted();
+
             if (requiresApproval && this.deps.approval) {
               const approved = await this.deps.approval({
                 runId,
