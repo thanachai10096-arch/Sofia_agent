@@ -294,3 +294,49 @@ test("conversation rejects a second active turn in the same session without appe
     },
   });
 });
+
+test("cancelling an async conversation turn stops the run and preserves a terminal status", async () => {
+  let notifyStarted!: () => void;
+  const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+
+  await withApi(async (baseUrl) => {
+    const created = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+    const payload = await created.json() as { conversation: { id: string } };
+    const submitted = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}/messages`, "POST", {
+      role: "user", content: "Cancel this background task", async: true,
+    });
+    assert.equal(submitted.status, 202);
+    const accepted = await submitted.json() as { run: { id: string }; pollUrl: string };
+
+    try {
+      await started;
+      const cancelled = await request(baseUrl, "test-token-a", `/v1/agent/runs/${accepted.run.id}`, "DELETE");
+      assert.equal(cancelled.status, 200);
+      const cancelledPayload = await cancelled.json() as { status: string };
+      assert.equal(cancelledPayload.status, "cancelled");
+    } finally {
+      release();
+    }
+
+    let finalStatus = "";
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const polled = await request(baseUrl, "test-token-a", accepted.pollUrl);
+      const value = await polled.json() as { status: string };
+      finalStatus = value.status;
+      if (finalStatus === "cancelled" || finalStatus === "failed" || finalStatus === "completed") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(finalStatus, "cancelled");
+    const session = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}`);
+    const saved = await session.json() as { conversation: { messages: Array<{ role: string }> } };
+    assert.deepEqual(saved.conversation.messages.map((message) => message.role), ["user"]);
+  }, {
+    generate: async () => {
+      notifyStarted();
+      await gate;
+      return { text: "This response must not be appended", assistantMessage: { role: "assistant", content: "This response must not be appended" } };
+    },
+  });
+});
