@@ -97,7 +97,11 @@ export class AgentMessageBus {
   private readonly queue: AgentMessage[] = [];
   private readonly seen = new Set<string>();
   private closed = false;
-  constructor(private readonly scope: AgentTaskScope, private readonly agents: ReadonlyMap<string, AgentIdentity>, private readonly limits: CoordinationLimits = DEFAULT_COORDINATION_LIMITS) {}
+  constructor(private readonly scope: AgentTaskScope, private readonly agents: ReadonlyMap<string, AgentIdentity>, private readonly limits: CoordinationLimits = DEFAULT_COORDINATION_LIMITS) {
+    if (!validCoordinationLimits(limits)) {
+      throw new CoordinationError("Invalid coordination limits.", "BUDGET_EXCEEDED");
+    }
+  }
   publish(message: AgentMessage, now = Date.now()): void {
     if (this.closed) throw new CoordinationError("Agent message bus is closed.", "CANCELLED");
     validateAgentMessage(message, this.scope, this.agents, this.limits, now);
