@@ -27,6 +27,8 @@ export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { createWorkflowPlan, transitionWorkflowStep, workflowStepDependenciesSatisfied, readyWorkflowSteps, assessWorkflowRetry } from "./brain/workflow-plan.js";
 export { FileWorkflowPlanStore } from "./brain/workflow-plan-store.js";
 export type { WorkflowPlanStore } from "./brain/workflow-plan-store.js";
+export { WorkflowOrchestrator } from "./brain/workflow-orchestrator.js";
+export type { WorkflowOrchestratorDependencies, WorkflowExecutionSummary, WorkflowStepExecutionResult } from "./brain/workflow-orchestrator.js";
 export type { WorkflowPlan, WorkflowStepDefinition, WorkflowStepRecord, WorkflowStepStatus, WorkflowRisk, RetryAssessment } from "./brain/workflow-plan.js";
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
