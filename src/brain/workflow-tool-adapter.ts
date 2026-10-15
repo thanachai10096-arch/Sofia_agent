@@ -15,7 +15,7 @@ export function createToolGatewayWorkflowAdapter(input: {
   allowNetwork?: boolean;
 }): Pick<WorkflowOrchestratorDependencies, "executeStep" | "createCheckpoint" | "requestApproval"> {
   return {
-    createCheckpoint: async (plan, step) => {
+    createCheckpoint: async (_plan, _step) => {
       const controller = new AbortController();
       const checkpoint = await input.gateway.checkpoint(controller.signal);
       if (!checkpoint.id.trim() || !checkpoint.revision.trim()) {
