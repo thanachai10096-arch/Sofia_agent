@@ -311,6 +311,69 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
+      const conversationStreamMatch = req.url?.split("?")[0]?.match(/^\\/v1\\/conversations\\/([0-9a-f-]{36})\\/turns\\/([0-9a-f-]{36})\\/stream$/i);
+      if (conversationStreamMatch && req.method === "GET") {
+        if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
+        if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+        }
+        const conversationId = conversationStreamMatch[1]!;
+        const runId = conversationStreamMatch[2]!;
+        const conversation = conversations.get(auth.keyId, conversationId);
+        const run = runs.get(runId);
+        if (!conversation || !run || run.ownerKeyId !== auth.keyId || run.conversationId !== conversationId) {
+          return json(res, 404, { error: "conversation_turn_not_found" }, origin, config);
+        }
+        res.writeHead(200, {
+          ...headers(origin, config),
+          "content-type": "text/event-stream; charset=utf-8",
+          connection: "keep-alive",
+          "x-accel-buffering": "no",
+        });
+        const send = (value: unknown) => {
+          if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(value)}\\n\\n`);
+        };
+        for (const [index, event] of run.events.entries()) send({ type: "event", runId, sequence: index, event });
+        const sendTerminal = () => {
+          const latest = runs.get(runId);
+          if (!latest) return;
+          if (latest.status === "completed" || latest.status === "failed" || latest.status === "cancelled") {
+            const session = conversations.get(auth.keyId, conversationId);
+            const assistantMessage = latest.assistantMessageId
+              ? session?.messages.find((message) => message.id === latest.assistantMessageId)
+              : undefined;
+            send({
+              type: "status",
+              runId,
+              status: latest.status,
+              ...(assistantMessage ? { assistantMessage } : {}),
+              ...(latest.result ? { result: latest.result } : {}),
+              ...(latest.error ? { error: latest.error } : {}),
+            });
+            if (!res.writableEnded && !res.destroyed) res.end();
+            return true;
+          }
+          return false;
+        };
+        if (sendTerminal()) return;
+        const subscribers = runSubscribers.get(runId) ?? new Set<(event: import("../agent/types.js").AgentEvent) => void>();
+        const subscriber = (event: import("../agent/types.js").AgentEvent) => send({ type: "event", runId, event });
+        subscribers.add(subscriber);
+        runSubscribers.set(runId, subscribers);
+        const heartbeat = setInterval(() => {
+          if (res.destroyed || res.writableEnded) return;
+          res.write(": keep-alive\\n\\n");
+          if (sendTerminal()) cleanup();
+        }, 10_000);
+        const cleanup = () => {
+          clearInterval(heartbeat);
+          subscribers.delete(subscriber);
+          if (subscribers.size === 0) runSubscribers.delete(runId);
+        };
+        res.on("close", cleanup);
+        return;
+      }
+
       const conversationTurnMatch = req.url?.split("?")[0]?.match(/^\\/v1\\/conversations\\/([0-9a-f-]{36})\\/turns\\/([0-9a-f-]{36})$/i);
       if (conversationTurnMatch && req.method === "GET") {
         if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
