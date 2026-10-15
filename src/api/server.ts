@@ -316,16 +316,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (typeof input.title !== "string" || !Array.isArray(input.steps)) {
             return json(res, 400, { error: "invalid_workflow", message: "title and steps[] are required" }, origin, config);
           }
+          let plan;
           try {
-            const plan = createWorkflowPlan(input.title, input.steps as WorkflowStepDefinition[]);
-            await workflow.create(plan);
-            return json(res, 201, { workflow: plan }, origin, config);
+            plan = createWorkflowPlan(input.title, input.steps as WorkflowStepDefinition[]);
           } catch (error) {
             return json(res, 400, {
               error: "invalid_workflow",
               message: error instanceof Error ? error.message.slice(0, 300) : "Invalid workflow definition",
             }, origin, config);
           }
+          await workflow.create(plan);
+          return json(res, 201, { workflow: plan }, origin, config);
         }
         if (!workflowMatch) return json(res, 404, { error: "workflow_not_found" }, origin, config);
         let workflowId: string;
