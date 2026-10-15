@@ -34,6 +34,7 @@ export interface WorkflowExecutionSummary {
  * The caller supplies the real tool gateway, checkpoint service and principal-bound approval UI.
  */
 export class WorkflowOrchestrator {
+  private readonly activeRuns = new Set<string>();
   private readonly maxStepsPerRun: number;
   private readonly now: () => string;
 
@@ -56,6 +57,25 @@ export class WorkflowOrchestrator {
   }
 
   async run(id: string, options: { signal?: AbortSignal } = {}): Promise<WorkflowExecutionSummary> {
+    if (this.activeRuns.has(id)) {
+      const plan = await this.deps.store.load(id);
+      if (!plan) throw new Error("Workflow plan not found");
+      return {
+        plan,
+        executed: 0,
+        waitingForApproval: plan.status === "waiting_approval",
+        stoppedReason: "This workflow is already executing in this orchestrator instance.",
+      };
+    }
+    this.activeRuns.add(id);
+    try {
+      return await this.runExclusive(id, options);
+    } finally {
+      this.activeRuns.delete(id);
+    }
+  }
+
+  private async runExclusive(id: string, options: { signal?: AbortSignal }): Promise<WorkflowExecutionSummary> {
     let plan = await this.deps.store.load(id);
     if (!plan) throw new Error("Workflow plan not found");
     if (["completed", "failed", "cancelled"].includes(plan.status)) {
