@@ -142,7 +142,7 @@ export class ConversationService {
     if (expectedUserMessageId && !session.messages.some((message) => message.id === expectedUserMessageId)) {
       return undefined;
     }
-    const marker = "\\n\\n[Response truncated in conversation history.]";
+    const marker = "\n\n[Response truncated in conversation history.]";
     const suffix = this.maxMessageCharacters >= marker.length
       ? marker
       : this.maxMessageCharacters >= "[truncated]".length

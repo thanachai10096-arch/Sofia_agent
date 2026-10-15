@@ -138,7 +138,7 @@ export class SofiaAgent {
               "BEGIN UNTRUSTED CONTEXT",
               fenceUntrustedOutput("conversation.context", request.context).text,
               "END UNTRUSTED CONTEXT",
-            ].join("\\n"),
+            ].join("\n"),
           }]
         : []),
       { role: "user" as const, content: request.task },
