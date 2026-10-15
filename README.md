@@ -2,7 +2,7 @@
 <div align="center">
 
 <p align="center">
-  <img src="assets/sofia-agent-hero.svg" alt="Sofia Agent — mascot team and neon-green title" width="100%" />
+  <img src="assets/sofia-agent-hero.svg" alt="Sofia Agent — scalable vector AI mascot team and neon-green title" width="100%" />
 </p>
 
 **An agent runtime designed to plan, act, check results, and recover.**
