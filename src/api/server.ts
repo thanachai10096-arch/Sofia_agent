@@ -161,6 +161,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   }
   const idempotency = new Map<string, string>();
   const activeByKey = new Map<string, number>();
+  const activeConversationTurns = new Set<string>();
   const runSubscribers = new Map<string, Set<(event: import("../agent/types.js").AgentEvent) => void>>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
@@ -435,6 +436,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 400, { error: "user_message_required" }, origin, config);
           }
           const asyncTurn = (input as { async?: unknown }).async === true;
+          const conversationTurnKey = auth.keyId + ":" + conversationId;
+          if (activeConversationTurns.has(conversationTurnKey)) {
+            res.setHeader("retry-after", "1");
+            return json(res, 409, { error: "conversation_turn_in_progress", retryAfterMs: 1000 }, origin, config);
+          }
           // Check capacity before consuming quota or mutating conversation history.
           // No await occurs between this check and the later increment.
           const active = activeByKey.get(auth.keyId) ?? 0;
@@ -466,6 +472,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           // Route the user's natural-language turn through the existing Sofia Agent.
           // The conversation layer stores context; it does not introduce a second planner.
           const context = conversations.buildContext(auth.keyId, conversationId);
+          // One active generation per conversation preserves user/assistant turn order.
+          activeConversationTurns.add(conversationTurnKey);
           // Count synchronous and asynchronous conversation turns against the same
           // per-key limit used by the ordinary run endpoints.
           activeByKey.set(auth.keyId, active + 1);
@@ -488,16 +496,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               task: input.content,
               context: JSON.stringify(context.messages),
             }, (settled) => {
-              if (settled.status !== "completed" || !settled.result || settled.assistantMessageId) return;
               try {
-                const assistant = conversations.appendAssistantResponse(auth.keyId, conversationId, settled.result.output, userMessage.id);
-                if (assistant) {
-                  settled.assistantMessageId = assistant.id;
-                  settled.updatedAt = Date.now();
-                  persist(settled);
+                if (settled.status !== "completed" || !settled.result || settled.assistantMessageId) return;
+                try {
+                  const assistant = conversations.appendAssistantResponse(auth.keyId, conversationId, settled.result.output, userMessage.id);
+                  if (assistant) {
+                    settled.assistantMessageId = assistant.id;
+                    settled.updatedAt = Date.now();
+                    persist(settled);
+                  }
+                } catch {
+                  // Keep the run result available; a deleted conversation must not fail the run.
                 }
-              } catch {
-                // Keep the run result available; a deleted conversation must not fail the run.
+              } finally {
+                activeConversationTurns.delete(conversationTurnKey);
               }
             });
             return json(res, 202, {
@@ -538,6 +550,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             }, origin, config);
           } finally {
             clearTimeout(timer);
+            activeConversationTurns.delete(conversationTurnKey);
             const current = activeByKey.get(auth.keyId) ?? 1;
             if (current <= 1) activeByKey.delete(auth.keyId);
             else activeByKey.set(auth.keyId, current - 1);
