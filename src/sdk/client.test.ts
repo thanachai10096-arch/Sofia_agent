@@ -148,3 +148,39 @@ test("SDK deletes one memory and clears the principal memory namespace", async (
   assert.equal(requests[1]?.url, "https://api.example.test/v1/memory");
   assert.equal(requests[1]?.method, "DELETE");
 });
+
+
+test("SDK creates, lists, reads, runs, and deletes workflow plans using authenticated routes", async () => {
+  const requests: Array<{ url: string; method: string; body?: unknown }> = [];
+  const plan = { id: "workflow-1", title: "Example", status: "draft", steps: [] };
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      requests.push({ url, method, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
+      if (url.endsWith("/run")) return response(200, { plan: { ...plan, status: "completed" }, executed: 1, waitingForApproval: false });
+      if (method === "POST" && url.endsWith("/v1/workflows")) return response(201, { workflow: plan });
+      if (method === "GET" && url.endsWith("/v1/workflows")) return response(200, { workflows: [plan] });
+      if (method === "DELETE") return response(200, { ok: true, deleted: true });
+      return response(200, { workflow: plan });
+    },
+  });
+  const created = await client.createWorkflow("Example", [
+    { id: "step", title: "Step", description: "Inspect", idempotent: true },
+  ]);
+  assert.equal(created.workflow.id, "workflow-1");
+  assert.equal((await client.listWorkflows()).workflows.length, 1);
+  assert.equal((await client.getWorkflow("workflow/a")).workflow.title, "Example");
+  assert.equal((await client.runWorkflow("workflow/a")).plan.status, "completed");
+  assert.deepEqual(await client.deleteWorkflow("workflow/a"), { ok: true, deleted: true });
+  assert.equal(requests[0]?.method, "POST");
+  assert.deepEqual(requests[0]?.body, {
+    title: "Example",
+    steps: [{ id: "step", title: "Step", description: "Inspect", idempotent: true }],
+  });
+  assert.match(requests[2]?.url ?? "", /workflow%2Fa$/);
+  assert.match(requests[3]?.url ?? "", /workflow%2Fa\/run$/);
+  assert.ok(requests.every((request) => request.url.startsWith("https://api.example.test/v1/workflows")));
+});

@@ -1,3 +1,6 @@
+import type { WorkflowPlan, WorkflowStepDefinition } from "../brain/workflow-plan.js";
+import type { WorkflowExecutionSummary } from "../brain/workflow-orchestrator.js";
+
 export interface SofiaClientOptions {
   apiKey: string;
   baseUrl: string;
@@ -40,6 +43,9 @@ export interface SofiaMemoryEntry {
 export interface SofiaMemoryListResponse {
   entries: SofiaMemoryEntry[];
 }
+
+export interface SofiaWorkflowResponse { workflow: WorkflowPlan; }
+export interface SofiaWorkflowListResponse { workflows: WorkflowPlan[]; }
 
 export interface SofiaPollOptions {
   intervalMs?: number;
@@ -240,6 +246,39 @@ export class SofiaClient {
       method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` },
     }, signal);
   }
+  /** Lists durable workflows owned by the authenticated principal. */
+  async listWorkflows(signal?: AbortSignal): Promise<SofiaWorkflowListResponse> {
+    return this.request<SofiaWorkflowListResponse>("/v1/workflows", {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  /** Creates a validated workflow plan; it does not execute any actions. */
+  async createWorkflow(title: string, steps: WorkflowStepDefinition[], signal?: AbortSignal): Promise<SofiaWorkflowResponse> {
+    return this.request<SofiaWorkflowResponse>("/v1/workflows", {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ title, steps }),
+    }, signal);
+  }
+
+  async getWorkflow(id: string, signal?: AbortSignal): Promise<SofiaWorkflowResponse> {
+    return this.request<SofiaWorkflowResponse>(`/v1/workflows/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  /** Runs a workflow through the host-configured, permission-enforcing runtime. */
+  async runWorkflow(id: string, signal?: AbortSignal): Promise<WorkflowExecutionSummary> {
+    return this.request<WorkflowExecutionSummary>(`/v1/workflows/${encodeURIComponent(id)}/run`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  async deleteWorkflow(id: string, signal?: AbortSignal): Promise<{ ok: boolean; deleted: boolean }> {
+    return this.request<{ ok: boolean; deleted: boolean }>(`/v1/workflows/${encodeURIComponent(id)}`, {
+      method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
   private async waitFor(
     fetchStatus: () => Promise<SofiaRunResponse>,
     options: SofiaPollOptions,
