@@ -24,6 +24,8 @@ export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConventio
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
+export { createWorkflowPlan, transitionWorkflowStep, workflowStepDependenciesSatisfied, readyWorkflowSteps, assessWorkflowRetry } from "./brain/workflow-plan.js";
+export type { WorkflowPlan, WorkflowStepDefinition, WorkflowStepRecord, WorkflowStepStatus, WorkflowRisk, RetryAssessment } from "./brain/workflow-plan.js";
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
 export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
