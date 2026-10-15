@@ -140,6 +140,9 @@ export function transitionWorkflowStep(
   if (next === "running" && current.consequential && !details.checkpointId) {
     throw new Error("Consequential workflow steps require a checkpoint before execution");
   }
+  if (next === "running" && current.consequential && details.approved !== true) {
+    throw new Error("Consequential workflow steps require explicit approval before execution");
+  }
   const now = details.now ?? new Date().toISOString();
   const updated: WorkflowStepRecord = {
     ...current,
