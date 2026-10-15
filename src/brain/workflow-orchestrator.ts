@@ -99,8 +99,12 @@ export class WorkflowOrchestrator {
       }
       return await this.runExclusive(id, options);
     } finally {
-      if (claimed) await this.deps.store.releaseRunLock?.(id, ownerToken);
-      this.activeRuns.delete(id);
+      try {
+        if (claimed) await this.deps.store.releaseRunLock?.(id, ownerToken);
+      } finally {
+        // Even a failed lock release must not poison this instance's in-memory guard.
+        this.activeRuns.delete(id);
+      }
     }
   }
 

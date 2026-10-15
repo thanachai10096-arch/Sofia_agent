@@ -58,18 +58,36 @@ export function createWorkflowPlan(
   options: { maxSteps?: number; id?: string; now?: string } = {},
 ): WorkflowPlan {
   if (typeof title !== "string" || !title.trim()) throw new Error("Workflow title must not be empty");
+  if (!Array.isArray(definitions)) throw new Error("Workflow steps must be an array");
   const maxSteps = options.maxSteps ?? 100;
-  if (!Number.isInteger(maxSteps) || maxSteps < 1) throw new Error("maxSteps must be a positive integer");
+  if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 100) throw new Error("maxSteps must be an integer between 1 and 100");
   if (definitions.length === 0 || definitions.length > maxSteps) throw new Error("Invalid workflow step count");
+  if (options.id !== undefined && (typeof options.id !== "string" || !options.id.trim())) throw new Error("Workflow id must not be empty");
+  if (options.now !== undefined && (typeof options.now !== "string" || !options.now.trim())) throw new Error("Workflow timestamp must not be empty");
 
   const ids = new Set<string>();
   for (const step of definitions) {
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(step.id)) throw new Error("Invalid workflow step id");
+    if (!step || typeof step !== "object" || Array.isArray(step)) throw new Error("Workflow steps must be objects");
+    if (typeof step.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(step.id)) throw new Error("Invalid workflow step id");
     if (ids.has(step.id)) throw new Error(`Duplicate workflow step: ${step.id}`);
     ids.add(step.id);
-    if (!step.title.trim() || !step.description.trim()) throw new Error("Workflow step title and description are required");
+    if (typeof step.title !== "string" || !step.title.trim() ||
+        typeof step.description !== "string" || !step.description.trim()) {
+      throw new Error("Workflow step title and description are required");
+    }
     if (typeof step.idempotent !== "boolean") throw new Error("Workflow step idempotency must be explicit");
-    if (step.risk && !["low", "medium", "high"].includes(step.risk)) throw new Error("Invalid workflow risk");
+    if (step.consequential !== undefined && typeof step.consequential !== "boolean") throw new Error("Workflow consequential flag must be boolean");
+    if (step.risk !== undefined && !["low", "medium", "high"].includes(step.risk)) throw new Error("Invalid workflow risk");
+    if (step.dependsOn !== undefined && (!Array.isArray(step.dependsOn) || !step.dependsOn.every((id) => typeof id === "string" && id.length > 0))) {
+      throw new Error(`Invalid dependencies for workflow step: ${step.id}`);
+    }
+    if (step.action !== undefined) {
+      if (!step.action || typeof step.action !== "object" || Array.isArray(step.action) ||
+          typeof step.action.tool !== "string" || !step.action.tool.trim() ||
+          !step.action.input || typeof step.action.input !== "object" || Array.isArray(step.action.input)) {
+        throw new Error(`Invalid tool action for workflow step: ${step.id}`);
+      }
+    }
   }
 
   for (const step of definitions) {

@@ -29,6 +29,30 @@ test("workflow plan validates dependencies and returns only dependency-ready ste
   ]), /Unknown workflow dependency/);
 });
 
+test("workflow plan rejects malformed untrusted definitions with controlled errors", () => {
+  assert.throws(() => createWorkflowPlan("bad", [
+    { id: "step", title: 42 as unknown as string, description: "description", idempotent: true },
+  ]), /title and description are required/);
+  assert.throws(() => createWorkflowPlan("bad", [
+    { id: "step", title: "Step", description: "description", idempotent: true, dependsOn: "not-an-array" as unknown as string[] },
+  ]), /Invalid dependencies/);
+  assert.throws(() => createWorkflowPlan("bad", [
+    { id: "step", title: "Step", description: "description", idempotent: true, consequential: "yes" as unknown as boolean },
+  ]), /consequential flag must be boolean/);
+  assert.throws(() => createWorkflowPlan("bad", [
+    { id: "step", title: "Step", description: "description", idempotent: true, risk: "" as "low" },
+  ]), /Invalid workflow risk/);
+  assert.throws(() => createWorkflowPlan("bad", [
+    { id: "step", title: "Step", description: "description", idempotent: true, action: { tool: " ", input: {} } },
+  ]), /Invalid tool action/);
+  assert.throws(() => createWorkflowPlan("bad", [
+    { id: "step", title: "Step", description: "description", idempotent: true },
+  ], { id: " " }), /Workflow id must not be empty/);
+  assert.throws(() => createWorkflowPlan("bad", [
+    { id: "step", title: "Step", description: "description", idempotent: true },
+  ], { maxSteps: 101 }), /between 1 and 100/);
+});
+
 test("workflow state transitions require completed dependencies and checkpoint before consequential actions", () => {
   let plan = createWorkflowPlan("release", definitions, { now: "2026-10-15T00:00:00.000Z" });
   assert.throws(() => transitionWorkflowStep(plan, "publish", "ready"), /dependencies are not satisfied/);

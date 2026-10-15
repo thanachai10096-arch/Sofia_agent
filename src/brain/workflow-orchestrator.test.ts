@@ -90,6 +90,34 @@ test("orchestrator stops on failure and never runs downstream steps", async () =
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("active-run guard is cleared even when lock release fails", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-lock-release-"));
+  try {
+    const backing = new FileWorkflowPlanStore("release-failure", root);
+    const store = {
+      save: (plan: Parameters<typeof backing.save>[0]) => backing.save(plan),
+      load: (id: string) => backing.load(id),
+      list: () => backing.list(),
+      delete: (id: string) => backing.delete(id),
+      acquireRunLock: async () => true,
+      releaseRunLock: async () => { throw new Error("release failed"); },
+    };
+    let calls = 0;
+    const orchestrator = new WorkflowOrchestrator({
+      store,
+      executeStep: async () => { calls++; return {}; },
+    });
+    await orchestrator.create(createWorkflowPlan("release failure", [
+      { id: "step", title: "Step", description: "Run once", idempotent: true },
+    ], { id: "release-failure-plan" }));
+    await assert.rejects(() => orchestrator.run("release-failure-plan"), /release failed/);
+    // A second call must pass the in-memory guard and observe the terminal plan;
+    // it rejects only because the test store deliberately fails every lock release.
+    await assert.rejects(() => orchestrator.run("release-failure-plan"), /release failed/);
+    assert.equal(calls, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("concurrent run requests do not execute the same workflow twice in one orchestrator", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-"));
   try {
