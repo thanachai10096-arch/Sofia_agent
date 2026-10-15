@@ -38,7 +38,8 @@ test("workflow state transitions require completed dependencies and checkpoint b
   assert.deepEqual(readyWorkflowSteps(plan).map((step) => step.id), ["publish"]);
   plan = transitionWorkflowStep(plan, "publish", "ready");
   assert.throws(() => transitionWorkflowStep(plan, "publish", "running"), /require a checkpoint/);
-  plan = transitionWorkflowStep(plan, "publish", "running", { checkpointId: "checkpoint-1" });
+  assert.throws(() => transitionWorkflowStep(plan, "publish", "running", { checkpointId: "checkpoint-1" }), /require explicit approval/);
+  plan = transitionWorkflowStep(plan, "publish", "running", { checkpointId: "checkpoint-1", approved: true });
   assert.equal(plan.steps.find((step) => step.id === "publish")?.attempts, 1);
   assert.throws(() => transitionWorkflowStep(plan, "publish", "pending"), /Invalid workflow transition/);
 });
