@@ -96,11 +96,25 @@ function validCoordinationLimits(limits: CoordinationLimits): boolean {
 export class AgentMessageBus {
   private readonly queue: AgentMessage[] = [];
   private readonly seen = new Set<string>();
+  private readonly scope: AgentTaskScope;
+  private readonly agents: ReadonlyMap<string, AgentIdentity>;
+  private readonly limits: CoordinationLimits;
   private closed = false;
-  constructor(private readonly scope: AgentTaskScope, private readonly agents: ReadonlyMap<string, AgentIdentity>, private readonly limits: CoordinationLimits = DEFAULT_COORDINATION_LIMITS) {
+  constructor(scope: AgentTaskScope, agents: ReadonlyMap<string, AgentIdentity>, limits: CoordinationLimits = DEFAULT_COORDINATION_LIMITS) {
     if (!validCoordinationLimits(limits)) {
       throw new CoordinationError("Invalid coordination limits.", "BUDGET_EXCEEDED");
     }
+    // Freeze a host-owned policy snapshot; callers must not be able to widen
+    // the job scope or agent capabilities by mutating their original objects.
+    this.scope = Object.freeze({
+      ...scope,
+      allowedTools: Object.freeze([...scope.allowedTools]),
+    });
+    this.agents = new Map([...agents].map(([id, agent]) => [
+      id,
+      Object.freeze({ ...agent, capabilities: Object.freeze([...agent.capabilities]) }),
+    ]));
+    this.limits = Object.freeze({ ...limits });
   }
   publish(message: AgentMessage, now = Date.now()): void {
     if (this.closed) throw new CoordinationError("Agent message bus is closed.", "CANCELLED");
