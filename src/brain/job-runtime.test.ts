@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash, randomUUID } from "node:crypto";
-import { rm, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -544,4 +544,52 @@ test("DurableJobRuntime preserves submissions from separate Node.js processes", 
   );
   await rm(file, { force: true });
   await rm(file + ".lock", { force: true });
+});
+
+
+test("DurableJobRuntime serializes competing stale-lock reclamation without losing jobs", async () => {
+  const namespace = "job-runtime-stale-lock-reclaim-" + randomUUID();
+  const stateDirectory = path.join(os.tmpdir(), "sofia-agents-jobs");
+  const stateFile = path.join(stateDirectory, createHash("sha256").update(namespace).digest("hex") + ".json");
+  const lockFile = stateFile + ".lock";
+  const reclaimFile = lockFile + ".reclaim";
+  await mkdir(stateDirectory, { recursive: true });
+  await Promise.all([
+    rm(stateFile, { force: true }),
+    rm(lockFile, { force: true }),
+    rm(reclaimFile, { force: true }),
+  ]);
+  await writeFile(lockFile, JSON.stringify({
+    token: "stale-test-owner",
+    pid: 0,
+    hostname: os.hostname(),
+    createdAt: Date.now() - 180_000,
+  }), { encoding: "utf8", mode: 0o600 });
+
+  const runtimes = Array.from({ length: 8 }, () => new DurableJobRuntime(() => ({
+    run: async () => { throw new Error("expected test worker failure"); },
+  } as unknown as SofiaBrain), undefined, namespace));
+
+  try {
+    const submitted = await Promise.all(runtimes.map((runtime, index) =>
+      runtime.submit({ task: "stale-lock reclaim submission " + index }),
+    ));
+    assert.equal(submitted.length, 8);
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const states = await Promise.all(submitted.map((job, index) => runtimes[index]!.get(job.id)));
+      if (states.every((state) => state?.status === "failed" || state?.status === "completed")) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+
+    const persisted = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string }>;
+    assert.equal(persisted.length, submitted.length, "concurrent reclaimers must not lose job records");
+    assert.deepEqual(new Set(persisted.map((record) => record.id)), new Set(submitted.map((job) => job.id)));
+  } finally {
+    await Promise.all([
+      rm(stateFile, { force: true }),
+      rm(lockFile, { force: true }),
+      rm(reclaimFile, { force: true }),
+    ]);
+  }
 });
