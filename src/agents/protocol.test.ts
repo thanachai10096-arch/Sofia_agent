@@ -238,3 +238,38 @@ test("denies delegation when the authenticated principal does not match the job 
   assert.equal(authorizer.authorize({ ...base, principalId: "attacker" }).allowed, false);
   assert.equal(authorizer.authorize({ ...base, principalId: "user-123" }).allowed, true);
 });
+
+
+test("delegation authorizer snapshots caller-owned policy and scope", () => {
+  const mutableTools = ["workspace.write", "secrets.read"];
+  const mutableScope: AgentTaskScope = {
+    jobId: "job-1", objective: "Scoped work", allowedTools: mutableTools, maxHops: 4,
+  };
+  const mutableAgents = new Map<string, AgentIdentity>([
+    ["sofia", { id: "sofia", role: "orchestrator", capabilities: ["workspace.write", "secrets.read"] }],
+    ["pixel", { id: "pixel", role: "coder", capabilities: ["workspace.write", "secrets.read"] }],
+  ]);
+  const allowedRoles = new Set(["coder"]);
+  const neverDelegateTools = new Set(["secrets.read"]);
+  const authorizer = new DelegationAuthorizer(mutableAgents, mutableScope, {
+    maxHops: 4,
+    maxDelegationsPerAgent: 8,
+    allowedRoles,
+    neverDelegateTools,
+  });
+
+  mutableScope.jobId = "attacker-job";
+  mutableTools.length = 0;
+  mutableAgents.clear();
+  allowedRoles.clear();
+  neverDelegateTools.clear();
+
+  assert.equal(authorizer.authorize({
+    requesterId: "sofia", recipientId: "pixel", jobId: "job-1",
+    requestedTools: ["workspace.write"], hop: 0, purpose: "Write within original scope",
+  }).allowed, true);
+  assert.equal(authorizer.authorize({
+    requesterId: "sofia", recipientId: "pixel", jobId: "job-1",
+    requestedTools: ["secrets.read"], hop: 0, purpose: "Attempt privileged read",
+  }).allowed, false);
+});
