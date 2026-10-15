@@ -20,7 +20,32 @@ export const DEFAULT_DELEGATION_POLICY: DelegationPolicy = {
 /** Authorizes coordination only; tool execution still requires the central Tool Gateway. */
 export class DelegationAuthorizer {
   private readonly counts = new Map<string, number>();
-  constructor(private readonly agents: ReadonlyMap<string, AgentIdentity>, private readonly scope: AgentTaskScope, private readonly policy: DelegationPolicy = DEFAULT_DELEGATION_POLICY) {}
+  private readonly agents: ReadonlyMap<string, AgentIdentity>;
+  private readonly scope: AgentTaskScope;
+  private readonly policy: DelegationPolicy;
+
+  constructor(
+    agents: ReadonlyMap<string, AgentIdentity>,
+    scope: AgentTaskScope,
+    policy: DelegationPolicy = DEFAULT_DELEGATION_POLICY,
+  ) {
+    // Snapshot caller-owned policy inputs so later mutations cannot widen
+    // identity, job scope, roles, or privileged-tool restrictions.
+    this.agents = new Map([...agents].map(([id, agent]) => [
+      id,
+      Object.freeze({ ...agent, capabilities: Object.freeze([...agent.capabilities]) }),
+    ]));
+    this.scope = Object.freeze({
+      ...scope,
+      allowedTools: Object.freeze([...scope.allowedTools]),
+    });
+    this.policy = Object.freeze({
+      maxHops: policy.maxHops,
+      maxDelegationsPerAgent: policy.maxDelegationsPerAgent,
+      allowedRoles: new Set(policy.allowedRoles),
+      neverDelegateTools: new Set(policy.neverDelegateTools),
+    });
+  }
 
   authorize(request: DelegationRequest): DelegationDecision {
     // Treat this boundary as runtime input: callers may be decoding model/tool output.
