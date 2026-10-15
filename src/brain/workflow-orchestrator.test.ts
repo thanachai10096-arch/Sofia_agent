@@ -106,3 +106,25 @@ test("interrupted unknown side effects block automatic replay", async () => {
     assert.match(result.stoppedReason ?? "", /reconciliation is required/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("orchestrator persists cancellation while a step is in flight", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-"));
+  try {
+    const store = new FileWorkflowPlanStore("cancel", root);
+    const controller = new AbortController();
+    const orchestrator = new WorkflowOrchestrator({
+      store,
+      executeStep: async (_step, context) => await new Promise((resolve, reject) => {
+        const signal = context.signal!;
+        signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        setTimeout(() => controller.abort(), 5);
+      }),
+    });
+    await orchestrator.create(createWorkflowPlan("cancel", [
+      { id: "step", title: "Step", description: "Long-running action", idempotent: true },
+    ], { id: "cancel-plan" }));
+    const result = await orchestrator.run("cancel-plan", { signal: controller.signal });
+    assert.equal(result.plan.steps[0]?.status, "cancelled");
+    assert.match(result.stoppedReason ?? "", /partial side effects/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
