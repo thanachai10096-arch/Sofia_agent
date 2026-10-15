@@ -217,6 +217,7 @@ test("preserves host-authenticated principal binding in the scope snapshot", () 
   const principalScope: AgentTaskScope = { ...scope, principalId: "user-123" };
   const bus = new AgentMessageBus(principalScope, agents);
   principalScope.principalId = "attacker";
+  assert.equal((bus as unknown as { scope: AgentTaskScope }).scope.principalId, "user-123");
   const message = createAgentMessage({
     correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel",
     kind: "task", payload: {},
