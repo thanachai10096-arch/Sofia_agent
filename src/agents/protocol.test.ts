@@ -127,3 +127,21 @@ test("message bus refuses consumption by an unregistered identity", () => {
     (error: unknown) => error instanceof CoordinationError && error.code === "POLICY_DENIED",
   );
 });
+
+
+test("rejects invalid coordination limits and unbounded envelope metadata", () => {
+  assert.throws(() => new AgentMessageBus(scope, agents, {
+    maxMessages: 0, maxHops: 4, maxPayloadBytes: 100, maxAgeMs: 1000,
+  }), (error: unknown) => error instanceof CoordinationError && error.code === "BUDGET_EXCEEDED");
+  const bus = new AgentMessageBus(scope, agents);
+  const tooManyEvidence = createAgentMessage({
+    correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel",
+    kind: "evidence", payload: {}, evidenceIds: Array.from({ length: 257 }, (_, i) => String(i)),
+  });
+  assert.throws(() => bus.publish(tooManyEvidence), (error: unknown) => error instanceof CoordinationError && error.code === "INVALID_MESSAGE");
+  const tooLongId = createAgentMessage({
+    correlationId: "job-1", jobId: "job-1", from: "sofia", to: "pixel",
+    kind: "task", payload: {}, id: "x".repeat(257),
+  });
+  assert.throws(() => bus.publish(tooLongId), (error: unknown) => error instanceof CoordinationError && error.code === "INVALID_MESSAGE");
+});
