@@ -203,7 +203,7 @@ The SDK exports a validated workflow-plan model for applications that want to bu
 
 - `createWorkflowPlan(title, steps)` validates unique IDs, dependency references, cycles, and a bounded step count.
 - `readyWorkflowSteps(plan)` returns steps whose dependencies have succeeded.
-- `transitionWorkflowStep(plan, stepId, status)` enforces legal state transitions, tracks bounded evidence/error details, and requires a checkpoint ID before a consequential step enters `running`.
+- `transitionWorkflowStep(plan, stepId, status)` enforces legal state transitions, tracks bounded evidence/error details, and requires both a checkpoint ID and an explicit `approved: true` flag before a consequential step enters `running`.
 - `assessWorkflowRetry(...)` blocks automatic retries when side effects are unknown, already completed, or not idempotent; consequential retries require a checkpoint and still require approval.
 
 These are deterministic planning and policy primitives, **not a workflow execution service**. They do not run tools, persist plans, create checkpoints, or collect approval by themselves. The caller must persist state durably, create/verify checkpoints through the configured runtime, enforce authorization and approval at the execution boundary, impose retry/time budgets, and verify downstream state.
