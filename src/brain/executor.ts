@@ -222,6 +222,22 @@ function ensureString(value: unknown, label: string): string {
   return value;
 }
 
+function boundedConversationContext(value: string, maxCharacters = 12_000): string {
+  if (value.length <= maxCharacters) return value;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      const messages = [...parsed];
+      while (messages.length > 1 && JSON.stringify(messages).length > maxCharacters) messages.shift();
+      const serialized = JSON.stringify(messages);
+      if (serialized.length <= maxCharacters) return serialized;
+    }
+  } catch {
+    // Non-JSON context is still bounded below.
+  }
+  return value.slice(-maxCharacters);
+}
+
 export class SofiaBrain {
   readonly runId = randomUUID();
 
@@ -808,7 +824,7 @@ export class SofiaBrain {
     this.started = true;
     if (input.context !== undefined) {
       if (typeof input.context !== "string") throw new Error("Conversation context must be a string");
-      this.conversationContext = input.context.slice(-12_000);
+      this.conversationContext = boundedConversationContext(input.context);
     }
     const requestedSignal = input.signal ?? new AbortController().signal;
     requestedSignal.throwIfAborted();
