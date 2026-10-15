@@ -1,7 +1,7 @@
 <!-- Sofia Agent — README -->
 <div align="center">
 
-<h1 align="center"><img src="assets/sofia-title.svg" alt="Sofia Agent — large green code-style title" width="100%" /></h1>
+<table align="center" border="0"><tr><td align="center" valign="middle" width="112"><img src="assets/characters/a01-beanie-white.png" alt="Sofia character mascot" width="100" /></td><td align="center" valign="middle"><img src="assets/sofia-title.svg" alt="Sofia Agent — large green code-style title" width="100%" /></td></tr></table>
 
 **An agent runtime designed to plan, act, check results, and recover.**
 
