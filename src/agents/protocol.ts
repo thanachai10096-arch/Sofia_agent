@@ -93,11 +93,28 @@ export class AgentMessageBus {
     validateAgentMessage(message, this.scope, this.agents, this.limits, now);
     if (this.seen.has(message.id)) throw new CoordinationError("Duplicate message ID.", "INVALID_MESSAGE");
     if (this.queue.length >= this.limits.maxMessages) throw new CoordinationError("Message budget exceeded.", "BUDGET_EXCEEDED");
-    this.seen.add(message.id); this.queue.push(message);
+    // Snapshot the envelope at publication time. Retaining caller-owned objects
+    // would let a sender mutate a queued message after validation.
+    let snapshot: AgentMessage;
+    try {
+      snapshot = JSON.parse(JSON.stringify(message)) as AgentMessage;
+    } catch {
+      throw new CoordinationError("Message cannot be safely serialized.", "INVALID_MESSAGE");
+    }
+    validateAgentMessage(snapshot, this.scope, this.agents, this.limits, now);
+    this.seen.add(snapshot.id);
+    this.queue.push(snapshot);
   }
-  takeFor(agentId: string): AgentMessage | undefined {
+  takeFor(agentId: string, now = Date.now()): AgentMessage | undefined {
+    if (this.closed) throw new CoordinationError("Agent message bus is closed.", "CANCELLED");
+    if (!this.agents.has(agentId)) throw new CoordinationError("Recipient is not registered.", "POLICY_DENIED");
     const index = this.queue.findIndex(message => message.to === agentId);
-    return index < 0 ? undefined : this.queue.splice(index, 1)[0];
+    if (index < 0) return undefined;
+    const [message] = this.queue.splice(index, 1);
+    // A message may have become stale while queued, so re-check freshness and
+    // the job deadline at consumption, not only at publication.
+    validateAgentMessage(message, this.scope, this.agents, this.limits, now);
+    return message;
   }
   pendingCount(): number { return this.queue.length; }
   close(): void { this.closed = true; this.queue.length = 0; }
