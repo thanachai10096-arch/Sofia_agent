@@ -348,6 +348,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (!res.writableEnded) controller.abort(new Error("SSE client disconnected."));
         };
         res.on("close", abortOnDisconnect);
+        let toolQuotaExceeded = false;
         try {
           run.status = "running";
           const result = await agent.run({
@@ -361,21 +362,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             onEvent: (event) => {
               send({ type: "event", runId, event });
               if (event.type === "tool.started" && !usage.recordToolCalls(auth.keyId)) {
+                toolQuotaExceeded = true;
                 controller.abort(new Error("API tool-call quota exceeded."));
               }
             },
           });
           if (controller.signal.aborted) {
-            if (usage.get(auth.keyId).toolCalls >= maxToolCallsPerKeyPerDay) {
-              throw new Error("API tool-call quota exceeded.");
-            }
-            throw new Error("Run cancelled.");
+            throw new Error(toolQuotaExceeded ? "API tool-call quota exceeded." : "Run cancelled.");
           }
           run.result = result;
           run.status = "completed";
           send({ type: "result", runId, status: "completed", result: run.result });
         } catch (error) {
-          const toolQuotaExceeded = controller.signal.aborted && error instanceof Error && error.message === "API tool-call quota exceeded.";
           run.status = controller.signal.aborted && !toolQuotaExceeded ? "cancelled" : "failed";
           run.error = toolQuotaExceeded ? "API tool-call quota exceeded." : controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Agent failed";
           send({ type: "error", runId, status: run.status, error: run.error });
@@ -450,6 +448,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const runId = randomUUID();
+        let toolQuotaExceeded = false;
         try {
           const result = await agent.run({
             principalId: auth.keyId,
@@ -461,19 +460,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             signal: controller.signal,
             onEvent: (event) => {
               if (event.type === "tool.started" && !usage.recordToolCalls(auth.keyId)) {
+                toolQuotaExceeded = true;
                 controller.abort(new Error("API tool-call quota exceeded."));
               }
             },
           });
           if (controller.signal.aborted) {
-            if (usage.get(auth.keyId).toolCalls >= maxToolCallsPerKeyPerDay) {
-              return json(res, 429, { id: runId, status: "failed", error: "API tool-call quota exceeded." }, origin, config);
-            }
+            if (toolQuotaExceeded) return json(res, 429, { id: runId, status: "failed", error: "API tool-call quota exceeded." }, origin, config);
             return json(res, 504, { id: runId, status: "failed", error: "Request timed out or was cancelled." }, origin, config);
           }
           return json(res, 200, { id: runId, status: "completed", result }, origin, config);
         } catch (error) {
-          if (controller.signal.aborted && usage.get(auth.keyId).toolCalls >= maxToolCallsPerKeyPerDay) {
+          if (controller.signal.aborted && toolQuotaExceeded) {
             return json(res, 429, { id: runId, status: "failed", error: "API tool-call quota exceeded." }, origin, config);
           }
           return json(res, controller.signal.aborted ? 504 : 502, {
