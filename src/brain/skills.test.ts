@@ -31,6 +31,9 @@ test("expanded catalog includes distinct engineering and operations skills", () 
     "token-and-cost-budgeting",
     "multi-agent-handoff",
     "user-memory-and-preferences",
+    "workflow-design-and-automation",
+    "workflow-orchestration-and-integrations",
+    "workflow-failure-recovery",
   ]) {
     assert.ok(ids.has(id), `missing built-in skill: ${id}`);
   }
