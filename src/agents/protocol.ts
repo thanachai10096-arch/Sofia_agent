@@ -92,6 +92,25 @@ function validCoordinationLimits(limits: CoordinationLimits): boolean {
     Number.isSafeInteger(limits.maxPayloadBytes) && limits.maxPayloadBytes >= 1 &&
     Number.isSafeInteger(limits.maxAgeMs) && limits.maxAgeMs >= 1;
 }
+function validTaskScope(scope: AgentTaskScope): boolean {
+  return typeof scope.jobId === "string" && scope.jobId.length > 0 && scope.jobId.length <= 256 &&
+    typeof scope.objective === "string" && scope.objective.trim().length > 0 && scope.objective.length <= 4_000 &&
+    Array.isArray(scope.allowedTools) &&
+    scope.allowedTools.every(tool => typeof tool === "string" && tool.length > 0 && tool.length <= 256) &&
+    Number.isSafeInteger(scope.maxHops) && scope.maxHops >= 0 &&
+    (scope.deadlineEpochMs === undefined ||
+      (Number.isSafeInteger(scope.deadlineEpochMs) && scope.deadlineEpochMs > 0)) &&
+    (scope.workspaceRoot === undefined || typeof scope.workspaceRoot === "string");
+}
+function validAgentRegistry(agents: ReadonlyMap<string, AgentIdentity>): boolean {
+  return [...agents].every(([key, agent]) =>
+    typeof key === "string" && key.length > 0 && key.length <= 256 &&
+    isRecord(agent) && agent.id === key &&
+    ["orchestrator", "planner", "researcher", "coder", "tester", "security", "reviewer", "specialist"].includes(agent.role) &&
+    Array.isArray(agent.capabilities) &&
+    agent.capabilities.every(capability =>
+      typeof capability === "string" && capability.length > 0 && capability.length <= 256));
+}
 /** Bounded in-memory queue. Durable deployments must persist deduplication with the queue. */
 export class AgentMessageBus {
   private readonly queue: AgentMessage[] = [];
