@@ -114,7 +114,7 @@ test("orchestrator persists cancellation while a step is in flight", async () =>
     const controller = new AbortController();
     const orchestrator = new WorkflowOrchestrator({
       store,
-      executeStep: async (_step, context) => await new Promise((resolve, reject) => {
+      executeStep: async (_step, context) => await new Promise<never>((_resolve, reject) => {
         const signal = context.signal!;
         signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
         setTimeout(() => controller.abort(), 5);
