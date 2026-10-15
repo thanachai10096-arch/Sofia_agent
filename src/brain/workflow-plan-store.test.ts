@@ -62,3 +62,20 @@ test("workflow plan store rejects corrupted persisted JSON", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("file workflow run lock is shared across store instances and owner-bound", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-workflow-lock-"));
+  try {
+    const first = new FileWorkflowPlanStore("shared-lock", root);
+    const second = new FileWorkflowPlanStore("shared-lock", root);
+    assert.equal(await first.acquireRunLock("plan-1", "owner-a"), true);
+    assert.equal(await second.acquireRunLock("plan-1", "owner-b"), false);
+    await assert.rejects(() => second.releaseRunLock("plan-1", "owner-b"), /owned by another process/);
+    await first.releaseRunLock("plan-1", "owner-a");
+    assert.equal(await second.acquireRunLock("plan-1", "owner-b"), true);
+    await second.releaseRunLock("plan-1", "owner-b");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
