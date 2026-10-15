@@ -78,7 +78,7 @@ export function createWorkflowPlan(
     if (typeof step.idempotent !== "boolean") throw new Error("Workflow step idempotency must be explicit");
     if (step.consequential !== undefined && typeof step.consequential !== "boolean") throw new Error("Workflow consequential flag must be boolean");
     if (step.risk !== undefined && !["low", "medium", "high"].includes(step.risk)) throw new Error("Invalid workflow risk");
-    if (step.dependsOn !== undefined && (!Array.isArray(step.dependsOn) || !step.dependsOn.every((id) => typeof id === "string" && id.length > 0))) {
+    if (step.dependsOn !== undefined && (!Array.isArray(step.dependsOn) || !step.dependsOn.every((id: unknown) => typeof id === "string" && id.length > 0))) {
       throw new Error(`Invalid dependencies for workflow step: ${step.id}`);
     }
     if (step.action !== undefined) {
