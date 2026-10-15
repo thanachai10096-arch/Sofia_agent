@@ -9,6 +9,10 @@ export interface WorkflowPlanStore {
   load(id: string): Promise<WorkflowPlan | undefined>;
   list(): Promise<WorkflowPlan[]>;
   delete(id: string): Promise<void>;
+  /** Atomic cross-process claim when supported by the backing store. */
+  acquireRunLock?(id: string, ownerToken: string): Promise<boolean>;
+  /** Releases only a lock owned by this caller. */
+  releaseRunLock?(id: string, ownerToken: string): Promise<void>;
 }
 
 const writeQueues = new Map<string, Promise<void>>();
@@ -53,6 +57,48 @@ export class FileWorkflowPlanStore implements WorkflowPlanStore {
   private file(id: string): string {
     if (typeof id !== "string" || !id.trim()) throw new Error("Workflow plan id must not be empty");
     return path.join(this.directory, digest(id) + ".json");
+  }
+
+  private lockDirectory(id: string): string {
+    return this.file(id) + ".run-lock";
+  }
+
+  /**
+   * Atomic mkdir provides a local-filesystem cross-process claim. A crashed process
+   * leaves the lock in place intentionally: operators must reconcile side effects
+   * before removing it, rather than risk a lease expiry causing duplicate execution.
+   */
+  async acquireRunLock(id: string, ownerToken: string): Promise<boolean> {
+    if (typeof ownerToken !== "string" || !ownerToken.trim()) throw new Error("Run lock owner token must not be empty");
+    await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
+    await fs.chmod(this.directory, 0o700);
+    const lock = this.lockDirectory(id);
+    try {
+      await fs.mkdir(lock, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw error;
+    }
+    try {
+      await fs.writeFile(path.join(lock, "owner"), ownerToken, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      return true;
+    } catch (error) {
+      await fs.rm(lock, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  async releaseRunLock(id: string, ownerToken: string): Promise<void> {
+    const lock = this.lockDirectory(id);
+    let actual: string;
+    try {
+      actual = await fs.readFile(path.join(lock, "owner"), "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (actual !== ownerToken) throw new Error("Cannot release a workflow run lock owned by another process");
+    await fs.rm(lock, { recursive: true, force: true });
   }
 
   async save(plan: WorkflowPlan): Promise<void> {
