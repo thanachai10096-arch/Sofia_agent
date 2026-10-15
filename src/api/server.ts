@@ -21,6 +21,7 @@ interface ActiveRun {
   desktopCapabilities: DesktopCapability[];
   conversationId?: string;
   assistantMessageId?: string;
+  events: import("../agent/types.js").AgentEvent[];
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -134,6 +135,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
       ...(run.conversationId ? { conversationId: run.conversationId } : {}),
       ...(run.assistantMessageId ? { assistantMessageId: run.assistantMessageId } : {}),
+      events: [...run.events],
     };
     void runStore.save(record);
   };
@@ -153,11 +155,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
       ...(record.conversationId ? { conversationId: record.conversationId } : {}),
       ...(record.assistantMessageId ? { assistantMessageId: record.assistantMessageId } : {}),
+      events: [...(record.events ?? [])],
     };
     runs.set(run.id, run); if (interrupted) persist(run);
   }
   const idempotency = new Map<string, string>();
   const activeByKey = new Map<string, number>();
+  const runSubscribers = new Map<string, Set<(event: import("../agent/types.js").AgentEvent) => void>>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
   const retention = integerSetting("runRetentionMs", config.runRetentionMs, 24 * 60 * 60 * 1000, 0, 365 * 24 * 60 * 60 * 1000);
@@ -185,6 +189,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
+          onEvent: (event) => {
+            run.events.push(event);
+            if (run.events.length > 500) run.events.shift();
+            persist(run);
+            for (const subscriber of runSubscribers.get(run.id) ?? []) subscriber(event);
+          },
         });
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
@@ -394,6 +404,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               ownerKeyId: auth.keyId,
               desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
               conversationId,
+              events: [],
             };
             runs.set(runId, run);
             persist(run);
@@ -606,6 +617,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             updatedAt: Date.now(),
             ownerKeyId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            events: [],
           };
           runs.set(runId, run);
           persist(run);
