@@ -576,6 +576,7 @@ export class SofiaBrain {
     const authorizer = new DelegationAuthorizer(identities, scope);
     try {
       const decision = authorizer.authorize({
+        ...(principalId ? { principalId } : {}),
         requesterId: orchestratorId,
         recipientId: specialistId,
         jobId: this.runId,
@@ -1172,6 +1173,7 @@ export class SofiaBrain {
                 ? compactProjectContext(this.projectContext)
                 : undefined,
             },
+            input.principalId,
             diagnosis.category,
           ) : undefined;
 
