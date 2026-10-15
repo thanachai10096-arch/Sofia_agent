@@ -113,7 +113,8 @@ export function createWorkflowPlan(
 }
 
 const TRANSITIONS: Record<WorkflowStepStatus, readonly WorkflowStepStatus[]> = {
-  pending: ["ready", "skipped", "cancelled"],
+  // A consequential step may need to pause for approval before it is marked ready to execute.
+  pending: ["ready", "waiting_approval", "skipped", "cancelled"],
   ready: ["running", "waiting_approval", "skipped", "cancelled"],
   running: ["succeeded", "failed", "waiting_approval", "cancelled"],
   waiting_approval: ["ready", "cancelled", "skipped"],
