@@ -68,9 +68,25 @@ export class WorkflowOrchestrator {
       };
     }
     this.activeRuns.add(id);
+    const ownerToken = randomUUID();
+    let claimed = false;
     try {
+      if (this.deps.store.acquireRunLock) {
+        claimed = await this.deps.store.acquireRunLock(id, ownerToken);
+        if (!claimed) {
+          const plan = await this.deps.store.load(id);
+          if (!plan) throw new Error("Workflow plan not found");
+          return {
+            plan,
+            executed: 0,
+            waitingForApproval: plan.status === "waiting_approval",
+            stoppedReason: "Workflow is claimed by another process or has an unreconciled stale run lock; inspect side effects before clearing the lock.",
+          };
+        }
+      }
       return await this.runExclusive(id, options);
     } finally {
+      if (claimed) await this.deps.store.releaseRunLock?.(id, ownerToken);
       this.activeRuns.delete(id);
     }
   }
