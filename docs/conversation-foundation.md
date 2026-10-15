@@ -27,6 +27,27 @@ All routes require a Bearer API key. The owner ID is derived from the authentica
 
 If no conversation store is configured, these routes return `503 conversation_store_unavailable`. A turn runs synchronously within the HTTP request, bounded by the configured request timeout and API usage limiter. Prior conversation context is capped by the conversation service and again at 12,000 characters in Brain; it is labeled as untrusted reference material and must not override system instructions, security policy, or the current task. Async turns reuse the API's existing run lifecycle, concurrency limits, cancellation, usage limiter, run persistence, and ownership checks. Run events are bounded to the latest 500 entries and are included in the configured run store. Reconnectable SSE is available at the turn stream endpoint; clients can also poll if SSE is unavailable. A server restart marks queued/running runs as interrupted according to the existing run-store recovery behavior; this is reconnectable status, not guaranteed execution continuation.
 
+## SDK usage
+
+The TypeScript SDK exposes the same endpoints for web, desktop, and mobile clients:
+
+```ts
+const conversation = await client.createConversation("Project chat");
+const accepted = await client.sendConversationMessage(conversation.id, "Inspect this project", {
+  async: true,
+});
+if ("pollUrl" in accepted) {
+  const turn = await client.waitForConversationTurn(
+    conversation.id,
+    accepted.run.id,
+    { timeoutMs: 30 * 60 * 1000 },
+  );
+  console.log(turn.assistantMessage?.content ?? turn.error);
+}
+```
+
+For live progress, call `openConversationTurnStream(conversation.id, runId, signal)` and parse the returned SSE response body. Keep the API key in a trusted host/server; do not embed a master key in a public browser or mobile bundle.
+
 ## Security and trust boundaries
 
 - Derive ownership from authenticated credentials. Never trust an owner ID supplied by an untrusted client.
