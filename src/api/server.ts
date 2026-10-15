@@ -291,7 +291,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      const conversationMatch = req.url?.match(/^\\/v1\\/conversations\\/([0-9a-f-]{36})(?:\\/(messages))?$/i);
+      const conversationPath = req.url?.split("?")[0]?.split("/") ?? [];
+      const conversationMatch = conversationPath[1] === "v1" && conversationPath[2] === "conversations" && conversationPath.length >= 4 && conversationPath.length <= 5 && (conversationPath.length === 4 || conversationPath[4] === "messages") && /^[0-9a-f-]{36}$/i.test(conversationPath[3] ?? "")
+        ? [req.url ?? "", conversationPath[3] ?? "", conversationPath.length === 5 ? "messages" : undefined]
+        : null;
       if (conversationMatch) {
         if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
         const conversationId = conversationMatch[1] ?? "";
