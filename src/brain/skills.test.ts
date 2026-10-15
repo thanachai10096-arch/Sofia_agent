@@ -34,6 +34,9 @@ test("expanded catalog includes distinct engineering and operations skills", () 
     "workflow-design-and-automation",
     "workflow-orchestration-and-integrations",
     "workflow-failure-recovery",
+    "workflow-observability-and-alerting",
+    "workflow-security-and-secret-handling",
+    "workflow-testing-and-release",
   ]) {
     assert.ok(ids.has(id), `missing built-in skill: ${id}`);
   }
@@ -93,4 +96,25 @@ test("compact context exposes procedure and verification but not full descriptio
   assert.ok("procedure" in (context[0] as object));
   assert.ok("verification" in (context[0] as object));
   assert.ok(!("description" in (context[0] as object)));
+});
+
+test("workflow monitoring requests select observability skill", () => {
+  assert.equal(matchSkills("runtime_error", "workflow monitoring execution trace and workflow alert")[0]?.id, "workflow-observability-and-alerting");
+  const skill = allBuiltinSkills().find((item) => item.id === "workflow-observability-and-alerting");
+  assert.ok(skill);
+  assert.ok(skill.procedure.some((step) => step.includes("correlation ID")));
+  assert.ok(skill.procedure.some((step) => step.includes("secrets")));
+});
+
+test("workflow credential requests select security skill", () => {
+  assert.equal(matchSkills("unknown", "workflow security and credential handling")[0]?.id, "workflow-security-and-secret-handling");
+  assert.ok(matchSkills("permission_error", "ความปลอดภัย workflow และจัดการ secret")[0]?.id === "workflow-security-and-secret-handling");
+});
+
+test("workflow release requests select staged testing skill", () => {
+  assert.equal(matchSkills("unknown", "dry run workflow test before production release")[0]?.id, "workflow-testing-and-release");
+  const skill = allBuiltinSkills().find((item) => item.id === "workflow-testing-and-release");
+  assert.ok(skill);
+  assert.ok(skill.procedure.some((step) => step.includes("rollback plan")));
+  assert.ok(skill.procedure.some((step) => step.includes("duplicate events")));
 });
