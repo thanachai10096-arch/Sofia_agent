@@ -23,7 +23,7 @@ All routes require a Bearer API key. The owner ID is derived from the authentica
 - `DELETE /v1/conversations/:id/messages` — clear message history (`agent:run`).
 - `DELETE /v1/conversations/:id` — delete an owned session (`agent:run`).
 
-If no conversation store is configured, these routes return `503 conversation_store_unavailable`. A turn runs synchronously within the HTTP request, bounded by the configured request timeout and API usage limiter. Long-running/mobile-resilient turns should move to the existing async job/run lifecycle before production use.
+If no conversation store is configured, these routes return `503 conversation_store_unavailable`. A turn runs synchronously within the HTTP request, bounded by the configured request timeout and API usage limiter. Prior conversation context is capped by the conversation service and again at 12,000 characters in Brain; it is labeled as untrusted reference material and must not override system instructions, security policy, or the current task. Long-running/mobile-resilient turns should move to the existing async job/run lifecycle before production use.
 
 ## Security and trust boundaries
 
