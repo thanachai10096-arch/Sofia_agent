@@ -32,7 +32,10 @@ function isWorkflowPlan(value: unknown): value is WorkflowPlan {
         !["pending", "ready", "running", "waiting_approval", "succeeded", "failed", "skipped", "cancelled"].includes(String(step.status)) ||
         !Number.isInteger(step.attempts) || (step.attempts ?? -1) < 0 ||
         !Array.isArray(step.evidenceIds) || !step.evidenceIds.every((id) => typeof id === "string") ||
-        typeof step.updatedAt !== "string") return false;
+        typeof step.updatedAt !== "string" ||
+        (step.consequential !== undefined && typeof step.consequential !== "boolean") ||
+        (step.risk !== undefined && !["low", "medium", "high"].includes(String(step.risk))) ||
+        (step.action !== undefined && (!step.action || typeof step.action.tool !== "string" || !step.action.tool.trim() || !step.action.input || typeof step.action.input !== "object" || Array.isArray(step.action.input)))) return false;
     ids.add(step.id);
   }
   return plan.steps.every((step) => step.dependsOn.every((id) => ids.has(id)));
