@@ -280,7 +280,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!auth.scopes.includes("agent:run")) {
           return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
         }
-        const input = await body(req, maxBytes) as { title?: unknown };
+        const input = await body(req, maxBytes) as { title?: unknown } | null;
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
+          return json(res, 400, { error: "invalid_request_body" }, origin, config);
+        }
         if (input.title !== undefined && typeof input.title !== "string") {
           return json(res, 400, { error: "invalid_title" }, origin, config);
         }
@@ -319,9 +322,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           catch { return json(res, 404, { error: "conversation_not_found" }, origin, config); }
         }
         if (req.method === "POST" && messagesPath) {
-          const input = await body(req, maxBytes) as { role?: unknown; content?: unknown };
+          const input = await body(req, maxBytes) as { role?: unknown; content?: unknown } | null;
           // Clients may submit only user messages; assistant/tool messages are server-owned.
-          if (input.role !== "user" || typeof input.content !== "string") {
+          if (!input || typeof input !== "object" || Array.isArray(input) || input.role !== "user" || typeof input.content !== "string") {
             return json(res, 400, { error: "user_message_required" }, origin, config);
           }
           try {
