@@ -169,6 +169,14 @@ export class WorkflowOrchestrator {
         await this.deps.store.save(plan);
         executed += 1;
       } catch (error) {
+        if (options.signal?.aborted) {
+          plan = transitionWorkflowStep(plan, step.id, "cancelled", {
+            now: this.now(),
+            error: "Cancellation requested while the step was running; inspect side effects before retrying.",
+          });
+          await this.deps.store.save(plan);
+          return { plan, executed, waitingForApproval: false, stoppedReason: "Cancellation requested; inspect any partial side effects before resuming." };
+        }
         plan = transitionWorkflowStep(plan, step.id, "failed", {
           now: this.now(),
           error: error instanceof Error ? error.message : "Workflow step failed with an unknown error",
