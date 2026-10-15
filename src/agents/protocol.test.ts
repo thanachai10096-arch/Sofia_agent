@@ -83,3 +83,47 @@ test("rejects non-finite hops and malformed delegation payloads", () => {
   });
   assert.equal(invalidPolicy.authorize(base).allowed, false);
 });
+
+
+test("queued messages are snapshotted and revalidated when consumed", () => {
+  const deadlineScope: AgentTaskScope = { ...scope, deadlineEpochMs: 2_000 };
+  const bus = new AgentMessageBus(deadlineScope, agents);
+  const message = createAgentMessage({
+    id: "snapshot-message",
+    correlationId: "job-1",
+    jobId: "job-1",
+    from: "sofia",
+    to: "pixel",
+    kind: "task",
+    payload: { objective: "approved objective" },
+    createdAt: 1_000,
+  });
+  bus.publish(message, 1_000);
+  (message.payload as { objective: string }).objective = "mutated after validation";
+  const received = bus.takeFor("pixel", 1_500);
+  assert.equal((received?.payload as { objective: string }).objective, "approved objective");
+
+  const expiring = new AgentMessageBus(deadlineScope, agents);
+  expiring.publish(createAgentMessage({
+    id: "expires-in-queue",
+    correlationId: "job-1",
+    jobId: "job-1",
+    from: "sofia",
+    to: "pixel",
+    kind: "task",
+    payload: {},
+    createdAt: 1_000,
+  }), 1_000);
+  assert.throws(
+    () => expiring.takeFor("pixel", 2_001),
+    (error: unknown) => error instanceof CoordinationError && error.code === "BUDGET_EXCEEDED",
+  );
+});
+
+test("message bus refuses consumption by an unregistered identity", () => {
+  const bus = new AgentMessageBus(scope, agents);
+  assert.throws(
+    () => bus.takeFor("rogue"),
+    (error: unknown) => error instanceof CoordinationError && error.code === "POLICY_DENIED",
+  );
+});
