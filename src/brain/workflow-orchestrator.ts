@@ -46,6 +46,19 @@ export class WorkflowOrchestrator {
     this.now = deps.now ?? (() => new Date().toISOString());
   }
 
+  private cancelUnstartedSteps(plan: WorkflowPlan): WorkflowPlan {
+    let cancelled = plan;
+    for (const step of [...cancelled.steps]) {
+      if (step.status === "pending" || step.status === "ready" || step.status === "waiting_approval") {
+        cancelled = transitionWorkflowStep(cancelled, step.id, "cancelled", {
+          now: this.now(),
+          error: "Cancelled before execution; no new side effects were started by this step.",
+        });
+      }
+    }
+    return cancelled;
+  }
+
   async create(plan: WorkflowPlan): Promise<WorkflowPlan> {
     if (await this.deps.store.load(plan.id)) throw new Error("Workflow plan already exists");
     await this.deps.store.save(plan);
@@ -130,7 +143,9 @@ export class WorkflowOrchestrator {
 
     while (executed < this.maxStepsPerRun) {
       if (options.signal?.aborted) {
-        return { plan, executed, waitingForApproval: false, stoppedReason: "Cancellation requested; no new step was started." };
+        plan = this.cancelUnstartedSteps(plan);
+        await this.deps.store.save(plan);
+        return { plan, executed, waitingForApproval: false, stoppedReason: "Cancellation requested; all steps not yet started were cancelled." };
       }
       const waiting = plan.steps.find((step) => step.status === "waiting_approval");
       const candidate = waiting ?? readyWorkflowSteps(plan)[0];
@@ -184,7 +199,9 @@ export class WorkflowOrchestrator {
         step = plan.steps.find((item) => item.id === step.id)!;
       }
       if (options.signal?.aborted) {
-        return { plan, executed, waitingForApproval: false, stoppedReason: "Cancellation requested before step execution." };
+        plan = this.cancelUnstartedSteps(plan);
+        await this.deps.store.save(plan);
+        return { plan, executed, waitingForApproval: false, stoppedReason: "Cancellation requested before execution; all unstarted steps were cancelled." };
       }
 
       plan = transitionWorkflowStep(plan, step.id, "running", {
@@ -210,6 +227,7 @@ export class WorkflowOrchestrator {
             now: this.now(),
             error: "Cancellation requested while the step was running; inspect side effects before retrying.",
           });
+          plan = this.cancelUnstartedSteps(plan);
           await this.deps.store.save(plan);
           return { plan, executed, waitingForApproval: false, stoppedReason: "Cancellation requested; inspect any partial side effects before resuming." };
         }
