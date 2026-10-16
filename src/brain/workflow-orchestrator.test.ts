@@ -19,6 +19,7 @@ test("WorkflowOrchestrator persists dependency-ordered results and evidence", as
     const executionOrder: string[] = [];
     const runner = new WorkflowOrchestrator({
       store,
+      resolveWorkspaceRoot: async () => root,
       executeStep: async (step) => {
         executionOrder.push(step.id);
         return { status: "succeeded", evidenceIds: ["evidence-" + step.id] };
@@ -45,6 +46,7 @@ test("WorkflowOrchestrator pauses for approval and only continues after explicit
     const calls: string[] = [];
     const runner = new WorkflowOrchestrator({
       store,
+      resolveWorkspaceRoot: async () => root,
       executeStep: async (step, context) => {
         calls.push(step.id + ":" + context.approved);
         if (step.id === "publish" && !context.approved) {
@@ -59,8 +61,7 @@ test("WorkflowOrchestrator pauses for approval and only continues after explicit
     assert.deepEqual(calls, ["publish:false"]);
     const completed = await runner.run("approval-plan", {
       principalId: "principal-a",
-      workspaceRoot: root,
-      approvedStepIds: ["publish"],
+            approvedStepIds: ["publish"],
     });
     assert.equal(completed.plan.status, "completed");
     assert.deepEqual(calls, ["publish:false", "publish:true", "independent:false"]);
@@ -79,6 +80,7 @@ test("WorkflowOrchestrator rejects a different principal before executing steps"
     let invoked = false;
     const runner = new WorkflowOrchestrator({
       store,
+      resolveWorkspaceRoot: async () => root,
       executeStep: async () => { invoked = true; return { status: "succeeded" }; },
     });
     await assert.rejects(
@@ -103,6 +105,7 @@ test("WorkflowOrchestrator cancels a step when its signal aborts before result a
     let calls = 0;
     const runner = new WorkflowOrchestrator({
       store,
+      resolveWorkspaceRoot: async () => root,
       executeStep: async () => {
         calls += 1;
         controller.abort(new Error("cancel test"));
@@ -110,7 +113,7 @@ test("WorkflowOrchestrator cancels a step when its signal aborts before result a
       },
     });
     await assert.rejects(
-      () => runner.run("cancel-plan", { principalId: "principal-a", workspaceRoot: root, signal: controller.signal }),
+      () => runner.run("cancel-plan", { principalId: "principal-a", signal: controller.signal }),
     );
     const saved = await store.load("cancel-plan");
     assert.equal(calls, 1);
@@ -131,13 +134,13 @@ test("WorkflowOrchestrator rejects approval for a step not awaiting approval", a
     ], { id: "approval-target-plan", ownerPrincipalId: "principal-a" }));
     const runner = new WorkflowOrchestrator({
       store,
+      resolveWorkspaceRoot: async () => root,
       executeStep: async () => ({ status: "succeeded" }),
     });
     await assert.rejects(
       () => runner.run("approval-target-plan", {
         principalId: "principal-a",
-        workspaceRoot: root,
-        approvedStepIds: ["step"],
+                approvedStepIds: ["step"],
       }),
       /currently awaiting approval/,
     );
@@ -155,6 +158,7 @@ test("WorkflowOrchestrator fails closed on malformed executor results", async ()
     ], { id: "bad-result-plan", ownerPrincipalId: "principal-a" }));
     const runner = new WorkflowOrchestrator({
       store,
+      resolveWorkspaceRoot: async () => root,
       executeStep: async () => ({ status: "pretend-success" } as never),
     });
     await assert.rejects(
@@ -177,13 +181,14 @@ test("WorkflowOrchestrator enforces a bounded deadline and persists cancellation
     ], { id: "timeout-plan", ownerPrincipalId: "principal-a" }));
     const runner = new WorkflowOrchestrator({
       store,
+      resolveWorkspaceRoot: async () => root,
       executeStep: async (_step, context) => await new Promise((_resolve, reject) => {
         if (context.signal.aborted) reject(context.signal.reason);
         else context.signal.addEventListener("abort", () => reject(context.signal.reason), { once: true });
       }),
     });
     await assert.rejects(
-      () => runner.run("timeout-plan", { principalId: "principal-a", workspaceRoot: root, timeoutMs: 10 }),
+      () => runner.run("timeout-plan", { principalId: "principal-a", timeoutMs: 10 }),
       /deadline exceeded/,
     );
     const saved = await store.load("timeout-plan");
