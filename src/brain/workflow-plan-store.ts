@@ -4,6 +4,7 @@ import path from "node:path";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 export type WorkflowPlanStatus = "draft" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+export type WorkflowRisk = "low" | "medium" | "high";
 export type WorkflowStepStatus = "pending" | "ready" | "running" | "waiting_approval" | "succeeded" | "failed" | "skipped" | "cancelled";
 export interface WorkflowStepRecord {
   id: string;
@@ -11,7 +12,7 @@ export interface WorkflowStepRecord {
   description: string;
   idempotent: boolean;
   dependsOn: string[];
-  risk?: "low" | "medium" | "high";
+  risk?: WorkflowRisk;
   maxAttempts?: number;
   status: WorkflowStepStatus;
   attempts: number;
