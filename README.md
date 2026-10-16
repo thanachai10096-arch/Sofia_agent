@@ -283,6 +283,14 @@ npm run build
 
 GitHub Actions runs the same license, type, test, and build checks on pushes and pull requests. Use the workflow result as the source of truth; a commit alone does not mean the checks passed.
 
+The license check also reviews declared licenses for every locked dependency against the repository's MIT/Apache-2.0 allowlist. To generate a line-level Git attribution inventory from a **full-history clone**, run:
+
+```bash
+npm run provenance:report
+```
+
+The report records Git blame attribution and line hashes; it is **not** a copyright similarity scan and cannot prove independent authorship. Unknown-provenance code still requires source comparison and appropriate author/license confirmation before release.
+
 ## `> License`
 
 Sofia Agents is distributed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) for the complete terms. The license permits use, modification, and redistribution subject to its conditions, including preserving required notices. Third-party dependencies remain subject to their own license terms.
