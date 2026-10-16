@@ -40,27 +40,30 @@ test("WorkflowOrchestrator pauses for approval and only continues after explicit
     const store = new FileWorkflowPlanStore("approval", root);
     await store.save(createWorkflowPlan("approval", [
       { id: "publish", title: "Publish", description: "External side effect", idempotent: false, risk: "high" },
+      { id: "independent", title: "Independent", description: "Must pause with the workflow", idempotent: true },
     ], { id: "approval-plan", ownerPrincipalId: "principal-a" }));
-    const approvals: boolean[] = [];
+    const calls: string[] = [];
     const runner = new WorkflowOrchestrator({
       store,
-      executeStep: async (_step, context) => {
-        approvals.push(context.approved);
-        return context.approved
-          ? { status: "succeeded", evidenceIds: ["approved-action"] }
-          : { status: "waiting_approval", reason: "Requires explicit approval." };
+      executeStep: async (step, context) => {
+        calls.push(step.id + ":" + context.approved);
+        if (step.id === "publish" && !context.approved) {
+          return { status: "waiting_approval", reason: "Requires explicit approval." };
+        }
+        return { status: "succeeded", evidenceIds: ["result-" + step.id] };
       },
     });
     const paused = await runner.run("approval-plan", { principalId: "principal-a", workspaceRoot: root });
     assert.equal(paused.pausedForApproval, true);
     assert.equal(paused.plan.status, "waiting_approval");
+    assert.deepEqual(calls, ["publish:false"]);
     const completed = await runner.run("approval-plan", {
       principalId: "principal-a",
       workspaceRoot: root,
       approvedStepIds: ["publish"],
     });
     assert.equal(completed.plan.status, "completed");
-    assert.deepEqual(approvals, [false, true]);
+    assert.deepEqual(calls, ["publish:false", "publish:true", "independent:false"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
