@@ -115,3 +115,30 @@ test("workflow API fails closed when the host has not configured workflow execut
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("workflow API uses the runtime wired by Sofia Agent dependencies when config does not override it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-workflow-api-factory-"));
+  const deps = {
+    workflowStateRoot: root,
+    workflowRuntime: () => ({
+      executeStep: async (step: { id: string }) => ({ evidenceIds: ["factory:" + step.id] }),
+    }),
+  } as unknown as AgentDependencies;
+  const server = createSofiaApi(deps, {
+    apiKeys: { "workflow-user": ["agent:read", "agent:run"] },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Test API did not bind a TCP port");
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/workflows", {
+      headers: auth("workflow-user"),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json() as { workflows: unknown[] }).workflows, []);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});

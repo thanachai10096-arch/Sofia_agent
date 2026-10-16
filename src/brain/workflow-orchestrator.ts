@@ -14,6 +14,8 @@ export interface WorkflowOrchestratorDependencies {
   executeStep(step: Readonly<WorkflowStepRecord>, context: { workflowId: string; signal?: AbortSignal }): Promise<WorkflowStepExecutionResult>;
   /** Create and verify a real rollback/checkpoint before a consequential action. */
   createCheckpoint?(plan: Readonly<WorkflowPlan>, step: Readonly<WorkflowStepRecord>): Promise<{ id: string; verified: boolean }>;
+  /** Restore workspace state after a failed consequential step; this cannot undo external side effects. */
+  rollbackCheckpoint?(checkpointId: string, signal?: AbortSignal): Promise<{ restoredFiles: string[] }>;
   /** Approval must be bound to the authenticated principal and this exact workflow/step. */
   requestApproval?(plan: Readonly<WorkflowPlan>, step: Readonly<WorkflowStepRecord>, checkpointId: string): Promise<boolean>;
   /** Optional reconciliation after a process crashed while a step was running. Never assume no side effects. */
@@ -243,10 +245,16 @@ export class WorkflowOrchestrator {
           await this.deps.store.save(plan);
           return { plan, executed, waitingForApproval: false, stoppedReason: "Cancellation requested; inspect any partial side effects before resuming." };
         }
-        plan = transitionWorkflowStep(plan, step.id, "failed", {
-          now: this.now(),
-          error: error instanceof Error ? error.message : "Workflow step failed with an unknown error",
-        });
+        let failure = error instanceof Error ? error.message : "Workflow step failed with an unknown error";
+        if (step.consequential && checkpointId && this.deps.rollbackCheckpoint) {
+          try {
+            const rollback = await this.deps.rollbackCheckpoint(checkpointId, options.signal);
+            failure = `${failure}; workspace rollback restored ${rollback.restoredFiles.length} file(s). External side effects, if any, still require reconciliation.`;
+          } catch (rollbackError) {
+            failure = `${failure}; workspace rollback failed: ${rollbackError instanceof Error ? rollbackError.message : "unknown rollback error"}. Inspect side effects before retrying.`;
+          }
+        }
+        plan = transitionWorkflowStep(plan, step.id, "failed", { now: this.now(), error: failure });
         await this.deps.store.save(plan);
         return { plan, executed, waitingForApproval: false, stoppedReason: "A step failed; automatic continuation is blocked." };
       }

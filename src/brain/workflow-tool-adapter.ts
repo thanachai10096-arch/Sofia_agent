@@ -13,8 +13,11 @@ export function createToolGatewayWorkflowAdapter(input: {
   onApprovalState?: (waiting: boolean, workflowId: string, stepId: string) => void;
   allowShell?: boolean;
   allowNetwork?: boolean;
-}): Pick<WorkflowOrchestratorDependencies, "executeStep" | "createCheckpoint" | "requestApproval"> {
+}): Pick<WorkflowOrchestratorDependencies, "executeStep" | "createCheckpoint" | "requestApproval" | "rollbackCheckpoint"> {
   return {
+    rollbackCheckpoint: async (checkpointId: string, signal?: AbortSignal) => ({
+      restoredFiles: await input.gateway.rollback(checkpointId, signal ?? new AbortController().signal),
+    }),
     createCheckpoint: async (_plan, _step) => {
       const controller = new AbortController();
       const checkpoint = await input.gateway.checkpoint(controller.signal);
@@ -34,14 +37,14 @@ export function createToolGatewayWorkflowAdapter(input: {
       if (descriptor.effects.includes("network") && input.allowNetwork === false) {
         throw new Error("Workflow tool blocked: network access is disabled");
       }
-      const mutates = descriptor.effects.includes("write") || descriptor.effects.includes("destructive");
+      const mutates = descriptor.effects.includes("write") || descriptor.effects.includes("destructive") || descriptor.effects.includes("shell") || descriptor.effects.includes("network") || descriptor.effects.includes("browser");
       if (mutates && !step.consequential) {
         throw new Error("Mutating tool actions must be marked consequential to require checkpoint and approval");
       }
       const controller = new AbortController();
       const signal = context.signal ?? controller.signal;
       const toolContext: ToolExecutionContext = {
-        runId: context.workflowId,
+        runId: `${context.workflowId}:${step.id}`,
         ...(input.principalId ? { principalId: input.principalId } : {}),
         signal,
         requireApproval: mutates || descriptor.effects.includes("destructive"),

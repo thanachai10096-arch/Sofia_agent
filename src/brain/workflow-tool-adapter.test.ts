@@ -49,6 +49,7 @@ test("ToolGateway adapter routes actions through gateway with principal and appr
     assert.equal(result.plan.status, "completed");
     assert.equal(observed.call?.tool, "workspace.write_file");
     assert.equal(observed.context?.principalId, "principal-test");
+    assert.equal(observed.context?.runId, "adapter-success:write");
     assert.equal(observed.context?.requireApproval, true);
     assert.deepEqual(result.plan.steps[0]?.evidenceIds, ["evidence-written"]);
     assert.equal(result.plan.steps[0]?.checkpointId, "checkpoint-real");

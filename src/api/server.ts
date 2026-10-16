@@ -301,12 +301,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       if (isWorkflowRoute) {
-        if (!config.workflowRuntime) return json(res, 503, { error: "workflow_runtime_unavailable" }, origin, config);
-        const workflowStore = new FileWorkflowPlanStore(auth.principalId, config.workflowStateRoot);
+        const workflowRuntime = config.workflowRuntime ?? deps.workflowRuntime;
+        if (!workflowRuntime) return json(res, 503, { error: "workflow_runtime_unavailable" }, origin, config);
+        const workflowStore = new FileWorkflowPlanStore(auth.principalId, config.workflowStateRoot ?? deps.workflowStateRoot);
         // Runtime dependencies are constructed from the authenticated principal, never request-supplied identity.
         const workflow = new WorkflowOrchestrator({
           store: workflowStore,
-          ...config.workflowRuntime(auth.principalId),
+          ...workflowRuntime(auth.principalId),
         });
         if (isWorkflowCollection && req.method === "GET") {
           return json(res, 200, { workflows: await workflow.list() }, origin, config);
@@ -337,6 +338,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (!workflowId || workflowId.length > 256) return json(res, 400, { error: "invalid_workflow_id" }, origin, config);
         if (workflowMatch[2] === "run" && req.method === "POST") {
+          if (!await workflow.get(workflowId)) return json(res, 404, { error: "workflow_not_found" }, origin, config);
           const result = await workflow.run(workflowId);
           return json(res, 200, result, origin, config);
         }

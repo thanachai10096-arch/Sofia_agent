@@ -44,9 +44,9 @@ export class DurableCheckpointManager implements CheckpointManager {
   private readonly local: RuntimeCheckpointManager;
   private readonly store: CheckpointStore;
 
-  constructor(runtime: WorkspaceRuntime, namespace: string) {
+  constructor(runtime: WorkspaceRuntime, namespace: string, root?: string) {
     this.local = new RuntimeCheckpointManager(runtime);
-    this.store = new FileCheckpointStore(namespace);
+    this.store = new FileCheckpointStore(namespace, root);
   }
 
   async create(signal: AbortSignal): Promise<Checkpoint> {

@@ -254,3 +254,37 @@ test("orchestrator persists cancellation while a step is in flight", async () =>
     assert.match(result.stoppedReason ?? "", /partial side effects/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+test("failed consequential steps attempt workspace rollback and preserve uncertainty about external effects", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-workflow-rollback-"));
+  try {
+    const store = new FileWorkflowPlanStore("rollback-on-failure", root);
+    let rollbackCalled = false;
+    const orchestrator = new WorkflowOrchestrator({
+      store,
+      createCheckpoint: async () => ({ id: "checkpoint-rollback", verified: true }),
+      requestApproval: async () => true,
+      executeStep: async () => { throw new Error("tool failed after partial work"); },
+      rollbackCheckpoint: async (id) => {
+        assert.equal(id, "checkpoint-rollback");
+        rollbackCalled = true;
+        return { restoredFiles: ["src/example.ts"] };
+      },
+    });
+    await orchestrator.create(createWorkflowPlan("rollback after failure", [{
+      id: "change",
+      title: "Change",
+      description: "A consequential change",
+      idempotent: false,
+      consequential: true,
+    }], { id: "rollback-on-failure" }));
+    const result = await orchestrator.run("rollback-on-failure");
+    assert.equal(result.plan.status, "failed");
+    assert.equal(rollbackCalled, true);
+    assert.match(result.plan.steps[0]?.lastError ?? "", /workspace rollback restored 1 file/);
+    assert.match(result.plan.steps[0]?.lastError ?? "", /External side effects.*require reconciliation/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
