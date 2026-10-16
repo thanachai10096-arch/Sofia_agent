@@ -135,11 +135,24 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     ...(run.assistantMessageId ? { assistantMessageId: run.assistantMessageId } : {}),
     events: [...run.events],
   });
-  const persist = (run: ActiveRun) => {
-    if (runStore) void runStore.save(toRunRecord(run)).catch(() => undefined);
-  };
+  // Serialize writes at the API boundary too: injected RunRecordStore adapters are
+  // not required to implement their own queue, and terminal snapshots must not be
+  // overwritten by an older in-flight event snapshot.
+  const persistenceChains = new Map<string, Promise<void>>();
   const persistRequired = async (run: ActiveRun) => {
-    if (runStore) await runStore.save(toRunRecord(run));
+    if (!runStore) return;
+    const previous = persistenceChains.get(run.id) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(() => runStore.save(toRunRecord(run)));
+    const queued = operation.catch(() => undefined);
+    persistenceChains.set(run.id, queued);
+    try {
+      await operation;
+    } finally {
+      if (persistenceChains.get(run.id) === queued) persistenceChains.delete(run.id);
+    }
+  };
+  const persist = (run: ActiveRun) => {
+    if (runStore) void persistRequired(run).catch(() => undefined);
   };
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
