@@ -167,3 +167,56 @@ test("job API enforces owner isolation for reads, resume, cancel, and list", asy
   assert.equal(job.resumeCalls, 0, "unauthorized caller must not invoke resume");
   assert.equal(job.cancelCalls, 0, "unauthorized caller must not invoke cancel");
 });
+
+
+test("CORS preflight allows the idempotency-key header used by browser clients", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "ok" }; } };
+  const { server, url } = await startApi(provider);
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  const response = await fetch(url + "/v1/agent/runs", {
+    method: "OPTIONS",
+    headers: {
+      origin: "https://app.example",
+      "access-control-request-method": "POST",
+      "access-control-request-headers": "authorization,content-type,idempotency-key",
+    },
+  });
+  assert.equal(response.status, 204);
+  assert.match(response.headers.get("access-control-allow-headers") ?? "", /idempotency-key/i);
+});
+
+test("async API rejects an idempotency key reused with a different request", async (t) => {
+  const provider: ModelProvider = {
+    async generate() {
+      return { text: "ok" };
+    },
+  };
+  const { server, url } = await startApi(provider);
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  const post = (task: string, sessionId?: string) => fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test-token",
+      "content-type": "application/json",
+      "idempotency-key": "same-key",
+    },
+    body: JSON.stringify({ task, async: true, ...(sessionId ? { sessionId } : {}) }),
+  });
+
+  const first = await post("first task");
+  assert.equal(first.status, 202);
+  const firstBody = await first.json() as { id: string };
+
+  const duplicate = await post("first task");
+  assert.equal(duplicate.status, 200);
+  assert.equal((await duplicate.json() as { id: string }).id, firstBody.id);
+
+  const sessionMismatch = await post("first task", "different-session");
+  assert.equal(sessionMismatch.status, 409, "sessionId is part of request identity");
+
+  const mismatch = await post("different task");
+  assert.equal(mismatch.status, 409);
+  assert.equal((await mismatch.json() as { error: string }).error, "idempotency_key_reused");
+});
