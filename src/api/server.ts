@@ -82,13 +82,13 @@ function normalizeContext(context: AgentRunInput["context"]): string | undefined
   return typeof context === "string" ? context : JSON.stringify(context);
 }
 
-function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"]): import("../brain/types.js").AcceptanceCriterion[] | undefined {
+export function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"]): import("../brain/types.js").AcceptanceCriterion[] | undefined {
   return input?.map((criterion) => ({
     id: criterion.id,
     description: criterion.description,
     probe: criterion.probe,
     evaluate: (value: unknown) => ({
-      passed: Boolean((value as { passed?: unknown })?.passed),
+      passed: (value as { passed?: unknown } | null)?.passed === true,
       detail: "API acceptance probe",
     }),
   }));

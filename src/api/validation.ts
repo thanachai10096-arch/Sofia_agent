@@ -19,6 +19,7 @@ export function validateAgentRunInput(value: unknown): { valid: true; input: Age
   if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || input.sessionId.length > 256)) return { valid: false, error: "invalid_session_id" };
   if (input.acceptanceCriteria !== undefined) {
     if (!Array.isArray(input.acceptanceCriteria) || input.acceptanceCriteria.length > 50) return { valid: false, error: "invalid_acceptance_criteria" };
+    const criterionIds = new Set<string>();
     for (const item of input.acceptanceCriteria) {
       if (item === null || typeof item !== "object" || Array.isArray(item)) return { valid: false, error: "invalid_acceptance_criteria" };
       const criterion = item as Record<string, unknown>;
@@ -27,6 +28,10 @@ export function validateAgentRunInput(value: unknown): { valid: true; input: Age
           criterion.probe === null || typeof criterion.probe !== "object" || Array.isArray(criterion.probe)) {
         return { valid: false, error: "invalid_acceptance_criteria" };
       }
+      // Criterion IDs are used to correlate probes and verification evidence. Reject
+      // duplicates so one result cannot ambiguously satisfy multiple requirements.
+      if (criterionIds.has(criterion.id)) return { valid: false, error: "invalid_acceptance_criteria" };
+      criterionIds.add(criterion.id);
       const probe = criterion.probe as Record<string, unknown>;
       if (typeof probe.tool !== "string" || !probe.tool.trim() || probe.tool.length > 128 ||
           probe.input === null || typeof probe.input !== "object" || Array.isArray(probe.input)) {
