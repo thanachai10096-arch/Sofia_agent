@@ -85,7 +85,7 @@ The current branch contains an in-memory, bounded agent message protocol and a d
 
 ## Suggested implementation order
 
-1. Complete workflow run #1007 for the workflow lifecycle/orchestrator changes; do not claim those new changes pass until the run is green. The store and orchestrator remain separately callable primitives until an explicit Brain/DurableJobRuntime integration is implemented.
+1. [x] Workflow lifecycle/orchestrator CI passed in GitHub Actions run #1017 (all 6 jobs, including Ubuntu/macOS/Windows typecheck, tests and builds, browser egress, Docker sandbox, and license check). The store and orchestrator remain separately callable primitives until an explicit Brain/DurableJobRuntime integration is implemented.
 2. Map the real Brain/subagent/Tool Gateway/job-runtime call graph and add an architecture test harness.
 3. Integrate a single specialist round trip behind a feature flag; no parallel fan-out at first.
 4. Add cancellation, permission-denial, hostile-evidence, and cross-principal tests.
