@@ -65,7 +65,7 @@ function validateDefinitions(definitions: readonly WorkflowStepDefinition[]): vo
 export function createWorkflowPlan(
   title: string,
   definitions: readonly WorkflowStepDefinition[],
-  options: { id?: string; now?: string } = {},
+  options: { id?: string; now?: string; ownerPrincipalId?: string } = {},
 ): WorkflowPlan {
   if (typeof title !== "string" || !title.trim() || title.length > 240) {
     throw new Error("Workflow title must be non-empty and at most 240 characters.");
@@ -76,8 +76,13 @@ export function createWorkflowPlan(
   if (typeof id !== "string" || !id.trim() || id.length > 256) {
     throw new Error("Workflow ID must be non-empty and at most 256 characters.");
   }
+  if (options.ownerPrincipalId !== undefined &&
+      (typeof options.ownerPrincipalId !== "string" || !options.ownerPrincipalId.trim() || options.ownerPrincipalId.length > 256)) {
+    throw new Error("Workflow owner principal is invalid.");
+  }
   validateDefinitions(definitions);
   return {
+    ...(options.ownerPrincipalId ? { ownerPrincipalId: options.ownerPrincipalId } : {}),
     id,
     title: title.trim(),
     createdAt: now,
