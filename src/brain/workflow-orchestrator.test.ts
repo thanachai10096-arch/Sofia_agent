@@ -120,3 +120,49 @@ test("WorkflowOrchestrator cancels a step when its signal aborts before result a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("WorkflowOrchestrator rejects approval for a step not awaiting approval", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-bad-approval-"));
+  try {
+    const store = new FileWorkflowPlanStore("bad-approval", root);
+    await store.save(createWorkflowPlan("approval", [
+      { id: "step", title: "Step", description: "Not awaiting approval", idempotent: true },
+    ], { id: "approval-target-plan", ownerPrincipalId: "principal-a" }));
+    const runner = new WorkflowOrchestrator({
+      store,
+      executeStep: async () => ({ status: "succeeded" }),
+    });
+    await assert.rejects(
+      () => runner.run("approval-target-plan", {
+        principalId: "principal-a",
+        workspaceRoot: root,
+        approvedStepIds: ["step"],
+      }),
+      /currently awaiting approval/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkflowOrchestrator fails closed on malformed executor results", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-bad-result-"));
+  try {
+    const store = new FileWorkflowPlanStore("bad-result", root);
+    await store.save(createWorkflowPlan("bad result", [
+      { id: "step", title: "Step", description: "Executor contract validation", idempotent: true },
+    ], { id: "bad-result-plan", ownerPrincipalId: "principal-a" }));
+    const runner = new WorkflowOrchestrator({
+      store,
+      executeStep: async () => ({ status: "pretend-success" } as never),
+    });
+    await assert.rejects(
+      () => runner.run("bad-result-plan", { principalId: "principal-a", workspaceRoot: root }),
+      /invalid result/,
+    );
+    assert.equal((await store.load("bad-result-plan"))?.steps[0]?.status, "failed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
