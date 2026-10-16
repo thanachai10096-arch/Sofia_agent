@@ -146,10 +146,12 @@ test("policy skill success is learned only from observed test metrics and review
           data: {
             passed: true,
             code: 0,
-            assertionsPassed: true,
-            assertionsTotal: 12,
-            failedAssertions: 0,
-            skippedAssertions: 0,
+            testsTotal: 12,
+            passedTests: 12,
+            failedTests: 0,
+            skippedTests: 0,
+            cancelledTests: 0,
+            todoTests: 0,
           },
           evidenceId: "verify-" + String(call.input.kind),
         };
