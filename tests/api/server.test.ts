@@ -210,3 +210,79 @@ test("public API errors redact provider secrets from sync responses and async ru
   assert.equal(body.includes("sk-live-secret"), false);
   assert.equal(body.includes("/srv/private/customer.env"), false);
 });
+
+
+test("job API does not expose provider paths or secrets from submit and resume errors", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const secretError = new Error("token=sk-live-private /srv/private/customer.env");
+  const job = {
+    id: "owned-job",
+    status: "failed" as const,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    task: "job",
+    ownerKeyId: undefined as string | undefined,
+  };
+  const jobRuntime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      job.ownerKeyId = input.ownerKeyId;
+      throw secretError;
+    },
+    async get(id: string) { return id === job.id ? { ...job } : undefined; },
+    async list() { return []; },
+    async resume() { throw secretError; },
+    async cancel() { return false; },
+  };
+  const server = createSofiaApi(
+    { ...dependencies(provider), jobRuntime: jobRuntime as unknown as import("../../src/brain/job-runtime.js").JobRuntime },
+    { apiKeys: { "owner-token": ["agent:run"] } },
+  );
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}`;
+  const request = (path: string, init: RequestInit = {}) => fetch(base + path, {
+    ...init,
+    headers: {
+      authorization: "Bearer owner-token",
+      ...(init.body ? { "content-type": "application/json" } : {}),
+    },
+  });
+
+  const submitted = await request("/v1/jobs", { method: "POST", body: JSON.stringify({ task: "job" }) });
+  assert.equal(submitted.status, 502);
+  const submitBody = await submitted.text();
+  assert.ok(submitBody.includes("job_submit_failed"));
+  assert.ok(!submitBody.includes("sk-live-private"));
+  assert.ok(!submitBody.includes("/srv/private/customer.env"));
+
+  // Simulate an already-owned job so the resume error path is reachable.
+  job.ownerKeyId = "owner-token-hash";
+  const resumeServer = createSofiaApi(
+    { ...dependencies(provider), jobRuntime: {
+      ...jobRuntime,
+      async get(id: string) { return id === job.id ? { ...job, ownerKeyId: "owner-token-hash" } : undefined; },
+    } as unknown as import("../../src/brain/job-runtime.js").JobRuntime },
+    { apiKeys: { "owner-token": ["agent:run"] } },
+  );
+  await new Promise<void>((resolve, reject) => {
+    resumeServer.once("error", reject);
+    resumeServer.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise<void>((resolve, reject) => resumeServer.close((error) => error ? reject(error) : resolve())));
+  const resumeAddress = resumeServer.address();
+  assert.ok(resumeAddress && typeof resumeAddress !== "string");
+  const resumed = await fetch(`http://127.0.0.1:${resumeAddress.port}/v1/jobs/owned-job/resume`, {
+    method: "POST",
+    headers: { authorization: "Bearer owner-token" },
+  });
+  assert.equal(resumed.status, 409);
+  const resumeBody = await resumed.text();
+  assert.ok(resumeBody.includes("job_resume_failed"));
+  assert.ok(!resumeBody.includes("sk-live-private"));
+  assert.ok(!resumeBody.includes("/srv/private/customer.env"));
+});
