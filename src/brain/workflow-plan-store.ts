@@ -55,7 +55,8 @@ function clonePlan(plan: WorkflowPlan): WorkflowPlan {
 function isWorkflowPlan(value: unknown): value is WorkflowPlan {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const plan = value as Partial<WorkflowPlan>;
-  if (typeof plan.id !== "string" || !plan.id.trim() || plan.id.length > 256 ||
+  if ((plan.ownerPrincipalId !== undefined && (typeof plan.ownerPrincipalId !== "string" || !plan.ownerPrincipalId.trim() || plan.ownerPrincipalId.length > 256)) ||
+      typeof plan.id !== "string" || !plan.id.trim() || plan.id.length > 256 ||
       typeof plan.title !== "string" || !plan.title.trim() || plan.title.length > 240 ||
       typeof plan.createdAt !== "string" || !Number.isFinite(Date.parse(plan.createdAt)) ||
       typeof plan.updatedAt !== "string" || !Number.isFinite(Date.parse(plan.updatedAt)) ||
