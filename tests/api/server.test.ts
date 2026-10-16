@@ -195,14 +195,14 @@ test("async API rejects an idempotency key reused with a different request", asy
   const { server, url } = await startApi(provider);
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
-  const post = (task: string) => fetch(url + "/v1/agent/runs", {
+  const post = (task: string, sessionId?: string) => fetch(url + "/v1/agent/runs", {
     method: "POST",
     headers: {
       authorization: "Bearer test-token",
       "content-type": "application/json",
       "idempotency-key": "same-key",
     },
-    body: JSON.stringify({ task, async: true }),
+    body: JSON.stringify({ task, async: true, ...(sessionId ? { sessionId } : {}) }),
   });
 
   const first = await post("first task");
@@ -212,6 +212,9 @@ test("async API rejects an idempotency key reused with a different request", asy
   const duplicate = await post("first task");
   assert.equal(duplicate.status, 200);
   assert.equal((await duplicate.json() as { id: string }).id, firstBody.id);
+
+  const sessionMismatch = await post("first task", "different-session");
+  assert.equal(sessionMismatch.status, 409, "sessionId is part of request identity");
 
   const mismatch = await post("different task");
   assert.equal(mismatch.status, 409);
