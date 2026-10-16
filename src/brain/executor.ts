@@ -815,6 +815,12 @@ export class SofiaBrain {
       if (result.assertionsTotal !== undefined) evidence.assertionsTotal = result.assertionsTotal;
       if (result.failedAssertions !== undefined) evidence.failedAssertions = result.failedAssertions;
       if (result.skippedAssertions !== undefined) evidence.skippedAssertions = result.skippedAssertions;
+      if (result.testsTotal !== undefined) evidence.testsTotal = result.testsTotal;
+      if (result.passedTests !== undefined) evidence.passedTests = result.passedTests;
+      if (result.failedTests !== undefined) evidence.failedTests = result.failedTests;
+      if (result.skippedTests !== undefined) evidence.skippedTests = result.skippedTests;
+      if (result.cancelledTests !== undefined) evidence.cancelledTests = result.cancelledTests;
+      if (result.todoTests !== undefined) evidence.todoTests = result.todoTests;
       checks.push(evidence);
     }
     if (reviewApproved) {
