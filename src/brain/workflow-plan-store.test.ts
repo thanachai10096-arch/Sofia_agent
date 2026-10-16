@@ -116,7 +116,8 @@ test("workflow step lifecycle enforces dependencies and only retries safe transi
     { id: "change", title: "Change", description: "Apply a change", idempotent: false, dependsOn: ["inspect"] },
   ], { id: "lifecycle-plan", now: "2026-10-16T00:00:00.000Z" });
   assert.deepEqual(readyWorkflowSteps(plan).map(step => step.id), ["inspect"]);
-  assert.throws(() => transitionWorkflowStep(plan, "change", "running"), /dependencies/);
+  const prematurelyReady = transitionWorkflowStep(plan, "change", "ready");
+  assert.throws(() => transitionWorkflowStep(prematurelyReady, "change", "running"), /dependencies/);
   plan = transitionWorkflowStep(plan, "inspect", "running", { now: "2026-10-16T00:00:01.000Z" });
   plan = transitionWorkflowStep(plan, "inspect", "failed", { now: "2026-10-16T00:00:02.000Z", error: "temporary issue" });
   const failed = plan.steps.find(step => step.id === "inspect")!;
