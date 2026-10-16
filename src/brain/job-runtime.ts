@@ -124,7 +124,11 @@ export class DurableJobRuntime implements JobRuntime {
         ? "Job was interrupted by a process restart; resume it from the saved snapshot."
         : "Job was interrupted before a resumable snapshot was saved.";
       record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
+      try {
+        await this.state.save(record);
+      } catch {
+        // Recovery status remains useful in this process even if the disk is read-only.
+      }
     }
     return record;
   }
@@ -193,8 +197,14 @@ export class DurableJobRuntime implements JobRuntime {
     record.status = "cancelled";
     record.error ??= "Job cancelled by caller.";
     record.updatedAt = new Date().toISOString();
-    await this.state.save(record);
+    // Cancellation is a live control action: abort first so a storage outage cannot
+    // leave execution running after the caller requested cancellation.
     controller?.abort(new Error("Job cancelled by caller"));
+    try {
+      await this.state.save(record);
+    } catch {
+      // Keep cancellation effective in memory; durable status may need reconciliation.
+    }
     return true;
   }
 

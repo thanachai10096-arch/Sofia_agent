@@ -503,3 +503,40 @@ test("DurableJobRuntime preserves a successful result when terminal persistence 
   assert.equal(current?.result?.summary, "work finished");
   assert.equal(current?.error, undefined);
 });
+
+
+test("DurableJobRuntime cancellation aborts execution even when status persistence fails", async () => {
+  const namespace = "job-runtime-cancel-persist-failure-" + randomUUID();
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => { started = resolve; });
+  let saves = 0;
+  const stateStore = {
+    async save() {
+      saves += 1;
+      if (saves === 3) throw new Error("cancel status disk unavailable");
+    },
+    async list() { return []; },
+    async get() { return undefined; },
+  };
+  const brain = {
+    run: async ({ signal }: { signal?: AbortSignal }) => {
+      started();
+      if (!signal) throw new Error("missing abort signal");
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return { completed: false, state: "cancelled" };
+    },
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace, stateStore);
+  const submitted = await runtime.submit({ task: "cancel despite persistence outage" });
+  await running;
+  assert.equal(await runtime.cancel(submitted.id), true);
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status === "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "cancelled");
+});
