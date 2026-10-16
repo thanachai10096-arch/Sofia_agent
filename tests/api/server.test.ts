@@ -261,11 +261,11 @@ test("job API does not expose provider paths or secrets from submit and resume e
   assert.ok(!submitBody.includes("/srv/private/customer.env"));
 
   // Simulate an already-owned job so the resume error path is reachable.
-  job.ownerKeyId = "owner-token-hash";
+  job.ownerKeyId = "c32c7bb97d785c65916c05538cfc0f9d";
   const resumeServer = createSofiaApi(
     { ...dependencies(provider), jobRuntime: {
       ...jobRuntime,
-      async get(id: string) { return id === job.id ? { ...job, ownerKeyId: "owner-token-hash" } : undefined; },
+      async get(id: string) { return id === job.id ? { ...job, ownerKeyId: "c32c7bb97d785c65916c05538cfc0f9d" } : undefined; },
     } as unknown as import("../../src/brain/job-runtime.js").JobRuntime },
     { apiKeys: { "owner-token": ["agent:run"] } },
   );
