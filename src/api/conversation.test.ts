@@ -433,3 +433,55 @@ test("async conversation admission rolls back the user message and quota when ru
     },
   });
 });
+
+
+test("async runs keep their concurrency slot until terminal persistence settles", async () => {
+  let notifyTerminalWrite!: () => void;
+  const terminalWriteStarted = new Promise<void>((resolve) => { notifyTerminalWrite = resolve; });
+  let releaseTerminalWrite!: () => void;
+  const terminalWriteGate = new Promise<void>((resolve) => { releaseTerminalWrite = resolve; });
+  let blockedOnce = false;
+  const runStore: RunRecordStore = {
+    save: async (record) => {
+      if (record.status === "completed" && !blockedOnce) {
+        blockedOnce = true;
+        notifyTerminalWrite();
+        await terminalWriteGate;
+      }
+    },
+    remove: async () => undefined,
+    loadAllSync: () => [],
+  };
+  await withApi(async (baseUrl) => {
+    const createConversation = async () => {
+      const response = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+      return (await response.json() as { conversation: { id: string } }).conversation.id;
+    };
+    const firstConversation = await createConversation();
+    const first = await request(baseUrl, "test-token-a", `/v1/conversations/${firstConversation}/messages`, "POST", {
+      role: "user", content: "Hold the slot until saved", async: true,
+    });
+    assert.equal(first.status, 202);
+    await terminalWriteStarted;
+    const secondConversation = await createConversation();
+    const rejected = await request(baseUrl, "test-token-a", `/v1/conversations/${secondConversation}/messages`, "POST", {
+      role: "user", content: "Must wait for durable settlement", async: true,
+    });
+    assert.equal(rejected.status, 429);
+    try {
+      releaseTerminalWrite();
+      let accepted = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const retry = await request(baseUrl, "test-token-a", `/v1/conversations/${secondConversation}/messages`, "POST", {
+          role: "user", content: "Retry after terminal save", async: true,
+        });
+        if (retry.status === 202) { accepted = true; break; }
+        assert.equal(retry.status, 429);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(accepted, true);
+    } finally {
+      releaseTerminalWrite();
+    }
+  }, { maxConcurrentRunsPerKey: 1, runStore });
+});

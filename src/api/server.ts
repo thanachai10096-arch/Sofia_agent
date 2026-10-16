@@ -217,8 +217,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       } finally {
         clearTimeout(timer);
         run.updatedAt = Date.now();
-        persist(run);
-        onSettled?.(run);
+        try { onSettled?.(run); } catch { /* settlement hooks must not leak concurrency slots */ }
+        // Await the terminal snapshot so queued event/status writes are drained before
+        // this run releases capacity. A persistence failure must not mask the result.
+        try { await persistRequired(run); } catch { /* the in-memory terminal result remains available */ }
         const current = activeByKey.get(run.ownerKeyId) ?? 1;
         if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
       }
