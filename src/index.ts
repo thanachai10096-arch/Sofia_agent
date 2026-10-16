@@ -21,6 +21,13 @@ export { createEditPatch, applyEditPatch, unifiedDiff } from "./brain/edit-engin
 export { reviewCodeChange } from "./review/code-review.js";
 export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
+export { FileWorkflowPlanStore } from "./brain/workflow-plan-store.js";
+export type { WorkflowPlanStore, WorkflowPlan, WorkflowStepRecord, WorkflowPlanStatus, WorkflowStepStatus, WorkflowRisk } from "./brain/workflow-plan-store.js";
+export { createWorkflowPlan, workflowStepDependenciesSatisfied, readyWorkflowSteps, transitionWorkflowStep, assessWorkflowRetry } from "./brain/workflow-plan.js";
+export { WorkflowOrchestrator } from "./brain/workflow-orchestrator.js";
+export type { WorkflowOrchestratorDependencies, WorkflowExecutionContext, WorkflowExecutionSummary, WorkflowStepExecutionResult } from "./brain/workflow-orchestrator.js";
+export type { WorkflowStepDefinition, RetryAssessment } from "./brain/workflow-plan.js";
+// Workflow orchestration remains a separate layer until explicitly integrated with Brain and DurableJobRuntime.
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
 export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
@@ -50,3 +57,7 @@ export { MemorySecurityAudit } from "./security/audit.js";
 export { assessAction, containsPromptInjection, redactSecrets, riskFor } from "./security/guard.js";
 export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/guard.js";
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
+export { AgentMessageBus, CoordinationError, createAgentMessage, validateAgentMessage, DEFAULT_COORDINATION_LIMITS } from "./agents/protocol.js";
+export type { AgentIdentity, AgentTaskScope, AgentMessage, AgentMessageKind, AgentRole, CoordinationLimits } from "./agents/protocol.js";
+export { DelegationAuthorizer, DEFAULT_DELEGATION_POLICY } from "./security/delegation-policy.js";
+export type { DelegationRequest, DelegationDecision, DelegationPolicy } from "./security/delegation-policy.js";

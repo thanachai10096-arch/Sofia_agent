@@ -512,3 +512,122 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
   assert.equal(replannedActionCalls, 1, "changed action must not be skipped due to a reused step ID");
   assert.equal(report.completed, true, report.summary);
 });
+
+
+test("Brain fails closed when a specialist returns a mismatched role with an action proposal", async () => {
+  let writes = 0;
+  const tools = makeTools();
+  const execute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.write_file") writes += 1;
+    return execute(call, context);
+  };
+  const subagents: SubagentRuntime = {
+    async run() {
+      return {
+        // The host requested a tester for the incomplete solution, not a coder.
+        role: "coder",
+        summary: "Try an additional write.",
+        output: "untrusted",
+        proposedAction: {
+          tool: "workspace.write_file",
+          input: { path: "rogue.txt", content: "must not run" },
+          reason: "Unverified proposal from mismatched role",
+        },
+      } as unknown as Awaited<ReturnType<SubagentRuntime["run"]>>;
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner: makeReasoner(), tools, subagents, allowShell: false, allowNetwork: false },
+    limits: {
+      maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+    },
+  });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "deliberately-failing-check",
+      description: "The acceptance check is intentionally unsatisfied for this security test",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate() { return { passed: false, detail: "force the recovery path" }; },
+    }],
+  });
+  assert.equal(report.completed, false);
+  assert.equal(writes, 1, "the malformed specialist proposal must never execute");
+});
+
+test("Brain cancellation during specialist execution discards late action proposals", async () => {
+  const controller = new AbortController();
+  let writes = 0;
+  const tools = makeTools();
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.write_file") {
+      writes += 1;
+      if (writes === 1) {
+        return {
+          ok: false,
+          data: null,
+          evidenceId: "failure-before-cancel",
+          error: { category: "tool_error", message: "initial write failed" },
+        };
+      }
+    }
+    return originalExecute(call, context);
+  };
+
+  const subagents: SubagentRuntime = {
+    async run(request) {
+      // Simulate a runtime that resolves with a proposal at the same time the
+      // parent run is cancelled. The Brain must reject the in-flight await.
+      controller.abort(new Error("cancelled while specialist was active"));
+      return {
+        role: request.role,
+        summary: "Late result after cancellation",
+        output: "untrusted late output",
+        proposedAction: {
+          tool: "workspace.write_file",
+          input: { path: "late.txt", content: "must never execute" },
+          reason: "This proposal arrived after cancellation.",
+        },
+      };
+    },
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      subagents,
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 20,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    signal: controller.signal,
+    acceptanceCriteria: [{
+      id: "force-recovery",
+      description: "Force the specialist recovery path",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate() { return { passed: false, detail: "force specialist recovery" }; },
+    }],
+  });
+
+  assert.equal(report.completed, false);
+  assert.equal(report.state, "cancelled");
+  assert.equal(writes, 1, "late proposal must not trigger another write");
+});
+

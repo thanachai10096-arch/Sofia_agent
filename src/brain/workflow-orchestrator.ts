@@ -1,0 +1,243 @@
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import type { WorkflowPlan, WorkflowPlanStore, WorkflowStepRecord } from "./workflow-plan-store.js";
+import { readyWorkflowSteps, transitionWorkflowStep } from "./workflow-plan.js";
+
+export interface WorkflowExecutionContext {
+  /** Host-authenticated identity; never read from step/model payloads. */
+  principalId: string;
+  /** Must be supplied by the trusted host workspace resolver. */
+  workspaceRoot: string;
+  planId: string;
+  signal: AbortSignal;
+  approved: boolean;
+}
+export type WorkflowStepExecutionResult =
+  | { status: "succeeded"; evidenceIds?: string[] }
+  | { status: "waiting_approval"; reason?: string };
+
+export interface WorkflowOrchestratorDependencies {
+  store: WorkflowPlanStore;
+  /** Resolve the workspace from trusted host state, never from model/user task payloads. */
+  resolveWorkspaceRoot: (principalId: string, planId: string) => Promise<string>;
+  /** Must route side effects through Brain/Tool Gateway; this layer never executes tools itself. */
+  executeStep: (step: Readonly<WorkflowStepRecord>, context: WorkflowExecutionContext) => Promise<WorkflowStepExecutionResult>;
+  now?: () => string;
+}
+export interface WorkflowExecutionSummary {
+  plan: WorkflowPlan;
+  pausedForApproval: boolean;
+  completedSteps: number;
+}
+
+/**
+ * Sequential, checkpointed workflow runner. It owns scheduling and persistence,
+ * not tool execution. The host callback remains responsible for policy/approval.
+ * Parallel fan-out and automatic retries are deliberately not enabled here.
+ */
+export class WorkflowOrchestrator {
+  constructor(private readonly dependencies: WorkflowOrchestratorDependencies) {}
+
+  async run(
+    planId: string,
+    context: { principalId: string; signal?: AbortSignal; approvedStepIds?: readonly string[]; timeoutMs?: number },
+  ): Promise<WorkflowExecutionSummary> {
+    if (typeof context.principalId !== "string" || !context.principalId.trim() || context.principalId.length > 256) {
+      throw new Error("Authenticated workflow principal is required.");
+    }
+    const timeoutMs = context.timeoutMs ?? 120_000;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 600_000) {
+      throw new Error("Workflow timeout must be an integer between 1 and 600000 milliseconds.");
+    }
+    if (context.signal?.aborted) throw context.signal.reason ?? new Error("Workflow cancelled.");
+    const lockOwner = randomUUID();
+    const acquire = this.dependencies.store.acquireRunLock;
+    const release = this.dependencies.store.releaseRunLock;
+    if (!acquire || !release) throw new Error("Workflow store does not support exclusive run locks.");
+    if (!await acquire.call(this.dependencies.store, planId, lockOwner)) {
+      throw new Error("Workflow is already running or has an unreconciled lock.");
+    }
+    const controller = new AbortController();
+    const onExternalAbort = () => controller.abort(context.signal?.reason ?? new Error("Workflow cancelled."));
+    context.signal?.addEventListener("abort", onExternalAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(new Error("Workflow deadline exceeded.")), timeoutMs);
+    const signal = controller.signal;
+
+    try {
+      let plan = await this.requireOwnedPlan(planId, context.principalId);
+      const workspaceRoot = await this.dependencies.resolveWorkspaceRoot(context.principalId, plan.id);
+      if (typeof workspaceRoot !== "string" || !path.isAbsolute(workspaceRoot)) {
+        throw new Error("Trusted workspace resolver must return an absolute workspace root.");
+      }
+      const approved = new Set(context.approvedStepIds ?? []);
+      if (approved.size > 100 || [...approved].some(id => typeof id !== "string" || id.length > 80)) {
+        throw new Error("Approved workflow step IDs are invalid.");
+      }
+      if ([...approved].some(id => !plan.steps.some(step => step.id === id && step.status === "waiting_approval"))) {
+        throw new Error("Approval can only be applied to a step currently awaiting approval.");
+      }
+      if (["completed", "cancelled"].includes(plan.status)) {
+        return this.summary(plan, false);
+      }
+      if (plan.status === "failed") throw new Error("Failed workflow must be explicitly repaired before rerun.");
+
+      const approvedPending = plan.steps.find(step => step.status === "waiting_approval" && approved.has(step.id));
+      if (approvedPending) {
+        plan = transitionWorkflowStep(plan, approvedPending.id, "running", { now: this.now() });
+        await this.dependencies.store.save(plan);
+        const result = await this.execute(plan, approvedPending.id, context.principalId, workspaceRoot, signal, true);
+        plan = result.plan;
+        if (result.paused) return this.summary(plan, true);
+      }
+      // Never advance unrelated work while any step is awaiting a human/host decision.
+      if (plan.steps.some(step => step.status === "waiting_approval")) {
+        return this.summary(plan, true);
+      }
+
+      while (true) {
+        if (signal.aborted) {
+          plan = await this.cancelRemaining(plan);
+          await this.dependencies.store.save(plan);
+          throw signal.reason ?? new Error("Workflow cancelled.");
+        }
+        const ready = readyWorkflowSteps(plan);
+        if (ready.length === 0) break;
+        const step = ready[0]!;
+        if (step.status === "pending") {
+          plan = transitionWorkflowStep(plan, step.id, "ready", { now: this.now() });
+          await this.dependencies.store.save(plan);
+        }
+        // High-risk steps must pause before invoking the executor. A callback must
+        // not be able to accidentally omit the approval check for destructive or
+        // externally visible actions.
+        if (step.risk === "high" && !approved.has(step.id)) {
+          plan = transitionWorkflowStep(plan, step.id, "waiting_approval", {
+            now: this.now(),
+            error: "High-risk workflow step requires explicit approval.",
+          });
+          await this.dependencies.store.save(plan);
+          return this.summary(plan, true);
+        }
+        plan = transitionWorkflowStep(plan, step.id, "running", { now: this.now() });
+        await this.dependencies.store.save(plan);
+        const result = await this.execute(plan, step.id, context.principalId, workspaceRoot, signal, approved.has(step.id));
+        plan = result.plan;
+        if (result.paused) return this.summary(plan, true);
+      }
+
+      if (signal.aborted) {
+        plan = await this.cancelRemaining(plan);
+        await this.dependencies.store.save(plan);
+        throw signal.reason ?? new Error("Workflow cancelled.");
+      }
+      return this.summary(plan, false);
+    } finally {
+      clearTimeout(timer);
+      context.signal?.removeEventListener("abort", onExternalAbort);
+      await release.call(this.dependencies.store, planId, lockOwner);
+    }
+  }
+
+  private async awaitAbortable<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+    signal.throwIfAborted();
+    let onAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason ?? new Error("Workflow cancelled."));
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      return await Promise.race([operation(), aborted]);
+    } finally {
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+    }
+  }
+
+  private async requireOwnedPlan(planId: string, principalId: string): Promise<WorkflowPlan> {
+    const plan = await this.dependencies.store.load(planId);
+    if (!plan) throw new Error("Unknown workflow plan.");
+    if (!plan.ownerPrincipalId || plan.ownerPrincipalId !== principalId) {
+      throw new Error("Workflow owner mismatch; access denied.");
+    }
+    return plan;
+  }
+
+  private async execute(
+    plan: WorkflowPlan,
+    stepId: string,
+    principalId: string,
+    workspaceRoot: string,
+    signal: AbortSignal,
+    approved: boolean,
+  ): Promise<{ plan: WorkflowPlan; paused: boolean }> {
+    const step = plan.steps.find(item => item.id === stepId);
+    if (!step) throw new Error("Workflow step disappeared.");
+    try {
+      signal.throwIfAborted();
+      const result: unknown = await this.awaitAbortable(signal, () => this.dependencies.executeStep(
+        { ...step, dependsOn: [...step.dependsOn], evidenceIds: [...step.evidenceIds] },
+        { principalId, workspaceRoot, planId: plan.id, signal, approved },
+      ));
+      signal.throwIfAborted();
+      if (!result || typeof result !== "object" ||
+          !["succeeded", "waiting_approval"].includes(String((result as { status?: unknown }).status))) {
+        throw new Error("Workflow step executor returned an invalid result.");
+      }
+      const stepResult = result as WorkflowStepExecutionResult;
+      if (stepResult.status === "waiting_approval") {
+        const paused = transitionWorkflowStep(plan, stepId, "waiting_approval", {
+          now: this.now(),
+          error: stepResult.reason ?? "Waiting for explicit host/user approval.",
+        });
+        await this.dependencies.store.save(paused);
+        return { plan: paused, paused: true };
+      }
+      const succeeded = transitionWorkflowStep(plan, stepId, "succeeded", {
+        now: this.now(),
+        evidenceIds: stepResult.evidenceIds ?? [],
+      });
+      await this.dependencies.store.save(succeeded);
+      return { plan: succeeded, paused: false };
+    } catch (error) {
+      if (signal.aborted) {
+        const cancelled = transitionWorkflowStep(plan, stepId, "cancelled", {
+          now: this.now(),
+          error: "Cancelled before a verified step result was accepted.",
+        });
+        const final = await this.cancelRemaining(cancelled);
+        await this.dependencies.store.save(final);
+        throw signal.reason ?? error;
+      }
+      const failed = transitionWorkflowStep(plan, stepId, "failed", {
+        now: this.now(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await this.dependencies.store.save(failed);
+      throw error;
+    }
+  }
+
+  private async cancelRemaining(plan: WorkflowPlan): Promise<WorkflowPlan> {
+    let current = plan;
+    for (const step of [...current.steps]) {
+      if (["pending", "ready", "running", "waiting_approval", "failed"].includes(step.status)) {
+        current = transitionWorkflowStep(current, step.id, "cancelled", {
+          now: this.now(),
+          error: "Workflow cancelled; no further steps will be scheduled.",
+        });
+      }
+    }
+    return current;
+  }
+
+  private summary(plan: WorkflowPlan, pausedForApproval: boolean): WorkflowExecutionSummary {
+    return {
+      plan,
+      pausedForApproval,
+      completedSteps: plan.steps.filter(step => step.status === "succeeded").length,
+    };
+  }
+
+  private now(): string {
+    return (this.dependencies.now ?? (() => new Date().toISOString()))();
+  }
+}

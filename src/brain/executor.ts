@@ -15,6 +15,8 @@ import { compactSkillContext, matchSkills } from "./skills.js";
 import type { SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
+import { AgentMessageBus, createAgentMessage, type AgentIdentity, type AgentRole, type AgentTaskScope } from "../agents/protocol.js";
+import { DelegationAuthorizer } from "../security/delegation-policy.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 import type { BrainRunSnapshot } from "./run-state.js";
 import type { RepositoryMap } from "./repository-intelligence.js";
@@ -218,6 +220,53 @@ function ensureString(value: unknown, label: string): string {
     throw new Stop(`Invalid ${label}`);
   }
   return value;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function validateSubagentResult(value: unknown, expectedRole: SubagentResult["role"]): SubagentResult {
+  if (!isPlainRecord(value) || value.role !== expectedRole ||
+      typeof value.summary !== "string" || !value.summary.trim()) {
+    throw new RecoverableFailure("tool_error", "Specialist returned an invalid result envelope");
+  }
+
+  let proposedAction: SubagentResult["proposedAction"];
+  if (value.proposedAction !== undefined) {
+    const proposal = value.proposedAction;
+    if (!isPlainRecord(proposal) ||
+        typeof proposal.tool !== "string" || !proposal.tool.trim() || proposal.tool.length > 128 ||
+        !isPlainRecord(proposal.input) ||
+        typeof proposal.reason !== "string" || !proposal.reason.trim() || proposal.reason.length > 1000) {
+      throw new RecoverableFailure("tool_error", "Specialist returned a malformed action proposal");
+    }
+    let bytes: number;
+    try {
+      bytes = Buffer.byteLength(JSON.stringify({ tool: proposal.tool, input: proposal.input, reason: proposal.reason }), "utf8");
+    } catch {
+      throw new RecoverableFailure("tool_error", "Specialist action proposal is not serializable");
+    }
+    if (bytes > 16 * 1024) {
+      throw new RecoverableFailure("tool_error", "Specialist action proposal exceeds the size limit");
+    }
+    proposedAction = {
+      tool: proposal.tool,
+      input: proposal.input,
+      reason: proposal.reason,
+    };
+  }
+
+  // Do not retain arbitrary model output in the Brain recovery state. Only the
+  // bounded summary and a separately validated proposal are needed downstream.
+  return {
+    role: expectedRole,
+    summary: value.summary.slice(0, 6_000),
+    output: undefined,
+    ...(proposedAction ? { proposedAction } : {}),
+  };
 }
 
 export class SofiaBrain {
@@ -487,6 +536,7 @@ export class SofiaBrain {
   private async delegateSubagent(
     task: string,
     context: Record<string, unknown>,
+    principalId?: string,
     failureCategory?: string,
   ): Promise<SubagentResult | undefined> {
     const runtime = this.dependencies.subagents;
@@ -498,18 +548,91 @@ export class SofiaBrain {
 
     this.usage.modelCalls += 1;
     const role = roleForTask(task, failureCategory);
-    const result = await this.wait(() =>
-      runtime.run({
-        role,
-        task,
-        context,
-        signal: this.signal,
-      }),
-    );
+    // Bind this one specialist round-trip to host-owned run identity and scope.
+    // Coordination grants no tools: any returned proposal must still pass the
+    // existing Brain allowlist, Tool Gateway policy, and normal approval flow.
+    const specialistRole: AgentRole = role === "explorer" || role === "researcher"
+      ? "researcher"
+      : role === "architect"
+        ? "planner"
+        : role === "debugger"
+          ? "specialist"
+          : role;
+    const orchestratorId = `brain:${this.runId}`;
+    const specialistId = `specialist:${this.runId}`;
+    const identities = new Map<string, AgentIdentity>([
+      [orchestratorId, { id: orchestratorId, role: "orchestrator", capabilities: [] }],
+      [specialistId, { id: specialistId, role: specialistRole, capabilities: [] }],
+    ]);
+    const scope: AgentTaskScope = {
+      jobId: this.runId,
+      ...(principalId ? { principalId } : {}),
+      objective: task.slice(0, 4_000),
+      allowedTools: [],
+      maxHops: 1,
+      deadlineEpochMs: Date.now() + this.limits.timeoutMs,
+    };
+    const bus = new AgentMessageBus(scope, identities);
+    const authorizer = new DelegationAuthorizer(identities, scope);
+    try {
+      const decision = authorizer.authorize({
+        ...(principalId ? { principalId } : {}),
+        requesterId: orchestratorId,
+        recipientId: specialistId,
+        jobId: this.runId,
+        requestedTools: [],
+        hop: 0,
+        purpose: `Bounded failure recovery: ${task.slice(0, 900)}`,
+      });
+      if (!decision.allowed) {
+        throw new RecoverableFailure("permission_error", "Specialist delegation denied by host policy");
+      }
 
-    this.emit({ type: "brain.subagent.completed" });
+      bus.publish(createAgentMessage({
+        correlationId: this.runId,
+        jobId: this.runId,
+        from: orchestratorId,
+        to: specialistId,
+        kind: "task",
+        payload: { role, task, context },
+      }));
+      const taskMessage = bus.takeFor(specialistId);
+      if (!taskMessage || taskMessage.kind !== "task") {
+        throw new RecoverableFailure("tool_error", "Specialist task message was unavailable");
+      }
+      const result: unknown = await this.wait(() =>
+        runtime.run({
+          role,
+          task,
+          context,
+          signal: this.signal,
+        }),
+      );
 
-    return result;
+      // The result is still untrusted data. The message bus bounds it, and the
+      // Brain validates its schema and role before considering any proposal.
+      bus.publish(createAgentMessage({
+        correlationId: this.runId,
+        jobId: this.runId,
+        from: specialistId,
+        to: orchestratorId,
+        kind: "result",
+        payload: { result },
+      }));
+      const resultMessage = bus.takeFor(orchestratorId);
+      if (!resultMessage || resultMessage.kind !== "result" ||
+          !resultMessage.payload || typeof resultMessage.payload !== "object" ||
+          !("result" in resultMessage.payload)) {
+        throw new RecoverableFailure("tool_error", "Specialist result message was invalid");
+      }
+
+      const validated = validateSubagentResult(resultMessage.payload.result, role);
+      this.emit({ type: "brain.subagent.completed" });
+      return validated;
+    } finally {
+      // Per-run queues never outlive the active Brain run.
+      bus.close();
+    }
   }
 
   private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string): Promise<void> {
@@ -1050,6 +1173,7 @@ export class SofiaBrain {
                 ? compactProjectContext(this.projectContext)
                 : undefined,
             },
+            input.principalId,
             diagnosis.category,
           ) : undefined;
 
