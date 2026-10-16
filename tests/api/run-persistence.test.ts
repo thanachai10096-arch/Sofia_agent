@@ -3,11 +3,10 @@ const KEY="persist-test-key";const listen=(s:ReturnType<typeof createSofiaApi>)=
 test("async idempotency binding survives an API restart when run persistence is configured", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "sofia-idempotency-restart-"));
   const store = new FileRunRecordStore(directory);
-  const provider: ModelProvider = { async generate() { return { text: "persisted run" }; } };
   let firstServer: ReturnType<typeof createSofiaApi> | undefined;
   let secondServer: ReturnType<typeof createSofiaApi> | undefined;
   try {
-    firstServer = createSofiaApi(dependencies(provider), {
+    firstServer = createSofiaApi({} as AgentDependencies, {
       apiKeys: { "test-token": ["agent:run"] }, runStore: store, requestTimeoutMs: 5000,
     });
     const firstUrl = await listen(firstServer);
