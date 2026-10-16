@@ -66,6 +66,33 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 | **Platform services** | Agent profiles and templates, skills platform, cloud execution backend contract, and evaluation runner. |
 | **SDK & API** | A stable, model-agnostic public surface for desktop, mobile, web, and third-party clients. |
 
+## `> Workflow skills`
+
+Sofia's built-in skill matcher includes focused workflow support for designing automations, orchestrating integrations, and recovering failed runs:
+
+- **Workflow design & automation** — define triggers, inputs, branches, owners, approval gates, success criteria, and test cases before enabling automation.
+- **Workflow orchestration & integrations** — coordinate webhooks, scheduled jobs, external systems, durable state, correlation IDs, deduplication, rate limits, and bounded retries.
+- **Workflow failure diagnosis & recovery** — inspect traces, detect whether a failed step already caused a side effect, resume from verified checkpoints, and verify final state.
+- **Workflow observability & alerting** — define actionable success/error/latency signals, correlate runs and steps, and create redacted, owner-routed alerts.
+- **Workflow security & secrets** — apply least privilege, secret references, webhook verification, log redaction, and approval gates for risky production actions.
+- **Workflow testing & controlled release** — test branches, duplicate events, timeouts, and partial outages; use dry runs, staged rollout, rollback plans, and regression tests.
+
+These are guidance skills selected by task text and failure category; they do not by themselves connect an integration or execute an automation. Actual actions still require configured tools, credentials, permissions, and runtime support. Treat external inputs as untrusted, never put secrets in workflow logs, require approval for consequential or irreversible operations, and test duplicate events and partial failures before production use.
+
+### Workflow plan primitives
+
+The SDK exports a validated workflow-plan model for applications that want to build a workflow UI or orchestrator:
+
+- `createWorkflowPlan(title, steps)` validates unique IDs, dependency references, cycles, and a bounded step count.
+- `readyWorkflowSteps(plan)` returns steps whose dependencies have succeeded.
+- `transitionWorkflowStep(plan, stepId, status)` enforces legal state transitions, tracks bounded evidence/error details, and requires both a checkpoint ID and an explicit `approved: true` flag before a consequential step enters `running`.
+- `assessWorkflowRetry(...)` blocks automatic retries when side effects are unknown, already completed, or not idempotent; consequential retries require a checkpoint and still require approval.
+
+For durable local storage, the package exports `FileWorkflowPlanStore` and the `WorkflowPlanStore` interface. `WorkflowOrchestrator` and its dependency/result types are also exported. `createToolGatewayWorkflowAdapter` connects concrete `step.action` tool calls to Sofia's existing `ToolGateway`, passes the principal and cancellation signal, uses the gateway's checkpoint API, and sets the gateway approval requirement for mutating actions. Mutating tools are rejected unless the workflow step is explicitly marked consequential. The caller must provide principal-bound approval and configure the gateway's own authorization/permission policies. It namespaces plans, hashes filenames, validates persisted shape and identity on read, serializes same-process writes per plan, uses atomic replacement with restrictive local file permissions, and atomically claims workflow execution across processes sharing the same local filesystem. The lock is intentionally not auto-expired: if a process crashes, inspect side effects and reconcile the plan before manually clearing its stale `.run-lock` directory. This is a local-filesystem guard, not a distributed lock service or transactional multi-host database. Set `SOFIA_STATE_DIR` to an absolute persistent directory if plans must survive temporary-directory cleanup.
+
+
+These are deterministic planning and policy primitives. `WorkflowOrchestrator` adds a sequential, durable execution loop around a `WorkflowPlanStore`: it persists state transitions, runs only dependency-ready steps, stops on failures, gates consequential steps on a verified checkpoint plus explicit approval, and refuses to replay an interrupted step until a reconciliation callback is provided. The caller must inject a real tool gateway that enforces authorization and a real approval provider bound to the authenticated principal and exact step. The file store prevents concurrent runs on a shared local filesystem, but it is not a distributed lock service or transactional multi-host scheduler; stale locks after crashes require explicit operator reconciliation and must not be deleted blindly. Set per-run step limits and verify downstream state in the injected runtime.
+
 ## `> Quick start`
 
 ```bash
@@ -99,6 +126,10 @@ npm ci\nnpx playwright install chromium
 
 Only enable browser capability in environments where its permissions and policy are configured appropriately. Playwright traffic is routed through a local egress proxy that validates DNS answers and connects to the selected numeric IP, blocks private/internal destinations, and limits web traffic to HTTP port 80 and HTTPS port 443. Chromium QUIC and non-proxied WebRTC UDP are disabled to reduce direct-network bypasses. Sites that require non-standard ports may not work. Keep host/container egress controls enabled for defense in depth.
 
+## `> Workflow API (opt-in)`
+
+The authenticated API can expose durable workflow plans when `createSofiaAgentDependencies(workspace, approval)` is passed to `createSofiaApi`; the factory supplies a principal-aware workflow runtime and stores plans in the OS user-data directory, namespaced by resolved workspace and authenticated principal. A host may override this with `workflowRuntime(principalId)` in API config. It adds `GET/POST /v1/workflows`, `GET/DELETE /v1/workflows/:id`, `POST /v1/workflows/:id/run`, and `POST /v1/workflows/:id/cancel` to cancel a currently active workflow on the same API server instance. Cancellation is process-local; multi-instance deployments need a shared runtime coordinator. Plans are stored in a per-workspace, per-principal `FileWorkflowPlanStore` outside the source workspace; request JSON cannot choose the principal or storage namespace. The built-in workflow runtime uses Sofia’s `RegistryToolGateway`, the configured execution policy, persistent workspace checkpoints in the OS user-data directory, a durable action journal scoped to workspace and principal, and the supplied approval handler bound to the authenticated principal plus `workflowId:stepId` and exact action hash. The same one-time approval ticket is consumed at ToolGateway execution. If no approval handler is configured, consequential actions fail closed. If no callback is configured on either API config or Sofia dependencies, these routes return `503 workflow_runtime_unavailable` and do not execute actions. A failed consequential step attempts workspace rollback only when a pre-action snapshot confirms that workspace changes are confined to the failed action’s known target paths; concurrent or unrelated changes block automatic rollback. This cannot undo external side effects. A durable action journal can reconcile a tool call only when its completed record matches the exact action hash; missing, started, failed, or mismatched entries remain `unknown` and block replay. The local file store is not a distributed transactional database; do not horizontally scale without a shared transactional store and queue.
+
 ## `> API — reconnectable runs`
 
 Sofia supports long-running work for desktop and mobile browser clients:
@@ -110,9 +141,21 @@ Sofia supports long-running work for desktop and mobile browser clients:
 | `GET` | `/v1/agent/runs/:id` | Inspect or reconnect to a run. |
 | `DELETE` | `/v1/agent/runs/:id` | Cancel a queued or running task. |
 | `POST` | `/v1/agent/runs/stream` | Receive live Server-Sent Events (SSE). |
+
+| `GET` | `/v1/workflows` | List durable workflow plans for the authenticated principal (`agent:read` or `agent:run`). |
+| `POST` | `/v1/workflows` | Validate and create a workflow plan (`agent:run`). |
+| `GET` | `/v1/workflows/:id` | Read a plan owned by the authenticated principal. |
+| `POST` | `/v1/workflows/:id/run` | Execute a plan through the configured workflow runtime (`agent:run`). |
+| `POST` | `/v1/workflows/:id/cancel` | Request cancellation of an active workflow in this API server process (`agent:run`). |
+| `DELETE` | `/v1/workflows/:id` | Delete a plan when it has no active or unreconciled run lock (`agent:run`). |
+| `GET` | `/v1/memory` or `/v1/memory?q=...` | List or search memories for the authenticated principal (`agent:read` or `agent:run`). |
+| `DELETE` | `/v1/memory/:id` | Delete one saved memory (`agent:run`). |
+| `DELETE` | `/v1/memory` | Clear the authenticated principal’s saved memories (`agent:run`). |
 | `OPTIONS` | API routes | Handle browser CORS preflight requests. |
 
-The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconnectable execution.
+For async runs, send an `Idempotency-Key` header when retrying a request after a network interruption. Sofia binds the key to a stable fingerprint of the request: the same key and equivalent JSON request return the original run, while reuse with different input returns `409 idempotency_key_conflict`. When a `runStore` is configured, the key hash and request fingerprint are persisted with the run record and restored after restart. Without a run store, idempotency is process-local. Multi-instance deployments still need a shared transactional store to prevent duplicate work across servers.
+
+The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconnectable execution, plus `createWorkflow()`, `listWorkflows()`, `getWorkflow()`, `runWorkflow()`, `cancelWorkflow()`, and `deleteWorkflow()` for workflow lifecycle management.
 
 ### Secure client integration
 
@@ -142,6 +185,37 @@ export SOFIA_SANDBOX_MODE=docker
 Replace the example placeholder with the actual digest printed by your local Docker engine. The placeholder is not a usable image reference. Preload the exact digest before running Sofia; the sandbox uses `--pull=never` and fails closed if that image is absent.
 
 More details: [Desktop Runtime Foundation](docs/desktop-runtime.md).
+
+## `> Personal memory & recall`
+
+Sofia supports persistent, user-scoped memory in addition to project memory and learned repair history.
+
+- Explicitly ask Sofia to remember a preference or fact, for example: `Remember that I prefer concise Thai responses` or `จำไว้ว่า ฉันชอบคำตอบภาษาไทย`.
+- Later requests can use those saved details as context. Sofia loads a small, bounded set of recent memories rather than the entire memory file.
+- Ask Sofia to forget saved details with `Forget all memories about me` or `ลืมทุกอย่างเกี่ยวกับฉัน`.
+- Memory is local-first, scoped to the principal identity, and stored separately from project memory. Local runs use `SOFIA_USER_ID` when set or a stable local default; API runs use the authenticated API-key identity unless a trusted server config maps separate channel keys to the same verified end-user principal. It uses the OS user-data directory by default; set an absolute `SOFIA_STATE_DIR` to choose a persistent application data root. In multi-user deployments, issue separate API keys per client and configure `principalIdsByApiKey` only from verified server-side login identity when the same person should share memory across channels. Never trust a user ID supplied by the client.
+- Sofia saves only clearly phrased, explicit remember requests; it does not automatically turn every conversation into long-term memory. Secret-like values are redacted, prompt-injection-like content is rejected, entries are bounded, and local files use restrictive permissions.
+- User memory is optional context, not an instruction or permission grant. ToolGateway and security policy remain authoritative. Do not store credentials, recovery codes, or other secrets.
+
+Programmatic integrations can use `FileUserMemoryStore`, `UserMemoryStore`, and `UserMemoryEntry` exported by the package to list, search, delete, or clear memories for a trusted principal. Web, desktop, and mobile clients can use the `SofiaClient` SDK without inventing their own memory routes:
+
+```ts
+import { SofiaClient } from "sofia-agent";
+
+const sofia = new SofiaClient({
+  baseUrl: process.env.SOFIA_API_URL!,
+  apiKey: process.env.SOFIA_API_KEY!,
+});
+
+const saved = await sofia.listMemory();
+const matching = await sofia.searchMemory("language preference");
+// Offer these operations behind an explicit confirmation in user-facing settings:
+if (matching.entries[0]) await sofia.deleteMemory(matching.entries[0].id);
+// Or, after confirming with the user:
+await sofia.clearMemory();
+```
+
+The SDK methods are `listMemory`, `searchMemory`, `deleteMemory`, and `clearMemory`. The API enforces principal isolation and scopes. Keep privileged API keys in a trusted backend, not in browser or mobile app bundles; client apps should call your authenticated backend, which can issue/route appropriately scoped credentials.
 
 ## `> Evidence & limitations`
 

@@ -1,3 +1,6 @@
+import type { WorkflowPlan, WorkflowStepDefinition } from "../brain/workflow-plan.js";
+import type { WorkflowExecutionSummary } from "../brain/workflow-orchestrator.js";
+
 export interface SofiaClientOptions {
   apiKey: string;
   baseUrl: string;
@@ -23,6 +26,26 @@ export interface SofiaRunResponse {
   result?: { output: string; kind: string; steps: number };
   error?: string;
 }
+
+export type SofiaMemoryKind = "preference" | "fact" | "goal" | "instruction";
+
+export interface SofiaMemoryEntry {
+  id: string;
+  kind: SofiaMemoryKind;
+  content: string;
+  source: "explicit-user-request";
+  confidence: number;
+  createdAt: string;
+  updatedAt: string;
+  uses: number;
+}
+
+export interface SofiaMemoryListResponse {
+  entries: SofiaMemoryEntry[];
+}
+
+export interface SofiaWorkflowResponse { workflow: WorkflowPlan; }
+export interface SofiaWorkflowListResponse { workflows: WorkflowPlan[]; }
 
 export interface SofiaPollOptions {
   intervalMs?: number;
@@ -143,10 +166,17 @@ export class SofiaClient {
     }, signal);
   }
 
-  /** Starts a durable async run so a mobile client can reconnect and poll by ID. */
-  async start(input: SofiaRunInput, signal?: AbortSignal): Promise<SofiaRunResponse> {
+  /** Starts an async run. Pass the same idempotency key when retrying after a network interruption. */
+  async start(input: SofiaRunInput, signal?: AbortSignal, idempotencyKey?: string): Promise<SofiaRunResponse> {
+    const headers: Record<string, string> = this.headers();
+    if (idempotencyKey !== undefined) {
+      if (!idempotencyKey.trim() || idempotencyKey.length > 128 || /[\\x00-\\x1f\\x7f]/.test(idempotencyKey)) {
+        throw new Error("Idempotency key must contain 1–128 characters and no control characters.");
+      }
+      headers["idempotency-key"] = idempotencyKey.trim();
+    }
     return this.request<SofiaRunResponse>("/v1/agent/runs", {
-      method: "POST", headers: this.headers(), body: JSON.stringify({ ...input, async: true }),
+      method: "POST", headers, body: JSON.stringify({ ...input, async: true }),
     }, signal);
   }
 
@@ -192,6 +222,74 @@ export class SofiaClient {
 
   async waitForRun(id: string, options: SofiaPollOptions = {}): Promise<SofiaRunResponse> {
     return this.waitFor(() => this.getRun(id, options.signal), options);
+  }
+
+  /** Lists saved memories for the authenticated principal. */
+  async listMemory(signal?: AbortSignal): Promise<SofiaMemoryListResponse> {
+    return this.request<SofiaMemoryListResponse>("/v1/memory", {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  /** Searches saved memories for the authenticated principal. */
+  async searchMemory(query: string, signal?: AbortSignal): Promise<SofiaMemoryListResponse> {
+    if (!query.trim()) return this.listMemory(signal);
+    const params = new URLSearchParams({ q: query.slice(0, 200) });
+    return this.request<SofiaMemoryListResponse>(`/v1/memory?${params.toString()}`, {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  /** Deletes one memory belonging to the authenticated principal. */
+  async deleteMemory(id: string, signal?: AbortSignal): Promise<{ ok: boolean; deleted: boolean }> {
+    return this.request<{ ok: boolean; deleted: boolean }>(`/v1/memory/${encodeURIComponent(id)}`, {
+      method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  /** Clears all memories belonging to the authenticated principal. */
+  async clearMemory(signal?: AbortSignal): Promise<{ ok: boolean; cleared: boolean }> {
+    return this.request<{ ok: boolean; cleared: boolean }>("/v1/memory", {
+      method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+  /** Lists durable workflows owned by the authenticated principal. */
+  async listWorkflows(signal?: AbortSignal): Promise<SofiaWorkflowListResponse> {
+    return this.request<SofiaWorkflowListResponse>("/v1/workflows", {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  /** Creates a validated workflow plan; it does not execute any actions. */
+  async createWorkflow(title: string, steps: WorkflowStepDefinition[], signal?: AbortSignal): Promise<SofiaWorkflowResponse> {
+    return this.request<SofiaWorkflowResponse>("/v1/workflows", {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ title, steps }),
+    }, signal);
+  }
+
+  async getWorkflow(id: string, signal?: AbortSignal): Promise<SofiaWorkflowResponse> {
+    return this.request<SofiaWorkflowResponse>(`/v1/workflows/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
+  }
+
+  /** Runs a workflow through the host-configured, permission-enforcing runtime. */
+  async runWorkflow(id: string, signal?: AbortSignal): Promise<WorkflowExecutionSummary> {
+    return this.request<WorkflowExecutionSummary>(`/v1/workflows/${encodeURIComponent(id)}/run`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  async cancelWorkflow(id: string, signal?: AbortSignal): Promise<{ ok: boolean; cancelRequested: boolean; workflowId: string }> {
+    return this.request<{ ok: boolean; cancelRequested: boolean; workflowId: string }>(`/v1/workflows/${encodeURIComponent(id)}/cancel`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  async deleteWorkflow(id: string, signal?: AbortSignal): Promise<{ ok: boolean; deleted: boolean }> {
+    return this.request<{ ok: boolean; deleted: boolean }>(`/v1/workflows/${encodeURIComponent(id)}`, {
+      method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` },
+    }, signal);
   }
 
   private async waitFor(

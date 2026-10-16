@@ -177,3 +177,53 @@ test("evolution treats prototype property names as ordinary skill and task IDs",
   assert.equal(engine.getSnapshot().taskTypes["__proto__"]?.successes, 1);
   assert.equal((Object.prototype as { attempts?: number }).attempts, before);
 });
+
+
+test("malformed persisted learning entries are ignored or normalized safely", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-evolution-malformed-"));
+  const file = join(directory, "evolution.json");
+  try {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(file, JSON.stringify({
+      version: 999,
+      skills: {
+        broken: null,
+        ["__proto__"]: {
+          attempts: 1, successes: 1, failures: 0, confidence: 0.8,
+          avgSteps: 1, avgRecoveryRounds: 0,
+        },
+        "valid-but-partial": {
+          attempts: "not-a-number",
+          successes: 4,
+          failures: -1,
+          confidence: 99,
+          avgSteps: Number.NaN,
+          taskTypes: { coding: { attempts: 2, successes: "bad", failures: 1 } },
+          successHistory: [null, { at: "now", steps: 2, recoveryRounds: 0 }],
+          failureHistory: [{ at: "now", message: "x".repeat(900) }, false],
+        },
+      },
+      taskTypes: { coding: null },
+    }), "utf8");
+
+    const engine = new EvolutionEngine(file);
+    assert.equal(engine.getSkill("broken"), undefined);
+    assert.equal(engine.getSkill("__proto__")?.successes, 1);
+    const skill = engine.getSkill("valid-but-partial");
+    assert.ok(skill);
+    assert.equal(skill.attempts, 0);
+    assert.equal(skill.successes, 4);
+    assert.equal(skill.failures, 0);
+    assert.equal(skill.confidence, 1);
+    assert.equal(skill.avgSteps, 0);
+    assert.deepEqual(skill.taskTypes.coding, { attempts: 2, successes: 0, failures: 1 });
+    assert.equal(skill.successHistory.length, 1);
+    assert.equal(skill.failureHistory.length, 1);
+    assert.equal(skill.failureHistory[0]?.message.length, 500);
+    assert.deepEqual(engine.getSnapshot().taskTypes.coding, { attempts: 0, successes: 0, failures: 0 });
+    assert.ok((engine.rank(["valid-but-partial"], "coding")[0]?.score ?? -1) >= 0);
+    await engine.flush();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

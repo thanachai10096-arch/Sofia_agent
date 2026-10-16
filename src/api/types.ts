@@ -1,5 +1,6 @@
 import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
+import type { WorkflowOrchestratorDependencies } from "../brain/workflow-orchestrator.js";
 
 export interface AgentRunInput {
   task: string;
@@ -37,6 +38,13 @@ export interface ApiAuth {
 
 export interface SofiaApiConfig {
   apiKeys: Record<string, string[]>;
+  /**
+   * Optional trusted mapping from API key to a stable end-user identity.
+   * Configure only from a server-side authenticated identity provider. Never
+   * populate this map from request headers, query parameters, or request JSON.
+   * Keys omitted from this map remain isolated by their hashed API-key identity.
+   */
+  principalIdsByApiKey?: Record<string, string>;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
@@ -51,4 +59,8 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Configure real ToolGateway execution, checkpointing, reconciliation, and principal-bound approval. If absent, workflow endpoints fail closed. */
+  workflowRuntime?: (principalId: string) => Omit<WorkflowOrchestratorDependencies, "store">;
+  /** Optional persistent root for per-principal workflow plans. */
+  workflowStateRoot?: string;
 }

@@ -6,6 +6,7 @@ export interface ApprovalRequest {
   input:Record<string,unknown>;
   actionHash:string;
   risk:RiskLevel;
+ checkpointId?:string;
 }
 export type ApprovalHandler=(request:ApprovalRequest)=>Promise<boolean>;
 /**

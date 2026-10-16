@@ -7,6 +7,18 @@ import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } 
 import { UsageLimiter } from "./usage.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
+import { createWorkflowPlan, type WorkflowStepDefinition } from "../brain/workflow-plan.js";
+import { FileWorkflowPlanStore } from "../brain/workflow-plan-store.js";
+import { WorkflowOrchestrator } from "../brain/workflow-orchestrator.js";
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
 
 interface ActiveRun {
   id: string;
@@ -17,7 +29,10 @@ interface ActiveRun {
   createdAt: number;
   updatedAt: number;
   ownerKeyId: string;
+  principalId: string;
   desktopCapabilities: DesktopCapability[];
+  idempotencyKeyHash?: string;
+  requestFingerprint?: string;
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -63,7 +78,16 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   if (!token || !Object.prototype.hasOwnProperty.call(config.apiKeys, token)) return null;
   const scopes = config.apiKeys[token];
   if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === "string")) return null;
-  return { keyId: createHash("sha256").update(token).digest("hex").slice(0, 32), scopes };
+  const keyId = createHash("sha256").update(token).digest("hex").slice(0, 32);
+  const configuredPrincipal = config.principalIdsByApiKey &&
+    Object.prototype.hasOwnProperty.call(config.principalIdsByApiKey, token)
+      ? config.principalIdsByApiKey[token]
+      : undefined;
+  // This mapping is server configuration, never a client-supplied identity.
+  if (configuredPrincipal !== undefined &&
+      (typeof configuredPrincipal !== "string" || !configuredPrincipal.trim() ||
+       configuredPrincipal.length > 256 || /[\x00-\x1f\x7f]/.test(configuredPrincipal))) return null;
+  return { keyId, principalId: configuredPrincipal === undefined ? keyId : createHash("sha256").update("sofia-principal:" + configuredPrincipal.trim()).digest("hex").slice(0, 32), scopes };
 }
 
 function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapability[] {
@@ -120,16 +144,21 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
   const runs = new Map<string, ActiveRun>();
+  const activeWorkflowRuns = new Map<string, AbortController>();
+  const idempotency = new Map<string, string>();
+  const idempotencyFingerprints = new Map<string, string>();
   const runStore = config.runStore;
-  const persist = (run: ActiveRun) => {
+  const persist = async (run: ActiveRun): Promise<void> => {
     if (!runStore) return;
     const record: RunRecord = {
       id: run.id, status: run.status,
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
       ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
-      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+      ownerKeyId: run.ownerKeyId, principalId: run.principalId, desktopCapabilities: [...run.desktopCapabilities],
+      ...(run.idempotencyKeyHash ? { idempotencyKeyHash: run.idempotencyKeyHash } : {}),
+      ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
-    void runStore.save(record);
+    await runStore.save(record);
   };
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
@@ -144,11 +173,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(interrupted ? { error: "Run interrupted by server restart." } : record.error ? { error: record.error } : {}),
       controller: new AbortController(), createdAt: record.createdAt,
       updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
+      principalId: record.principalId ?? record.ownerKeyId,
       desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+      ...(record.idempotencyKeyHash ? { idempotencyKeyHash: record.idempotencyKeyHash } : {}),
+      ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
     };
-    runs.set(run.id, run); if (interrupted) persist(run);
+    runs.set(run.id, run);
+    if (run.idempotencyKeyHash && run.requestFingerprint) {
+      idempotency.set(run.idempotencyKeyHash, run.id);
+      idempotencyFingerprints.set(run.idempotencyKeyHash, run.requestFingerprint);
+    } if (interrupted) void persist(run).catch(() => undefined);
   }
-  const idempotency = new Map<string, string>();
   const activeByKey = new Map<string, number>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
@@ -166,11 +201,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
-      persist(run);
+      void persist(run).catch(() => undefined);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
         const result = await agent.run({
-          principalId: run.ownerKeyId,
+          principalId: run.principalId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
@@ -196,7 +231,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       } finally {
         clearTimeout(timer);
         run.updatedAt = Date.now();
-        persist(run);
+        void persist(run).catch(() => undefined);
         const current = activeByKey.get(run.ownerKeyId) ?? 1;
         if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
       }
@@ -209,7 +244,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id); }
     }
     for (const [key, runId] of idempotency) {
-      if (!runs.has(runId)) idempotency.delete(key);
+      if (!runs.has(runId)) {
+        idempotency.delete(key);
+        idempotencyFingerprints.delete(key);
+      }
     }
   };
 
@@ -242,6 +280,27 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
+      const parsedUrl = new URL(req.url ?? "/", "http://sofia.local");
+      const pathname = parsedUrl.pathname;
+      const isWorkflowCollection = pathname === "/v1/workflows";
+      const workflowMatch = pathname.match(/^\/v1\/workflows\/([^/]+)(?:\/(run|cancel))?$/);
+      const isWorkflowRoute = isWorkflowCollection || workflowMatch !== null;
+      if (isWorkflowRoute && req.method === "GET" && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+      }
+      if (isWorkflowRoute && req.method !== "GET" && !auth.scopes.includes("agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
+      const isMemoryRead = req.method === "GET" && pathname === "/v1/memory";
+      const isMemoryMutation = req.method === "DELETE" &&
+        (pathname === "/v1/memory" || /^\/v1\/memory\/[^/]+$/.test(pathname));
+      if (isMemoryRead && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+      }
+      if (isMemoryMutation && !auth.scopes.includes("agent:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
+
       // Authorization scopes are enforced at the API boundary, not merely used to
       // derive desktop capabilities. Admin scopes do not implicitly grant run access.
       const isRunRequest = req.method === "POST" && (req.url === "/v1/agent/runs" || req.url === "/v1/agent/runs/stream" || req.url === "/v1/jobs");
@@ -263,6 +322,102 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
+
+      if (isWorkflowRoute) {
+        const workflowRuntime = config.workflowRuntime ?? deps.workflowRuntime;
+        if (!workflowRuntime) return json(res, 503, { error: "workflow_runtime_unavailable" }, origin, config);
+        const workflowNamespace = deps.workflowNamespace ? `${deps.workflowNamespace}:${auth.principalId}` : auth.principalId;
+        const workflowStore = new FileWorkflowPlanStore(workflowNamespace, config.workflowStateRoot ?? deps.workflowStateRoot);
+        // Runtime dependencies are constructed from the authenticated principal, never request-supplied identity.
+        const workflow = new WorkflowOrchestrator({
+          store: workflowStore,
+          ...workflowRuntime(auth.principalId),
+        });
+        if (isWorkflowCollection && req.method === "GET") {
+          return json(res, 200, { workflows: await workflow.list() }, origin, config);
+        }
+        if (isWorkflowCollection && req.method === "POST") {
+          const input = await body(req, maxBytes) as { title?: unknown; steps?: unknown };
+          if (typeof input.title !== "string" || !Array.isArray(input.steps)) {
+            return json(res, 400, { error: "invalid_workflow", message: "title and steps[] are required" }, origin, config);
+          }
+          let plan;
+          try {
+            plan = createWorkflowPlan(input.title, input.steps as WorkflowStepDefinition[]);
+          } catch (error) {
+            return json(res, 400, {
+              error: "invalid_workflow",
+              message: error instanceof Error ? error.message.slice(0, 300) : "Invalid workflow definition",
+            }, origin, config);
+          }
+          await workflow.create(plan);
+          return json(res, 201, { workflow: plan }, origin, config);
+        }
+        if (!workflowMatch) return json(res, 404, { error: "workflow_not_found" }, origin, config);
+        let workflowId: string;
+        try {
+          workflowId = decodeURIComponent(workflowMatch[1]!);
+        } catch {
+          return json(res, 400, { error: "invalid_workflow_id" }, origin, config);
+        }
+        if (!workflowId || workflowId.length > 256) return json(res, 400, { error: "invalid_workflow_id" }, origin, config);
+        if ((workflowMatch[2] === "run" || workflowMatch[2] === "cancel") && req.method === "POST") {
+          if (!await workflow.get(workflowId)) return json(res, 404, { error: "workflow_not_found" }, origin, config);
+          const runKey = `${auth.principalId}:${workflowId}`;
+          if (workflowMatch[2] === "cancel") {
+            const active = activeWorkflowRuns.get(runKey);
+            if (!active) return json(res, 409, { error: "workflow_not_running" }, origin, config);
+            active.abort(new Error("Workflow cancellation requested by authenticated principal."));
+            return json(res, 202, { ok: true, cancelRequested: true, workflowId }, origin, config);
+          }
+          if (activeWorkflowRuns.has(runKey)) return json(res, 409, { error: "workflow_already_running" }, origin, config);
+          const controller = new AbortController();
+          activeWorkflowRuns.set(runKey, controller);
+          try {
+            const result = await workflow.run(workflowId, { signal: controller.signal });
+            return json(res, 200, result, origin, config);
+          } finally {
+            if (activeWorkflowRuns.get(runKey) === controller) activeWorkflowRuns.delete(runKey);
+          }
+        }
+        if (workflowMatch[2] === undefined && req.method === "GET") {
+          const plan = await workflow.get(workflowId);
+          if (!plan) return json(res, 404, { error: "workflow_not_found" }, origin, config);
+          return json(res, 200, { workflow: plan }, origin, config);
+        }
+        if (workflowMatch[2] === undefined && req.method === "DELETE") {
+          await workflow.delete(workflowId);
+          return json(res, 200, { ok: true, deleted: true }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
+      }
+
+      if (isMemoryRead) {
+        if (!deps.userMemory) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
+        const query = parsedUrl.searchParams.get("q")?.slice(0, 200) ?? "";
+        const entries = query
+          ? await deps.userMemory.find(auth.principalId, query, 20)
+          : await deps.userMemory.list(auth.principalId);
+        return json(res, 200, {
+          entries: [...entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 50),
+        }, origin, config);
+      }
+      if (isMemoryMutation) {
+        if (!deps.userMemory) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
+        if (pathname === "/v1/memory") {
+          await deps.userMemory.clear(auth.principalId);
+          return json(res, 200, { ok: true, cleared: true }, origin, config);
+        }
+        let memoryId: string;
+        try {
+          memoryId = decodeURIComponent(pathname.slice("/v1/memory/".length));
+        } catch {
+          return json(res, 400, { error: "invalid_memory_id" }, origin, config);
+        }
+        const deleted = await deps.userMemory.delete(auth.principalId, memoryId);
+        if (!deleted) return json(res, 404, { error: "memory_not_found" }, origin, config);
+        return json(res, 200, { ok: true, deleted: true }, origin, config);
       }
 
       const adminScope = config.securityAdminScope ?? "security:admin";
@@ -310,7 +465,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.controller.abort();
           run.status = "cancelled";
           run.updatedAt = Date.now();
-          persist(run);
+          void persist(run).catch(() => undefined);
         }
         return json(res, 200, publicResponse(run), origin, config);
       }
@@ -326,9 +481,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
+        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, principalId: auth.principalId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
         runs.set(runId, run);
-        persist(run);
+        void persist(run).catch(() => undefined);
         res.writeHead(200, {
           ...headers(origin, config),
           "content-type": "text/event-stream; charset=utf-8",
@@ -344,7 +499,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           run.status = "running";
           const result = await agent.run({
-            principalId: auth.keyId,
+            principalId: auth.principalId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
@@ -364,7 +519,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         send({ type: "done", runId });
         run.updatedAt = Date.now();
-        persist(run);
+        void persist(run).catch(() => undefined);
         clearTimeout(timer);
         res.off("close", abortOnDisconnect);
         if (!res.destroyed) return res.end();
@@ -386,12 +541,21 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (idempotencyKey && (idempotencyKey.length > 128 || /[\x00-\x1f\x7f]/.test(idempotencyKey))) {
             return json(res, 400, { error: "invalid_idempotency_key" }, origin, config);
           }
-          const idempotencyId = idempotencyKey ? `${auth.keyId}:${idempotencyKey}` : undefined;
+          const idempotencyId = idempotencyKey ? createHash("sha256").update(`${auth.keyId}\n${idempotencyKey}`).digest("hex") : undefined;
+          const requestFingerprint = createHash("sha256").update(stableJson(input)).digest("hex");
           if (idempotencyId) {
             const existing = idempotency.get(idempotencyId);
             const existingRun = existing ? runs.get(existing) : undefined;
-            if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
-            if (existing) idempotency.delete(idempotencyId);
+            if (existingRun) {
+              if (idempotencyFingerprints.get(idempotencyId) !== requestFingerprint) {
+                return json(res, 409, { error: "idempotency_key_conflict", message: "This idempotency key was already used with a different request." }, origin, config);
+              }
+              return json(res, 200, publicResponse(existingRun), origin, config);
+            }
+            if (existing) {
+              idempotency.delete(idempotencyId);
+              idempotencyFingerprints.delete(idempotencyId);
+            }
           }
           const active = activeByKey.get(auth.keyId) ?? 0;
           if (active >= maxConcurrentRunsPerKey) {
@@ -409,11 +573,27 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             createdAt: Date.now(),
             updatedAt: Date.now(),
             ownerKeyId: auth.keyId,
+            principalId: auth.principalId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            ...(idempotencyId ? { idempotencyKeyHash: idempotencyId, requestFingerprint } : {}),
           };
           runs.set(runId, run);
-          persist(run);
-          if (idempotencyId) idempotency.set(idempotencyId, runId);
+          if (idempotencyId) {
+            idempotency.set(idempotencyId, runId);
+            idempotencyFingerprints.set(idempotencyId, requestFingerprint);
+          }
+          try {
+            // Do not acknowledge an async run until its idempotency binding and queued
+            // state are durably recorded. Otherwise a quick restart can execute a retry twice.
+            await persist(run);
+          } catch {
+            runs.delete(runId);
+            if (idempotencyId) {
+              idempotency.delete(idempotencyId);
+              idempotencyFingerprints.delete(idempotencyId);
+            }
+            return json(res, 503, { error: "run_persistence_unavailable", message: "Sofia could not safely persist this run. Retry with the same Idempotency-Key." }, origin, config);
+          }
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
             ...input,
@@ -434,7 +614,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         try {
           const result = await agent.run({
-            principalId: auth.keyId,
+            principalId: auth.principalId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),

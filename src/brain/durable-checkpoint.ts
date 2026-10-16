@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import type { Checkpoint, CheckpointManager } from "./checkpoint.js";
 import { RuntimeCheckpointManager } from "./checkpoint.js";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 interface CheckpointStore {
   save(checkpoint: Checkpoint): Promise<void>;
@@ -14,20 +14,27 @@ interface CheckpointStore {
 class FileCheckpointStore implements CheckpointStore {
   private readonly directory: string;
 
-  constructor(namespace: string, root = path.join(os.tmpdir(), "sofia-agents-checkpoints")) {
+  constructor(namespace: string, root = sofiaStateDirectory("checkpoints")) {
     const key = createHash("sha256").update(namespace).digest("hex");
     this.directory = path.join(root, key);
   }
 
   async save(checkpoint: Checkpoint): Promise<void> {
-    await fs.mkdir(this.directory, { recursive: true });
+    if (!/^[a-f0-9-]{36}$/i.test(checkpoint.id)) throw new Error("Invalid checkpoint id");
+    await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
+    await fs.chmod(this.directory, 0o700);
     const target = path.join(this.directory, checkpoint.id + ".json");
     const temporary = target + ".tmp";
-    await fs.writeFile(temporary, JSON.stringify(checkpoint), "utf8");
-    await fs.rename(temporary, target);
+    try {
+      await fs.writeFile(temporary, JSON.stringify(checkpoint), { encoding: "utf8", mode: 0o600 });
+      await fs.rename(temporary, target);
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
   }
 
   async load(id: string): Promise<Checkpoint | undefined> {
+    if (!/^[a-f0-9-]{36}$/i.test(id)) throw new Error("Invalid checkpoint id");
     try {
       return JSON.parse(
         await fs.readFile(path.join(this.directory, id + ".json"), "utf8"),
@@ -44,9 +51,9 @@ export class DurableCheckpointManager implements CheckpointManager {
   private readonly local: RuntimeCheckpointManager;
   private readonly store: CheckpointStore;
 
-  constructor(runtime: WorkspaceRuntime, namespace: string) {
+  constructor(runtime: WorkspaceRuntime, namespace: string, root?: string) {
     this.local = new RuntimeCheckpointManager(runtime);
-    this.store = new FileCheckpointStore(namespace);
+    this.store = new FileCheckpointStore(namespace, root);
   }
 
   async create(signal: AbortSignal): Promise<Checkpoint> {

@@ -8,7 +8,9 @@ import type { JobRuntime } from "../brain/job-runtime.js";
 import type { BrainRunSnapshot } from "../brain/run-state.js";
 import type { SecurityController } from "../security/controller.js";
 import type { SecurityAuditSink } from "../security/audit.js";
+import type { UserMemoryStore } from "../brain/user-memory.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import type { WorkflowOrchestratorDependencies } from "../brain/workflow-orchestrator.js";
 export interface AgentRequest {
   task: string;
   context?: string;
@@ -44,5 +46,9 @@ export interface AgentDependencies {
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;
  learningDiagnostics?: () => unknown;
+ userMemory?: UserMemoryStore;
+ workflowRuntime?: (principalId: string) => Omit<WorkflowOrchestratorDependencies, "store">;
+ workflowStateRoot?: string;
+ workflowNamespace?: string;
 }
 export type { ToolCall };

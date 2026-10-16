@@ -252,10 +252,12 @@ test("DurableJobRuntime rejects resume for a cancelled job even when a checkpoin
       return { completed: false, state: "cancelled" };
     },
   } as unknown as SofiaBrain;
-  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => {
-    void onRunSnapshot?.(snapshot);
-    return brain;
-  }, undefined, namespace);
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async (input: Parameters<SofiaBrain["run"]>[0]) => {
+      await onRunSnapshot?.(snapshot);
+      return brain.run(input);
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
 
   const submitted = await runtime.submit({ task: "cancelled checkpoint" });
   await running;

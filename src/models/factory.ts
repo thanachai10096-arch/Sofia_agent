@@ -12,7 +12,7 @@ import type { AgentDependencies } from "../agent/types.js";
 import { Reviewer } from "../review/reviewer.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
-import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
+import { assertSecurityConfiguration, loadExecutionPolicyFromEnv, toolPermission } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { createBrowserTools } from "../browser/tools.js";
 import { PlaywrightBrowserRuntime } from "../browser/runtime.js";
@@ -23,25 +23,32 @@ import { FileRunStore } from "../brain/run-store.js";
 import { DurableJobRuntime } from "../brain/job-runtime.js";
 import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
+import { FileUserMemoryStore } from "../brain/user-memory.js";
 import { EvolutionEngine } from "../brain/evolution.js";
 import path from "node:path";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
 import { EncryptedFileAudit } from "../security/persistent-audit.js";
 import { CompositeSecurityAudit } from "../security/audit.js";
+import { createToolGatewayWorkflowAdapter } from "../brain/workflow-tool-adapter.js";
+import { FileWorkflowExecutionJournal } from "../brain/workflow-execution-journal.js";
+import { actionHash, riskFor } from "../security/guard.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import type { WorkflowOrchestratorDependencies } from "../brain/workflow-orchestrator.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink}):NonNullable<AgentDependencies["brainFactory"]>{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;userMemory:FileUserMemoryStore}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=config.routes.map(route=>createInternalRoute({modelProvider:provider,route}));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
+  const userMemory=dependencies.userMemory;
   const skillLedger=new PersistentSkillLedger(projectMemory);
   return ({signal,maxSteps,principalId,desktopCapabilities,onRunSnapshot})=>{
     const runLimit:BudgetLimit={maxTokens:intEnv("SOFIA_BRAIN_MAX_TOKENS",60000,1),maxCostNanoUsd:bigintEnv("SOFIA_BRAIN_MAX_COST_NANO_USD",NO_COST_CAP),maxCalls:intEnv("SOFIA_BRAIN_MAX_MODEL_CALLS",12,1),maxInFlight:intEnv("SOFIA_BRAIN_MAX_IN_FLIGHT",1,1)};
@@ -65,7 +72,141 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const subagents=createSubagentRuntime(reasoner,toolGateway);
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
-    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot},limits});
+    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,userMemory,evolution,onRunSnapshot},limits});
+  };
+}
+
+function createWorkflowRuntimeFactory(
+  workspace: string,
+  runtime: ReturnType<typeof createNodeWorkspaceRuntime>,
+  tools: ReturnType<typeof createToolRegistry>,
+  policy: ReturnType<typeof loadExecutionPolicyFromEnv>,
+  approval: AgentDependencies["approval"],
+  security: SecurityController,
+  audit: import("../security/audit.js").SecurityAuditSink,
+): NonNullable<AgentDependencies["workflowRuntime"]> {
+  return (principalId: string): Omit<WorkflowOrchestratorDependencies, "store"> => {
+    const checkpointManager = new DurableCheckpointManager(runtime, workspace);
+    const approvedActions = new Set<string>();
+    const executionJournal = new FileWorkflowExecutionJournal(`${path.resolve(workspace)}:${principalId}`);
+    const rollbackGuards = new Map<string, { snapshotId: string; allowedPaths: Set<string> }>();
+    const normalizeWorkspacePath = (value: string) => path.normalize(value).replace(/\\/g, "/").replace(/^\.\//, "");
+    const gateway = new RegistryToolGateway(
+      { runtime, tools },
+      policy,
+      async (request) => {
+        // Consume only a ticket for the exact immutable action approved for this principal/step.
+        if (approvedActions.delete(request.actionHash)) return true;
+        return approval ? approval(request) : false;
+      },
+      checkpointManager,
+      security,
+      audit,
+    );
+    const adapter = createToolGatewayWorkflowAdapter({
+      gateway,
+      principalId,
+      allowShell: policy.allowShell,
+      allowNetwork: policy.allowNetwork,
+    });
+    const requestApproval = approval
+      ? async (plan: import("../brain/workflow-plan.js").WorkflowPlan, step: import("../brain/workflow-plan.js").WorkflowStepRecord, checkpointId: string): Promise<boolean> => {
+          if (!step.action) return false;
+          const descriptor = gateway.describe(step.action.tool);
+          if (!descriptor) return false;
+          const runId = `${plan.id}:${step.id}`;
+          const input = structuredClone(step.action.input);
+          const hash = actionHash(runId, step.action.tool, input, principalId);
+          const approved = await approval({
+            runId,
+            principalId,
+            toolName: step.action.tool,
+            input,
+            actionHash: hash,
+            risk: riskFor(descriptor.effects, input),
+            checkpointId,
+          });
+          const gatewayWillAsk = descriptor.effects.some((effect) =>
+            effect === "write" || effect === "shell" || effect === "network" ||
+            effect === "browser" || effect === "destructive",
+          ) || toolPermission(policy, step.action.tool, descriptor.effects).requireApproval === true;
+          if (approved && gatewayWillAsk) approvedActions.add(hash);
+          return approved;
+        }
+      : undefined;
+    return {
+      ...adapter,
+      executeStep: async (step, context) => {
+        const runId = `${context.workflowId}:${step.id}`;
+        const hash = step.action ? actionHash(runId, step.action.tool, step.action.input, principalId) : undefined;
+        try {
+          if (step.consequential && step.checkpointId) {
+            const signal = context.signal ?? new AbortController().signal;
+            const baseline = await gateway.snapshot(signal);
+            const allowedPaths = new Set<string>();
+            if (typeof step.action?.input.path === "string") {
+              allowedPaths.add(normalizeWorkspacePath(step.action.input.path));
+            }
+            if (Array.isArray(step.action?.input.operations)) {
+              for (const operation of step.action.input.operations) {
+                if (operation && typeof operation === "object" && typeof (operation as { path?: unknown }).path === "string") {
+                  allowedPaths.add(normalizeWorkspacePath((operation as { path: string }).path));
+                }
+              }
+            }
+            rollbackGuards.set(step.checkpointId, { snapshotId: baseline.id, allowedPaths });
+          }
+          if (step.action && hash) {
+            await executionJournal.recordStarted({ workflowId: context.workflowId, stepId: step.id, actionHash: hash });
+          }
+          const result = await adapter.executeStep(step, context);
+          if (step.action && hash) {
+            await executionJournal.recordCompleted({ workflowId: context.workflowId, stepId: step.id, actionHash: hash, evidenceIds: result.evidenceIds });
+          }
+          return result;
+        } catch (error) {
+          if (step.action && hash) {
+            try {
+              await executionJournal.recordFailed({
+                workflowId: context.workflowId,
+                stepId: step.id,
+                actionHash: hash,
+                error: error instanceof Error ? error.message : "Workflow tool action failed",
+              });
+            } catch {
+              // Preserve the original execution error; absent/invalid journal entries remain fail-closed.
+            }
+          }
+          throw error;
+        } finally {
+          if (step.action && hash) approvedActions.delete(hash);
+        }
+      },
+      ...(requestApproval ? { requestApproval } : {}),
+      rollbackCheckpoint: async (checkpointId: string, step: import("../brain/workflow-plan.js").WorkflowStepRecord, signal?: AbortSignal) => {
+        const guard = rollbackGuards.get(checkpointId);
+        if (!guard) throw new Error("Rollback blocked because no pre-action workspace baseline is available.");
+        try {
+          const changed = await gateway.changedFiles(guard.snapshotId, signal ?? new AbortController().signal);
+          const unexpected = changed.map(normalizeWorkspacePath).filter((file) => !guard.allowedPaths.has(file));
+          if (unexpected.length) {
+            throw new Error(`Rollback blocked because workspace changes outside the failed action were detected: ${unexpected.slice(0, 10).join(", ")}`);
+          }
+          return { restoredFiles: await gateway.rollback(checkpointId, signal ?? new AbortController().signal) };
+        } finally {
+          rollbackGuards.delete(checkpointId);
+        }
+      },
+      // No durable tool-result journal exists yet. A crash during a tool call is ambiguous,
+      // so never infer success or automatically replay it.
+      reconcileInterruptedStep: async (plan, step) => {
+        if (!step.action) return "unknown" as const;
+        const expectedHash = actionHash(`${plan.id}:${step.id}`, step.action.tool, step.action.input, principalId);
+        const entry = await executionJournal.get(plan.id, step.id);
+        if (!entry || entry.actionHash !== expectedHash || entry.status !== "completed") return "unknown" as const;
+        return { state: "completed" as const, evidenceIds: entry.evidenceIds };
+      },
+    };
   };
 }
 
@@ -75,7 +216,9 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const tools=createToolRegistry([...createBuiltinTools(),...browserTools]);
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
-  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
+  const userMemory=new FileUserMemoryStore();
+  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,userMemory});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,learningDiagnostics:()=>evolution.getDiagnostics()};
+  const workflowRuntime=createWorkflowRuntimeFactory(workspace,runtime,tools,policy,approval,security,audit);
+  return{workflowRuntime,workflowStateRoot:sofiaStateDirectory("workflows"),workflowNamespace:path.resolve(workspace),router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,learningDiagnostics:()=>evolution.getDiagnostics(),userMemory};
 }
