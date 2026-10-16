@@ -168,7 +168,7 @@ export class SofiaClient {
 
   /** Starts an async run. Pass the same idempotency key when retrying after a network interruption. */
   async start(input: SofiaRunInput, signal?: AbortSignal, idempotencyKey?: string): Promise<SofiaRunResponse> {
-    const headers = this.headers();
+    const headers: Record<string, string> = this.headers();
     if (idempotencyKey !== undefined) {
       if (!idempotencyKey.trim() || idempotencyKey.length > 128 || /[\\x00-\\x1f\\x7f]/.test(idempotencyKey)) {
         throw new Error("Idempotency key must contain 1–128 characters and no control characters.");
