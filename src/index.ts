@@ -21,6 +21,12 @@ export { createEditPatch, applyEditPatch, unifiedDiff } from "./brain/edit-engin
 export { reviewCodeChange } from "./review/code-review.js";
 export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
+export { FileWorkflowPlanStore } from "./brain/workflow-plan-store.js";
+export type { WorkflowPlanStore } from "./brain/workflow-plan-store.js";
+export { WorkflowOrchestrator } from "./brain/workflow-orchestrator.js";
+export type { WorkflowOrchestratorDependencies, WorkflowExecutionSummary, WorkflowStepExecutionResult } from "./brain/workflow-orchestrator.js";
+export type { WorkflowPlan, WorkflowStepDefinition, WorkflowStepRecord, WorkflowStepStatus, WorkflowRisk, RetryAssessment } from "./brain/workflow-plan.js";
+export { createWorkflowPlan, transitionWorkflowStep, readyWorkflowSteps, workflowStepDependenciesSatisfied, assessWorkflowRetry } from "./brain/workflow-plan.js";
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
 export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
