@@ -97,3 +97,40 @@ test("verification leaves absent assertion metrics absent", async () => {
   assert.equal(result?.failedAssertions, undefined);
   assert.equal(result?.skippedAssertions, undefined);
 });
+
+
+test("verification carries structured TAP test counts from the trusted project verifier", async () => {
+  const gateway: ToolGateway = {
+    describe() { return { effects: ["read"] }; },
+    async execute() {
+      return {
+        ok: true,
+        data: {
+          passed: true,
+          code: 0,
+          testsTotal: 7,
+          passedTests: 7,
+          failedTests: 0,
+          skippedTests: 0,
+          cancelledTests: 0,
+          todoTests: 0,
+        },
+        evidenceId: "tap-verification-evidence",
+      };
+    },
+    async snapshot() {
+      return { id: "s1", revision: "r1", evidenceId: "snapshot-evidence" };
+    },
+    async changedFiles() { return []; },
+    async checkpoint() { return { id: "c1", revision: "r1" }; },
+    async rollback() { return []; },
+  };
+  const [result] = await runVerification(gateway, ["test"], new AbortController().signal, "run-test");
+  assert.equal(result?.passed, true);
+  assert.equal(result?.testsTotal, 7);
+  assert.equal(result?.passedTests, 7);
+  assert.equal(result?.failedTests, 0);
+  assert.equal(result?.skippedTests, 0);
+  assert.equal(result?.cancelledTests, 0);
+  assert.equal(result?.todoTests, 0);
+});
