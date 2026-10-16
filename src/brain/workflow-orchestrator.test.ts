@@ -288,3 +288,31 @@ test("failed consequential steps attempt workspace rollback and preserve uncerta
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("interrupted completed journal reconciliation preserves tool evidence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-workflow-reconcile-evidence-"));
+  try {
+    const store = new FileWorkflowPlanStore("reconcile-evidence", root);
+    const plan = createWorkflowPlan("interrupted completed", [{
+      id: "step",
+      title: "Step",
+      description: "Step completed before plan persistence",
+      idempotent: false,
+      action: { tool: "workspace.write_file", input: { path: "x.txt", content: "x" } },
+    }], { id: "reconcile-evidence" });
+    const running = { ...plan, status: "running" as const, steps: [{ ...plan.steps[0]!, status: "running" as const, attempts: 1 }] };
+    await store.save(running);
+    const orchestrator = new WorkflowOrchestrator({
+      store,
+      executeStep: async () => { throw new Error("must not replay"); },
+      reconcileInterruptedStep: async () => ({ state: "completed", evidenceIds: ["journal-evidence-1"] }),
+    });
+    const result = await orchestrator.run(plan.id);
+    assert.equal(result.plan.status, "completed");
+    assert.equal(result.plan.steps[0]?.status, "succeeded");
+    assert.deepEqual(result.plan.steps[0]?.evidenceIds, ["journal-evidence-1"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

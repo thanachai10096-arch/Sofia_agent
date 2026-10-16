@@ -31,6 +31,7 @@ import { MemorySecurityAudit } from "../security/audit.js";
 import { EncryptedFileAudit } from "../security/persistent-audit.js";
 import { CompositeSecurityAudit } from "../security/audit.js";
 import { createToolGatewayWorkflowAdapter } from "../brain/workflow-tool-adapter.js";
+import { FileWorkflowExecutionJournal } from "../brain/workflow-execution-journal.js";
 import { actionHash, riskFor } from "../security/guard.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
@@ -86,6 +87,7 @@ function createWorkflowRuntimeFactory(
   return (principalId: string): Omit<WorkflowOrchestratorDependencies, "store"> => {
     const checkpointManager = new DurableCheckpointManager(runtime, workspace, path.join(workspace, ".sofia", "checkpoints"));
     const approvedActions = new Set<string>();
+    const executionJournal = new FileWorkflowExecutionJournal(principalId, path.join(workspace, ".sofia", "workflow-journal"));
     const rollbackGuards = new Map<string, { snapshotId: string; allowedPaths: Set<string> }>();
     const normalizeWorkspacePath = (value: string) => path.normalize(value).replace(/\\/g, "/").replace(/^\.\//, "");
     const gateway = new RegistryToolGateway(
@@ -134,6 +136,8 @@ function createWorkflowRuntimeFactory(
     return {
       ...adapter,
       executeStep: async (step, context) => {
+        const runId = `${context.workflowId}:${step.id}`;
+        const hash = step.action ? actionHash(runId, step.action.tool, step.action.input, principalId) : undefined;
         try {
           if (step.consequential && step.checkpointId) {
             const signal = context.signal ?? new AbortController().signal;
@@ -151,11 +155,30 @@ function createWorkflowRuntimeFactory(
             }
             rollbackGuards.set(step.checkpointId, { snapshotId: baseline.id, allowedPaths });
           }
-          return await adapter.executeStep(step, context);
-        } finally {
-          if (step.action) {
-            approvedActions.delete(actionHash(`${context.workflowId}:${step.id}`, step.action.tool, step.action.input, principalId));
+          if (step.action && hash) {
+            await executionJournal.recordStarted({ workflowId: context.workflowId, stepId: step.id, actionHash: hash });
           }
+          const result = await adapter.executeStep(step, context);
+          if (step.action && hash) {
+            await executionJournal.recordCompleted({ workflowId: context.workflowId, stepId: step.id, actionHash: hash, evidenceIds: result.evidenceIds });
+          }
+          return result;
+        } catch (error) {
+          if (step.action && hash) {
+            try {
+              await executionJournal.recordFailed({
+                workflowId: context.workflowId,
+                stepId: step.id,
+                actionHash: hash,
+                error: error instanceof Error ? error.message : "Workflow tool action failed",
+              });
+            } catch {
+              // Preserve the original execution error; absent/invalid journal entries remain fail-closed.
+            }
+          }
+          throw error;
+        } finally {
+          if (step.action && hash) approvedActions.delete(hash);
         }
       },
       ...(requestApproval ? { requestApproval } : {}),
@@ -175,7 +198,13 @@ function createWorkflowRuntimeFactory(
       },
       // No durable tool-result journal exists yet. A crash during a tool call is ambiguous,
       // so never infer success or automatically replay it.
-      reconcileInterruptedStep: async () => "unknown" as const,
+      reconcileInterruptedStep: async (plan, step) => {
+        if (!step.action) return "unknown" as const;
+        const expectedHash = actionHash(`${plan.id}:${step.id}`, step.action.tool, step.action.input, principalId);
+        const entry = await executionJournal.get(plan.id, step.id);
+        if (!entry || entry.actionHash !== expectedHash || entry.status !== "completed") return "unknown" as const;
+        return { state: "completed" as const, evidenceIds: entry.evidenceIds };
+      },
     };
   };
 }

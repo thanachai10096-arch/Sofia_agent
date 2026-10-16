@@ -19,7 +19,7 @@ export interface WorkflowOrchestratorDependencies {
   /** Approval must be bound to the authenticated principal and this exact workflow/step. */
   requestApproval?(plan: Readonly<WorkflowPlan>, step: Readonly<WorkflowStepRecord>, checkpointId: string): Promise<boolean>;
   /** Optional reconciliation after a process crashed while a step was running. Never assume no side effects. */
-  reconcileInterruptedStep?(plan: Readonly<WorkflowPlan>, step: Readonly<WorkflowStepRecord>): Promise<"not_started" | "completed" | "unknown">;
+  reconcileInterruptedStep?(plan: Readonly<WorkflowPlan>, step: Readonly<WorkflowStepRecord>): Promise<"not_started" | "completed" | "unknown" | { state: "completed"; evidenceIds?: readonly string[] }>;
   maxStepsPerRun?: number;
   now?: () => string;
 }
@@ -132,12 +132,13 @@ export class WorkflowOrchestrator {
       if (!this.deps.reconcileInterruptedStep) {
         return { plan, executed, waitingForApproval: false, stoppedReason: "A step was interrupted; reconciliation is required before resuming." };
       }
-      const state = await this.deps.reconcileInterruptedStep(plan, interrupted);
+      const reconciliation = await this.deps.reconcileInterruptedStep(plan, interrupted);
+      const state = typeof reconciliation === "string" ? reconciliation : reconciliation.state;
       if (state === "unknown") {
         return { plan, executed, waitingForApproval: false, stoppedReason: "Interrupted step side effects are unknown; automatic retry is blocked." };
       }
       if (state === "completed") {
-        plan = transitionWorkflowStep(plan, interrupted.id, "succeeded", { now: this.now(), evidenceIds: ["reconciled-after-interruption"] });
+        plan = transitionWorkflowStep(plan, interrupted.id, "succeeded", { now: this.now(), evidenceIds: typeof reconciliation === "string" ? ["reconciled-after-interruption"] : reconciliation.evidenceIds?.length ? reconciliation.evidenceIds : ["reconciled-after-interruption"] });
       } else {
         const retry = assessWorkflowRetry({
           idempotent: interrupted.idempotent,

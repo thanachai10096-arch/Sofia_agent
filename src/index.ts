@@ -26,6 +26,8 @@ export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/u
 export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { createWorkflowPlan, transitionWorkflowStep, workflowStepDependenciesSatisfied, readyWorkflowSteps, assessWorkflowRetry } from "./brain/workflow-plan.js";
 export { FileWorkflowPlanStore } from "./brain/workflow-plan-store.js";
+export { FileWorkflowExecutionJournal } from "./brain/workflow-execution-journal.js";
+export type { WorkflowJournalEntry, WorkflowJournalStatus } from "./brain/workflow-execution-journal.js";
 export type { WorkflowPlanStore } from "./brain/workflow-plan-store.js";
 export { WorkflowOrchestrator } from "./brain/workflow-orchestrator.js";
 export type { WorkflowOrchestratorDependencies, WorkflowExecutionSummary, WorkflowStepExecutionResult } from "./brain/workflow-orchestrator.js";
