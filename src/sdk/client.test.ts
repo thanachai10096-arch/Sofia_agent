@@ -184,6 +184,6 @@ test("SDK creates, lists, reads, runs, and deletes workflow plans using authenti
   });
   assert.match(requests[2]?.url ?? "", /workflow%2Fa$/);
   assert.match(requests[3]?.url ?? "", /workflow%2Fa\/run$/);
-  assert.match(requests[4]?.url ?? "", /workflow%2Fa\/cancel$/);
+  assert.match(requests[5]?.url ?? "", /workflow%2Fa\/cancel$/);
   assert.ok(requests.every((request) => request.url.startsWith("https://api.example.test/v1/workflows")));
 });
