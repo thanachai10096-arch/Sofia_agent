@@ -64,6 +64,12 @@ export async function runVerification(
       ...(count("assertionsTotal") !== undefined ? { assertionsTotal: count("assertionsTotal") } : {}),
       ...(count("failedAssertions") !== undefined ? { failedAssertions: count("failedAssertions") } : {}),
       ...(count("skippedAssertions") !== undefined ? { skippedAssertions: count("skippedAssertions") } : {}),
+      ...(count("testsTotal") !== undefined ? { testsTotal: count("testsTotal") } : {}),
+      ...(count("passedTests") !== undefined ? { passedTests: count("passedTests") } : {}),
+      ...(count("failedTests") !== undefined ? { failedTests: count("failedTests") } : {}),
+      ...(count("skippedTests") !== undefined ? { skippedTests: count("skippedTests") } : {}),
+      ...(count("cancelledTests") !== undefined ? { cancelledTests: count("cancelledTests") } : {}),
+      ...(count("todoTests") !== undefined ? { todoTests: count("todoTests") } : {}),
     };
     results.push(verificationResult);
 
