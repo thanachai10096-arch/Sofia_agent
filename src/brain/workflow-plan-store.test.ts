@@ -70,3 +70,24 @@ test("malformed persisted workflow JSON fails closed instead of being treated as
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("FileWorkflowPlanStore serializes concurrent writes across store instances", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-workflow-concurrent-"));
+  try {
+    const stores = Array.from({ length: 4 }, () => new FileWorkflowPlanStore("concurrent", root));
+    const base = createWorkflowPlan("snapshot-0", [
+      { id: "step", title: "Step", description: "Persist concurrent updates", idempotent: true },
+    ], { id: "shared-plan" });
+    await Promise.all(Array.from({ length: 20 }, (_, index) => {
+      const snapshot = { ...base, title: `snapshot-${index}`, updatedAt: `2026-10-16T00:00:${String(index).padStart(2, "0")}.000Z` };
+      return stores[index % stores.length]!.save(snapshot);
+    }));
+    const loaded = await stores[0]!.load("shared-plan");
+    assert.ok(loaded);
+    assert.match(loaded.title, /^snapshot-(?:[0-9]|1[0-9])$/);
+    assert.equal(loaded.steps[0]?.id, "step");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
