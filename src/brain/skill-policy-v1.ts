@@ -242,8 +242,21 @@ function assessCheck(v:unknown):"passed"|"failure"|"unverified"{
   if(v.exitCode!==0||v.checksPassed!==true)return "unverified";
  }
  if(v.check==="tests"){
-  if(v.assertionsPassed!==true||!Number.isSafeInteger(v.assertionsTotal)||Number(v.assertionsTotal)<1||
-     v.failedAssertions!==0||v.skippedAssertions!==0)return "unverified";
+  const hasAssertionMetrics =
+   typeof v.assertionsPassed==="boolean" || Number.isSafeInteger(v.assertionsTotal) ||
+   Number.isSafeInteger(v.failedAssertions) || Number.isSafeInteger(v.skippedAssertions);
+  if(hasAssertionMetrics){
+   if(v.assertionsPassed!==true||!Number.isSafeInteger(v.assertionsTotal)||Number(v.assertionsTotal)<1||
+      v.failedAssertions!==0||v.skippedAssertions!==0)return "unverified";
+  }else{
+   const counts = [v.testsTotal,v.passedTests,v.failedTests,v.skippedTests,v.cancelledTests,v.todoTests];
+   if(counts.some((value)=>!Number.isSafeInteger(value)||Number(value)<0)||
+      Number(v.testsTotal)<1||Number(v.passedTests)<1||v.failedTests!==0||
+      v.skippedTests!==0||v.cancelledTests!==0||v.todoTests!==0||
+      Number(v.testsTotal)!==Number(v.passedTests)+Number(v.failedTests)+Number(v.skippedTests)+Number(v.cancelledTests)+Number(v.todoTests)){
+    return "unverified";
+   }
+  }
  }
  if(v.check==="security-review"){
   if(v.reviewCompleted!==true||!Number.isSafeInteger(v.confirmedFindings)||Number(v.confirmedFindings)<0||
