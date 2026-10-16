@@ -38,7 +38,9 @@ The current branch contains an in-memory, bounded agent message protocol and a d
 
 - [x] Trace the existing SofiaBrain, SubagentRuntime, ToolGateway, and DurableJobRuntime paths before editing production flow.
 - [x] Route the bounded single-specialist recovery exchange through a per-run coordinator owned by Brain; no independent tool-execution route is created.
-- [ ] Complete coordinator binding to authenticated principal, active job ID, allowed tools, workspace boundary, cancellation signal, and deadline (principal scope/authorizer matching implemented; workspace-root and end-to-end ownership enforcement remain).
+- [ ] Complete coordinator binding to authenticated principal, active job ID, allowed tools, workspace boundary, cancellation signal, and deadline (principal scope/authorizer matching implemented; Brain specialist path still needs trusted workspace-root propagation and end-to-end job ownership/cancellation proof).
+- [x] Add a standalone sequential `WorkflowOrchestrator` with durable checkpoints, owner-principal matching, trusted absolute workspace-root input, exclusive run lock, dependency ordering, explicit approval pause/resume, and cancellation checks. Its execution callback is an integration seam and MUST route side effects through Brain/Tool Gateway; it is not yet wired into `SofiaBrain` or `DurableJobRuntime.
+- [x] Add workflow DAG validation, persisted-plan schema/cycle validation, guarded step transitions, evidence references, and conservative retry assessment (no automatic retries).
 - [x] Validate specialist result envelopes at the Brain boundary: expected role, non-empty bounded summary, plain-object action input, bounded reason, JSON serializability, and a 16 KiB proposal cap. Reject malformed output before it can be considered for execution.
 - [x] Route the bounded Brain specialist exchange through the ACP message bus and explicit delegation authorizer, with run identity and deadline scope bound by host-owned state.
 - [x] Carry the host-authenticated principal into specialist task scope and deny delegation requests whose principal does not match a principal-bound scope.
@@ -83,7 +85,7 @@ The current branch contains an in-memory, bounded agent message protocol and a d
 
 ## Suggested implementation order
 
-1. Complete Phase 0 validation and resolve any remaining typecheck/test failures. Treat the workflow-plan store as an isolated primitive until an actual orchestrator is implemented and integrated.
+1. Run CI for the workflow lifecycle/orchestrator changes; do not claim those new changes pass until the run is green. The store and orchestrator remain separately callable primitives until an explicit Brain/DurableJobRuntime integration is implemented.
 2. Map the real Brain/subagent/Tool Gateway/job-runtime call graph and add an architecture test harness.
 3. Integrate a single specialist round trip behind a feature flag; no parallel fan-out at first.
 4. Add cancellation, permission-denial, hostile-evidence, and cross-principal tests.
