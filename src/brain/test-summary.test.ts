@@ -29,7 +29,7 @@ test("parses a complete Node TAP summary into structured counts", () => {
 
 test("missing, contradictory, empty, or oversized TAP summaries remain unverified", () => {
   assert.equal(parseNodeTestSummary("TAP version 13\n# tests 3\n# pass 3"), undefined);
-  assert.equal(parseNodeTestSummary("# tests 2\n# pass 2\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0"), undefined);
+  assert.equal(parseNodeTestSummary("# tests 2\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0"), undefined);
   assert.equal(parseNodeTestSummary("# tests 0\n# pass 0\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0"), undefined);
   assert.equal(parseNodeTestSummary("x".repeat(8_000_001)), undefined);
 });
