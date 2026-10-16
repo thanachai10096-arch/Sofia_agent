@@ -145,6 +145,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
   const runs = new Map<string, ActiveRun>();
   const activeWorkflowRuns = new Map<string, AbortController>();
+  const idempotency = new Map<string, string>();
+  const idempotencyFingerprints = new Map<string, string>();
   const runStore = config.runStore;
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
@@ -182,8 +184,6 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       idempotencyFingerprints.set(run.idempotencyKeyHash, run.requestFingerprint);
     } if (interrupted) persist(run);
   }
-  const idempotency = new Map<string, string>();
-  const idempotencyFingerprints = new Map<string, string>();
   const activeByKey = new Map<string, number>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
