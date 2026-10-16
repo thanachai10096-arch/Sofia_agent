@@ -23,8 +23,9 @@ export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConventio
 export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { FileWorkflowPlanStore } from "./brain/workflow-plan-store.js";
 export type { WorkflowPlanStore, WorkflowPlan, WorkflowStepRecord, WorkflowPlanStatus, WorkflowStepStatus } from "./brain/workflow-plan-store.js";
-export { createWorkflowPlan } from "./brain/workflow-plan.js";
-// Workflow orchestration is not yet wired into Brain or DurableJobRuntime.
+export { createWorkflowPlan, workflowStepDependenciesSatisfied, readyWorkflowSteps, transitionWorkflowStep, assessWorkflowRetry } from "./brain/workflow-plan.js";
+export type { WorkflowStepDefinition, RetryAssessment } from "./brain/workflow-plan.js";
+// Workflow orchestration remains a separate layer until explicitly integrated with Brain and DurableJobRuntime.
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
 export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
