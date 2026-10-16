@@ -132,3 +132,20 @@ test("workflow step lifecycle enforces dependencies and only retries safe transi
   const change = plan.steps.find(step => step.id === "change")!;
   assert.equal(assessWorkflowRetry({ ...change, status: "failed" }, true).retry, false);
 });
+
+
+test("FileWorkflowPlanStore refuses cyclic dependency graphs at persistence boundary", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-workflow-cycle-"));
+  try {
+    const store = new FileWorkflowPlanStore("cycle", root);
+    const plan = createWorkflowPlan("cycle", [
+      { id: "a", title: "A", description: "", idempotent: true },
+      { id: "b", title: "B", description: "", idempotent: true },
+    ], { id: "cyclic-plan" });
+    plan.steps[0]!.dependsOn = ["b"];
+    plan.steps[1]!.dependsOn = ["a"];
+    await assert.rejects(() => store.save(plan), /invalid workflow plan/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
