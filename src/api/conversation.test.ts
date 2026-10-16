@@ -443,7 +443,7 @@ test("async runs keep their concurrency slot until terminal persistence settles"
   let blockedOnce = false;
   const runStore: RunRecordStore = {
     save: async (record) => {
-      if (record.status === "completed" && !blockedOnce) {
+      if (record.status === "running" && !blockedOnce) {
         blockedOnce = true;
         notifyTerminalWrite();
         await terminalWriteGate;
@@ -462,7 +462,17 @@ test("async runs keep their concurrency slot until terminal persistence settles"
       role: "user", content: "Hold the slot until saved", async: true,
     });
     assert.equal(first.status, 202);
+    const accepted = await first.json() as { pollUrl: string };
     await terminalWriteStarted;
+    let completedInMemory = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const poll = await request(baseUrl, "test-token-a", accepted.pollUrl);
+      const status = await poll.json() as { status: string };
+      if (status.status === "completed") { completedInMemory = true; break; }
+      if (status.status === "failed" || status.status === "cancelled") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(completedInMemory, true);
     const secondConversation = await createConversation();
     const rejected = await request(baseUrl, "test-token-a", `/v1/conversations/${secondConversation}/messages`, "POST", {
       role: "user", content: "Must wait for durable settlement", async: true,
