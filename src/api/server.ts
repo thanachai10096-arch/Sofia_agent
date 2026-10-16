@@ -114,6 +114,11 @@ function pathId(url: string): string | null {
   return match?.[1] ?? null;
 }
 
+// Keep provider/tool details out of public responses and persisted run records.
+function publicAgentError(): string {
+  return "Agent execution failed.";
+}
+
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
@@ -192,7 +197,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.error = "Run cancelled.";
         } else {
           run.status = "failed";
-          run.error = error instanceof Error ? error.message : "Agent failed";
+          run.error = publicAgentError();
         }
       } finally {
         clearTimeout(timer);
@@ -364,7 +369,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           send({ type: "result", runId, status: "completed", result: run.result });
         } catch (error) {
           run.status = controller.signal.aborted ? "cancelled" : "failed";
-          run.error = controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Agent failed";
+          run.error = controller.signal.aborted ? "Run cancelled." : publicAgentError();
           send({ type: "error", runId, status: run.status, error: run.error });
         }
         send({ type: "done", runId });
@@ -404,7 +409,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
           }
           try { usage.consume(auth.keyId); } catch (error) {
-            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+            return json(res, 429, { error: "quota_exceeded", message: "Quota exceeded" }, origin, config);
           }
           if (!concurrency.tryAcquire(auth.keyId, maxConcurrentRunsPerKey)) {
             res.setHeader("retry-after", "2");
@@ -439,7 +444,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         try { usage.consume(auth.keyId); } catch (error) {
           concurrency.release(auth.keyId);
-          return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+          return json(res, 429, { error: "quota_exceeded", message: "Quota exceeded" }, origin, config);
         }
 
         const controller = new AbortController();
@@ -463,7 +468,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 502, {
             id: runId,
             status: "failed",
-            error: controller.signal.aborted ? "Request timed out or was cancelled." : error instanceof Error ? error.message : "Agent failed",
+            error: controller.signal.aborted ? "Request timed out or was cancelled." : publicAgentError(),
           }, origin, config);
         } finally {
           clearTimeout(timer);
@@ -485,7 +490,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (req.method === "POST" && action === "resume") {
           try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
-          catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
+          catch { return json(res, 409, { error: "job_resume_failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
           const cancelled = await deps.jobRuntime.cancel(jobId);
@@ -514,7 +519,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           });
           return json(res, 202, job, origin, config);
         } catch (error) {
-          return json(res, 502, { error: "job_submit_failed", message: error instanceof Error ? error.message : "Job submission failed" }, origin, config);
+          return json(res, 502, { error: "job_submit_failed", message: "Job submission failed" }, origin, config);
         }
       }
 
