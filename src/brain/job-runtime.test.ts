@@ -490,7 +490,7 @@ test("DurableJobRuntime preserves a successful result when terminal persistence 
     async get() { return undefined; },
   };
   const runtime = new DurableJobRuntime(() => ({
-    run: async () => ({ completed: true, state: "completed", output: "work finished" }),
+    run: async () => ({ completed: true, state: "completed", summary: "work finished" }),
   } as unknown as SofiaBrain), undefined, namespace, stateStore);
 
   const submitted = await runtime.submit({ task: "terminal persistence failure" });
@@ -500,6 +500,6 @@ test("DurableJobRuntime preserves a successful result when terminal persistence 
     current = await runtime.get(submitted.id);
   }
   assert.equal(current?.status, "completed");
-  assert.equal(current?.result?.output, "work finished");
+  assert.equal(current?.result?.summary, "work finished");
   assert.equal(current?.error, undefined);
 });
