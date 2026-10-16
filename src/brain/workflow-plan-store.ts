@@ -1,8 +1,32 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { WorkflowPlan } from "./workflow-plan.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
+
+export type WorkflowPlanStatus = "draft" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+export type WorkflowStepStatus = "pending" | "ready" | "running" | "waiting_approval" | "succeeded" | "failed" | "skipped" | "cancelled";
+export interface WorkflowStepRecord {
+  id: string;
+  title: string;
+  description: string;
+  idempotent: boolean;
+  dependsOn: string[];
+  risk?: "low" | "medium" | "high";
+  maxAttempts?: number;
+  status: WorkflowStepStatus;
+  attempts: number;
+  evidenceIds: string[];
+  updatedAt: string;
+  lastError?: string;
+}
+export interface WorkflowPlan {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  status: WorkflowPlanStatus;
+  steps: WorkflowStepRecord[];
+}
 
 export interface WorkflowPlanStore {
   save(plan: WorkflowPlan): Promise<void>;
