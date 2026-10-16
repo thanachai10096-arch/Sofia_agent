@@ -52,6 +52,37 @@ function streamRequest(url: string, signal?: AbortSignal) {
   });
 }
 
+test("async idempotency keys reject reuse with a different request body", async (t) => {
+  const provider: ModelProvider = {
+    async generate() {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return { text: "idempotent result" };
+    },
+  };
+  const { server, url } = await startApi(provider);
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const headers = {
+    authorization: "Bearer test-token",
+    "content-type": "application/json",
+    "idempotency-key": "mobile-retry-unique",
+  };
+  const first = await fetch(`${url}/v1/agent/runs`, {
+    method: "POST", headers, body: JSON.stringify({ task: "summarize project", async: true }),
+  });
+  assert.equal(first.status, 202);
+  const firstRun = await first.json() as { id: string };
+  const retry = await fetch(`${url}/v1/agent/runs`, {
+    method: "POST", headers, body: JSON.stringify({ async: true, task: "summarize project" }),
+  });
+  assert.equal(retry.status, 200);
+  assert.equal((await retry.json() as { id: string }).id, firstRun.id);
+  const conflict = await fetch(`${url}/v1/agent/runs`, {
+    method: "POST", headers, body: JSON.stringify({ task: "delete the project", async: true }),
+  });
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json() as { error: string }).error, "idempotency_key_conflict");
+});
+
 test("SSE endpoint emits correctly delimited events", async (t) => {
   const provider: ModelProvider = {
     async generate() {

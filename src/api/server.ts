@@ -11,6 +11,15 @@ import { createWorkflowPlan, type WorkflowStepDefinition } from "../brain/workfl
 import { FileWorkflowPlanStore } from "../brain/workflow-plan-store.js";
 import { WorkflowOrchestrator } from "../brain/workflow-orchestrator.js";
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
 interface ActiveRun {
   id: string;
   status: AgentRunStatus;
@@ -164,6 +173,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     runs.set(run.id, run); if (interrupted) persist(run);
   }
   const idempotency = new Map<string, string>();
+  const idempotencyFingerprints = new Map<string, string>();
   const activeByKey = new Map<string, number>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
@@ -519,11 +529,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 400, { error: "invalid_idempotency_key" }, origin, config);
           }
           const idempotencyId = idempotencyKey ? `${auth.keyId}:${idempotencyKey}` : undefined;
+          const requestFingerprint = createHash("sha256").update(stableJson(input)).digest("hex");
           if (idempotencyId) {
             const existing = idempotency.get(idempotencyId);
             const existingRun = existing ? runs.get(existing) : undefined;
-            if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
-            if (existing) idempotency.delete(idempotencyId);
+            if (existingRun) {
+              if (idempotencyFingerprints.get(idempotencyId) !== requestFingerprint) {
+                return json(res, 409, { error: "idempotency_key_conflict", message: "This idempotency key was already used with a different request." }, origin, config);
+              }
+              return json(res, 200, publicResponse(existingRun), origin, config);
+            }
+            if (existing) {
+              idempotency.delete(idempotencyId);
+              idempotencyFingerprints.delete(idempotencyId);
+            }
           }
           const active = activeByKey.get(auth.keyId) ?? 0;
           if (active >= maxConcurrentRunsPerKey) {
@@ -546,7 +565,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           };
           runs.set(runId, run);
           persist(run);
-          if (idempotencyId) idempotency.set(idempotencyId, runId);
+          if (idempotencyId) {
+            idempotency.set(idempotencyId, runId);
+            idempotencyFingerprints.set(idempotencyId, requestFingerprint);
+          }
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
             ...input,
