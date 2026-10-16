@@ -40,7 +40,7 @@ test("WorkflowOrchestrator pauses for approval and only continues after explicit
   try {
     const store = new FileWorkflowPlanStore("approval", root);
     await store.save(createWorkflowPlan("approval", [
-      { id: "publish", title: "Publish", description: "External side effect", idempotent: false, risk: "high" },
+      { id: "publish", title: "Publish", description: "External side effect", idempotent: false, risk: "medium" },
       { id: "independent", title: "Independent", description: "Must pause with the workflow", idempotent: true },
     ], { id: "approval-plan", ownerPrincipalId: "principal-a" }));
     const calls: string[] = [];
