@@ -1,5 +1,6 @@
 import type { SofiaTool } from "./types.js";
 import { applyEditPatch, createEditPatch } from "../brain/edit-engine.js";
+import { parseNodeTestSummary } from "../brain/test-summary.js";
 
 const str = (description: string) => ({ type: "string", description });
 
@@ -150,7 +151,17 @@ export function createBuiltinTools(): SofiaTool[] {
         if (!command) throw new Error("Unsupported verification kind: " + kind);
         const [executable, args] = command;
         const result = await runtime.run(executable, args);
-        return { kind, command: executable, args, ...result, passed: result.code === 0 };
+        const testSummary = kind === "test"
+          ? parseNodeTestSummary(result.stdout + "\n" + result.stderr)
+          : undefined;
+        return {
+          kind,
+          command: executable,
+          args,
+          ...result,
+          passed: result.code === 0,
+          ...(testSummary ?? {}),
+        };
       },
     },
     {
