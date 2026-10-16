@@ -478,7 +478,7 @@ test("DurableJobRuntime does not expose or execute a job when initial persistenc
 });
 
 
-test("DurableJobRuntime keeps an in-memory failure if terminal persistence fails", async () => {
+test("DurableJobRuntime preserves a successful result when terminal persistence fails", async () => {
   const namespace = "job-runtime-terminal-persist-failure-" + randomUUID();
   let saves = 0;
   const stateStore = {
@@ -490,7 +490,7 @@ test("DurableJobRuntime keeps an in-memory failure if terminal persistence fails
     async get() { return undefined; },
   };
   const runtime = new DurableJobRuntime(() => ({
-    run: async () => { throw new Error("model execution failed"); },
+    run: async () => ({ completed: true, state: "completed", output: "work finished" }),
   } as unknown as SofiaBrain), undefined, namespace, stateStore);
 
   const submitted = await runtime.submit({ task: "terminal persistence failure" });
@@ -499,6 +499,7 @@ test("DurableJobRuntime keeps an in-memory failure if terminal persistence fails
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
     current = await runtime.get(submitted.id);
   }
-  assert.equal(current?.status, "failed");
-  assert.match(current?.error ?? "", /model execution failed/i);
+  assert.equal(current?.status, "completed");
+  assert.equal(current?.result?.output, "work finished");
+  assert.equal(current?.error, undefined);
 });

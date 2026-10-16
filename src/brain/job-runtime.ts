@@ -260,7 +260,12 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = result.completed ? "completed" : "failed";
       }
       record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
+      try {
+        await this.state.save(record);
+      } catch {
+        // Execution succeeded; keep its truthful in-memory result/status if the
+        // terminal snapshot cannot be persisted. Durability is degraded, not execution.
+      }
     } catch (error) {
       if (record.status !== "cancelled") {
         record.error = error instanceof Error ? error.message : String(error);
