@@ -218,3 +218,46 @@ test("external skills are size-bounded and always quarantined when structurally 
   assert.equal(inspectExternalSkill("{invalid"), "invalid");
   assert.equal(inspectExternalSkill("x".repeat(32_769)), "invalid");
 });
+
+
+test("test skill accepts only complete TAP evidence when assertion metrics are unavailable", () => {
+  const attempt = prepareAttempt("sofia.v1.test", "testing", "tap-run", []);
+  const success = finishAttempt(attempt, {
+    runId: "tap-run",
+    state: "succeeded",
+    checks: [{
+      check: "tests",
+      state: "passed",
+      completed: true,
+      exitCode: 0,
+      checksPassed: true,
+      testsTotal: 12,
+      passedTests: 12,
+      failedTests: 0,
+      skippedTests: 0,
+      cancelledTests: 0,
+      todoTests: 0,
+    }],
+  });
+  assert.equal(success?.result, "verified-success");
+
+  const incompleteAttempt = prepareAttempt("sofia.v1.test", "testing", "tap-skipped-run", []);
+  const incomplete = finishAttempt(incompleteAttempt, {
+    runId: "tap-skipped-run",
+    state: "succeeded",
+    checks: [{
+      check: "tests",
+      state: "passed",
+      completed: true,
+      exitCode: 0,
+      checksPassed: true,
+      testsTotal: 12,
+      passedTests: 11,
+      failedTests: 0,
+      skippedTests: 1,
+      cancelledTests: 0,
+      todoTests: 0,
+    }],
+  });
+  assert.equal(incomplete?.result, "unverified");
+});
