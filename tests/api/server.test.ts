@@ -167,3 +167,46 @@ test("job API enforces owner isolation for reads, resume, cancel, and list", asy
   assert.equal(job.resumeCalls, 0, "unauthorized caller must not invoke resume");
   assert.equal(job.cancelCalls, 0, "unauthorized caller must not invoke cancel");
 });
+
+
+test("public API errors redact provider secrets from sync responses and async run records", async (t) => {
+  const provider: ModelProvider = {
+    async generate() {
+      throw new Error("provider failed token=sk-live-secret /srv/private/customer.env");
+    },
+  };
+  const { server, url } = await startApi(provider);
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const headers = {
+    authorization: "Bearer test-token",
+    origin: "https://app.example",
+    "content-type": "application/json",
+  };
+
+  const sync = await fetch(url + "/v1/agent/runs", {
+    method: "POST", headers, body: JSON.stringify({ task: "trigger provider failure" }),
+  });
+  assert.equal(sync.status, 502);
+  const syncBody = await sync.text();
+  assert.equal(syncBody.includes("sk-live-secret"), false);
+  assert.equal(syncBody.includes("/srv/private/customer.env"), false);
+  assert.match(syncBody, /Agent execution failed\\./);
+
+  const accepted = await fetch(url + "/v1/agent/runs", {
+    method: "POST", headers, body: JSON.stringify({ task: "trigger async provider failure", async: true }),
+  });
+  assert.equal(accepted.status, 202);
+  const { id } = await accepted.json() as { id: string };
+  let body = "";
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const response = await fetch(url + "/v1/agent/runs/" + id, {
+      headers: { authorization: "Bearer test-token" },
+    });
+    body = await response.text();
+    if (body.includes('"status":"failed"')) break;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  assert.match(body, /Agent execution failed\\./);
+  assert.equal(body.includes("sk-live-secret"), false);
+  assert.equal(body.includes("/srv/private/customer.env"), false);
+});
