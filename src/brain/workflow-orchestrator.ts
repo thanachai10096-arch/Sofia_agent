@@ -46,7 +46,11 @@ export class WorkflowOrchestrator {
     if (typeof context.workspaceRoot !== "string" || !path.isAbsolute(context.workspaceRoot)) {
       throw new Error("Workspace root must come from a trusted host resolver and be absolute.");
     }
-    const signal = context.signal ?? new AbortController().signal;
+    const timeoutMs = context.timeoutMs ?? 120_000;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 600_000) {
+      throw new Error("Workflow timeout must be an integer between 1 and 600000 milliseconds.");
+    }
+    if (context.signal?.aborted) throw context.signal.reason ?? new Error("Workflow cancelled.");
     const lockOwner = randomUUID();
     const acquire = this.dependencies.store.acquireRunLock;
     const release = this.dependencies.store.releaseRunLock;
@@ -54,6 +58,11 @@ export class WorkflowOrchestrator {
     if (!await acquire.call(this.dependencies.store, planId, lockOwner)) {
       throw new Error("Workflow is already running or has an unreconciled lock.");
     }
+    const controller = new AbortController();
+    const onExternalAbort = () => controller.abort(context.signal?.reason ?? new Error("Workflow cancelled."));
+    context.signal?.addEventListener("abort", onExternalAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(new Error("Workflow deadline exceeded.")), timeoutMs);
+    const signal = controller.signal;
 
     try {
       let plan = await this.requireOwnedPlan(planId, context.principalId);
@@ -109,7 +118,23 @@ export class WorkflowOrchestrator {
       }
       return this.summary(plan, false);
     } finally {
+      clearTimeout(timer);
+      context.signal?.removeEventListener("abort", onExternalAbort);
       await release.call(this.dependencies.store, planId, lockOwner);
+    }
+  }
+
+  private async awaitAbortable<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+    signal.throwIfAborted();
+    let onAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal.reason ?? new Error("Workflow cancelled."));
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      return await Promise.race([operation(), aborted]);
+    } finally {
+      if (onAbort) signal.removeEventListener("abort", onAbort);
     }
   }
 
@@ -134,10 +159,10 @@ export class WorkflowOrchestrator {
     if (!step) throw new Error("Workflow step disappeared.");
     try {
       signal.throwIfAborted();
-      const result: unknown = await this.dependencies.executeStep(
+      const result: unknown = await this.awaitAbortable(signal, () => this.dependencies.executeStep(
         { ...step, dependsOn: [...step.dependsOn], evidenceIds: [...step.evidenceIds] },
         { principalId, workspaceRoot, planId: plan.id, signal, approved },
-      );
+      ));
       signal.throwIfAborted();
       if (!result || typeof result !== "object" ||
           !["succeeded", "waiting_approval"].includes(String((result as { status?: unknown }).status))) {
