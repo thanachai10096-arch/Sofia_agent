@@ -150,7 +150,7 @@ test("workflow API uses the runtime wired by Sofia Agent dependencies when confi
 
 test("real Sofia factory executes a consequential workspace action through checkpoint and exact one-time approval", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-workflow-e2e-"));
-  const envKeys = ["SOFIA_AI_GATEWAY_API_KEY", "SOFIA_FAST_MODEL", "SOFIA_ALLOW_FILE_WRITE", "SOFIA_ALLOW_TOOLS"] as const;
+  const envKeys = ["SOFIA_AI_GATEWAY_API_KEY", "SOFIA_FAST_MODEL", "SOFIA_ALLOW_FILE_WRITE", "SOFIA_ALLOW_TOOLS", "SOFIA_STATE_DIR"] as const;
   const prior = new Map(envKeys.map((key) => [key, process.env[key]]));
   const approvals: ApprovalRequest[] = [];
   let server: ReturnType<typeof createSofiaApi> | undefined;
@@ -160,6 +160,7 @@ test("real Sofia factory executes a consequential workspace action through check
     process.env.SOFIA_FAST_MODEL = "workflow-test-model";
     process.env.SOFIA_ALLOW_FILE_WRITE = "true";
     process.env.SOFIA_ALLOW_TOOLS = "true";
+    process.env.SOFIA_STATE_DIR = path.join(root, ".sofia-state");
     const deps = createSofiaAgentDependencies(root, async (request) => {
       approvals.push(request);
       return true;

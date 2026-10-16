@@ -20,6 +20,7 @@ class FileCheckpointStore implements CheckpointStore {
   }
 
   async save(checkpoint: Checkpoint): Promise<void> {
+    if (!/^[a-f0-9-]{36}$/i.test(checkpoint.id)) throw new Error("Invalid checkpoint id");
     await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
     await fs.chmod(this.directory, 0o700);
     const target = path.join(this.directory, checkpoint.id + ".json");
@@ -33,6 +34,7 @@ class FileCheckpointStore implements CheckpointStore {
   }
 
   async load(id: string): Promise<Checkpoint | undefined> {
+    if (!/^[a-f0-9-]{36}$/i.test(id)) throw new Error("Invalid checkpoint id");
     try {
       return JSON.parse(
         await fs.readFile(path.join(this.directory, id + ".json"), "utf8"),
