@@ -259,6 +259,8 @@ Sofia supports long-running work for desktop and mobile browser clients:
 | `GET` | `/v1/agent/runs/:id` | Inspect or reconnect to a run. |
 | `DELETE` | `/v1/agent/runs/:id` | Cancel a queued or running task. |
 | `POST` | `/v1/agent/runs/stream` | Receive live Server-Sent Events (SSE). |
+
+For async runs, send an `Idempotency-Key` header when retrying a request after a network interruption. Sofia binds the key to a stable fingerprint of the request: the same key and equivalent JSON request return the original run, while reuse with different input returns `409 idempotency_key_conflict`. Keys are scoped to the authenticated API key and currently retained in the API process memory; a durable multi-instance idempotency store is required for clustered deployments.
 | `GET` | `/v1/workflows` | List durable workflow plans for the authenticated principal (`agent:read` or `agent:run`). |
 | `POST` | `/v1/workflows` | Validate and create a workflow plan (`agent:run`). |
 | `GET` | `/v1/workflows/:id` | Read a plan owned by the authenticated principal. |
