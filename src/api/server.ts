@@ -113,6 +113,12 @@ function pathId(url: string): string | null {
   return match?.[1] ?? null;
 }
 
+// Provider/tool exceptions may contain credentials, local paths, prompts, or other
+// implementation details. Keep raw errors inside trusted diagnostics only.
+function publicAgentError(): string {
+  return "Agent execution failed.";
+}
+
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
@@ -202,7 +208,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.error = "Run cancelled.";
         } else {
           run.status = "failed";
-          run.error = error instanceof Error ? error.message : "Agent failed";
+          run.error = publicAgentError();
         }
       } finally {
         clearTimeout(timer);
@@ -374,7 +380,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           send({ type: "result", runId, status: "completed", result: run.result });
         } catch (error) {
           run.status = controller.signal.aborted ? "cancelled" : "failed";
-          run.error = controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Agent failed";
+          run.error = controller.signal.aborted ? "Run cancelled." : publicAgentError();
           send({ type: "error", runId, status: run.status, error: run.error });
         }
         send({ type: "done", runId });
@@ -415,7 +421,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           }
           try { usage.consume(auth.keyId); } catch (error) {
             releaseRunSlot(auth.keyId);
-            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+            return json(res, 429, { error: "quota_exceeded" }, origin, config);
           }
           const runId = randomUUID();
           const run: ActiveRun = {
@@ -470,7 +476,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 502, {
             id: runId,
             status: "failed",
-            error: controller.signal.aborted ? "Request timed out or was cancelled." : error instanceof Error ? error.message : "Agent failed",
+            error: controller.signal.aborted ? "Request timed out or was cancelled." : publicAgentError(),
           }, origin, config);
         } finally {
           clearTimeout(timer);
@@ -521,7 +527,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           });
           return json(res, 202, job, origin, config);
         } catch (error) {
-          return json(res, 502, { error: "job_submit_failed", message: error instanceof Error ? error.message : "Job submission failed" }, origin, config);
+          return json(res, 502, { error: "job_submit_failed" }, origin, config);
         }
       }
 
