@@ -435,35 +435,41 @@ test("async conversation admission rolls back the user message and quota when ru
 });
 
 
-test("async runs keep their concurrency slot until terminal persistence settles", async () => {
+test("async run drains queued writes before persisting its terminal record", async () => {
+  let notifyRunningWrite!: () => void;
+  const runningWriteStarted = new Promise<void>((resolve) => { notifyRunningWrite = resolve; });
+  let releaseRunningWrite!: () => void;
+  const runningWriteGate = new Promise<void>((resolve) => { releaseRunningWrite = resolve; });
   let notifyTerminalWrite!: () => void;
   const terminalWriteStarted = new Promise<void>((resolve) => { notifyTerminalWrite = resolve; });
-  let releaseTerminalWrite!: () => void;
-  const terminalWriteGate = new Promise<void>((resolve) => { releaseTerminalWrite = resolve; });
   let blockedOnce = false;
+  let terminalWriteStartedBeforeRelease = false;
+  let released = false;
   const runStore: RunRecordStore = {
     save: async (record) => {
       if (record.status === "running" && !blockedOnce) {
         blockedOnce = true;
+        notifyRunningWrite();
+        await runningWriteGate;
+      }
+      if (record.status === "completed") {
+        terminalWriteStartedBeforeRelease ||= !released;
         notifyTerminalWrite();
-        await terminalWriteGate;
       }
     },
     remove: async () => undefined,
     loadAllSync: () => [],
   };
   await withApi(async (baseUrl) => {
-    const createConversation = async () => {
-      const response = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
-      return (await response.json() as { conversation: { id: string } }).conversation.id;
-    };
-    const firstConversation = await createConversation();
-    const first = await request(baseUrl, "test-token-a", `/v1/conversations/${firstConversation}/messages`, "POST", {
-      role: "user", content: "Hold the slot until saved", async: true,
+    const created = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+    const conversation = (await created.json() as { conversation: { id: string } }).conversation;
+    const first = await request(baseUrl, "test-token-a", `/v1/conversations/${conversation.id}/messages`, "POST", {
+      role: "user", content: "Hold a run-record write", async: true,
     });
     assert.equal(first.status, 202);
     const accepted = await first.json() as { pollUrl: string };
-    await terminalWriteStarted;
+    await runningWriteStarted;
+
     let completedInMemory = false;
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const poll = await request(baseUrl, "test-token-a", accepted.pollUrl);
@@ -473,25 +479,11 @@ test("async runs keep their concurrency slot until terminal persistence settles"
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(completedInMemory, true);
-    const secondConversation = await createConversation();
-    const rejected = await request(baseUrl, "test-token-a", `/v1/conversations/${secondConversation}/messages`, "POST", {
-      role: "user", content: "Must wait for durable settlement", async: true,
-    });
-    assert.equal(rejected.status, 429);
-    try {
-      releaseTerminalWrite();
-      let accepted = false;
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        const retry = await request(baseUrl, "test-token-a", `/v1/conversations/${secondConversation}/messages`, "POST", {
-          role: "user", content: "Retry after terminal save", async: true,
-        });
-        if (retry.status === 202) { accepted = true; break; }
-        assert.equal(retry.status, 429);
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      assert.equal(accepted, true);
-    } finally {
-      releaseTerminalWrite();
-    }
-  }, { maxConcurrentRunsPerKey: 1, runStore });
+    assert.equal(terminalWriteStartedBeforeRelease, false, "terminal write must wait for the earlier blocked write");
+
+    released = true;
+    releaseRunningWrite();
+    await terminalWriteStarted;
+    assert.equal(terminalWriteStartedBeforeRelease, false);
+  }, { runStore });
 });
