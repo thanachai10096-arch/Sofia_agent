@@ -107,6 +107,17 @@ export class WorkflowOrchestrator {
           plan = transitionWorkflowStep(plan, step.id, "ready", { now: this.now() });
           await this.dependencies.store.save(plan);
         }
+        // High-risk steps must pause before invoking the executor. A callback must
+        // not be able to accidentally omit the approval check for destructive or
+        // externally visible actions.
+        if (step.risk === "high" && !approved.has(step.id)) {
+          plan = transitionWorkflowStep(plan, step.id, "waiting_approval", {
+            now: this.now(),
+            error: "High-risk workflow step requires explicit approval.",
+          });
+          await this.dependencies.store.save(plan);
+          return this.summary(plan, true);
+        }
         plan = transitionWorkflowStep(plan, step.id, "running", { now: this.now() });
         await this.dependencies.store.save(plan);
         const result = await this.execute(plan, step.id, context.principalId, workspaceRoot, signal, approved.has(step.id));
