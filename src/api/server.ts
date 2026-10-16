@@ -148,7 +148,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const idempotency = new Map<string, string>();
   const idempotencyFingerprints = new Map<string, string>();
   const runStore = config.runStore;
-  const persist = (run: ActiveRun) => {
+  const persist = async (run: ActiveRun): Promise<void> => {
     if (!runStore) return;
     const record: RunRecord = {
       id: run.id, status: run.status,
@@ -158,7 +158,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(run.idempotencyKeyHash ? { idempotencyKeyHash: run.idempotencyKeyHash } : {}),
       ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
-    void runStore.save(record);
+    await runStore.save(record);
   };
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
@@ -182,7 +182,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     if (run.idempotencyKeyHash && run.requestFingerprint) {
       idempotency.set(run.idempotencyKeyHash, run.id);
       idempotencyFingerprints.set(run.idempotencyKeyHash, run.requestFingerprint);
-    } if (interrupted) persist(run);
+    } if (interrupted) void persist(run).catch(() => undefined);
   }
   const activeByKey = new Map<string, number>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
@@ -201,7 +201,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
-      persist(run);
+      void persist(run).catch(() => undefined);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
         const result = await agent.run({
@@ -231,7 +231,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       } finally {
         clearTimeout(timer);
         run.updatedAt = Date.now();
-        persist(run);
+        void persist(run).catch(() => undefined);
         const current = activeByKey.get(run.ownerKeyId) ?? 1;
         if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
       }
@@ -465,7 +465,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.controller.abort();
           run.status = "cancelled";
           run.updatedAt = Date.now();
-          persist(run);
+          void persist(run).catch(() => undefined);
         }
         return json(res, 200, publicResponse(run), origin, config);
       }
@@ -483,7 +483,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, principalId: auth.principalId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
         runs.set(runId, run);
-        persist(run);
+        void persist(run).catch(() => undefined);
         res.writeHead(200, {
           ...headers(origin, config),
           "content-type": "text/event-stream; charset=utf-8",
@@ -519,7 +519,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         send({ type: "done", runId });
         run.updatedAt = Date.now();
-        persist(run);
+        void persist(run).catch(() => undefined);
         clearTimeout(timer);
         res.off("close", abortOnDisconnect);
         if (!res.destroyed) return res.end();
@@ -578,10 +578,21 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(idempotencyId ? { idempotencyKeyHash: idempotencyId, requestFingerprint } : {}),
           };
           runs.set(runId, run);
-          persist(run);
           if (idempotencyId) {
             idempotency.set(idempotencyId, runId);
             idempotencyFingerprints.set(idempotencyId, requestFingerprint);
+          }
+          try {
+            // Do not acknowledge an async run until its idempotency binding and queued
+            // state are durably recorded. Otherwise a quick restart can execute a retry twice.
+            await persist(run);
+          } catch {
+            runs.delete(runId);
+            if (idempotencyId) {
+              idempotency.delete(idempotencyId);
+              idempotencyFingerprints.delete(idempotencyId);
+            }
+            return json(res, 503, { error: "run_persistence_unavailable", message: "Sofia could not safely persist this run. Retry with the same Idempotency-Key." }, origin, config);
           }
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
