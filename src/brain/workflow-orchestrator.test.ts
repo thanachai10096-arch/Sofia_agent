@@ -70,6 +70,41 @@ test("WorkflowOrchestrator pauses for approval and only continues after explicit
   }
 });
 
+test("WorkflowOrchestrator enforces high-risk approval before calling the executor", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-high-risk-"));
+  try {
+    const store = new FileWorkflowPlanStore("high-risk", root);
+    await store.save(createWorkflowPlan("high risk", [
+      { id: "publish", title: "Publish", description: "External side effect", idempotent: false, risk: "high" },
+      { id: "follow-up", title: "Follow up", description: "Must wait", idempotent: true },
+    ], { id: "high-risk-plan", ownerPrincipalId: "principal-a" }));
+    const calls: string[] = [];
+    const runner = new WorkflowOrchestrator({
+      store,
+      resolveWorkspaceRoot: async () => root,
+      executeStep: async (step, context) => {
+        calls.push(step.id + ":" + context.approved);
+        return { status: "succeeded", evidenceIds: ["result-" + step.id] };
+      },
+    });
+
+    const paused = await runner.run("high-risk-plan", { principalId: "principal-a" });
+    assert.equal(paused.pausedForApproval, true);
+    assert.equal(paused.plan.status, "waiting_approval");
+    assert.equal(paused.plan.steps[0]?.status, "waiting_approval");
+    assert.deepEqual(calls, []);
+
+    const completed = await runner.run("high-risk-plan", {
+      principalId: "principal-a",
+      approvedStepIds: ["publish"],
+    });
+    assert.equal(completed.plan.status, "completed");
+    assert.deepEqual(calls, ["publish:true", "follow-up:false"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("WorkflowOrchestrator rejects a different principal before executing steps", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-owner-"));
   try {
