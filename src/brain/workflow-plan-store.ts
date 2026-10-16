@@ -14,7 +14,11 @@ export interface WorkflowPlanStore {
   releaseRunLock?(id: string, ownerToken: string): Promise<void>;
 }
 
-// Serialize replacement of the same plan target across store instances; Windows can reject\n// overlapping rename-over-existing-target operations (EPERM).\nconst saveQueues = new Map<string, Promise<void>>();\n\nfunction key(value: string): string {
+// Serialize replacement of the same plan target across store instances; Windows can reject
+// overlapping rename-over-existing-target operations (EPERM).
+const saveQueues = new Map<string, Promise<void>>();
+
+function key(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
