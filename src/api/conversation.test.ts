@@ -139,6 +139,37 @@ test("conversation API supports async turns and reconnectable polling", async ()
 });
 
 
+test("completed async conversation turns release per-key concurrency capacity", async () => {
+  await withApi(async (baseUrl) => {
+    const createConversation = async () => {
+      const response = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+      return (await response.json() as { conversation: { id: string } }).conversation.id;
+    };
+    const firstConversation = await createConversation();
+    const first = await request(baseUrl, "test-token-a", `/v1/conversations/${firstConversation}/messages`, "POST", {
+      role: "user", content: "First async turn", async: true,
+    });
+    assert.equal(first.status, 202);
+    const accepted = await first.json() as { pollUrl: string };
+
+    let terminal = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const poll = await request(baseUrl, "test-token-a", accepted.pollUrl);
+      const status = await poll.json() as { status: string };
+      if (status.status === "completed") { terminal = true; break; }
+      if (status.status === "failed" || status.status === "cancelled") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(terminal, true);
+
+    const secondConversation = await createConversation();
+    const second = await request(baseUrl, "test-token-a", `/v1/conversations/${secondConversation}/messages`, "POST", {
+      role: "user", content: "Second async turn after completion", async: true,
+    });
+    assert.equal(second.status, 202, "a settled async turn must release its concurrency slot");
+  }, { maxConcurrentRunsPerKey: 1 });
+});
+
 test("conversation synchronous turns enforce the per-key concurrency limit without consuming a rejected turn", async () => {
   let notifyStarted!: () => void;
   const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
