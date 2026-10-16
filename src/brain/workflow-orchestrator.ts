@@ -15,7 +15,7 @@ export interface WorkflowOrchestratorDependencies {
   /** Create and verify a real rollback/checkpoint before a consequential action. */
   createCheckpoint?(plan: Readonly<WorkflowPlan>, step: Readonly<WorkflowStepRecord>): Promise<{ id: string; verified: boolean }>;
   /** Restore workspace state after a failed consequential step; this cannot undo external side effects. */
-  rollbackCheckpoint?(checkpointId: string, signal?: AbortSignal): Promise<{ restoredFiles: string[] }>;
+  rollbackCheckpoint?(checkpointId: string, step: Readonly<WorkflowStepRecord>, signal?: AbortSignal): Promise<{ restoredFiles: string[] }>;
   /** Approval must be bound to the authenticated principal and this exact workflow/step. */
   requestApproval?(plan: Readonly<WorkflowPlan>, step: Readonly<WorkflowStepRecord>, checkpointId: string): Promise<boolean>;
   /** Optional reconciliation after a process crashed while a step was running. Never assume no side effects. */
@@ -248,7 +248,7 @@ export class WorkflowOrchestrator {
         let failure = error instanceof Error ? error.message : "Workflow step failed with an unknown error";
         if (step.consequential && checkpointId && this.deps.rollbackCheckpoint) {
           try {
-            const rollback = await this.deps.rollbackCheckpoint(checkpointId, options.signal);
+            const rollback = await this.deps.rollbackCheckpoint(checkpointId, step, options.signal);
             failure = `${failure}; workspace rollback restored ${rollback.restoredFiles.length} file(s). External side effects, if any, still require reconciliation.`;
           } catch (rollbackError) {
             failure = `${failure}; workspace rollback failed: ${rollbackError instanceof Error ? rollbackError.message : "unknown rollback error"}. Inspect side effects before retrying.`;

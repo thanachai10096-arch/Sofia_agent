@@ -15,7 +15,7 @@ export function createToolGatewayWorkflowAdapter(input: {
   allowNetwork?: boolean;
 }): Pick<WorkflowOrchestratorDependencies, "executeStep" | "createCheckpoint" | "requestApproval" | "rollbackCheckpoint"> {
   return {
-    rollbackCheckpoint: async (checkpointId: string, signal?: AbortSignal) => ({
+    rollbackCheckpoint: async (checkpointId: string, _step: import("./workflow-plan.js").WorkflowStepRecord, signal?: AbortSignal) => ({
       restoredFiles: await input.gateway.rollback(checkpointId, signal ?? new AbortController().signal),
     }),
     createCheckpoint: async (_plan, _step) => {

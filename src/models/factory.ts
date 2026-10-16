@@ -86,6 +86,8 @@ function createWorkflowRuntimeFactory(
   return (principalId: string): Omit<WorkflowOrchestratorDependencies, "store"> => {
     const checkpointManager = new DurableCheckpointManager(runtime, workspace, path.join(workspace, ".sofia", "checkpoints"));
     const approvedActions = new Set<string>();
+    const rollbackGuards = new Map<string, { snapshotId: string; allowedPaths: Set<string> }>();
+    const normalizeWorkspacePath = (value: string) => path.normalize(value).replace(/\\/g, "/").replace(/^\.\//, "");
     const gateway = new RegistryToolGateway(
       { runtime, tools },
       policy,
@@ -133,6 +135,22 @@ function createWorkflowRuntimeFactory(
       ...adapter,
       executeStep: async (step, context) => {
         try {
+          if (step.consequential && step.checkpointId) {
+            const signal = context.signal ?? new AbortController().signal;
+            const baseline = await gateway.snapshot(signal);
+            const allowedPaths = new Set<string>();
+            if (typeof step.action?.input.path === "string") {
+              allowedPaths.add(normalizeWorkspacePath(step.action.input.path));
+            }
+            if (Array.isArray(step.action?.input.operations)) {
+              for (const operation of step.action.input.operations) {
+                if (operation && typeof operation === "object" && typeof (operation as { path?: unknown }).path === "string") {
+                  allowedPaths.add(normalizeWorkspacePath((operation as { path: string }).path));
+                }
+              }
+            }
+            rollbackGuards.set(step.checkpointId, { snapshotId: baseline.id, allowedPaths });
+          }
           return await adapter.executeStep(step, context);
         } finally {
           if (step.action) {
@@ -141,9 +159,20 @@ function createWorkflowRuntimeFactory(
         }
       },
       ...(requestApproval ? { requestApproval } : {}),
-      rollbackCheckpoint: async (checkpointId: string, signal?: AbortSignal) => ({
-        restoredFiles: await gateway.rollback(checkpointId, signal ?? new AbortController().signal),
-      }),
+      rollbackCheckpoint: async (checkpointId: string, step: import("../brain/workflow-plan.js").WorkflowStepRecord, signal?: AbortSignal) => {
+        const guard = rollbackGuards.get(checkpointId);
+        if (!guard) throw new Error("Rollback blocked because no pre-action workspace baseline is available.");
+        try {
+          const changed = await gateway.changedFiles(guard.snapshotId, signal ?? new AbortController().signal);
+          const unexpected = changed.map(normalizeWorkspacePath).filter((file) => !guard.allowedPaths.has(file));
+          if (unexpected.length) {
+            throw new Error(`Rollback blocked because workspace changes outside the failed action were detected: ${unexpected.slice(0, 10).join(", ")}`);
+          }
+          return { restoredFiles: await gateway.rollback(checkpointId, signal ?? new AbortController().signal) };
+        } finally {
+          rollbackGuards.delete(checkpointId);
+        }
+      },
       // No durable tool-result journal exists yet. A crash during a tool call is ambiguous,
       // so never infer success or automatically replay it.
       reconcileInterruptedStep: async () => "unknown" as const,
