@@ -25,6 +25,21 @@ test("mobile async start returns a durable run ID and sends async=true", async (
   assert.deepEqual(JSON.parse(String(request?.body)), { task: "inspect the project", async: true });
 });
 
+test("mobile async start forwards an idempotency key for safe retries", async () => {
+  let request: RequestInit | undefined;
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (_input, init) => {
+      request = init;
+      return response(202, { id: "run-safe", status: "queued" });
+    },
+  });
+  await client.start({ task: "continue safely" }, undefined, "mobile-retry-key");
+  assert.equal((request?.headers as Record<string, string>)["idempotency-key"], "mobile-retry-key");
+  await assert.rejects(client.start({ task: "bad key" }, undefined, "bad\\nkey"), /Idempotency key/);
+});
+
 test("mobile polling retries transient server errors with bounded backoff", async () => {
   let calls = 0;
   const client = new SofiaClient({

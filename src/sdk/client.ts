@@ -166,10 +166,17 @@ export class SofiaClient {
     }, signal);
   }
 
-  /** Starts a durable async run so a mobile client can reconnect and poll by ID. */
-  async start(input: SofiaRunInput, signal?: AbortSignal): Promise<SofiaRunResponse> {
+  /** Starts an async run. Pass the same idempotency key when retrying after a network interruption. */
+  async start(input: SofiaRunInput, signal?: AbortSignal, idempotencyKey?: string): Promise<SofiaRunResponse> {
+    const headers = this.headers();
+    if (idempotencyKey !== undefined) {
+      if (!idempotencyKey.trim() || idempotencyKey.length > 128 || /[\\x00-\\x1f\\x7f]/.test(idempotencyKey)) {
+        throw new Error("Idempotency key must contain 1–128 characters and no control characters.");
+      }
+      headers["idempotency-key"] = idempotencyKey.trim();
+    }
     return this.request<SofiaRunResponse>("/v1/agent/runs", {
-      method: "POST", headers: this.headers(), body: JSON.stringify({ ...input, async: true }),
+      method: "POST", headers, body: JSON.stringify({ ...input, async: true }),
     }, signal);
   }
 
