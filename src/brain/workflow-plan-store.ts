@@ -20,6 +20,8 @@ export interface WorkflowStepRecord {
   lastError?: string;
 }
 export interface WorkflowPlan {
+  /** Host-authenticated owner. Plans without an owner cannot be executed by WorkflowOrchestrator. */
+  ownerPrincipalId?: string;
   id: string;
   title: string;
   createdAt: string;
