@@ -6,7 +6,7 @@
 2. The adapter combines the existing legacy repair catalog with matching built-in policies from `src/brain/skill-policy-v1.ts`; it bounds input length and candidate count and keeps legacy IDs working.
 3. `compactSkillContext` sends procedures, preconditions, verification obligations, recovery guidance, risk labels, capability/permission names, and compatibility metadata to the planner as untrusted guidance.
 4. The planner's proposed tool calls still pass through the existing `ToolGateway` and its registered tool policies, workspace/sandbox checks, approval requirements, and Brain-wide execution/token/deadline budgets. Skill metadata does not authorize actions.
-5. `runVerification` carries structured project-check results and assertion metrics into the Brain. `finishAttempt` only emits verified success when the exact in-memory attempt receives a matching terminal observation and all required checks have acceptable evidence.
+5. `runVerification` carries structured project-check results, assertion metrics, and test-runner counts into the Brain. The repository test runner emits Node TAP summaries; `project.verify` parses only complete, consistent summaries, and `finishAttempt` accepts them only when there are passed tests and no failures, skips, cancellations, or TODO tests. Missing metrics remain unverified.
 6. `EvolutionEngine` receives success credit only for verified policy skills; failure handling remains scoped to the skill that informed the failed repair. Evolution persistence is bounded and sanitized before it affects ranking.
 
 ## Components incorporated
@@ -18,7 +18,7 @@
 | Matching | `selectSkills` plus compatibility adapter `matchSkills` | Integrated; old skills remain available |
 | Action policy / execution boundary | Existing `SofiaBrain`, `ToolGateway`, registered tool policies and approval checks | Reuses existing runtime boundary; no second parallel dispatcher is introduced |
 | Outcome history | `finishAttempt`, `boundedHistory`, `EvolutionEngine` | In-memory Skill Policy outcomes require private object identity; durable ranking uses EvolutionEngine |
-| Verification | `src/brain/verification.ts` and `finishAttempt` | Structured project-check evidence is propagated; missing metrics remain missing |
+| Verification | `src/brain/verification.ts`, `src/brain/test-summary.ts`, and `finishAttempt` | Structured project-check evidence and TAP counts are propagated; incomplete/malformed summaries remain unverified |
 | External/learned skills | `inspectExternalSkill`, `assessLearnedSkill`, safe legacy-ledger validation | Quarantined or rejected; never promoted to built-in trust by self-asserted metadata |
 
 ## Security invariants
