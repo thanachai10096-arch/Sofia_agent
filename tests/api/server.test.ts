@@ -190,7 +190,7 @@ test("public API errors redact provider secrets from sync responses and async ru
   const syncBody = await sync.text();
   assert.equal(syncBody.includes("sk-live-secret"), false);
   assert.equal(syncBody.includes("/srv/private/customer.env"), false);
-  assert.match(syncBody, /Agent execution failed\\./);
+  assert.ok(syncBody.includes("Agent execution failed."));
 
   const accepted = await fetch(url + "/v1/agent/runs", {
     method: "POST", headers, body: JSON.stringify({ task: "trigger async provider failure", async: true }),
@@ -206,7 +206,7 @@ test("public API errors redact provider secrets from sync responses and async ru
     if (body.includes('"status":"failed"')) break;
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
-  assert.match(body, /Agent execution failed\\./);
+  assert.ok(body.includes("Agent execution failed."));
   assert.equal(body.includes("sk-live-secret"), false);
   assert.equal(body.includes("/srv/private/customer.env"), false);
 });
