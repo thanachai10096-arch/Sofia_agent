@@ -19,6 +19,9 @@ interface ActiveRun {
   updatedAt: number;
   ownerKeyId: string;
   desktopCapabilities: DesktopCapability[];
+  /** Hashed owner-scoped idempotency key; the raw client key is never persisted. */
+  idempotencyId?: string;
+  requestFingerprint?: string;
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -129,6 +132,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
       ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
       ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+      ...(run.idempotencyId ? { idempotencyId: run.idempotencyId } : {}),
+      ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
     void runStore.save(record);
   };
@@ -146,10 +151,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       controller: new AbortController(), createdAt: record.createdAt,
       updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
       desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+      ...(record.idempotencyId ? { idempotencyId: record.idempotencyId } : {}),
+      ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
     };
     runs.set(run.id, run); if (interrupted) persist(run);
   }
   const idempotency = new Map<string, { runId: string; fingerprint: string }>();
+  // Rehydrate replay protection from durable run records after a server restart.
+  for (const run of runs.values()) {
+    if (run.idempotencyId && run.requestFingerprint) {
+      idempotency.set(run.idempotencyId, { runId: run.id, fingerprint: run.requestFingerprint });
+    }
+  }
   const activeByKey = new Map<string, number>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
@@ -387,7 +400,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (idempotencyKey && (idempotencyKey.length > 128 || /[\x00-\x1f\x7f]/.test(idempotencyKey))) {
             return json(res, 400, { error: "invalid_idempotency_key" }, origin, config);
           }
-          const idempotencyId = idempotencyKey ? `${auth.keyId}:${idempotencyKey}` : undefined;
+          // Hash the owner-scoped key so raw idempotency tokens never reach disk.
+          const idempotencyId = idempotencyKey
+            ? createHash("sha256").update(auth.keyId).update(":").update(idempotencyKey).digest("hex")
+            : undefined;
           const requestFingerprint = idempotencyFingerprint({
             task: input.task,
             ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
@@ -422,6 +438,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             updatedAt: Date.now(),
             ownerKeyId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            ...(idempotencyId ? { idempotencyId, requestFingerprint } : {}),
           };
           runs.set(runId, run);
           persist(run);
