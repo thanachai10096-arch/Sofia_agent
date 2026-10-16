@@ -303,7 +303,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (isWorkflowRoute) {
         const workflowRuntime = config.workflowRuntime ?? deps.workflowRuntime;
         if (!workflowRuntime) return json(res, 503, { error: "workflow_runtime_unavailable" }, origin, config);
-        const workflowStore = new FileWorkflowPlanStore(auth.principalId, config.workflowStateRoot ?? deps.workflowStateRoot);
+        const workflowNamespace = deps.workflowNamespace ? `${deps.workflowNamespace}:${auth.principalId}` : auth.principalId;
+        const workflowStore = new FileWorkflowPlanStore(workflowNamespace, config.workflowStateRoot ?? deps.workflowStateRoot);
         // Runtime dependencies are constructed from the authenticated principal, never request-supplied identity.
         const workflow = new WorkflowOrchestrator({
           store: workflowStore,

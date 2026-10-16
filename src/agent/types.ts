@@ -49,5 +49,6 @@ export interface AgentDependencies {
  userMemory?: UserMemoryStore;
  workflowRuntime?: (principalId: string) => Omit<WorkflowOrchestratorDependencies, "store">;
  workflowStateRoot?: string;
+ workflowNamespace?: string;
 }
 export type { ToolCall };

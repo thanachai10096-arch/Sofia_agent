@@ -26,6 +26,7 @@ import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-
 import { FileUserMemoryStore } from "../brain/user-memory.js";
 import { EvolutionEngine } from "../brain/evolution.js";
 import path from "node:path";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
 import { EncryptedFileAudit } from "../security/persistent-audit.js";
@@ -219,5 +220,5 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,userMemory});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const workflowRuntime=createWorkflowRuntimeFactory(workspace,runtime,tools,policy,approval,security,audit);
-  return{workflowRuntime,workflowStateRoot:path.join(workspace,".sofia","workflows"),router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,learningDiagnostics:()=>evolution.getDiagnostics(),userMemory};
+  return{workflowRuntime,workflowStateRoot:sofiaStateDirectory("workflows"),workflowNamespace:path.resolve(workspace),router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,learningDiagnostics:()=>evolution.getDiagnostics(),userMemory};
 }
