@@ -13,5 +13,7 @@ function canonicalize(value: unknown): unknown {
 }
 
 export function idempotencyFingerprint(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
+  const serialized = JSON.stringify(canonicalize(value));
+  if (serialized === undefined) throw new Error("Cannot fingerprint an undefined request.");
+  return createHash("sha256").update(serialized).digest("hex");
 }
