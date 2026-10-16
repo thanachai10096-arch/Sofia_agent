@@ -522,6 +522,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
                 }
               } finally {
                 activeConversationTurns.delete(conversationTurnKey);
+                // Release the per-key slot when the async turn settles. Without
+                // this, completed/failed/cancelled conversation runs permanently
+                // consume concurrency capacity until the server restarts.
+                const current = activeByKey.get(auth.keyId) ?? 1;
+                if (current <= 1) activeByKey.delete(auth.keyId);
+                else activeByKey.set(auth.keyId, current - 1);
               }
             });
             return json(res, 202, {
