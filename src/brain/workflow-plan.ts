@@ -126,7 +126,7 @@ export function transitionWorkflowStep(
   if (!STEP_STATUSES.has(next)) throw new Error("Invalid workflow step status.");
   const allowed: Record<WorkflowStepStatus, readonly WorkflowStepStatus[]> = {
     pending: ["ready", "cancelled", "skipped"],
-    ready: ["running", "cancelled", "skipped"],
+    ready: ["running", "waiting_approval", "cancelled", "skipped"],
     running: ["waiting_approval", "succeeded", "failed", "cancelled"],
     waiting_approval: ["running", "cancelled", "failed"],
     succeeded: [],
