@@ -44,7 +44,7 @@ function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if
 
 function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;userMemory:FileUserMemoryStore}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=config.routes.map(route=>createInternalRoute({modelProvider:provider,route}));
-  const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace,path.join(workspace,".sofia","checkpoints"));
+  const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
   const userMemory=dependencies.userMemory;
@@ -85,9 +85,9 @@ function createWorkflowRuntimeFactory(
   audit: import("../security/audit.js").SecurityAuditSink,
 ): NonNullable<AgentDependencies["workflowRuntime"]> {
   return (principalId: string): Omit<WorkflowOrchestratorDependencies, "store"> => {
-    const checkpointManager = new DurableCheckpointManager(runtime, workspace, path.join(workspace, ".sofia", "checkpoints"));
+    const checkpointManager = new DurableCheckpointManager(runtime, workspace);
     const approvedActions = new Set<string>();
-    const executionJournal = new FileWorkflowExecutionJournal(principalId, path.join(workspace, ".sofia", "workflow-journal"));
+    const executionJournal = new FileWorkflowExecutionJournal(`${path.resolve(workspace)}:${principalId}`);
     const rollbackGuards = new Map<string, { snapshotId: string; allowedPaths: Set<string> }>();
     const normalizeWorkspacePath = (value: string) => path.normalize(value).replace(/\\/g, "/").replace(/^\.\//, "");
     const gateway = new RegistryToolGateway(
