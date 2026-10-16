@@ -38,7 +38,7 @@ export class WorkflowOrchestrator {
 
   async run(
     planId: string,
-    context: { principalId: string; workspaceRoot: string; signal?: AbortSignal; approvedStepIds?: readonly string[] },
+    context: { principalId: string; workspaceRoot: string; signal?: AbortSignal; approvedStepIds?: readonly string[]; timeoutMs?: number },
   ): Promise<WorkflowExecutionSummary> {
     if (typeof context.principalId !== "string" || !context.principalId.trim() || context.principalId.length > 256) {
       throw new Error("Authenticated workflow principal is required.");
