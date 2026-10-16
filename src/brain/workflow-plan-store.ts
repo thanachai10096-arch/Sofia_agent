@@ -61,7 +61,7 @@ function isWorkflowPlan(value: unknown): value is WorkflowPlan {
   const ids = new Set<string>();
   for (const raw of plan.steps) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
-    const step = raw as Record<string, unknown>;
+    const step = raw as unknown as Record<string, unknown>;
     if (typeof step.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(step.id) ||
         ids.has(step.id) || typeof step.title !== "string" || typeof step.description !== "string" ||
         typeof step.idempotent !== "boolean" || !Array.isArray(step.dependsOn) ||
