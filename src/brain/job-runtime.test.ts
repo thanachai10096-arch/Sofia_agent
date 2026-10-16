@@ -253,7 +253,7 @@ test("DurableJobRuntime rejects resume for a cancelled job even when a checkpoin
     },
   } as unknown as SofiaBrain;
   const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
-    run: async (input: { signal?: AbortSignal }) => {
+    run: async (input: Parameters<SofiaBrain["run"]>[0]) => {
       await onRunSnapshot?.(snapshot);
       return brain.run(input);
     },
