@@ -56,7 +56,7 @@ export class RegistryToolGateway implements ToolGateway {
     if(!this.policy.allowTools)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution is disabled by policy."}};
     const permission=toolPermission(this.policy,call.tool,descriptor.effects);
     if(permission.allow===false)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:`Tool execution is disabled by policy: ${call.tool}`}};
-    const assessment=assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:redactSecrets(input),effects:descriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts);
+    const assessment=assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input,effects:descriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts);
     if(!assessment.allowed){
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:assessment.reason,input:redactSecrets(input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:assessment.reason??"Security policy denied the action."}};
