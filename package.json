@@ -11,9 +11,10 @@
     "license:check": "node scripts/check-license.mjs",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/run-tests.mjs",
+    "test": "node --check scripts/audit-code-provenance.mjs && node scripts/run-tests.mjs",
     "cli": "tsx src/cli/index.ts",
-    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs"
+    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs",
+    "provenance:report": "node scripts/audit-code-provenance.mjs"
   },
   "engines": {
     "node": ">=20"

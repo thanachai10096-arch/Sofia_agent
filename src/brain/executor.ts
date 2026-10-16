@@ -1,3 +1,4 @@
+// Modified for Sofia Agents Skill Engine integration on 2026-10-13; provenance notes: docs/engineering/CODE_PROVENANCE_AUDIT.md.
 import { fenceUntrustedOutput } from "../security/untrusted.js";
 import { randomUUID } from "node:crypto";
 
@@ -11,7 +12,9 @@ import {
 
 import { runVerification } from "./verification.js";
 import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
-import { compactSkillContext, matchSkills } from "./skills.js";
+import { compactSkillContext, matchSkills, taskTypeForFailure } from "./skills.js";
+import { BUILTIN_SKILLS as POLICY_SKILLS, finishAttempt, prepareAttempt } from "./skill-policy-v1.js";
+import type { SkillAttempt, TaskType as PolicyTaskType } from "./skill-policy-v1.js";
 import type { SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
@@ -247,7 +250,9 @@ export class SofiaBrain {
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
   private readonly selectedSkillIds = new Set<string>();
+  private readonly verifiedPolicySkillIds = new Set<string>();
   private activeSkillId?: string;
+  private activePolicyAttempt?: SkillAttempt;
 
   constructor(
     private readonly dependencies: Dependencies,
@@ -740,7 +745,7 @@ export class SofiaBrain {
       count: this.usage.replans,
     });
 
-    const taskType = understanding.requiredCapabilities[0] ?? "general";
+    const taskType = taskTypeForFailure(diagnosis.category, diagnosis.message);
     let skills = matchSkills(diagnosis.category, diagnosis.message, 5, this.dependencies.skillLedger);
     if (this.dependencies.evolution) {
       const ranking = new Map(this.dependencies.evolution.rank(skills.map(skill => skill.id), taskType).map(item => [item.id, item.score]));
@@ -749,6 +754,15 @@ export class SofiaBrain {
     if (skills[0]) {
       this.selectedSkillIds.add(skills[0].id);
       this.activeSkillId = skills[0].id;
+      const policySkill = POLICY_SKILLS.find((skill) => skill.id === skills[0]!.id);
+      this.activePolicyAttempt = policySkill
+        ? prepareAttempt(
+            policySkill.id,
+            taskType,
+            this.runId,
+            [],
+          )
+        : undefined;
     }
     const value = await this.infer("replan", {
       task,
@@ -772,6 +786,59 @@ export class SofiaBrain {
     }
 
     return plan;
+  }
+
+  private finishActivePolicyAttempt(
+    verification: VerificationResult[],
+    reviewApproved: boolean,
+  ): void {
+    const attempt = this.activePolicyAttempt;
+    if (!attempt) return;
+
+    const checks: Array<Record<string, unknown>> = [];
+    for (const result of verification) {
+      const match = /^project-(typecheck|test|build)$/.exec(result.criterionId);
+      if (!match || !result.passed || !result.evidenceIds.some((id) => typeof id === "string" && id.length > 0) ||
+          typeof result.workspaceRevision !== "string" || result.workspaceRevision.length === 0) {
+        continue;
+      }
+      const check = match[1] === "test" ? "tests" : match[1];
+      const evidence: Record<string, unknown> = {
+        check,
+        state: result.passed ? "passed" : "failed",
+        completed: true,
+        postconditionObserved: result.passed,
+      };
+      if (result.exitCode !== undefined) evidence.exitCode = result.exitCode;
+      if (result.checksPassed !== undefined) evidence.checksPassed = result.checksPassed;
+      if (result.assertionsPassed !== undefined) evidence.assertionsPassed = result.assertionsPassed;
+      if (result.assertionsTotal !== undefined) evidence.assertionsTotal = result.assertionsTotal;
+      if (result.failedAssertions !== undefined) evidence.failedAssertions = result.failedAssertions;
+      if (result.skippedAssertions !== undefined) evidence.skippedAssertions = result.skippedAssertions;
+      if (result.testsTotal !== undefined) evidence.testsTotal = result.testsTotal;
+      if (result.passedTests !== undefined) evidence.passedTests = result.passedTests;
+      if (result.failedTests !== undefined) evidence.failedTests = result.failedTests;
+      if (result.skippedTests !== undefined) evidence.skippedTests = result.skippedTests;
+      if (result.cancelledTests !== undefined) evidence.cancelledTests = result.cancelledTests;
+      if (result.todoTests !== undefined) evidence.todoTests = result.todoTests;
+      checks.push(evidence);
+    }
+    if (reviewApproved) {
+      checks.push({ check: "change-review", state: "passed", completed: true, postconditionObserved: true });
+      if (verification.length > 0 && verification.every((result) => result.passed)) {
+        checks.push({ check: "completion", state: "passed", completed: true, postconditionObserved: true });
+      }
+    }
+
+    const outcome = finishAttempt(attempt, {
+      runId: this.runId,
+      state: "succeeded",
+      checks,
+    });
+    if (outcome?.result === "verified-success") {
+      this.verifiedPolicySkillIds.add(outcome.skillId);
+    }
+    this.activePolicyAttempt = undefined;
   }
 
   private report(
@@ -1008,6 +1075,7 @@ export class SofiaBrain {
               );
             }
 
+            this.finishActivePolicyAttempt(verification, review.approved);
             this.move("completed");
             completed = true;
             break;
@@ -1025,6 +1093,17 @@ export class SofiaBrain {
 
           this.move("diagnosing");
           const diagnosis = this.diagnose(error);
+          if (this.activePolicyAttempt && this.activePolicyAttempt.skillId === this.activeSkillId) {
+            finishAttempt(this.activePolicyAttempt, {
+              runId: this.runId,
+              state: "failed",
+              checks: [],
+            });
+            // A later failed attempt invalidates an earlier success credit for this
+            // skill in the same run; the final learning gate must reflect the last outcome.
+            this.verifiedPolicySkillIds.delete(this.activeSkillId);
+            this.activePolicyAttempt = undefined;
+          }
           if (this.dependencies.evolution && this.activeSkillId) {
             // Penalize only the skill that actually informed the previous repair plan,
             // never every candidate that merely matched the error text. A failed skill
@@ -1032,7 +1111,7 @@ export class SofiaBrain {
             this.dependencies.evolution.recordFailure(
               this.activeSkillId,
               diagnosis.message,
-              understanding?.requiredCapabilities[0] ?? "general",
+              taskTypeForFailure(diagnosis.category, diagnosis.message),
             );
             this.selectedSkillIds.delete(this.activeSkillId);
             this.activeSkillId = undefined;
@@ -1111,10 +1190,22 @@ export class SofiaBrain {
 
       this.emit({ type: "brain.coding.loop.completed", count: codingIteration, passed: true });
       if (this.dependencies.evolution) {
-        const taskType = understanding.requiredCapabilities[0] ?? "general";
+        const eligibleSkillIds = [...this.selectedSkillIds].filter(
+          (skillId) => !skillId.startsWith("sofia.v1.") || this.verifiedPolicySkillIds.has(skillId),
+        );
+        const firstPolicyTaskType = eligibleSkillIds
+          .map((skillId) => POLICY_SKILLS.find((skill) => skill.id === skillId)?.taskTypes[0])
+          .find((value): value is PolicyTaskType => value !== undefined);
+        const taskType = firstPolicyTaskType ?? "coding";
         // This block is reachable only after trusted verification and code review pass.
-        for (const skillId of this.selectedSkillIds) {
-          this.dependencies.evolution.recordSuccess(skillId, this.usage.steps, recoveryRounds, taskType);
+        for (const skillId of eligibleSkillIds) {
+          const policyTask = POLICY_SKILLS.find((skill) => skill.id === skillId);
+          this.dependencies.evolution.recordSuccess(
+            skillId,
+            this.usage.steps,
+            recoveryRounds,
+            policyTask?.taskTypes[0] ?? taskType,
+          );
         }
         this.dependencies.evolution.recordRun(taskType, true);
       }

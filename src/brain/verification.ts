@@ -1,3 +1,4 @@
+// Modified for Sofia Agents Skill Engine integration on 2026-10-13; provenance notes: docs/engineering/CODE_PROVENANCE_AUDIT.md.
 import type { AcceptanceCriterion, ToolGateway, VerificationResult } from "./types.js";
 
 export type VerificationKind = "typecheck" | "test" | "build";
@@ -45,13 +46,32 @@ export async function runVerification(
     });
 
     const evaluated = criterion.evaluate(result.data);
-    results.push({
+    const data = result.data && typeof result.data === "object" && !Array.isArray(result.data)
+      ? result.data as Record<string, unknown>
+      : undefined;
+    const exitCode = Number.isSafeInteger(data?.code) ? Number(data?.code) : undefined;
+    const count = (key: string): number | undefined =>
+      Number.isSafeInteger(data?.[key]) && Number(data?.[key]) >= 0 ? Number(data?.[key]) : undefined;
+    const verificationResult: VerificationResult = {
       criterionId: criterion.id,
       passed: result.ok && evaluated.passed,
       detail: result.ok ? evaluated.detail : result.error?.message ?? "Verification tool failed",
       evidenceIds: [result.evidenceId],
       workspaceRevision: snapshot.revision,
-    });
+      ...(exitCode !== undefined ? { exitCode } : {}),
+      ...(typeof data?.passed === "boolean" ? { checksPassed: data.passed } : {}),
+      ...(typeof data?.assertionsPassed === "boolean" ? { assertionsPassed: data.assertionsPassed } : {}),
+      ...(count("assertionsTotal") !== undefined ? { assertionsTotal: count("assertionsTotal") } : {}),
+      ...(count("failedAssertions") !== undefined ? { failedAssertions: count("failedAssertions") } : {}),
+      ...(count("skippedAssertions") !== undefined ? { skippedAssertions: count("skippedAssertions") } : {}),
+      ...(count("testsTotal") !== undefined ? { testsTotal: count("testsTotal") } : {}),
+      ...(count("passedTests") !== undefined ? { passedTests: count("passedTests") } : {}),
+      ...(count("failedTests") !== undefined ? { failedTests: count("failedTests") } : {}),
+      ...(count("skippedTests") !== undefined ? { skippedTests: count("skippedTests") } : {}),
+      ...(count("cancelledTests") !== undefined ? { cancelledTests: count("cancelledTests") } : {}),
+      ...(count("todoTests") !== undefined ? { todoTests: count("todoTests") } : {}),
+    };
+    results.push(verificationResult);
 
     if (!result.ok || !evaluated.passed) break;
   }

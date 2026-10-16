@@ -32,10 +32,14 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
-const result = spawnSync(process.execPath, [tsxCli, "--test", ...files], {
+// Use Node's TAP reporter so trusted project.verify calls can consume an explicit,
+ // machine-readable test summary rather than infer success from prose.
+const result = spawnSync(process.execPath, ["--import", "tsx", "--test", "--test-reporter=tap", ...files], {
   cwd: root,
-  stdio: "inherit",
+  encoding: "utf8",
+  maxBuffer: 64 * 1024 * 1024,
 });
 if (result.error) throw result.error;
+if (result.stdout) process.stdout.write(result.stdout);
+if (result.stderr) process.stderr.write(result.stderr);
 process.exit(result.status ?? 1);

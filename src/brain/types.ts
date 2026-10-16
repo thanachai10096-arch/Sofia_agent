@@ -1,3 +1,4 @@
+// Modified for Sofia Agents Skill Engine integration on 2026-10-13; provenance notes: docs/engineering/CODE_PROVENANCE_AUDIT.md.
 export type BrainState =
   | "idle"
   | "understanding"
@@ -127,6 +128,20 @@ export interface VerificationResult {
   detail: string;
   evidenceIds: string[];
   workspaceRevision: string;
+  /** Structured fields copied only from the trusted project.verify result. */
+  exitCode?: number;
+  checksPassed?: boolean;
+  assertionsPassed?: boolean;
+  assertionsTotal?: number;
+  failedAssertions?: number;
+  skippedAssertions?: number;
+  /** Counts parsed from the trusted Node TAP test-runner summary. */
+  testsTotal?: number;
+  passedTests?: number;
+  failedTests?: number;
+  skippedTests?: number;
+  cancelledTests?: number;
+  todoTests?: number;
 }
 
 export interface Diagnosis {
