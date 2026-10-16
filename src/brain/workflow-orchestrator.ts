@@ -74,6 +74,10 @@ export class WorkflowOrchestrator {
         plan = result.plan;
         if (result.paused) return this.summary(plan, true);
       }
+      // Never advance unrelated work while any step is awaiting a human/host decision.
+      if (plan.steps.some(step => step.status === "waiting_approval")) {
+        return this.summary(plan, true);
+      }
 
       while (true) {
         if (signal.aborted) {
