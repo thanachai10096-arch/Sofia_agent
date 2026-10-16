@@ -91,3 +91,44 @@ test("FileWorkflowPlanStore serializes concurrent writes across store instances"
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("workflow plan factory rejects cycles and unknown dependencies", async () => {
+  const { createWorkflowPlan } = await import("./workflow-plan.js");
+  assert.throws(() => createWorkflowPlan("cycle", [
+    { id: "a", title: "A", description: "", idempotent: true, dependsOn: ["b"] },
+    { id: "b", title: "B", description: "", idempotent: true, dependsOn: ["a"] },
+  ]), /cycles/);
+  assert.throws(() => createWorkflowPlan("unknown", [
+    { id: "a", title: "A", description: "", idempotent: true, dependsOn: ["missing"] },
+  ]), /unknown step/);
+});
+
+test("workflow step lifecycle enforces dependencies and only retries safe transient failures", async () => {
+  const {
+    createWorkflowPlan,
+    readyWorkflowSteps,
+    transitionWorkflowStep,
+    assessWorkflowRetry,
+  } = await import("./workflow-plan.js");
+  let plan = createWorkflowPlan("lifecycle", [
+    { id: "inspect", title: "Inspect", description: "Read evidence", idempotent: true, maxAttempts: 2 },
+    { id: "change", title: "Change", description: "Apply a change", idempotent: false, dependsOn: ["inspect"] },
+  ], { id: "lifecycle-plan", now: "2026-10-16T00:00:00.000Z" });
+  assert.deepEqual(readyWorkflowSteps(plan).map(step => step.id), ["inspect"]);
+  assert.throws(() => transitionWorkflowStep(plan, "change", "running"), /dependencies/);
+  plan = transitionWorkflowStep(plan, "inspect", "running", { now: "2026-10-16T00:00:01.000Z" });
+  plan = transitionWorkflowStep(plan, "inspect", "failed", { now: "2026-10-16T00:00:02.000Z", error: "temporary issue" });
+  const failed = plan.steps.find(step => step.id === "inspect")!;
+  assert.equal(assessWorkflowRetry(failed, true).retry, true);
+  plan = transitionWorkflowStep(plan, "inspect", "ready", { now: "2026-10-16T00:00:03.000Z" });
+  plan = transitionWorkflowStep(plan, "inspect", "running", { now: "2026-10-16T00:00:04.000Z" });
+  plan = transitionWorkflowStep(plan, "inspect", "succeeded", {
+    now: "2026-10-16T00:00:05.000Z",
+    evidenceIds: ["evidence-1"],
+  });
+  assert.deepEqual(readyWorkflowSteps(plan).map(step => step.id), ["change"]);
+  assert.equal(plan.steps[0]?.evidenceIds[0], "evidence-1");
+  const change = plan.steps.find(step => step.id === "change")!;
+  assert.equal(assessWorkflowRetry({ ...change, status: "failed" }, true).retry, false);
+});
