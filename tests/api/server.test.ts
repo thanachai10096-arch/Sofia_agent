@@ -286,3 +286,48 @@ test("synchronous runs share the per-key concurrency limit with async runs", asy
   }
   assert.equal(status, "completed");
 });
+
+
+test("public API errors do not expose provider secrets or local paths", async (t) => {
+  const sensitiveError = new Error("provider failed token=sk-live-secret /srv/private/customer.env");
+  const provider: ModelProvider = {
+    async generate() { throw sensitiveError; },
+  };
+  const { server, url } = await startApi(provider);
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+
+  const headers = {
+    authorization: "Bearer test-token",
+    "content-type": "application/json",
+  };
+  const sync = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ task: "trigger provider failure" }),
+  });
+  assert.equal(sync.status, 502);
+  const syncBody = await sync.text();
+  assert.equal(syncBody.includes("sk-live-secret"), false);
+  assert.equal(syncBody.includes("/srv/private/customer.env"), false);
+  assert.match(syncBody, /Agent execution failed\./);
+
+  const accepted = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ task: "trigger async provider failure", async: true }),
+  });
+  assert.equal(accepted.status, 202);
+  const { id } = await accepted.json() as { id: string };
+  let responseBody = "";
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const response = await fetch(url + "/v1/agent/runs/" + id, {
+      headers: { authorization: "Bearer test-token" },
+    });
+    responseBody = await response.text();
+    if (responseBody.includes('"status":"failed"')) break;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  assert.match(responseBody, /Agent execution failed\./);
+  assert.equal(responseBody.includes("sk-live-secret"), false);
+  assert.equal(responseBody.includes("/srv/private/customer.env"), false);
+});
