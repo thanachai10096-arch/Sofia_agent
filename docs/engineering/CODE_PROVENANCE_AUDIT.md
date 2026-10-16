@@ -4,7 +4,7 @@
 
 This is an evidence log, not a legal opinion or a blanket claim that the repository is copyright-clean.
 
-- Repository-declared license: Apache-2.0 (`package.json` and `LICENSE`).
+- The current `main` branch declares MIT in `package.json`; this integration branch changes the declaration and `LICENSE` text to Apache-2.0. This is a material license change, not merely a metadata cleanup. The repository owner must explicitly confirm the intended license before merge, and all retained third-party code/notices must be assessed independently.
 - Existing `scripts/check-license.mjs` verifies only the package license field and the presence of the Apache-2.0 license text. It does **not** establish the origin or license compatibility of individual source lines.
 - The Skill Policy v1 code was present in draft PR #92 before this integration branch. The repository history proves when it entered this repository, but does not by itself prove whether every line was independently authored or derived from a third-party source.
 - Do not treat renaming identifiers, changing formatting, or rewriting comments as a cure for copied expression.
@@ -55,4 +55,4 @@ This report is an audit aid, not a copyright detector. Git blame cannot establis
 
 ## Current limitation
 
-This pass does **not** certify every line in the entire repository as original or legally compatible. The available GitHub file and commit views are sufficient to inspect the changed Skill Engine area, but a complete line-by-line audit needs the exact release tree, full history/blame data, source comparison, dependency/license review, and provenance attestations. Any final release claim must wait for that evidence.
+This pass does **not** certify every line in the entire repository as original or legally compatible. The available GitHub file and commit views are sufficient to inspect the changed Skill Engine area, but a complete line-by-line audit needs the exact release tree, full history/blame data, source comparison, dependency/license review, and provenance attestations. Any final release claim must wait for that evidence. The MIT-to-Apache-2.0 license change also requires explicit owner confirmation before merge.
