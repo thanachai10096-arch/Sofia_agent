@@ -20,7 +20,7 @@ test("async idempotency binding survives an API restart when run persistence is 
     await close(firstServer);
     firstServer = undefined;
 
-    secondServer = createSofiaApi(dependencies(provider), {
+    secondServer = createSofiaApi({} as AgentDependencies, {
       apiKeys: { "test-token": ["agent:run"] }, runStore: new FileRunRecordStore(directory), requestTimeoutMs: 5000,
     });
     const secondUrl = await listen(secondServer);
