@@ -340,6 +340,7 @@ test("tool gateway redacts secrets from tool output, errors, and audit records",
         return {
           apiKey: "sk-live-secret-value",
           message: "Authorization: Bearer abcdef123456",
+          freeText: "accidental unlabelled key sk-live-secret-value",
           nested: { password: "hunter2" },
         };
       },
@@ -374,6 +375,7 @@ test("tool gateway redacts secrets from tool output, errors, and audit records",
   assert.equal(success.ok, true);
   const serialized = JSON.stringify(success.data);
   assert.equal(serialized.includes("sk-live-secret-value"), false);
+  assert.equal(serialized.includes("unlabelled key [REDACTED]"), true);
   assert.equal(serialized.includes("abcdef123456"), false);
   assert.equal(serialized.includes("hunter2"), false);
 
