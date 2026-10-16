@@ -1,0 +1,119 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { createWorkflowPlan } from "./workflow-plan.js";
+import { WorkflowOrchestrator } from "./workflow-orchestrator.js";
+import { FileWorkflowPlanStore } from "./workflow-plan-store.js";
+
+test("WorkflowOrchestrator persists dependency-ordered results and evidence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-"));
+  try {
+    const store = new FileWorkflowPlanStore("runner", root);
+    const plan = createWorkflowPlan("ordered", [
+      { id: "inspect", title: "Inspect", description: "Gather evidence", idempotent: true },
+      { id: "change", title: "Change", description: "Apply approved change", idempotent: false, dependsOn: ["inspect"] },
+    ], { id: "ordered-plan", ownerPrincipalId: "principal-a" });
+    await store.save(plan);
+    const executionOrder: string[] = [];
+    const runner = new WorkflowOrchestrator({
+      store,
+      executeStep: async (step) => {
+        executionOrder.push(step.id);
+        return { status: "succeeded", evidenceIds: ["evidence-" + step.id] };
+      },
+    });
+    const summary = await runner.run("ordered-plan", { principalId: "principal-a", workspaceRoot: root });
+    assert.equal(summary.plan.status, "completed");
+    assert.equal(summary.completedSteps, 2);
+    assert.deepEqual(executionOrder, ["inspect", "change"]);
+    assert.deepEqual((await store.load("ordered-plan"))?.steps.map(step => step.status), ["succeeded", "succeeded"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkflowOrchestrator pauses for approval and only continues after explicit approval", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-approval-"));
+  try {
+    const store = new FileWorkflowPlanStore("approval", root);
+    await store.save(createWorkflowPlan("approval", [
+      { id: "publish", title: "Publish", description: "External side effect", idempotent: false, risk: "high" },
+    ], { id: "approval-plan", ownerPrincipalId: "principal-a" }));
+    const approvals: boolean[] = [];
+    const runner = new WorkflowOrchestrator({
+      store,
+      executeStep: async (_step, context) => {
+        approvals.push(context.approved);
+        return context.approved
+          ? { status: "succeeded", evidenceIds: ["approved-action"] }
+          : { status: "waiting_approval", reason: "Requires explicit approval." };
+      },
+    });
+    const paused = await runner.run("approval-plan", { principalId: "principal-a", workspaceRoot: root });
+    assert.equal(paused.pausedForApproval, true);
+    assert.equal(paused.plan.status, "waiting_approval");
+    const completed = await runner.run("approval-plan", {
+      principalId: "principal-a",
+      workspaceRoot: root,
+      approvedStepIds: ["publish"],
+    });
+    assert.equal(completed.plan.status, "completed");
+    assert.deepEqual(approvals, [false, true]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkflowOrchestrator rejects a different principal before executing steps", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-owner-"));
+  try {
+    const store = new FileWorkflowPlanStore("owner", root);
+    await store.save(createWorkflowPlan("private", [
+      { id: "step", title: "Step", description: "Private", idempotent: true },
+    ], { id: "private-plan", ownerPrincipalId: "principal-a" }));
+    let invoked = false;
+    const runner = new WorkflowOrchestrator({
+      store,
+      executeStep: async () => { invoked = true; return { status: "succeeded" }; },
+    });
+    await assert.rejects(
+      () => runner.run("private-plan", { principalId: "principal-b", workspaceRoot: root }),
+      /owner mismatch/,
+    );
+    assert.equal(invoked, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkflowOrchestrator cancels a step when its signal aborts before result acceptance", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-cancel-"));
+  try {
+    const store = new FileWorkflowPlanStore("cancel", root);
+    await store.save(createWorkflowPlan("cancel", [
+      { id: "step-a", title: "A", description: "Running step", idempotent: true },
+      { id: "step-b", title: "B", description: "Must not start", idempotent: true },
+    ], { id: "cancel-plan", ownerPrincipalId: "principal-a" }));
+    const controller = new AbortController();
+    let calls = 0;
+    const runner = new WorkflowOrchestrator({
+      store,
+      executeStep: async () => {
+        calls += 1;
+        controller.abort(new Error("cancel test"));
+        return { status: "succeeded" };
+      },
+    });
+    await assert.rejects(
+      () => runner.run("cancel-plan", { principalId: "principal-a", workspaceRoot: root, signal: controller.signal }),
+    );
+    const saved = await store.load("cancel-plan");
+    assert.equal(calls, 1);
+    assert.equal(saved?.status, "cancelled");
+    assert.deepEqual(saved?.steps.map(step => step.status), ["cancelled", "cancelled"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
