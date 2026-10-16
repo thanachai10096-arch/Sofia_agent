@@ -18,6 +18,8 @@ export type WorkflowStepExecutionResult =
 
 export interface WorkflowOrchestratorDependencies {
   store: WorkflowPlanStore;
+  /** Resolve the workspace from trusted host state, never from model/user task payloads. */
+  resolveWorkspaceRoot: (principalId: string, planId: string) => Promise<string>;
   /** Must route side effects through Brain/Tool Gateway; this layer never executes tools itself. */
   executeStep: (step: Readonly<WorkflowStepRecord>, context: WorkflowExecutionContext) => Promise<WorkflowStepExecutionResult>;
   now?: () => string;
@@ -38,13 +40,10 @@ export class WorkflowOrchestrator {
 
   async run(
     planId: string,
-    context: { principalId: string; workspaceRoot: string; signal?: AbortSignal; approvedStepIds?: readonly string[]; timeoutMs?: number },
+    context: { principalId: string; signal?: AbortSignal; approvedStepIds?: readonly string[]; timeoutMs?: number },
   ): Promise<WorkflowExecutionSummary> {
     if (typeof context.principalId !== "string" || !context.principalId.trim() || context.principalId.length > 256) {
       throw new Error("Authenticated workflow principal is required.");
-    }
-    if (typeof context.workspaceRoot !== "string" || !path.isAbsolute(context.workspaceRoot)) {
-      throw new Error("Workspace root must come from a trusted host resolver and be absolute.");
     }
     const timeoutMs = context.timeoutMs ?? 120_000;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 600_000) {
@@ -66,6 +65,10 @@ export class WorkflowOrchestrator {
 
     try {
       let plan = await this.requireOwnedPlan(planId, context.principalId);
+      const workspaceRoot = await this.dependencies.resolveWorkspaceRoot(context.principalId, plan.id);
+      if (typeof workspaceRoot !== "string" || !path.isAbsolute(workspaceRoot)) {
+        throw new Error("Trusted workspace resolver must return an absolute workspace root.");
+      }
       const approved = new Set(context.approvedStepIds ?? []);
       if (approved.size > 100 || [...approved].some(id => typeof id !== "string" || id.length > 80)) {
         throw new Error("Approved workflow step IDs are invalid.");
@@ -82,7 +85,7 @@ export class WorkflowOrchestrator {
       if (approvedPending) {
         plan = transitionWorkflowStep(plan, approvedPending.id, "running", { now: this.now() });
         await this.dependencies.store.save(plan);
-        const result = await this.execute(plan, approvedPending.id, context.principalId, context.workspaceRoot, signal, true);
+        const result = await this.execute(plan, approvedPending.id, context.principalId, workspaceRoot, signal, true);
         plan = result.plan;
         if (result.paused) return this.summary(plan, true);
       }
@@ -106,7 +109,7 @@ export class WorkflowOrchestrator {
         }
         plan = transitionWorkflowStep(plan, step.id, "running", { now: this.now() });
         await this.dependencies.store.save(plan);
-        const result = await this.execute(plan, step.id, context.principalId, context.workspaceRoot, signal, approved.has(step.id));
+        const result = await this.execute(plan, step.id, context.principalId, workspaceRoot, signal, approved.has(step.id));
         plan = result.plan;
         if (result.paused) return this.summary(plan, true);
       }
