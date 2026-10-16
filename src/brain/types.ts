@@ -135,6 +135,13 @@ export interface VerificationResult {
   assertionsTotal?: number;
   failedAssertions?: number;
   skippedAssertions?: number;
+  /** Counts parsed from the trusted Node TAP test-runner summary. */
+  testsTotal?: number;
+  passedTests?: number;
+  failedTests?: number;
+  skippedTests?: number;
+  cancelledTests?: number;
+  todoTests?: number;
 }
 
 export interface Diagnosis {
