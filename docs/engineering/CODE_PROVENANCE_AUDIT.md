@@ -18,7 +18,7 @@ This is an evidence log, not a legal opinion or a blanket claim that the reposit
 | `tests/skill-policy-v1.test.ts` | Full draft test file and test assumptions | Initial test origin remains unverified; additional regression cases are authored in this integration branch. |
 | `src/brain/skills.ts`, `src/brain/executor.ts` | Recovery selection adapter, policy prompt metadata, attempt receipts and success-learning gate | New integration changes are recorded in this branch; legacy source lines still need complete provenance attribution. |
 | `src/brain/evolution.ts`, `tests/evolution.test.ts` | Existing success/failure ranking and JSON persistence; added bounded-load regression coverage | Persisted state is size-bounded and sanitized before ranking. The origin of every pre-existing line remains unverified. |
-| `src/brain/verification.ts`, `src/brain/types.ts`, `src/brain/verification.test.ts` | Structured project-check evidence and propagation of actual assertion metrics | Missing test metrics remain absent; the policy learning gate does not invent assertion counts. Existing lines still need provenance attribution. |
+| `src/brain/verification.ts`, `src/brain/types.ts`, `src/brain/test-summary.ts`, `src/tools/builtin.ts`, `scripts/run-tests.mjs`, and related tests | Structured project-check evidence plus a strict parser for Node TAP summary counts | Test counts are accepted only from a complete, consistent TAP summary; incomplete, skipped, failed, cancelled, or TODO test runs cannot receive verified-success. Existing lines still need provenance attribution. |
 | `package.json`, `LICENSE`, `scripts/check-license.mjs` | Declared project license and current checker behavior | The project declares Apache-2.0; the current checker is not a source-provenance scanner. |
 
 ## External similarity spot-checks
@@ -29,7 +29,7 @@ The official [NousResearch/hermes-agent repository](https://github.com/NousResea
 
 ## Reproducible line-attribution inventory
 
-Run `npm run provenance:report` from a full Git clone. The script uses `git blame --line-porcelain` on tracked text/source files and writes a CSV containing path, line number, introducing commit, Git author metadata, commit summary, and a SHA-256 hash of each line. Pass a destination path as the first argument to choose the report location. It refuses shallow clones because their attribution is incomplete.
+Run `npm run provenance:report` from a full Git clone. The test runner now emits Node TAP output so project verification can distinguish a completed non-empty suite from an exit-code-only claim; this is verification evidence, not a copyright similarity test. The script uses `git blame --line-porcelain` on tracked text/source files and writes a CSV containing path, line number, introducing commit, Git author metadata, commit summary, and a SHA-256 hash of each line. Pass a destination path as the first argument to choose the report location. It refuses shallow clones because their attribution is incomplete.
 
 This report is an audit aid, not a copyright detector. Git blame cannot establish that a commit author independently wrote the code, and a line hash does not compare it with third-party sources. Each suspicious range still needs comparison with upstream code and license terms, and unknown provenance still needs an owner attestation or clean-room replacement. The Sofia CI workflow also uploads this line-attribution CSV as the `sofia-code-provenance-lines` artifact for pull requests and manual runs (retained for 14 days).
 
