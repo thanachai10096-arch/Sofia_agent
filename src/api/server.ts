@@ -146,7 +146,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
         !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string")) {
-      void runStore.remove(record.id); continue;
+      void runStore.remove(record.id).catch(() => undefined); continue;
     }
     const run: ActiveRun = {
       id: record.id, status: interrupted ? "failed" : record.status,
@@ -228,7 +228,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const prune = () => {
     const cutoff = Date.now() - retention;
     for (const [id, run] of runs) {
-      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id); }
+      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id).catch(() => undefined); }
     }
     for (const [key, runId] of idempotency) {
       if (!runs.has(runId)) idempotency.delete(key);
@@ -493,7 +493,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               events: [],
             };
             runs.set(runId, run);
-            persist(run);
+            try {
+              await persistRequired(run);
+            } catch {
+              runs.delete(runId);
+              try { conversations.removeMessage(auth.keyId, conversationId, userMessage.id); } catch { /* best-effort rollback if the conversation store itself failed */ }
+              usage.refundRun(auth.keyId);
+              activeConversationTurns.delete(conversationTurnKey);
+              const current = activeByKey.get(auth.keyId) ?? 1;
+              if (current <= 1) activeByKey.delete(auth.keyId); else activeByKey.set(auth.keyId, current - 1);
+              return json(res, 503, { error: "run_persistence_unavailable" }, origin, config);
+            }
             startRun(run, {
               task: input.content,
               context: JSON.stringify(context.messages),

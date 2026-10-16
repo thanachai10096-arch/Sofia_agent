@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createSofiaApi } from "./server.js";
 import type { AgentDependencies } from "../agent/types.js";
 import { InMemoryConversationStore } from "../conversation/session.js";
+import type { ConversationStore } from "../conversation/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 
 async function withApi(
@@ -12,6 +13,7 @@ async function withApi(
     maxConcurrentRunsPerKey?: number;
     maxRunsPerKeyPerDay?: number;
     runStore?: RunRecordStore;
+    conversationStore?: ConversationStore;
   } = {},
 ): Promise<void> {
   const server = createSofiaApi({
@@ -27,7 +29,7 @@ async function withApi(
       "test-token-b": ["agent:run", "agent:read"],
       "read-only-token": ["agent:read"],
     },
-    conversationStore: new InMemoryConversationStore(),
+    conversationStore: options.conversationStore ?? new InMemoryConversationStore(),
     ...(options.runStore ? { runStore: options.runStore } : {}),
     ...(options.maxConcurrentRunsPerKey === undefined ? {} : { maxConcurrentRunsPerKey: options.maxConcurrentRunsPerKey }),
     ...(options.maxRunsPerKeyPerDay === undefined ? {} : { maxRunsPerKeyPerDay: options.maxRunsPerKeyPerDay }),
@@ -361,6 +363,39 @@ test("async run admission returns 503 and does not start work when durable persi
     assert.equal(generated, false);
   }, {
     runStore: failingStore,
+    generate: async () => {
+      generated = true;
+      return { text: "Unexpected generation", assistantMessage: { role: "assistant", content: "Unexpected generation" } };
+    },
+  });
+});
+
+
+test("async conversation admission rolls back the user message and quota when run persistence fails", async () => {
+  let generated = false;
+  const conversationStore = new InMemoryConversationStore();
+  const failingStore: RunRecordStore = {
+    save: async () => { throw new Error("disk unavailable"); },
+    remove: async () => undefined,
+    loadAllSync: () => [],
+  };
+  await withApi(async (baseUrl) => {
+    const created = await request(baseUrl, "test-token-a", "/v1/conversations", "POST", {});
+    const payload = await created.json() as { conversation: { id: string } };
+    const response = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}/messages`, "POST", {
+      role: "user", content: "This turn must not be accepted", async: true,
+    });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as { error: string }).error, "run_persistence_unavailable");
+    const historyResponse = await request(baseUrl, "test-token-a", `/v1/conversations/${payload.conversation.id}`);
+    const history = await historyResponse.json() as { conversation: { messages: unknown[] } };
+    assert.deepEqual(history.conversation.messages, []);
+    const usageResponse = await request(baseUrl, "test-token-a", "/v1/usage");
+    assert.equal((await usageResponse.json() as { runs: number }).runs, 0);
+    assert.equal(generated, false);
+  }, {
+    runStore: failingStore,
+    conversationStore,
     generate: async () => {
       generated = true;
       return { text: "Unexpected generation", assistantMessage: { role: "assistant", content: "Unexpected generation" } };

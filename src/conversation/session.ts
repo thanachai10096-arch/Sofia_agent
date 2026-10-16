@@ -132,6 +132,21 @@ export class ConversationService {
    * Bound assistant output for history persistence and suppress stale completions
    * if the originating user message was cleared while the model was running.
    */
+  /** Remove one exact message when async admission fails before execution starts. */
+  removeMessage(ownerId: string, sessionId: string, messageId: string): boolean {
+    this.assertOwner(ownerId);
+    const session = this.store.get(sessionId);
+    if (!session || session.ownerId !== ownerId) return false;
+    const index = session.messages.findIndex((message) => message.id === messageId);
+    if (index < 0) return false;
+    session.messages.splice(index, 1);
+    const firstUserMessage = session.messages.find((message) => message.role === "user");
+    session.title = firstUserMessage ? this.titleFrom(firstUserMessage.content) : "New conversation";
+    session.updatedAt = Date.now();
+    this.store.save(session);
+    return true;
+  }
+
   appendAssistantResponse(
     ownerId: string,
     sessionId: string,
