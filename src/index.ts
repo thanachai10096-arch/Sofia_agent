@@ -22,7 +22,7 @@ export { reviewCodeChange } from "./review/code-review.js";
 export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { FileWorkflowPlanStore } from "./brain/workflow-plan-store.js";
-export type { WorkflowPlanStore, WorkflowPlan, WorkflowStepRecord, WorkflowPlanStatus, WorkflowStepStatus } from "./brain/workflow-plan-store.js";
+export type { WorkflowPlanStore, WorkflowPlan, WorkflowStepRecord, WorkflowPlanStatus, WorkflowStepStatus, WorkflowRisk } from "./brain/workflow-plan-store.js";
 export { createWorkflowPlan, workflowStepDependenciesSatisfied, readyWorkflowSteps, transitionWorkflowStep, assessWorkflowRetry } from "./brain/workflow-plan.js";
 export { WorkflowOrchestrator } from "./brain/workflow-orchestrator.js";
 export type { WorkflowOrchestratorDependencies, WorkflowExecutionContext, WorkflowExecutionSummary, WorkflowStepExecutionResult } from "./brain/workflow-orchestrator.js";
