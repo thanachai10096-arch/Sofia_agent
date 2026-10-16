@@ -200,7 +200,7 @@ test("real Sofia factory executes a consequential workspace action through check
     assert.equal(await (await import("node:fs/promises")).readFile(path.join(root, "approved.txt"), "utf8"), "approved");
     assert.equal(approvals.length, 1, "the exact action approval ticket should be consumed by ToolGateway without a second prompt");
     assert.equal(approvals[0]?.runId, created.workflow.id + ":write");
-    assert.equal(approvals[0]?.principalId, (await (await fetch(baseUrl + "/v1/workflows", { headers: auth("workflow-e2e-user") })).json() as { workflows: unknown[] }).workflows.length >= 0 ? approvals[0]?.principalId : undefined);
+    assert.match(approvals[0]?.principalId ?? "", /^[a-f0-9]{32}$/, "approval must be bound to the API-authenticated principal");
     assert.equal(approvals[0]?.actionHash, actionHash(created.workflow.id + ":write", "workspace.write_file", { path: "approved.txt", content: "approved" }, approvals[0]?.principalId));
     assert.equal(approvals[0]?.toolName, "workspace.write_file");
   } finally {
