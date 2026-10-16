@@ -25,7 +25,7 @@ test("WorkflowOrchestrator persists dependency-ordered results and evidence", as
         return { status: "succeeded", evidenceIds: ["evidence-" + step.id] };
       },
     });
-    const summary = await runner.run("ordered-plan", { principalId: "principal-a", workspaceRoot: root });
+    const summary = await runner.run("ordered-plan", { principalId: "principal-a",  });
     assert.equal(summary.plan.status, "completed");
     assert.equal(summary.completedSteps, 2);
     assert.deepEqual(executionOrder, ["inspect", "change"]);
@@ -55,7 +55,7 @@ test("WorkflowOrchestrator pauses for approval and only continues after explicit
         return { status: "succeeded", evidenceIds: ["result-" + step.id] };
       },
     });
-    const paused = await runner.run("approval-plan", { principalId: "principal-a", workspaceRoot: root });
+    const paused = await runner.run("approval-plan", { principalId: "principal-a",  });
     assert.equal(paused.pausedForApproval, true);
     assert.equal(paused.plan.status, "waiting_approval");
     assert.deepEqual(calls, ["publish:false"]);
@@ -84,7 +84,7 @@ test("WorkflowOrchestrator rejects a different principal before executing steps"
       executeStep: async () => { invoked = true; return { status: "succeeded" }; },
     });
     await assert.rejects(
-      () => runner.run("private-plan", { principalId: "principal-b", workspaceRoot: root }),
+      () => runner.run("private-plan", { principalId: "principal-b",  }),
       /owner mismatch/,
     );
     assert.equal(invoked, false);
@@ -162,7 +162,7 @@ test("WorkflowOrchestrator fails closed on malformed executor results", async ()
       executeStep: async () => ({ status: "pretend-success" } as never),
     });
     await assert.rejects(
-      () => runner.run("bad-result-plan", { principalId: "principal-a", workspaceRoot: root }),
+      () => runner.run("bad-result-plan", { principalId: "principal-a",  }),
       /invalid result/,
     );
     assert.equal((await store.load("bad-result-plan"))?.steps[0]?.status, "failed");
