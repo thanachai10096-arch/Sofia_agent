@@ -273,6 +273,12 @@ export class SofiaClient {
     }, signal);
   }
 
+  async cancelWorkflow(id: string, signal?: AbortSignal): Promise<{ ok: boolean; cancelRequested: boolean; workflowId: string }> {
+    return this.request<{ ok: boolean; cancelRequested: boolean; workflowId: string }>(`/v1/workflows/${encodeURIComponent(id)}/cancel`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
   async deleteWorkflow(id: string, signal?: AbortSignal): Promise<{ ok: boolean; deleted: boolean }> {
     return this.request<{ ok: boolean; deleted: boolean }>(`/v1/workflows/${encodeURIComponent(id)}`, {
       method: "DELETE", headers: { authorization: `Bearer ${this.options.apiKey}` },

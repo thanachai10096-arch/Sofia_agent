@@ -161,6 +161,7 @@ test("SDK creates, lists, reads, runs, and deletes workflow plans using authenti
       const method = init?.method ?? "GET";
       requests.push({ url, method, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
       if (url.endsWith("/run")) return response(200, { plan: { ...plan, status: "completed" }, executed: 1, waitingForApproval: false });
+      if (url.endsWith("/cancel")) return response(202, { ok: true, cancelRequested: true, workflowId: "workflow/a" });
       if (method === "POST" && url.endsWith("/v1/workflows")) return response(201, { workflow: plan });
       if (method === "GET" && url.endsWith("/v1/workflows")) return response(200, { workflows: [plan] });
       if (method === "DELETE") return response(200, { ok: true, deleted: true });
@@ -175,6 +176,7 @@ test("SDK creates, lists, reads, runs, and deletes workflow plans using authenti
   assert.equal((await client.getWorkflow("workflow/a")).workflow.title, "Example");
   assert.equal((await client.runWorkflow("workflow/a")).plan.status, "completed");
   assert.deepEqual(await client.deleteWorkflow("workflow/a"), { ok: true, deleted: true });
+  assert.deepEqual(await client.cancelWorkflow("workflow/a"), { ok: true, cancelRequested: true, workflowId: "workflow/a" });
   assert.equal(requests[0]?.method, "POST");
   assert.deepEqual(requests[0]?.body, {
     title: "Example",
@@ -182,5 +184,6 @@ test("SDK creates, lists, reads, runs, and deletes workflow plans using authenti
   });
   assert.match(requests[2]?.url ?? "", /workflow%2Fa$/);
   assert.match(requests[3]?.url ?? "", /workflow%2Fa\/run$/);
+  assert.match(requests[4]?.url ?? "", /workflow%2Fa\/cancel$/);
   assert.ok(requests.every((request) => request.url.startsWith("https://api.example.test/v1/workflows")));
 });

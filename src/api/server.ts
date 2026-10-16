@@ -133,6 +133,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
   const runs = new Map<string, ActiveRun>();
+  const activeWorkflowRuns = new Map<string, AbortController>();
   const runStore = config.runStore;
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
@@ -259,7 +260,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const parsedUrl = new URL(req.url ?? "/", "http://sofia.local");
       const pathname = parsedUrl.pathname;
       const isWorkflowCollection = pathname === "/v1/workflows";
-      const workflowMatch = pathname.match(/^\/v1\/workflows\/([^/]+)(?:\/(run))?$/);
+      const workflowMatch = pathname.match(/^\/v1\/workflows\/([^/]+)(?:\/(run|cancel))?$/);
       const isWorkflowRoute = isWorkflowCollection || workflowMatch !== null;
       if (isWorkflowRoute && req.method === "GET" && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
@@ -338,10 +339,24 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 400, { error: "invalid_workflow_id" }, origin, config);
         }
         if (!workflowId || workflowId.length > 256) return json(res, 400, { error: "invalid_workflow_id" }, origin, config);
-        if (workflowMatch[2] === "run" && req.method === "POST") {
+        if ((workflowMatch[2] === "run" || workflowMatch[2] === "cancel") && req.method === "POST") {
           if (!await workflow.get(workflowId)) return json(res, 404, { error: "workflow_not_found" }, origin, config);
-          const result = await workflow.run(workflowId);
-          return json(res, 200, result, origin, config);
+          const runKey = `${auth.principalId}:${workflowId}`;
+          if (workflowMatch[2] === "cancel") {
+            const active = activeWorkflowRuns.get(runKey);
+            if (!active) return json(res, 409, { error: "workflow_not_running" }, origin, config);
+            active.abort(new Error("Workflow cancellation requested by authenticated principal."));
+            return json(res, 202, { ok: true, cancelRequested: true, workflowId }, origin, config);
+          }
+          if (activeWorkflowRuns.has(runKey)) return json(res, 409, { error: "workflow_already_running" }, origin, config);
+          const controller = new AbortController();
+          activeWorkflowRuns.set(runKey, controller);
+          try {
+            const result = await workflow.run(workflowId, { signal: controller.signal });
+            return json(res, 200, result, origin, config);
+          } finally {
+            if (activeWorkflowRuns.get(runKey) === controller) activeWorkflowRuns.delete(runKey);
+          }
         }
         if (workflowMatch[2] === undefined && req.method === "GET") {
           const plan = await workflow.get(workflowId);

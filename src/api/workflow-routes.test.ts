@@ -167,3 +167,59 @@ test("factory-wired workflow API isolates the same principal across different wo
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("workflow API cancels an in-flight run through its authenticated cancel route", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-workflow-api-cancel-"));
+  let notifyStarted!: () => void;
+  const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+  const server = createSofiaApi({} as AgentDependencies, {
+    apiKeys: { "workflow-cancel-user": ["agent:read", "agent:run"] },
+    workflowStateRoot: root,
+    workflowRuntime: () => ({
+      executeStep: async (_step, context) => {
+        notifyStarted();
+        await new Promise<void>((resolve) => {
+          if (context.signal?.aborted) return resolve();
+          context.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new Error("aborted by test");
+      },
+    }),
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Test API did not bind a TCP port");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  try {
+    const create = await fetch(baseUrl + "/v1/workflows", {
+      method: "POST",
+      headers: auth("workflow-cancel-user"),
+      body: JSON.stringify({
+        title: "Cancel running workflow",
+        steps: [{ id: "wait", title: "Wait", description: "Wait until cancellation", idempotent: true }],
+      }),
+    });
+    assert.equal(create.status, 201);
+    const created = await create.json() as { workflow: { id: string } };
+    const runPromise = fetch(baseUrl + "/v1/workflows/" + created.workflow.id + "/run", {
+      method: "POST",
+      headers: auth("workflow-cancel-user"),
+    });
+    await started;
+    const cancel = await fetch(baseUrl + "/v1/workflows/" + created.workflow.id + "/cancel", {
+      method: "POST",
+      headers: auth("workflow-cancel-user"),
+    });
+    assert.equal(cancel.status, 202);
+    assert.equal((await cancel.json() as { cancelRequested: boolean }).cancelRequested, true);
+    const runResponse = await runPromise;
+    assert.equal(runResponse.status, 200);
+    const result = await runResponse.json() as { plan: { status: string; steps: Array<{ status: string }> } };
+    assert.equal(result.plan.status, "cancelled");
+    assert.equal(result.plan.steps[0]?.status, "cancelled");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
