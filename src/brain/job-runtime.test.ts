@@ -455,3 +455,50 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
   assert.equal(result.status, "completed");
   assert.equal(result.checkpointId, "restart-checkpoint");
 });
+
+
+test("DurableJobRuntime does not expose or execute a job when initial persistence fails", async () => {
+  const namespace = "job-runtime-admission-failure-" + randomUUID();
+  let generated = false;
+  const stateStore = {
+    async save() { throw new Error("job state disk unavailable"); },
+    async list() { return []; },
+    async get() { return undefined; },
+  };
+  const runtime = new DurableJobRuntime(() => ({
+    run: async () => {
+      generated = true;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace, stateStore);
+
+  await assert.rejects(() => runtime.submit({ task: "must not execute" }), /job state disk unavailable/i);
+  assert.deepEqual(await runtime.list(), []);
+  assert.equal(generated, false);
+});
+
+
+test("DurableJobRuntime keeps an in-memory failure if terminal persistence fails", async () => {
+  const namespace = "job-runtime-terminal-persist-failure-" + randomUUID();
+  let saves = 0;
+  const stateStore = {
+    async save() {
+      saves += 1;
+      if (saves >= 3) throw new Error("terminal state disk unavailable");
+    },
+    async list() { return []; },
+    async get() { return undefined; },
+  };
+  const runtime = new DurableJobRuntime(() => ({
+    run: async () => { throw new Error("model execution failed"); },
+  } as unknown as SofiaBrain), undefined, namespace, stateStore);
+
+  const submitted = await runtime.submit({ task: "terminal persistence failure" });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status === "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+  assert.match(current?.error ?? "", /model execution failed/i);
+});

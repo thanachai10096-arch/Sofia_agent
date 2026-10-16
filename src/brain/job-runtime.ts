@@ -28,7 +28,13 @@ export interface JobRuntime {
   list(): Promise<JobRecord[]>;
 }
 
-class FileJobStateStore {
+export interface JobStateStore {
+  save(record: JobRecord): Promise<void>;
+  list(): Promise<JobRecord[]>;
+  get(id: string): Promise<JobRecord | undefined>;
+}
+
+class FileJobStateStore implements JobStateStore {
   private readonly file: string;
   private writes: Promise<void> = Promise.resolve();
 
@@ -81,7 +87,7 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly jobs = new Map<string, JobRecord>();
   private readonly controllers = new Map<string, AbortController>();
   private readonly resuming = new Set<string>();
-  private readonly state: FileJobStateStore;
+  private readonly state: JobStateStore;
 
   constructor(
     private readonly brainFactory: (options: {
@@ -91,8 +97,9 @@ export class DurableJobRuntime implements JobRuntime {
     }) => SofiaBrain,
     private readonly runStore?: RunStore,
     namespace = process.cwd(),
+    stateStore?: JobStateStore,
   ) {
-    this.state = new FileJobStateStore(namespace);
+    this.state = stateStore ?? new FileJobStateStore(namespace);
   }
 
   async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string }): Promise<JobRecord> {
@@ -102,8 +109,10 @@ export class DurableJobRuntime implements JobRuntime {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
     };
-    this.jobs.set(id, record);
+    // Admission is durable before the job becomes visible in memory or execution
+    // starts. A failed write must not leave a ghost job that can be polled/resumed.
     await this.state.save(record);
+    this.jobs.set(id, record);
     void this.execute(record, input);
     return { ...record };
   }
@@ -258,7 +267,12 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = controller.signal.aborted ? "cancelled" : "failed";
         record.updatedAt = new Date().toISOString();
       }
-      await this.state.save(record);
+      try {
+        await this.state.save(record);
+      } catch {
+        // Keep the in-memory terminal failure, but do not leak a rejected detached
+        // execution promise when the state store is unavailable.
+      }
     } finally {
       if (externalSignal && onExternalAbort) {
         externalSignal.removeEventListener("abort", onExternalAbort);
