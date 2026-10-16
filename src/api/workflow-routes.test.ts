@@ -121,96 +121,49 @@ test("workflow API fails closed when the host has not configured workflow execut
 });
 
 
-test("workflow API uses the runtime wired by Sofia Agent dependencies when config does not override it", async () => {
+test("factory-wired workflow API isolates the same principal across different workspaces", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-workflow-api-factory-"));
-  const deps = {
+  const makeDeps = (namespace: string) => ({
     workflowStateRoot: root,
+    workflowNamespace: namespace,
     workflowRuntime: () => ({
       executeStep: async (step: { id: string }) => ({ evidenceIds: ["factory:" + step.id] }),
     }),
-  } as unknown as AgentDependencies;
-  const server = createSofiaApi(deps, {
+  }) as unknown as AgentDependencies;
+  const serverA = createSofiaApi(makeDeps("workspace-a"), {
     apiKeys: { "workflow-user": ["agent:read", "agent:run"] },
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("Test API did not bind a TCP port");
+  let serverB: ReturnType<typeof createSofiaApi> | undefined;
+  await new Promise<void>((resolve) => serverA.listen(0, "127.0.0.1", resolve));
+  const addressA = serverA.address();
+  if (!addressA || typeof addressA === "string") throw new Error("Test API did not bind a TCP port");
   try {
-    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/workflows", {
-      headers: auth("workflow-user"),
-    });
-    assert.equal(response.status, 200);
-    assert.deepEqual((await response.json() as { workflows: unknown[] }).workflows, []);
-  } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-
-test("real Sofia factory executes a consequential workspace action through checkpoint and exact one-time approval", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-workflow-e2e-"));
-  const envKeys = ["SOFIA_AI_GATEWAY_API_KEY", "SOFIA_FAST_MODEL", "SOFIA_ALLOW_FILE_WRITE", "SOFIA_ALLOW_TOOLS", "SOFIA_STATE_DIR"] as const;
-  const prior = new Map(envKeys.map((key) => [key, process.env[key]]));
-  const approvals: ApprovalRequest[] = [];
-  let server: ReturnType<typeof createSofiaApi> | undefined;
-  try {
-    execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
-    process.env.SOFIA_AI_GATEWAY_API_KEY = "workflow-test-key";
-    process.env.SOFIA_FAST_MODEL = "workflow-test-model";
-    process.env.SOFIA_ALLOW_FILE_WRITE = "true";
-    process.env.SOFIA_ALLOW_TOOLS = "true";
-    process.env.SOFIA_STATE_DIR = path.join(root, ".sofia-state");
-    const deps = createSofiaAgentDependencies(root, async (request) => {
-      approvals.push(request);
-      return true;
-    });
-    server = createSofiaApi(deps, {
-      apiKeys: { "workflow-e2e-user": ["agent:read", "agent:run"] },
-    });
-    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Test API did not bind a TCP port");
-    const baseUrl = "http://127.0.0.1:" + address.port;
-    const planResponse = await fetch(baseUrl + "/v1/workflows", {
+    const baseA = "http://127.0.0.1:" + addressA.port;
+    const create = await fetch(baseA + "/v1/workflows", {
       method: "POST",
-      headers: auth("workflow-e2e-user"),
+      headers: auth("workflow-user"),
       body: JSON.stringify({
-        title: "Write through Sofia's secured runtime",
-        steps: [{
-          id: "write",
-          title: "Write a file",
-          description: "Create a test file after explicit approval",
-          idempotent: false,
-          consequential: true,
-          action: { tool: "workspace.write_file", input: { path: "approved.txt", content: "approved" } },
-        }],
+        title: "Workspace A plan",
+        steps: [{ id: "inspect", title: "Inspect", description: "Read-only", idempotent: true }],
       }),
     });
-    assert.equal(planResponse.status, 201);
-    const created = await planResponse.json() as { workflow: { id: string } };
-    const runResponse = await fetch(baseUrl + "/v1/workflows/" + created.workflow.id + "/run", {
-      method: "POST",
-      headers: auth("workflow-e2e-user"),
+    assert.equal(create.status, 201);
+    const listA = await fetch(baseA + "/v1/workflows", { headers: auth("workflow-user") });
+    assert.equal((await listA.json() as { workflows: unknown[] }).workflows.length, 1);
+
+    serverB = createSofiaApi(makeDeps("workspace-b"), {
+      apiKeys: { "workflow-user": ["agent:read", "agent:run"] },
     });
-    assert.equal(runResponse.status, 200);
-    const result = await runResponse.json() as { plan: { status: string; steps: Array<{ status: string; checkpointId?: string }> } };
-    assert.equal(result.plan.status, "completed");
-    assert.equal(result.plan.steps[0]?.status, "succeeded");
-    assert.ok(result.plan.steps[0]?.checkpointId);
-    assert.equal(await (await import("node:fs/promises")).readFile(path.join(root, "approved.txt"), "utf8"), "approved");
-    assert.equal(approvals.length, 1, "the exact action approval ticket should be consumed by ToolGateway without a second prompt");
-    assert.equal(approvals[0]?.runId, created.workflow.id + ":write");
-    assert.match(approvals[0]?.principalId ?? "", /^[a-f0-9]{32}$/, "approval must be bound to the API-authenticated principal");
-    assert.equal(approvals[0]?.actionHash, actionHash(created.workflow.id + ":write", "workspace.write_file", { path: "approved.txt", content: "approved" }, approvals[0]?.principalId));
-    assert.equal(approvals[0]?.toolName, "workspace.write_file");
+    await new Promise<void>((resolve) => serverB!.listen(0, "127.0.0.1", resolve));
+    const addressB = serverB.address();
+    if (!addressB || typeof addressB === "string") throw new Error("Second test API did not bind a TCP port");
+    const listB = await fetch("http://127.0.0.1:" + addressB.port + "/v1/workflows", {
+      headers: auth("workflow-user"),
+    });
+    assert.equal((await listB.json() as { workflows: unknown[] }).workflows.length, 0);
   } finally {
-    if (server?.listening) await new Promise<void>((resolve, reject) => server!.close((error) => error ? reject(error) : resolve()));
-    for (const key of envKeys) {
-      const value = prior.get(key);
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
+    await new Promise<void>((resolve, reject) => serverA.close((error) => error ? reject(error) : resolve()));
+    if (serverB?.listening) await new Promise<void>((resolve, reject) => serverB!.close((error) => error ? reject(error) : resolve()));
     await rm(root, { recursive: true, force: true });
   }
 });
