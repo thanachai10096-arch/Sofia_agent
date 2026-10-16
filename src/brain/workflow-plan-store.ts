@@ -14,7 +14,7 @@ export interface WorkflowPlanStore {
   releaseRunLock?(id: string, ownerToken: string): Promise<void>;
 }
 
-function key(value: string): string {
+// Serialize replacement of the same plan target across store instances; Windows can reject\n// overlapping rename-over-existing-target operations (EPERM).\nconst saveQueues = new Map<string, Promise<void>>();\n\nfunction key(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
@@ -88,14 +88,23 @@ export class FileWorkflowPlanStore implements WorkflowPlanStore {
     if (!isWorkflowPlan(plan)) throw new Error("Refusing to persist an invalid workflow plan.");
     const target = this.file(plan.id);
     const serialized = JSON.stringify(clonePlan(plan));
-    await this.ensureDirectory();
-    const temporary = target + "." + randomUUID() + ".tmp";
+    const previous = saveQueues.get(target) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(async () => {
+      await this.ensureDirectory();
+      const temporary = target + "." + randomUUID() + ".tmp";
+      try {
+        await fs.writeFile(temporary, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        if (process.platform !== "win32") await fs.chmod(temporary, 0o600);
+        await fs.rename(temporary, target);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+    });
+    saveQueues.set(target, operation);
     try {
-      await fs.writeFile(temporary, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
-      if (process.platform !== "win32") await fs.chmod(temporary, 0o600);
-      await fs.rename(temporary, target);
+      await operation;
     } finally {
-      await fs.rm(temporary, { force: true });
+      if (saveQueues.get(target) === operation) saveQueues.delete(target);
     }
   }
 
