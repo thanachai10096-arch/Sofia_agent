@@ -452,7 +452,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         try { usage.consume(auth.keyId); } catch (error) {
           releaseRunSlot(auth.keyId);
-          return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+          return json(res, 429, { error: "quota_exceeded" }, origin, config);
         }
 
         const controller = new AbortController();
@@ -498,7 +498,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (req.method === "POST" && action === "resume") {
           try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
-          catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
+          catch { return json(res, 409, { error: "job_resume_failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
           const cancelled = await deps.jobRuntime.cancel(jobId);
