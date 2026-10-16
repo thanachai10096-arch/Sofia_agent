@@ -540,3 +540,28 @@ test("DurableJobRuntime cancellation aborts execution even when status persisten
   }
   assert.equal(current?.status, "cancelled");
 });
+
+
+test("FileJobStateStore serializes admissions across runtime instances sharing a namespace", async () => {
+  const namespace = "job-runtime-shared-writes-" + randomUUID();
+  const hangingBrain = {
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain;
+  const first = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
+  const second = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
+
+  const [firstJob, secondJob] = await Promise.all([
+    first.submit({ task: "first concurrent admission" }),
+    second.submit({ task: "second concurrent admission" }),
+  ]);
+
+  // Let both workers persist their running states before reading from a fresh runtime.
+  await new Promise<void>((resolve) => setTimeout(resolve, 40));
+  const restarted = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
+  const records = await restarted.list();
+  const ids = new Set(records.map((record) => record.id));
+
+  assert.equal(ids.has(firstJob.id), true, "first admitted job must not be overwritten");
+  assert.equal(ids.has(secondJob.id), true, "second admitted job must not be overwritten");
+  assert.equal(records.filter((record) => record.id === firstJob.id || record.id === secondJob.id).length, 2);
+});
