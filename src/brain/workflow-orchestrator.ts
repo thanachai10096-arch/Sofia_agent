@@ -61,6 +61,9 @@ export class WorkflowOrchestrator {
       if (approved.size > 100 || [...approved].some(id => typeof id !== "string" || id.length > 80)) {
         throw new Error("Approved workflow step IDs are invalid.");
       }
+      if ([...approved].some(id => !plan.steps.some(step => step.id === id && step.status === "waiting_approval"))) {
+        throw new Error("Approval can only be applied to a step currently awaiting approval.");
+      }
       if (["completed", "cancelled"].includes(plan.status)) {
         return this.summary(plan, false);
       }
@@ -131,22 +134,27 @@ export class WorkflowOrchestrator {
     if (!step) throw new Error("Workflow step disappeared.");
     try {
       signal.throwIfAborted();
-      const result = await this.dependencies.executeStep(
+      const result: unknown = await this.dependencies.executeStep(
         { ...step, dependsOn: [...step.dependsOn], evidenceIds: [...step.evidenceIds] },
         { principalId, workspaceRoot, planId: plan.id, signal, approved },
       );
       signal.throwIfAborted();
-      if (result.status === "waiting_approval") {
+      if (!result || typeof result !== "object" ||
+          !["succeeded", "waiting_approval"].includes(String((result as { status?: unknown }).status))) {
+        throw new Error("Workflow step executor returned an invalid result.");
+      }
+      const stepResult = result as WorkflowStepExecutionResult;
+      if (stepResult.status === "waiting_approval") {
         const paused = transitionWorkflowStep(plan, stepId, "waiting_approval", {
           now: this.now(),
-          error: result.reason ?? "Waiting for explicit host/user approval.",
+          error: stepResult.reason ?? "Waiting for explicit host/user approval.",
         });
         await this.dependencies.store.save(paused);
         return { plan: paused, paused: true };
       }
       const succeeded = transitionWorkflowStep(plan, stepId, "succeeded", {
         now: this.now(),
-        evidenceIds: result.evidenceIds ?? [],
+        evidenceIds: stepResult.evidenceIds ?? [],
       });
       await this.dependencies.store.save(succeeded);
       return { plan: succeeded, paused: false };
