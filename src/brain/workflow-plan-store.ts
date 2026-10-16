@@ -54,8 +54,9 @@ function isWorkflowPlan(value: unknown): value is WorkflowPlan {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const plan = value as Partial<WorkflowPlan>;
   if (typeof plan.id !== "string" || !plan.id.trim() || plan.id.length > 256 ||
-      typeof plan.title !== "string" || typeof plan.createdAt !== "string" ||
-      typeof plan.updatedAt !== "string" ||
+      typeof plan.title !== "string" || !plan.title.trim() || plan.title.length > 240 ||
+      typeof plan.createdAt !== "string" || !Number.isFinite(Date.parse(plan.createdAt)) ||
+      typeof plan.updatedAt !== "string" || !Number.isFinite(Date.parse(plan.updatedAt)) ||
       !["draft", "running", "waiting_approval", "completed", "failed", "cancelled"].includes(String(plan.status)) ||
       !Array.isArray(plan.steps) || plan.steps.length < 1 || plan.steps.length > 100) return false;
   const ids = new Set<string>();
@@ -63,19 +64,45 @@ function isWorkflowPlan(value: unknown): value is WorkflowPlan {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
     const step = raw as unknown as Record<string, unknown>;
     if (typeof step.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(step.id) ||
-        ids.has(step.id) || typeof step.title !== "string" || typeof step.description !== "string" ||
+        ids.has(step.id) || typeof step.title !== "string" || !step.title.trim() || step.title.length > 240 ||
+        typeof step.description !== "string" || step.description.length > 4_000 ||
         typeof step.idempotent !== "boolean" || !Array.isArray(step.dependsOn) ||
-        !step.dependsOn.every((id) => typeof id === "string") ||
+        step.dependsOn.length > 100 || !step.dependsOn.every((id) => typeof id === "string" && id.length <= 80) ||
+        new Set(step.dependsOn).size !== step.dependsOn.length ||
         !["pending", "ready", "running", "waiting_approval", "succeeded", "failed", "skipped", "cancelled"].includes(String(step.status)) ||
-        !Number.isSafeInteger(step.attempts) || (step.attempts as number) < 0 ||
-        !Array.isArray(step.evidenceIds) || !step.evidenceIds.every((id) => typeof id === "string") ||
-        typeof step.updatedAt !== "string") return false;
+        !Number.isSafeInteger(step.attempts) || (step.attempts as number) < 0 || (step.attempts as number) > 10 ||
+        (step.risk !== undefined && !["low", "medium", "high"].includes(String(step.risk))) ||
+        (step.maxAttempts !== undefined && (!Number.isSafeInteger(step.maxAttempts) || (step.maxAttempts as number) < 1 || (step.maxAttempts as number) > 10)) ||
+        !Array.isArray(step.evidenceIds) || step.evidenceIds.length > 256 ||
+        !step.evidenceIds.every((id) => typeof id === "string" && id.length > 0 && id.length <= 256) ||
+        typeof step.updatedAt !== "string" || !Number.isFinite(Date.parse(step.updatedAt)) ||
+        (step.lastError !== undefined && (typeof step.lastError !== "string" || step.lastError.length > 2_000))) return false;
     ids.add(step.id);
   }
+  const byId = new Map(plan.steps.map(raw => {
+    const step = raw as { id: string; dependsOn: string[] };
+    return [step.id, step] as const;
+  }));
   for (const raw of plan.steps) {
     const step = raw as { id: string; dependsOn: string[] };
     if (step.dependsOn.some((id) => !ids.has(id) || id === step.id)) return false;
   }
+  // Persisted plans are untrusted input too: reject dependency cycles before any
+  // caller can schedule a step from a corrupted snapshot.
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string): boolean => {
+    if (visiting.has(id)) return false;
+    if (visited.has(id)) return true;
+    const step = byId.get(id);
+    if (!step) return false;
+    visiting.add(id);
+    for (const dependency of step.dependsOn) if (!visit(dependency)) return false;
+    visiting.delete(id);
+    visited.add(id);
+    return true;
+  };
+  for (const id of ids) if (!visit(id)) return false;
   return true;
 }
 
