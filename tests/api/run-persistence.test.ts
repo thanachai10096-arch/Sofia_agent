@@ -40,6 +40,31 @@ test("async idempotency binding survives an API restart when run persistence is 
   }
 });
 
+test("async run is not acknowledged when durable run persistence fails", async () => {
+  let saveCalls = 0;
+  const failingStore = {
+    async save() { saveCalls += 1; throw new Error("disk unavailable"); },
+    async remove() {},
+    loadAllSync() { return []; },
+  };
+  const server = createSofiaApi({} as AgentDependencies, {
+    apiKeys: { [KEY]: ["agent:run"] }, runStore: failingStore, requestTimeoutMs: 5000,
+  });
+  const base = await listen(server);
+  try {
+    const response = await fetch(base + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer " + KEY, "content-type": "application/json", "idempotency-key": "must-not-acknowledge" },
+      body: JSON.stringify({ task: "do not run without durable state", async: true }),
+    });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json() as { error: string }).error, "run_persistence_unavailable");
+    assert.equal(saveCalls, 1);
+  } finally {
+    await close(server);
+  }
+});
+
 test("finished runs survive restart; queued/running become failed and remain owner-scoped",async()=>{const dir=await mkdtemp(path.join(os.tmpdir(),"sofia-runs-"));try{const owner=createHash("sha256").update(KEY).digest("hex").slice(0,32),done="22222222-2222-2222-2222-222222222222",running="33333333-3333-3333-3333-333333333333",store=new FileRunRecordStore(dir);await store.save({id:done,status:"completed",createdAt:Date.now(),updatedAt:Date.now(),ownerKeyId:owner,desktopCapabilities:[],result:{runId:done,output:"done",kind:"general",steps:1,events:[]} as never});await store.save({id:running,status:"running",createdAt:Date.now(),updatedAt:Date.now(),ownerKeyId:owner,desktopCapabilities:[]});const server=createSofiaApi({} as AgentDependencies,{apiKeys:{[KEY]:["agent:run"]},runStore:new FileRunRecordStore(dir)}),base=await listen(server);try{const h={authorization:"Bearer "+KEY};const a=await(await fetch(base+"/v1/agent/runs/"+done,{headers:h})).json() as {status:string;result?:{output:string}};assert.equal(a.status,"completed");assert.equal(a.result?.output,"done");const b=await(await fetch(base+"/v1/agent/runs/"+running,{headers:h})).json() as {status:string;error?:string};assert.equal(b.status,"failed");assert.match(b.error??"",/interrupted by server restart/);assert.equal((await fetch(base+"/v1/agent/runs/"+done,{headers:{authorization:"Bearer nope"}})).status,401);}finally{await close(server);} }finally{await rm(dir,{recursive:true,force:true});}});
 test("corrupt and path-traversal record files are ignored",async()=>{const dir=await mkdtemp(path.join(os.tmpdir(),"sofia-runs-"));try{await writeFile(path.join(dir,"corrupt.json"),"{bad");await writeFile(path.join(dir,"bad.json"),JSON.stringify({id:"../evil"}));assert.equal(new FileRunRecordStore(dir).loadAllSync().length,0);}finally{await rm(dir,{recursive:true,force:true});}});
 
