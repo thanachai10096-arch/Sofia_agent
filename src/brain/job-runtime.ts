@@ -28,9 +28,19 @@ export interface JobRuntime {
   list(): Promise<JobRecord[]>;
 }
 
-class FileJobStateStore {
+export interface JobStateStore {
+  save(record: JobRecord): Promise<void>;
+  list(): Promise<JobRecord[]>;
+  get(id: string): Promise<JobRecord | undefined>;
+}
+
+// FileJobStateStore instances created by separate runtimes in the same process
+// must share one write queue for a namespace. A per-instance queue allows two
+// read-modify-write operations to race and silently lose an admitted job.
+const fileJobStateWrites = new Map<string, Promise<void>>();
+
+class FileJobStateStore implements JobStateStore {
   private readonly file: string;
-  private writes: Promise<void> = Promise.resolve();
 
   constructor(namespace: string, root = sofiaStateDirectory("jobs")) {
     this.file = path.join(root, createHash("sha256").update(namespace).digest("hex") + ".json");
@@ -46,7 +56,8 @@ class FileJobStateStore {
   }
 
   async save(record: JobRecord): Promise<void> {
-    const operation = this.writes.then(async () => {
+    const previous = fileJobStateWrites.get(this.file) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(async () => {
       const records = await this.read();
       const index = records.findIndex((item) => item.id === record.id);
       const durable = { ...record };
@@ -64,8 +75,13 @@ class FileJobStateStore {
         await fs.rm(temporary, { force: true });
       }
     });
-    this.writes = operation.catch(() => undefined);
-    return operation;
+    const queued = operation.catch(() => undefined);
+    fileJobStateWrites.set(this.file, queued);
+    try {
+      await operation;
+    } finally {
+      if (fileJobStateWrites.get(this.file) === queued) fileJobStateWrites.delete(this.file);
+    }
   }
 
   async list(): Promise<JobRecord[]> {
@@ -81,7 +97,7 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly jobs = new Map<string, JobRecord>();
   private readonly controllers = new Map<string, AbortController>();
   private readonly resuming = new Set<string>();
-  private readonly state: FileJobStateStore;
+  private readonly state: JobStateStore;
 
   constructor(
     private readonly brainFactory: (options: {
@@ -91,8 +107,9 @@ export class DurableJobRuntime implements JobRuntime {
     }) => SofiaBrain,
     private readonly runStore?: RunStore,
     namespace = process.cwd(),
+    stateStore?: JobStateStore,
   ) {
-    this.state = new FileJobStateStore(namespace);
+    this.state = stateStore ?? new FileJobStateStore(namespace);
   }
 
   async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string }): Promise<JobRecord> {
@@ -102,8 +119,10 @@ export class DurableJobRuntime implements JobRuntime {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
     };
-    this.jobs.set(id, record);
+    // Admission is durable before the job becomes visible in memory or execution
+    // starts. A failed write must not leave a ghost job that can be polled/resumed.
     await this.state.save(record);
+    this.jobs.set(id, record);
     void this.execute(record, input);
     return { ...record };
   }
@@ -115,7 +134,11 @@ export class DurableJobRuntime implements JobRuntime {
         ? "Job was interrupted by a process restart; resume it from the saved snapshot."
         : "Job was interrupted before a resumable snapshot was saved.";
       record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
+      try {
+        await this.state.save(record);
+      } catch {
+        // Recovery status remains useful in this process even if the disk is read-only.
+      }
     }
     return record;
   }
@@ -184,8 +207,14 @@ export class DurableJobRuntime implements JobRuntime {
     record.status = "cancelled";
     record.error ??= "Job cancelled by caller.";
     record.updatedAt = new Date().toISOString();
-    await this.state.save(record);
+    // Cancellation is a live control action: abort first so a storage outage cannot
+    // leave execution running after the caller requested cancellation.
     controller?.abort(new Error("Job cancelled by caller"));
+    try {
+      await this.state.save(record);
+    } catch {
+      // Keep cancellation effective in memory; durable status may need reconciliation.
+    }
     return true;
   }
 
@@ -251,14 +280,24 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = result.completed ? "completed" : "failed";
       }
       record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
+      try {
+        await this.state.save(record);
+      } catch {
+        // Execution succeeded; keep its truthful in-memory result/status if the
+        // terminal snapshot cannot be persisted. Durability is degraded, not execution.
+      }
     } catch (error) {
       if (record.status !== "cancelled") {
         record.error = error instanceof Error ? error.message : String(error);
         record.status = controller.signal.aborted ? "cancelled" : "failed";
         record.updatedAt = new Date().toISOString();
       }
-      await this.state.save(record);
+      try {
+        await this.state.save(record);
+      } catch {
+        // Keep the in-memory terminal failure, but do not leak a rejected detached
+        // execution promise when the state store is unavailable.
+      }
     } finally {
       if (externalSignal && onExternalAbort) {
         externalSignal.removeEventListener("abort", onExternalAbort);

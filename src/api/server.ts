@@ -7,6 +7,7 @@ import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } 
 import { UsageLimiter } from "./usage.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
+import { ConversationService } from "../conversation/session.js";
 
 interface ActiveRun {
   id: string;
@@ -18,6 +19,9 @@ interface ActiveRun {
   updatedAt: number;
   ownerKeyId: string;
   desktopCapabilities: DesktopCapability[];
+  conversationId?: string;
+  assistantMessageId?: string;
+  events: import("../agent/types.js").AgentEvent[];
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -88,7 +92,7 @@ function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"])
     description: criterion.description,
     probe: criterion.probe,
     evaluate: (value: unknown) => ({
-      passed: Boolean((value as { passed?: unknown })?.passed),
+      passed: (value as { passed?: unknown } | null)?.passed === true,
       detail: "API acceptance probe",
     }),
   }));
@@ -121,22 +125,41 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
-  const persist = (run: ActiveRun) => {
+  const conversations = config.conversationStore ? new ConversationService(config.conversationStore) : undefined;
+  const toRunRecord = (run: ActiveRun): RunRecord => ({
+    id: run.id, status: run.status,
+    ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
+    ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
+    ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+    ...(run.conversationId ? { conversationId: run.conversationId } : {}),
+    ...(run.assistantMessageId ? { assistantMessageId: run.assistantMessageId } : {}),
+    events: [...run.events],
+  });
+  // Serialize writes at the API boundary too: injected RunRecordStore adapters are
+  // not required to implement their own queue, and terminal snapshots must not be
+  // overwritten by an older in-flight event snapshot.
+  const persistenceChains = new Map<string, Promise<void>>();
+  const persistRequired = async (run: ActiveRun) => {
     if (!runStore) return;
-    const record: RunRecord = {
-      id: run.id, status: run.status,
-      ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
-      ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
-      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
-    };
-    void runStore.save(record);
+    const previous = persistenceChains.get(run.id) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(() => runStore.save(toRunRecord(run)));
+    const queued = operation.catch(() => undefined);
+    persistenceChains.set(run.id, queued);
+    try {
+      await operation;
+    } finally {
+      if (persistenceChains.get(run.id) === queued) persistenceChains.delete(run.id);
+    }
+  };
+  const persist = (run: ActiveRun) => {
+    if (runStore) void persistRequired(run).catch(() => undefined);
   };
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
         !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string")) {
-      void runStore.remove(record.id); continue;
+      void runStore.remove(record.id).catch(() => undefined); continue;
     }
     const run: ActiveRun = {
       id: record.id, status: interrupted ? "failed" : record.status,
@@ -145,11 +168,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       controller: new AbortController(), createdAt: record.createdAt,
       updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
       desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+      ...(record.conversationId ? { conversationId: record.conversationId } : {}),
+      ...(record.assistantMessageId ? { assistantMessageId: record.assistantMessageId } : {}),
+      events: [...(record.events ?? [])],
     };
     runs.set(run.id, run); if (interrupted) persist(run);
   }
   const idempotency = new Map<string, string>();
   const activeByKey = new Map<string, number>();
+  const activeConversationTurns = new Set<string>();
+  const runSubscribers = new Map<string, Set<(event: import("../agent/types.js").AgentEvent) => void>>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
   const retention = integerSetting("runRetentionMs", config.runRetentionMs, 24 * 60 * 60 * 1000, 0, 365 * 24 * 60 * 60 * 1000);
@@ -162,7 +190,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     ...(run.error ? { error: run.error } : {}),
   });
 
-  const startRun = (run: ActiveRun, input: AgentRunInput) => {
+  const startRun = (run: ActiveRun, input: AgentRunInput, onSettled?: (run: ActiveRun) => void) => {
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
@@ -177,6 +205,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
+          onEvent: (event) => {
+            run.events.push(event);
+            if (run.events.length > 500) run.events.shift();
+            persist(run);
+            for (const subscriber of runSubscribers.get(run.id) ?? []) subscriber(event);
+          },
         });
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
@@ -196,7 +230,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       } finally {
         clearTimeout(timer);
         run.updatedAt = Date.now();
-        persist(run);
+        try { onSettled?.(run); } catch { /* settlement hooks must not leak concurrency slots */ }
+        // Await the terminal snapshot so queued event/status writes are drained before
+        // this run releases capacity. A persistence failure must not mask the result.
+        try { await persistRequired(run); } catch { /* the in-memory terminal result remains available */ }
         const current = activeByKey.get(run.ownerKeyId) ?? 1;
         if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
       }
@@ -206,7 +243,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const prune = () => {
     const cutoff = Date.now() - retention;
     for (const [id, run] of runs) {
-      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id); }
+      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id).catch(() => undefined); }
     }
     for (const [key, runId] of idempotency) {
       if (!runs.has(runId)) idempotency.delete(key);
@@ -263,6 +300,296 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+      }
+
+      // Conversation storage endpoints are optional until a durable store is configured.
+      // The authenticated API key hash is the owner boundary; client-supplied owner IDs are ignored.
+      if (req.url === "/v1/conversations" && (req.method === "GET" || req.method === "POST")) {
+        if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
+        if (req.method === "GET") {
+          if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+            return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+          }
+          return json(res, 200, { conversations: conversations.list(auth.keyId) }, origin, config);
+        }
+        if (!auth.scopes.includes("agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+        }
+        const input = await body(req, maxBytes) as { title?: unknown } | null;
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
+          return json(res, 400, { error: "invalid_request_body" }, origin, config);
+        }
+        if (input.title !== undefined && typeof input.title !== "string") {
+          return json(res, 400, { error: "invalid_title" }, origin, config);
+        }
+        try {
+          return json(res, 201, { conversation: conversations.create(auth.keyId, typeof input.title === "string" ? input.title : undefined) }, origin, config);
+        } catch (error) {
+          return json(res, 400, { error: "invalid_conversation", message: error instanceof Error ? error.message : "Invalid conversation" }, origin, config);
+        }
+      }
+
+      const conversationStreamMatch = req.url?.split("?")[0]?.match(/^\/v1\/conversations\/([0-9a-f-]{36})\/turns\/([0-9a-f-]{36})\/stream$/i);
+      if (conversationStreamMatch && req.method === "GET") {
+        if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
+        if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+        }
+        const conversationId = conversationStreamMatch[1]!;
+        const runId = conversationStreamMatch[2]!;
+        const conversation = conversations.get(auth.keyId, conversationId);
+        const run = runs.get(runId);
+        if (!conversation || !run || run.ownerKeyId !== auth.keyId || run.conversationId !== conversationId) {
+          return json(res, 404, { error: "conversation_turn_not_found" }, origin, config);
+        }
+        res.writeHead(200, {
+          ...headers(origin, config),
+          "content-type": "text/event-stream; charset=utf-8",
+          connection: "keep-alive",
+          "x-accel-buffering": "no",
+        });
+        const send = (value: unknown) => {
+          if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(value)}\n\n`);
+        };
+        for (const [index, event] of run.events.entries()) send({ type: "event", runId, sequence: index, event });
+        const sendTerminal = () => {
+          const latest = runs.get(runId);
+          if (!latest) return;
+          if (latest.status === "completed" || latest.status === "failed" || latest.status === "cancelled") {
+            const session = conversations.get(auth.keyId, conversationId);
+            const assistantMessage = latest.assistantMessageId
+              ? session?.messages.find((message) => message.id === latest.assistantMessageId)
+              : undefined;
+            send({
+              type: "status",
+              runId,
+              status: latest.status,
+              ...(assistantMessage ? { assistantMessage } : {}),
+              ...(latest.result ? { result: latest.result } : {}),
+              ...(latest.error ? { error: latest.error } : {}),
+            });
+            if (!res.writableEnded && !res.destroyed) res.end();
+            return true;
+          }
+          return false;
+        };
+        if (sendTerminal()) return;
+        const subscribers = runSubscribers.get(runId) ?? new Set<(event: import("../agent/types.js").AgentEvent) => void>();
+        const subscriber = (event: import("../agent/types.js").AgentEvent) => send({ type: "event", runId, event });
+        subscribers.add(subscriber);
+        runSubscribers.set(runId, subscribers);
+        let heartbeat: ReturnType<typeof setInterval> | undefined;
+        const cleanup = () => {
+          if (heartbeat) clearInterval(heartbeat);
+          subscribers.delete(subscriber);
+          if (subscribers.size === 0) runSubscribers.delete(runId);
+        };
+        heartbeat = setInterval(() => {
+          if (res.destroyed || res.writableEnded) return;
+          res.write(": keep-alive\n\n");
+          if (sendTerminal()) cleanup();
+        }, 10_000);
+        res.on("close", cleanup);
+        return;
+      }
+
+      const conversationTurnMatch = req.url?.split("?")[0]?.match(/^\/v1\/conversations\/([0-9a-f-]{36})\/turns\/([0-9a-f-]{36})$/i);
+      if (conversationTurnMatch && req.method === "GET") {
+        if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
+        if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+        }
+        const conversationId = conversationTurnMatch[1]!;
+        const runId = conversationTurnMatch[2]!;
+        const conversation = conversations.get(auth.keyId, conversationId);
+        const run = runs.get(runId);
+        if (!conversation || !run || run.ownerKeyId !== auth.keyId || run.conversationId !== conversationId) {
+          return json(res, 404, { error: "conversation_turn_not_found" }, origin, config);
+        }
+        const assistantMessage = run.status === "completed" && run.assistantMessageId
+          ? conversation.messages.find((message) => message.id === run.assistantMessageId)
+          : undefined;
+        return json(res, 200, {
+          conversationId,
+          runId,
+          status: run.status,
+          ...(assistantMessage ? { assistantMessage } : {}),
+          ...(run.result ? { result: run.result } : {}),
+          ...(run.error ? { error: run.error } : {}),
+        }, origin, config);
+      }
+
+      const conversationPath = req.url?.split("?")[0]?.split("/") ?? [];
+      const conversationMatch = conversationPath[1] === "v1" && conversationPath[2] === "conversations" && conversationPath.length >= 4 && conversationPath.length <= 5 && (conversationPath.length === 4 || conversationPath[4] === "messages") && /^[0-9a-f-]{36}$/i.test(conversationPath[3] ?? "")
+        ? [req.url ?? "", conversationPath[3] ?? "", conversationPath.length === 5 ? "messages" : undefined]
+        : null;
+      if (conversationMatch) {
+        if (!conversations) return json(res, 503, { error: "conversation_store_unavailable" }, origin, config);
+        const conversationId = conversationMatch[1] ?? "";
+        const messagesPath = conversationMatch[2] === "messages";
+        if (req.method === "GET" && !messagesPath) {
+          if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+            return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+          }
+          const conversation = conversations.get(auth.keyId, conversationId);
+          return conversation ? json(res, 200, { conversation }, origin, config) : json(res, 404, { error: "conversation_not_found" }, origin, config);
+        }
+        if (!auth.scopes.includes("agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+        }
+        if (req.method === "DELETE" && !messagesPath) {
+          return conversations.delete(auth.keyId, conversationId)
+            ? json(res, 200, { ok: true }, origin, config)
+            : json(res, 404, { error: "conversation_not_found" }, origin, config);
+        }
+        if (req.method === "DELETE" && messagesPath) {
+          try { return json(res, 200, { conversation: conversations.clear(auth.keyId, conversationId) }, origin, config); }
+          catch { return json(res, 404, { error: "conversation_not_found" }, origin, config); }
+        }
+        if (req.method === "POST" && messagesPath) {
+          const input = await body(req, maxBytes) as { role?: unknown; content?: unknown } | null;
+          // Clients may submit only user messages; assistant/tool messages are server-owned.
+          if (!input || typeof input !== "object" || Array.isArray(input) || input.role !== "user" || typeof input.content !== "string") {
+            return json(res, 400, { error: "user_message_required" }, origin, config);
+          }
+          const asyncTurn = (input as { async?: unknown }).async === true;
+          const conversationTurnKey = auth.keyId + ":" + conversationId;
+          if (activeConversationTurns.has(conversationTurnKey)) {
+            res.setHeader("retry-after", "1");
+            return json(res, 409, { error: "conversation_turn_in_progress", retryAfterMs: 1000 }, origin, config);
+          }
+          // Check capacity before consuming quota or mutating conversation history.
+          // No await occurs between this check and the later increment.
+          const active = activeByKey.get(auth.keyId) ?? 0;
+          if (active >= maxConcurrentRunsPerKey) {
+            res.setHeader("retry-after", "2");
+            return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
+          }
+          try {
+            conversations.validateAppend(auth.keyId, conversationId, { role: "user", content: input.content });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Invalid conversation message.";
+            const status = /not found/i.test(message) ? 404 : 400;
+            return json(res, status, { error: status === 404 ? "conversation_not_found" : "invalid_message", message }, origin, config);
+          }
+          try {
+            usage.consume(auth.keyId);
+          } catch (error) {
+            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+          }
+          let userMessage;
+          try {
+            userMessage = conversations.append(auth.keyId, conversationId, { role: "user", content: input.content });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Invalid conversation message.";
+            const status = /not found/i.test(message) ? 404 : 400;
+            return json(res, status, { error: status === 404 ? "conversation_not_found" : "invalid_message", message }, origin, config);
+          }
+
+          // Route the user's natural-language turn through the existing Sofia Agent.
+          // The conversation layer stores context; it does not introduce a second planner.
+          const context = conversations.buildContext(auth.keyId, conversationId);
+          // One active generation per conversation preserves user/assistant turn order.
+          activeConversationTurns.add(conversationTurnKey);
+          // Count synchronous and asynchronous conversation turns against the same
+          // per-key limit used by the ordinary run endpoints.
+          activeByKey.set(auth.keyId, active + 1);
+          if (asyncTurn) {
+            const runId = randomUUID();
+            const run: ActiveRun = {
+              id: runId,
+              status: "queued",
+              controller: new AbortController(),
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              ownerKeyId: auth.keyId,
+              desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+              conversationId,
+              events: [],
+            };
+            runs.set(runId, run);
+            try {
+              await persistRequired(run);
+            } catch {
+              runs.delete(runId);
+              try { conversations.removeMessage(auth.keyId, conversationId, userMessage.id); } catch { /* best-effort rollback if the conversation store itself failed */ }
+              usage.refundRun(auth.keyId);
+              activeConversationTurns.delete(conversationTurnKey);
+              const current = activeByKey.get(auth.keyId) ?? 1;
+              if (current <= 1) activeByKey.delete(auth.keyId); else activeByKey.set(auth.keyId, current - 1);
+              return json(res, 503, { error: "run_persistence_unavailable" }, origin, config);
+            }
+            startRun(run, {
+              task: input.content,
+              context: JSON.stringify(context.messages),
+            }, (settled) => {
+              try {
+                if (settled.status !== "completed" || !settled.result || settled.assistantMessageId) return;
+                try {
+                  const assistant = conversations.appendAssistantResponse(auth.keyId, conversationId, settled.result.output, userMessage.id);
+                  if (assistant) {
+                    settled.assistantMessageId = assistant.id;
+                    settled.updatedAt = Date.now();
+                    persist(settled);
+                  }
+                } catch {
+                  // Keep the run result available; a deleted conversation must not fail the run.
+                }
+              } finally {
+                activeConversationTurns.delete(conversationTurnKey);
+                // Release the per-key slot when the async turn settles. Without
+                // this, completed/failed/cancelled conversation runs permanently
+                // consume concurrency capacity until the server restarts.
+                const current = activeByKey.get(auth.keyId) ?? 1;
+                if (current <= 1) activeByKey.delete(auth.keyId);
+                else activeByKey.set(auth.keyId, current - 1);
+              }
+            });
+            return json(res, 202, {
+              conversationId,
+              userMessage,
+              run: publicResponse(run),
+              pollUrl: `/v1/conversations/${conversationId}/turns/${runId}`,
+              contextTruncated: context.truncated,
+            }, origin, config);
+          }
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+          try {
+            const result = await agent.run({
+              principalId: auth.keyId,
+              desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+              task: input.content,
+              context: JSON.stringify(context.messages),
+              signal: controller.signal,
+            });
+            if (controller.signal.aborted) {
+              return json(res, 504, { error: "conversation_turn_timeout", userMessage }, origin, config);
+            }
+            const assistantMessage = conversations.appendAssistantResponse(auth.keyId, conversationId, result.output, userMessage.id);
+            return json(res, 200, {
+              conversationId,
+              userMessage,
+              ...(assistantMessage ? { assistantMessage } : {}),
+              result,
+              contextTruncated: context.truncated,
+            }, origin, config);
+          } catch (error) {
+            return json(res, controller.signal.aborted ? 504 : 502, {
+              error: controller.signal.aborted ? "conversation_turn_timeout" : "conversation_turn_failed",
+              message: controller.signal.aborted ? "Sofia did not finish before the request timeout." : error instanceof Error ? error.message : "Agent failed",
+              conversationId,
+              userMessage,
+            }, origin, config);
+          } finally {
+            clearTimeout(timer);
+            activeConversationTurns.delete(conversationTurnKey);
+            const current = activeByKey.get(auth.keyId) ?? 1;
+            if (current <= 1) activeByKey.delete(auth.keyId);
+            else activeByKey.set(auth.keyId, current - 1);
+          }
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
 
       const adminScope = config.securityAdminScope ?? "security:admin";
@@ -326,7 +653,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
+        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes), events: [] };
         runs.set(runId, run);
         persist(run);
         res.writeHead(200, {
@@ -351,7 +678,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
-            onEvent: (event) => send({ type: "event", runId, event }),
+            onEvent: (event) => {
+              run.events.push(event);
+              if (run.events.length > 500) run.events.shift();
+              send({ type: "event", runId, event });
+            },
           });
           if (controller.signal.aborted) throw new Error("Run cancelled.");
           run.result = result;
@@ -410,9 +741,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             updatedAt: Date.now(),
             ownerKeyId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            events: [],
           };
           runs.set(runId, run);
-          persist(run);
+          try {
+            await persistRequired(run);
+          } catch {
+            runs.delete(runId);
+            return json(res, 503, { error: "run_persistence_unavailable" }, origin, config);
+          }
           if (idempotencyId) idempotency.set(idempotencyId, runId);
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {

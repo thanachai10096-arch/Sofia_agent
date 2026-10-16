@@ -455,3 +455,113 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
   assert.equal(result.status, "completed");
   assert.equal(result.checkpointId, "restart-checkpoint");
 });
+
+
+test("DurableJobRuntime does not expose or execute a job when initial persistence fails", async () => {
+  const namespace = "job-runtime-admission-failure-" + randomUUID();
+  let generated = false;
+  const stateStore = {
+    async save() { throw new Error("job state disk unavailable"); },
+    async list() { return []; },
+    async get() { return undefined; },
+  };
+  const runtime = new DurableJobRuntime(() => ({
+    run: async () => {
+      generated = true;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace, stateStore);
+
+  await assert.rejects(() => runtime.submit({ task: "must not execute" }), /job state disk unavailable/i);
+  assert.deepEqual(await runtime.list(), []);
+  assert.equal(generated, false);
+});
+
+
+test("DurableJobRuntime preserves a successful result when terminal persistence fails", async () => {
+  const namespace = "job-runtime-terminal-persist-failure-" + randomUUID();
+  let saves = 0;
+  const stateStore = {
+    async save() {
+      saves += 1;
+      if (saves >= 3) throw new Error("terminal state disk unavailable");
+    },
+    async list() { return []; },
+    async get() { return undefined; },
+  };
+  const runtime = new DurableJobRuntime(() => ({
+    run: async () => ({ completed: true, state: "completed", summary: "work finished" }),
+  } as unknown as SofiaBrain), undefined, namespace, stateStore);
+
+  const submitted = await runtime.submit({ task: "terminal persistence failure" });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status === "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "completed");
+  assert.equal(current?.result?.summary, "work finished");
+  assert.equal(current?.error, undefined);
+});
+
+
+test("DurableJobRuntime cancellation aborts execution even when status persistence fails", async () => {
+  const namespace = "job-runtime-cancel-persist-failure-" + randomUUID();
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => { started = resolve; });
+  let saves = 0;
+  const stateStore = {
+    async save() {
+      saves += 1;
+      if (saves === 3) throw new Error("cancel status disk unavailable");
+    },
+    async list() { return []; },
+    async get() { return undefined; },
+  };
+  const brain = {
+    run: async ({ signal }: { signal?: AbortSignal }) => {
+      started();
+      if (!signal) throw new Error("missing abort signal");
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return { completed: false, state: "cancelled" };
+    },
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace, stateStore);
+  const submitted = await runtime.submit({ task: "cancel despite persistence outage" });
+  await running;
+  assert.equal(await runtime.cancel(submitted.id), true);
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status === "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "cancelled");
+});
+
+
+test("FileJobStateStore serializes admissions across runtime instances sharing a namespace", async () => {
+  const namespace = "job-runtime-shared-writes-" + randomUUID();
+  const hangingBrain = {
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain;
+  const first = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
+  const second = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
+
+  const [firstJob, secondJob] = await Promise.all([
+    first.submit({ task: "first concurrent admission" }),
+    second.submit({ task: "second concurrent admission" }),
+  ]);
+
+  // Let both workers persist their running states before reading from a fresh runtime.
+  await new Promise<void>((resolve) => setTimeout(resolve, 40));
+  const restarted = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
+  const records = await restarted.list();
+  const ids = new Set(records.map((record) => record.id));
+
+  assert.equal(ids.has(firstJob.id), true, "first admitted job must not be overwritten");
+  assert.equal(ids.has(secondJob.id), true, "second admitted job must not be overwritten");
+  assert.equal(records.filter((record) => record.id === firstJob.id || record.id === secondJob.id).length, 2);
+});

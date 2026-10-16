@@ -1,5 +1,6 @@
 import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
+import type { ConversationStore } from "../conversation/types.js";
 
 export interface AgentRunInput {
   task: string;
@@ -51,4 +52,6 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Optional conversation persistence adapter; required to enable conversation endpoints. */
+  conversationStore?: ConversationStore;
 }

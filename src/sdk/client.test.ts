@@ -110,3 +110,48 @@ test("SDK aborts stalled mobile requests at the configured timeout", async () =>
   });
   await assert.rejects(client.start({ task: "must not hang forever" }), /timed out/i);
 });
+
+
+test("SDK exposes owner-scoped conversation operations and async polling", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith("/v1/conversations") && init?.method === "POST") {
+        return response(201, { conversation: { id: "conversation-123", title: "Chat", createdAt: 1, updatedAt: 1, messages: [] } });
+      }
+      if (url.endsWith("/messages")) {
+        return response(202, {
+          conversationId: "conversation-123",
+          userMessage: { id: "message-1", role: "user", content: "hello", createdAt: 2 },
+          run: { id: "run-123", status: "queued" },
+          pollUrl: "/v1/conversations/conversation-123/turns/run-123",
+          contextTruncated: false,
+        });
+      }
+      if (url.endsWith("/turns/run-123")) {
+        return response(200, { conversationId: "conversation-123", runId: "run-123", status: "completed", assistantMessage: { id: "message-2", role: "assistant", content: "hi", createdAt: 3 } });
+      }
+      if (url.endsWith("/stream")) {
+        return new Response(`data: ${JSON.stringify({ type: "status", status: "completed" })}\n\n`, {
+          status: 200, headers: { "content-type": "text/event-stream; charset=utf-8" },
+        });
+      }
+      return response(200, { conversations: [] });
+    },
+  });
+
+  const conversation = await client.createConversation("Chat");
+  assert.equal(conversation.id, "conversation-123");
+  const accepted = await client.sendConversationMessage(conversation.id, "hello", { async: true });
+  assert.equal("pollUrl" in accepted, true);
+  const turn = await client.waitForConversationTurn(conversation.id, "run-123", { timeoutMs: 500 });
+  assert.equal(turn.assistantMessage?.content, "hi");
+  const stream = await client.openConversationTurnStream(conversation.id, "run-123");
+  assert.match(await stream.text(), /completed/);
+  assert.equal(calls[1]?.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), { role: "user", content: "hello", async: true });
+});

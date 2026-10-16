@@ -3,6 +3,7 @@ export { classifyTask } from "./agent/classifier.js";
 export { ModelRouter } from "./models/router.js";
 export { Reviewer } from "./review/reviewer.js";
 export { createSofiaApi } from "./api/server.js";
+export { createSofiaLocalApi } from "./api/local.js";
 export { SofiaClient } from "./sdk/client.js";
 export { createNodeWorkspaceRuntime } from "./platform/local-runtime.js";
 export { detectPlatform } from "./platform/runtime.js";
@@ -44,6 +45,10 @@ export type * from "./models/types.js";
 export type * from "./api/types.js";
 export type * from "./platform/runtime.js";
 export type * from "./tools/types.js";
+
+export { ConversationService, InMemoryConversationStore } from "./conversation/session.js";
+export { FileConversationStore } from "./conversation/file-store.js";
+export type * from "./conversation/types.js";
 
 export { SecurityController } from "./security/controller.js";
 export { MemorySecurityAudit } from "./security/audit.js";

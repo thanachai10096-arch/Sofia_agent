@@ -12,7 +12,8 @@ permissions:
 
 concurrency:
   group: sofia-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Keep validation runs for rapid PR commits; cancelling them can leave the latest head unverified.
+  cancel-in-progress: false
 
 jobs:
   validate:
