@@ -166,3 +166,30 @@ test("WorkflowOrchestrator fails closed on malformed executor results", async ()
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("WorkflowOrchestrator enforces a bounded deadline and persists cancellation", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-orchestrator-timeout-"));
+  try {
+    const store = new FileWorkflowPlanStore("timeout", root);
+    await store.save(createWorkflowPlan("timeout", [
+      { id: "slow", title: "Slow", description: "Must honor AbortSignal", idempotent: true },
+    ], { id: "timeout-plan", ownerPrincipalId: "principal-a" }));
+    const runner = new WorkflowOrchestrator({
+      store,
+      executeStep: async (_step, context) => await new Promise((_resolve, reject) => {
+        if (context.signal.aborted) reject(context.signal.reason);
+        else context.signal.addEventListener("abort", () => reject(context.signal.reason), { once: true });
+      }),
+    });
+    await assert.rejects(
+      () => runner.run("timeout-plan", { principalId: "principal-a", workspaceRoot: root, timeoutMs: 10 }),
+      /deadline exceeded/,
+    );
+    const saved = await store.load("timeout-plan");
+    assert.equal(saved?.status, "cancelled");
+    assert.equal(saved?.steps[0]?.status, "cancelled");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
