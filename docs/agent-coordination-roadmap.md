@@ -30,7 +30,7 @@ The current branch contains an in-memory, bounded agent message protocol and a d
 - [x] Run npm ci, npm run license:check, npm run typecheck, npm test, and npm run build in CI; workflow run #873 passed for commit `f78ebaeea3224d5b6a34feed0ef692258ac7cc6f`. Cross-platform Windows/macOS/Ubuntu, browser egress, and Docker sandbox integration jobs also passed. The later privileged-tool denial hardening commits still require their own CI confirmation.
 - [x] Review message-size and budget configuration validation, including invalid limits, bounded envelope metadata, evidence ID caps, and policy-snapshot regression tests.
 - [x] Make host-level privileged-tool denials non-overridable by caller-supplied delegation policy; added regression coverage for permissive policy attempts. CI for this hardening change is pending.
-- [x] Restore the missing `FileWorkflowPlanStore` module used by the existing workflow orchestrator; add atomic durable writes, schema checks on read, owner-only local permissions, exclusive fail-closed run locks, serialized snapshot replacement across store instances, and store/lock/concurrent-write regression tests. Latest CI must confirm typecheck/build/tests.
+- [x] Add a standalone `FileWorkflowPlanStore` and a minimal workflow-plan factory; the current branch does not contain a workflow orchestrator, so these files are not yet wired into Brain or job execution. The store adds atomic durable writes, schema checks on read, owner-only local permissions, exclusive fail-closed run locks, serialized snapshot replacement within one process, and store/lock/concurrent-write regression tests. Latest CI must confirm typecheck/build/tests.
 
 **Exit criteria:** required CI green on Ubuntu, macOS, and Windows; tests reproducibly pass; no claim of runtime integration yet.
 
@@ -83,7 +83,7 @@ The current branch contains an in-memory, bounded agent message protocol and a d
 
 ## Suggested implementation order
 
-1. Complete Phase 0 validation, confirm the workflow-plan store restoration in CI, and resolve any remaining typecheck/test failures.
+1. Complete Phase 0 validation and resolve any remaining typecheck/test failures. Treat the workflow-plan store as an isolated primitive until an actual orchestrator is implemented and integrated.
 2. Map the real Brain/subagent/Tool Gateway/job-runtime call graph and add an architecture test harness.
 3. Integrate a single specialist round trip behind a feature flag; no parallel fan-out at first.
 4. Add cancellation, permission-denial, hostile-evidence, and cross-principal tests.
