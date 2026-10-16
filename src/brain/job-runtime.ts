@@ -34,9 +34,13 @@ export interface JobStateStore {
   get(id: string): Promise<JobRecord | undefined>;
 }
 
+// FileJobStateStore instances created by separate runtimes in the same process
+// must share one write queue for a namespace. A per-instance queue allows two
+// read-modify-write operations to race and silently lose an admitted job.
+const fileJobStateWrites = new Map<string, Promise<void>>();
+
 class FileJobStateStore implements JobStateStore {
   private readonly file: string;
-  private writes: Promise<void> = Promise.resolve();
 
   constructor(namespace: string, root = sofiaStateDirectory("jobs")) {
     this.file = path.join(root, createHash("sha256").update(namespace).digest("hex") + ".json");
@@ -52,7 +56,8 @@ class FileJobStateStore implements JobStateStore {
   }
 
   async save(record: JobRecord): Promise<void> {
-    const operation = this.writes.then(async () => {
+    const previous = fileJobStateWrites.get(this.file) ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(async () => {
       const records = await this.read();
       const index = records.findIndex((item) => item.id === record.id);
       const durable = { ...record };
@@ -70,8 +75,13 @@ class FileJobStateStore implements JobStateStore {
         await fs.rm(temporary, { force: true });
       }
     });
-    this.writes = operation.catch(() => undefined);
-    return operation;
+    const queued = operation.catch(() => undefined);
+    fileJobStateWrites.set(this.file, queued);
+    try {
+      await operation;
+    } finally {
+      if (fileJobStateWrites.get(this.file) === queued) fileJobStateWrites.delete(this.file);
+    }
   }
 
   async list(): Promise<JobRecord[]> {
