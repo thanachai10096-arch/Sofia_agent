@@ -14,7 +14,7 @@ test("stale lock is not automatically unlinked because that can delete a replace
   const namespace = "stale-lock-safety-test";
   const id = createHash("sha256").update(namespace).digest("hex");
   const lockPath = path.join(root, id + ".json.lock");
-  await writeFile(lockPath, JSON.stringify({ pid: Number.MAX_SAFE_INTEGER, at: Date.now() }), { mode: 0o600 });
+  await writeFile(lockPath, JSON.stringify({ pid: 999_999_999, at: Date.now() }), { mode: 0o600 });
   try {
     const store = new FileCronStore(namespace, root);
     await assert.rejects(() => store.transact(state => state.audit.length), /appears stale.*verify no scheduler process/i);
@@ -22,6 +22,17 @@ test("stale lock is not automatically unlinked because that can delete a replace
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("creating a schedule cannot assign it to another owner", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const runtime = { async submit() { throw new Error("unused"); } } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store });
+  await assert.rejects(() => scheduler.create({
+    name: "spoofed", task: "task", runAt: "2026-10-18T00:00:00.000Z", timeZone: "UTC", ownerKeyId: "bob",
+  }, "alice"), /owner must match/i);
+  assert.equal(state.schedules.length, 0);
 });
 
 test("schedule quota is enforced atomically per owner", async () => {
