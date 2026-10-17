@@ -10,7 +10,12 @@ function definition(overrides: Partial<AdvancedSkillDefinition> = {}): AdvancedS
   };
 }
 function context(approved = false, signal = new AbortController().signal, trace: string[] = []) {
-  return { principalId: "test-user", approved, signal, emitTrace: (event: { type: string }) => trace.push(event.type) };
+  return {
+    principalId: "test-user",
+    ...(approved ? { approval: { requestId: "approval-123" } } : {}),
+    signal,
+    emitTrace: (event: { type: string }) => trace.push(event.type),
+  };
 }
 
 test("registry refuses planned skills", () => {
@@ -56,6 +61,13 @@ test("registry requires approval for privileged skills", async () => {
   registry.register(definition({ risk: "privileged", requiresApproval: true }), () => "should not run");
   await assert.rejects(registry.execute("test.skill", null, context()),
     (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "APPROVAL_REQUIRED");
+});
+
+test("approval-required skills fail closed unless trusted verifier confirms approval", async () => {
+  const registry = new AdvancedSkillRegistry(({ requestId, principalId, skillId }) =>
+    requestId === "approval-123" && principalId === "test-user" && skillId === "test.skill");
+  registry.register(definition({ risk: "privileged", requiresApproval: true }), () => "approved");
+  assert.equal(await registry.execute("test.skill", null, context(true)), "approved");
 });
 
 test("registry rejects missing skills and pre-aborted executions", async () => {
