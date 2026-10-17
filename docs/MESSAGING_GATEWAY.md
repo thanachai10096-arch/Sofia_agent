@@ -53,4 +53,5 @@ The code outline above is not a claim that the repository's API server is alread
 
 - No real provider tokens or production webhook URL are configured or tested here.
 - The Discord route still must be mounted by the host application's HTTPS server; the central Sofia API router has intentionally not been changed in this adapter PR.
+- The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, shared multi-process rate limiting, durable cross-host gateway rate limits, provider registration, and end-to-end live tests remain follow-up work.
