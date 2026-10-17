@@ -17,8 +17,10 @@ function request(body: Uint8Array, method = "POST") {
 function responseCapture() {
   const capture: { status?: number; headers?: Record<string, string>; body?: string } = {};
   const response = {
+    headersSent: false,
     writeHead(status: number, headers: Record<string, string>) { capture.status = status; capture.headers = headers; return response; },
     end(body?: string) { capture.body = body; return response; },
+    destroy() {},
   } as unknown as ServerResponse;
   return { capture, response };
 }
@@ -64,4 +66,16 @@ test("Discord HTTP route rejects non-POST requests", async () => {
   const { capture, response } = responseCapture();
   await handleDiscordInteractionHttpRequest(request(Buffer.from("{}"), "GET"), response, transport);
   assert.equal(capture.status, 405);
+});
+
+test("Discord HTTP route converts unexpected transport errors to a generic 503", async () => {
+  const transport = {
+    async start() {}, async sendMessage() { return { messageId: "1" }; }, async stop() {},
+    async handleRequest() { throw new Error("sensitive token should not leak"); },
+  } as unknown as DiscordInteractionTransport;
+  const { capture, response } = responseCapture();
+  await handleDiscordInteractionHttpRequest(request(Buffer.from("{}")), response, transport);
+  assert.equal(capture.status, 503);
+  assert.equal(capture.body, JSON.stringify({ error: "messaging_transport_unavailable" }));
+  assert.equal(capture.body?.includes("sensitive"), false);
 });
