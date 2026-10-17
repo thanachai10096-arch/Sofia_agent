@@ -4,7 +4,6 @@ import {
   REDIS_CHAT_DEDUPE_CLAIM_SCRIPT,
   REDIS_CHAT_DEDUPE_RELEASE_SCRIPT,
   RedisChatMessageDeduplicator,
-  type RedisChatMessageDeduplicatorOptions,
 } from "./redis-chat-deduplicator.js";
 import type { RedisEvalClient } from "./messaging/redis-rate-limiter.js";
 
