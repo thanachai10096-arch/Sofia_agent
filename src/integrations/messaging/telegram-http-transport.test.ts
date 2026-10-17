@@ -40,8 +40,8 @@ test("Telegram HTTP transport polls, advances update offset, sends replies and s
 
   const pollBodies = requests.filter((request) => request.url.endsWith("/getUpdates"))
     .map((request) => JSON.parse(String(request.init?.body)) as Record<string, unknown>);
-  assert.equal(pollBodies[0].offset, undefined);
-  assert.equal(pollBodies[1].offset, 41);
+  assert.equal(pollBodies[0]?.offset, undefined);
+  assert.equal(pollBodies[1]?.offset, 41);
   const sendBody = JSON.parse(String(requests.find((request) => request.url.endsWith("/sendMessage"))?.init?.body));
   assert.equal(sendBody.chat_id, "chat-1");
   assert.equal(sendBody.text, "hello");
