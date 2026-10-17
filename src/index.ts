@@ -27,6 +27,8 @@ export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
 export { InMemorySkillsPlatform } from "./skills/platform.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
 export { AgentEvaluationRunner } from "./evaluation.js";
+export { VoiceWorkflow } from "./voice/workflow.js";
+export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpeechProvider, VoiceAgentReply, VoiceTurnResult, VoiceWorkflowOptions } from "./voice/workflow.js";
 export { EvolutionEngine } from "./brain/evolution.js";
 export type { SkillPerformance, SkillRanking, EvolutionSnapshot, LearningDiagnostics } from "./brain/evolution.js";
 export type * from "./brain/edit-engine.js";
