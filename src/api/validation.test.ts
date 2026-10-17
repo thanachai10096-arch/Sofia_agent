@@ -28,6 +28,7 @@ test("API run validation preserves optional session IDs and rejects invalid valu
     input: { task: "continue", sessionId: "conversation-42" },
   });
   assert.equal(validateAgentRunInput({ task: "continue", sessionId: 7 }).valid, false);
+  assert.equal(validateAgentRunInput({ task: "continue", sessionId: "   " }).valid, false);
   assert.equal(validateAgentRunInput({ task: "continue", sessionId: "x".repeat(257) }).valid, false);
 });
 
