@@ -88,10 +88,13 @@ test("stable workflow fingerprint is independent of object key order", () => {
   assert.equal(stableWorkflowFingerprint({ api_key: "one" }), stableWorkflowFingerprint({ api_key: "two" }));
 });
 
-test("implemented workflow handlers remain unregistered until their CI verification is promoted", () => {
+test("verified workflow and tool result handlers register through the guarded dispatcher", async () => {
   const registry = new AdvancedSkillRegistry();
   const ids = registerVerifiedWorkflowSkills(registry);
-  assert.deepEqual(ids, []);
-  assert.equal(registry.has("workflow.01"), false);
-  assert.equal(registry.has("workflow.06"), false);
+  assert.deepEqual(ids, ["workflow.01", "workflow.06", "workflow.09", "workflow.10", "tools.03"]);
+  const result = await registry.execute("workflow.01", { steps: [{ id: "one", action: "inspect" }] }, {
+    principalId: "test-user",
+    signal: new AbortController().signal,
+  }) as { stepCount: number };
+  assert.equal(result.stepCount, 1);
 });
