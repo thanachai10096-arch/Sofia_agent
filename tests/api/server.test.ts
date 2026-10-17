@@ -509,3 +509,22 @@ test("API prevents another key from reading or cancelling a run", async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API responses redact credential-shaped values returned by a provider", async (t) => {
+  const secret = "sk-" + "A".repeat(28);
+  const provider: ModelProvider = {
+    async generate() { return { text: "Provider output included token=" + secret }; },
+  };
+  const { server, url } = await startApi(provider);
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+    body: JSON.stringify({ task: "return a safe result" }),
+  });
+  assert.equal(response.status, 200);
+  const body = JSON.stringify(await response.json());
+  assert.ok(!body.includes(secret), "provider credentials must not be returned to API clients");
+  assert.match(body, /REDACTED/);
+});
