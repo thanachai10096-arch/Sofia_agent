@@ -3,7 +3,7 @@ import type { AdvancedSkillDefinition } from "./advanced-skill-catalog.js";
 export interface AdvancedSkillExecutionContext {
   readonly principalId: string;
   readonly signal: AbortSignal;
-  readonly approved: boolean;
+  readonly approval?: { readonly requestId: string };
   readonly emitTrace?: (event: AdvancedSkillTraceEvent) => void;
 }
 
@@ -33,6 +33,14 @@ export class AdvancedSkillPolicyError extends Error {
   }
 }
 
+export interface AdvancedSkillApprovalRequest {
+  readonly skillId: string;
+  readonly principalId: string;
+  readonly requestId: string;
+}
+
+export type AdvancedSkillApprovalVerifier = (request: AdvancedSkillApprovalRequest) => boolean | Promise<boolean>;
+
 interface RegisteredSkill {
   definition: AdvancedSkillDefinition;
   handler: AdvancedSkillHandler;
@@ -45,6 +53,12 @@ interface RegisteredSkill {
  */
 export class AdvancedSkillRegistry {
   private readonly skills = new Map<string, RegisteredSkill>();
+
+  /**
+   * The verifier must consult a trusted Sofia approval store/controller.
+   * With no verifier, approval-required skills fail closed.
+   */
+  constructor(private readonly verifyApproval: AdvancedSkillApprovalVerifier = () => false) {}
 
   register(definition: AdvancedSkillDefinition, handler: AdvancedSkillHandler): void {
     if (definition.status !== "verified") {
@@ -94,9 +108,19 @@ export class AdvancedSkillRegistry {
     if (definition.status !== "verified") {
       throw new AdvancedSkillPolicyError(`Skill ${id} is not verified`, "SKILL_NOT_VERIFIED");
     }
-    if ((definition.requiresApproval || definition.risk === "privileged") && !context.approved) {
-      context.emitTrace?.({ type: "skill.denied", skillId: id, at: new Date().toISOString(), detail: "approval required" });
-      throw new AdvancedSkillPolicyError(`Approval required for skill ${id}`, "APPROVAL_REQUIRED");
+    if (definition.requiresApproval || definition.risk === "privileged") {
+      const approval = context.approval;
+      const approved = approval
+        ? await this.verifyApproval({
+            skillId: id,
+            principalId: context.principalId,
+            requestId: approval.requestId,
+          })
+        : false;
+      if (!approved) {
+        context.emitTrace?.({ type: "skill.denied", skillId: id, at: new Date().toISOString(), detail: "approval required" });
+        throw new AdvancedSkillPolicyError(`Approval required for skill ${id}`, "APPROVAL_REQUIRED");
+      }
     }
     if (context.signal.aborted) {
       throw new AdvancedSkillPolicyError(`Skill ${id} was aborted before execution`, "ABORTED");
