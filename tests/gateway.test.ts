@@ -80,6 +80,8 @@ test("gateway rejects malformed and non-object tool arguments", async () => {
 
 test("gateway enforces one timeout budget across the provider request", async () => {
   const originalFetch = globalThis.fetch;
+  // AbortSignal.timeout is intentionally unref'ed; keep the test process alive while the mocked fetch awaits it.
+  const keepAlive = setTimeout(() => undefined, 100);
   let calls = 0;
   globalThis.fetch = async (_input, init) => {
     calls++;
@@ -103,6 +105,7 @@ test("gateway enforces one timeout budget across the provider request", async ()
     await assert.rejects(gateway.generate(request, makeRoute()), /timeout|timed out/i);
     assert.equal(calls, 1, "a timed-out request must not start another retry");
   } finally {
+    clearTimeout(keepAlive);
     globalThis.fetch = originalFetch;
   }
 });
