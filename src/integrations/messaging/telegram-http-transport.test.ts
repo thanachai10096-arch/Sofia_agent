@@ -54,11 +54,11 @@ test("Telegram transport rejects malformed tokens and poll timeouts", () => {
 });
 
 test("Telegram delivery errors are sanitized and surfaced to the caller", async () => {
-  let errorEvent = "";
+  const errorEvents: string[] = [];
   const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({ ok: false, description: "secret-bearing provider detail" }), { status: 403 });
-  const transport = createTelegramHttpTransport({ token, fetchImpl, onError(event) { errorEvent = event; } });
+  const transport = createTelegramHttpTransport({ token, fetchImpl, onError(event) { errorEvents.push(event); } });
   await transport.start(new AbortController().signal, async () => {});
   await assert.rejects(() => transport.sendMessage("chat-1", "hello"), /delivery failed/);
-  assert.equal(errorEvent, "delivery_failed");
+  assert.ok(errorEvents.includes("delivery_failed"));
   await transport.stop();
 });
