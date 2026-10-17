@@ -1,0 +1,133 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { AdvancedSkillPolicyError, AdvancedSkillRegistry } from "./advanced-skill-runtime.js";
+import type { AdvancedSkillDefinition } from "./advanced-skill-catalog.js";
+import { SecurityController } from "../security/controller.js";
+
+function definition(overrides: Partial<AdvancedSkillDefinition> = {}): AdvancedSkillDefinition {
+  return {
+    id: "test.skill", name: "Test Skill", category: "Testing", risk: "read-only",
+    status: "verified", requiresApproval: false, description: "test handler", ...overrides,
+  };
+}
+function context(approved = false, signal = new AbortController().signal, trace: string[] = []) {
+  return {
+    principalId: "test-user",
+    ...(approved ? { approval: { requestId: "approval-123" } } : {}),
+    signal,
+    emitTrace: (event: { type: string }) => trace.push(event.type),
+  };
+}
+
+test("registry refuses planned skills", () => {
+  const registry = new AdvancedSkillRegistry();
+  assert.throws(() => registry.register(definition({ status: "planned" }), () => "nope"),
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "SKILL_NOT_VERIFIED");
+});
+
+test("registry rejects malformed runtime policy metadata", () => {
+  const registry = new AdvancedSkillRegistry();
+  const malformed = definition({ risk: "read-only" }) as AdvancedSkillDefinition;
+  (malformed as { risk: string }).risk = "unknown-risk";
+  assert.throws(() => registry.register(malformed, () => "nope"), TypeError);
+});
+
+test("registry rejects duplicate handlers", () => {
+  const registry = new AdvancedSkillRegistry();
+  registry.register(definition(), () => "first");
+  assert.throws(() => registry.register(definition(), () => "second"), /already registered/);
+});
+
+test("registry executes verified handlers and emits trace events", async () => {
+  const registry = new AdvancedSkillRegistry();
+  const events: string[] = [];
+  registry.register(definition(), (input: unknown) => ({ echoed: input }));
+  const output = await registry.execute("test.skill", "hello", context(false, new AbortController().signal, events));
+  assert.deepEqual(output, { echoed: "hello" });
+  assert.deepEqual(events, ["skill.started", "skill.completed"]);
+});
+
+test("registered policy cannot be weakened by mutating the source definition", async () => {
+  const registry = new AdvancedSkillRegistry();
+  const source = { ...definition({ risk: "privileged", requiresApproval: true }) };
+  registry.register(source, () => "ran");
+  source.requiresApproval = false;
+  source.risk = "read-only";
+  await assert.rejects(registry.execute("test.skill", null, context()),
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "APPROVAL_REQUIRED");
+});
+
+test("registry requires approval for privileged skills", async () => {
+  const registry = new AdvancedSkillRegistry();
+  registry.register(definition({ risk: "privileged", requiresApproval: true }), () => "should not run");
+  await assert.rejects(registry.execute("test.skill", null, context()),
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "APPROVAL_REQUIRED");
+});
+
+test("approval-required skills fail closed unless trusted verifier confirms approval", async () => {
+  const registry = new AdvancedSkillRegistry(({ requestId, principalId, skillId }) =>
+    requestId === "approval-123" && principalId === "test-user" && skillId === "test.skill");
+  registry.register(definition({ risk: "privileged", requiresApproval: true }), () => "approved");
+  assert.equal(await registry.execute("test.skill", null, context(true)), "approved");
+});
+
+test("registry rejects missing skills and pre-aborted executions", async () => {
+  const registry = new AdvancedSkillRegistry();
+  await assert.rejects(registry.execute("missing", null, context()),
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "SKILL_NOT_FOUND");
+  registry.register(definition(), () => "should not run");
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(registry.execute("test.skill", null, context(false, controller.signal)),
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "ABORTED");
+});
+
+test("mid-flight cancellation aborts the handler signal", async () => {
+  const registry = new AdvancedSkillRegistry();
+  const controller = new AbortController();
+  let handlerSignal: AbortSignal | undefined;
+  registry.register(definition(), (_input, executionContext) => {
+    handlerSignal = executionContext.signal;
+    return new Promise((resolve) => setTimeout(() => resolve("late"), 100));
+  });
+  const pending = registry.execute("test.skill", null, context(false, controller.signal));
+  setTimeout(() => controller.abort(), 5);
+  await assert.rejects(pending,
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "ABORTED");
+  assert.equal(handlerSignal?.aborted, true);
+});
+
+test("registry times out slow handlers and aborts their execution signal", async () => {
+  const registry = new AdvancedSkillRegistry();
+  let signal: AbortSignal | undefined;
+  registry.register(definition(), (_input, executionContext) => {
+    signal = executionContext.signal;
+    return new Promise((resolve) => setTimeout(() => resolve("late"), 100));
+  });
+  await assert.rejects(registry.execute("test.skill", null, context(), { timeoutMs: 5 }),
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "TIMEOUT");
+  assert.equal(signal?.aborted, true);
+});
+
+
+test("security kill switch blocks new skill runs and aborts active runs", async () => {
+  const security = new SecurityController();
+  const registry = new AdvancedSkillRegistry(() => true, security);
+  let handlerSignal: AbortSignal | undefined;
+  let invoked = false;
+  registry.register(definition(), (_input, executionContext) => {
+    invoked = true;
+    handlerSignal = executionContext.signal;
+    return new Promise((resolve) => setTimeout(() => resolve("late"), 100));
+  });
+
+  const pending = registry.execute("test.skill", null, context());
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  security.kill("test emergency");
+  await assert.rejects(pending,
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "ABORTED");
+  assert.equal(invoked, true);
+  assert.equal(handlerSignal?.aborted, true);
+
+  await assert.rejects(registry.execute("test.skill", null, context()),
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "SECURITY_STOPPED");
+});
