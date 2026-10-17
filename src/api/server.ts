@@ -232,6 +232,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     ...(run.error ? { error: run.error } : {}),
   });
 
+  const publicJob = (job: unknown): unknown => {
+    const safe = redactSecrets(job);
+    if (safe && typeof safe === "object" && "status" in safe && "error" in safe) {
+      const record = safe as Record<string, unknown>;
+      if (record.status === "failed" && typeof record.error === "string") {
+        return { ...record, error: "Job execution failed." };
+      }
+    }
+    return safe;
+  };
+
   const startRun = (run: ActiveRun, input: AgentRunInput) => {
     void (async () => {
       run.status = "running";
@@ -666,10 +677,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 404, { error: "job_not_found" }, origin, config);
         }
         if (req.method === "GET" && !action) {
-          return json(res, 200, redactSecrets(job), origin, config);
+          return json(res, 200, publicJob(job), origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, redactSecrets(await deps.jobRuntime.resume(jobId)), origin, config); }
+          try { return json(res, 202, publicJob(await deps.jobRuntime.resume(jobId)), origin, config); }
           catch { return json(res, 409, { error: "job_resume_failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
@@ -681,7 +692,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (req.method === "GET" && requestPath === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
         const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
-        return json(res, 200, { jobs: redactSecrets(jobs) }, origin, config);
+        return json(res, 200, { jobs: jobs.map(publicJob) }, origin, config);
       }
 
       if (req.method === "POST" && requestPath === "/v1/jobs") {
@@ -697,7 +708,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ownerKeyId: auth.keyId,
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });
-          return json(res, 202, redactSecrets(job), origin, config);
+          return json(res, 202, publicJob(job), origin, config);
         } catch (error) {
           return json(res, 502, { error: "job_submit_failed" }, origin, config);
         }
