@@ -139,6 +139,7 @@ export class FileCronStore implements CronStore {
 function parseField(source: string, min: number, max: number): Set<number> {
   const values = new Set<number>();
   for (const part of source.split(",")) {
+    if (!part.trim()) throw new Error("Invalid cron field: " + source);
     const [base = "", stepRaw] = part.split("/");
     if (part.split("/").length > 2) throw new Error("Invalid cron field: " + source);
     const step = stepRaw === undefined ? 1 : Number(stepRaw);
@@ -147,7 +148,7 @@ function parseField(source: string, min: number, max: number): Set<number> {
     if (base === "*") { start = min; end = max; }
     else if (base.includes("-")) {
       const range = base.split("-");
-      if (range.length !== 2) throw new Error("Invalid cron range: " + source);
+      if (range.length !== 2 || range.some(value => !value.trim())) throw new Error("Invalid cron range: " + source);
       start = Number(range[0]); end = Number(range[1]);
     } else { start = Number(base); end = stepRaw === undefined ? start : max; }
     if (!Number.isInteger(start) || !Number.isInteger(end) || start < min || end > max || start > end) {
