@@ -26,4 +26,4 @@ Cron endpoints remain unavailable if no job runtime is configured.
 - `POST /v1/cron/schedules/:id/enable` and `/disable` — toggle a schedule.
 - `DELETE /v1/cron/schedules/:id` — disable the schedule and cancel its active runtime job if present.
 
-Grant `cron:read` to list schedules/history and `cron:manage` to create, enable, disable or cancel schedules. Ownership is derived from the authenticated API key; clients cannot choose another owner's `ownerKeyId`. The API does not currently apply a separate per-key schedule-count quota; deploy behind trusted API-key provisioning and operational rate/concurrency controls until that quota is added.
+Grant `cron:read` to list schedules/history and `cron:manage` to create, enable, disable or cancel schedules. Ownership is derived from the authenticated API key; clients cannot choose another owner's `ownerKeyId`. The scheduler enforces a default limit of 100 schedules per API key (including disabled schedules), configurable with `maxSchedulesPerOwner` when constructing `CronScheduler` and capped at 10,000.
