@@ -23,6 +23,25 @@ export interface JobRecord {
   result?: Awaited<ReturnType<SofiaBrain["run"]>>;
   error?: string;
 }
+async function renameStateFile(source: string, destination: string): Promise<void> {
+  // Windows can transiently deny replacement while another local process has a
+  // short-lived read handle open. Keep the lock and retry only those transient
+  // sharing violations; never delete the destination to force a non-atomic write.
+  const attempts = process.platform === "win32" ? 50 : 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await fs.rename(source, destination);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (process.platform !== "win32" || (code !== "EPERM" && code !== "EBUSY") || attempt === attempts - 1) {
+        throw error;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+
 function isJobCancelled(record: JobRecord): boolean { return record.status === "cancelled"; }
 
 function redactJobRecord(record: JobRecord): JobRecord {
@@ -226,7 +245,7 @@ class FileJobStateStore {
     const temporary = this.file + "." + randomUUID() + ".tmp";
     try {
       await fs.writeFile(temporary, JSON.stringify(records.map(redactJobRecord), null, 2), { encoding: "utf8", mode: 0o600 });
-      await fs.rename(temporary, this.file);
+      await renameStateFile(temporary, this.file);
     } finally {
       await fs.rm(temporary, { force: true });
     }
