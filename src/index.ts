@@ -83,3 +83,5 @@ export { gitWorkflowOperator, externalActionApproval } from "./skills/security-c
 
 export { secretLeakDetector } from "./skills/security-coordination-handlers.js";
 export { commandRiskClassifier } from "./skills/security-coordination-handlers.js";
+export { patchGenerator, pythonSpecialist, apiContractDesigner, codeReviewAuditor, unitTestGenerator, auditTrailWriter } from "./skills/remaining-domain-handlers.js";
+export { toolDiscoveryRouter, terminalTaskRunner, fileWorkspaceOperator, apiConnectorOrchestrator, technicalDocumentationReader, marketGapAnalyst, modelRouterOptimizer, registerVerifiedRemainingDomainSkills } from "./skills/remaining-domain-handlers.js";
