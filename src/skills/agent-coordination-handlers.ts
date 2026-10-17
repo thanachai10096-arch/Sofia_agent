@@ -53,7 +53,7 @@ export const specialistRouter = (input: unknown) => {
     matchedTags: requiredTags.filter(tag => item.tags.includes(tag)),
     score: requiredTags.length === 0 ? 0 : requiredTags.filter(tag => item.tags.includes(tag)).length / requiredTags.length,
   })).sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-  return { requiredTags, candidates: ranked, recommendation: ranked[0]?.score > 0 ? ranked[0].id : null, launchesAgent: false, grantsCapabilities: false };
+  return { requiredTags, candidates: ranked, recommendation: (ranked[0]?.score ?? 0) > 0 ? ranked[0]!.id : null, launchesAgent: false, grantsCapabilities: false };
 };
 
 /** Validates a handoff contract and exposes missing fields instead of guessing them. */
