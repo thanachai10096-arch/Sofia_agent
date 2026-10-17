@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -527,4 +528,22 @@ test("API responses redact credential-shaped values returned by a provider", asy
   const body = JSON.stringify(await response.json());
   assert.ok(!body.includes(secret), "provider credentials must not be returned to API clients");
   assert.match(body, /REDACTED/);
+});
+
+
+test("API authenticates keyed API key digests without changing legacy key support", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const token = "a-long-random-test-token-for-hmac";
+  const secret = "test-only-hmac-secret-that-is-at-least-32-bytes";
+  const digest = createHmac("sha256", secret).update(token).digest("hex");
+  const { server, url } = await startApi(provider, {
+    apiKeys: {},
+    apiKeyHashes: { [digest]: ["agent:read"] },
+    apiKeyHashSecret: secret,
+  });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/v1/usage", {
+    headers: { authorization: "Bearer " + token },
+  });
+  assert.equal(response.status, 200);
 });
