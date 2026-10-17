@@ -39,7 +39,8 @@ class FileJobStateStore {
 
   private async read(): Promise<JobRecord[]> {
     try {
-      return JSON.parse(await fs.readFile(this.file, "utf8")) as JobRecord[];
+      const records = JSON.parse(await fs.readFile(this.file, "utf8")) as JobRecord[];
+      return records.map((record) => redactSecrets(record) as JobRecord);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
