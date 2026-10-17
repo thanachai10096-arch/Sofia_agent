@@ -80,3 +80,6 @@ export { agentMessageValidator, sharedTaskBoard, agentResultReviewer, loopDeadlo
 export { workflowTriggerEvaluator, longRunningJobMonitor, slaWatchdog, notificationPlanner, failureMemoryCurator } from "./skills/security-coordination-handlers.js";
 
 export { gitWorkflowOperator, externalActionApproval } from "./skills/security-coordination-handlers.js";
+
+export { secretLeakDetector } from "./skills/security-coordination-handlers.js";
+export { commandRiskClassifier } from "./skills/security-coordination-handlers.js";
