@@ -131,9 +131,10 @@ export function redactSecrets(value: unknown): unknown {
   if (typeof value === "string") {
     return value
       .replace(/-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----/gi, "[REDACTED PRIVATE KEY]")
-      .replace(/(?:Bearer\s+)[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
+      .replace(/\b(?:xox[baprs]-[A-Za-z0-9-]{10,})\b/gi, "[REDACTED]")
+      .replace(/(?:Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]")
       .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{12,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[0-9A-Z]{16})\b/g, "[REDACTED]")
-      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization|token|aws_secret_access_key)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
+      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|password|authorization|token|secret[_-]?key|session[_-]?token|aws_secret_access_key)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
   }
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value && typeof value === "object") {
