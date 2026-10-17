@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { BrainRunSnapshot } from "./run-state.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
+import { redactSecrets } from "../security/guard.js";
 
 export interface RunStore {
   save(snapshot: BrainRunSnapshot): Promise<void>;
@@ -39,7 +40,7 @@ export class FileRunStore implements RunStore {
       // Each write gets a unique temporary path, and replacement is serialized per target.
       const temporary = target + "." + randomUUID() + ".tmp";
       try {
-        await fs.writeFile(temporary, JSON.stringify(snapshot), { encoding: "utf8", mode: 0o600 });
+        await fs.writeFile(temporary, JSON.stringify(redactSecrets(snapshot)), { encoding: "utf8", mode: 0o600 });
         await fs.rename(temporary, target);
       } finally {
         await fs.rm(temporary, { force: true });
@@ -55,7 +56,7 @@ export class FileRunStore implements RunStore {
 
   async load(runId: string): Promise<BrainRunSnapshot | undefined> {
     try {
-      return JSON.parse(await fs.readFile(this.file(runId), "utf8")) as BrainRunSnapshot;
+      return redactSecrets(JSON.parse(await fs.readFile(this.file(runId), "utf8"))) as BrainRunSnapshot;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;

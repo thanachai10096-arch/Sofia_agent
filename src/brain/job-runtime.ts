@@ -5,6 +5,7 @@ import type { BrainRunInput, SofiaBrain } from "./executor.js";
 import type { BrainRunSnapshot } from "./run-state.js";
 import type { RunStore } from "./run-store.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
+import { redactSecrets } from "../security/guard.js";
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export interface JobRecord {
@@ -38,7 +39,8 @@ class FileJobStateStore {
 
   private async read(): Promise<JobRecord[]> {
     try {
-      return JSON.parse(await fs.readFile(this.file, "utf8")) as JobRecord[];
+      const records = JSON.parse(await fs.readFile(this.file, "utf8")) as JobRecord[];
+      return records.map((record) => redactSecrets(record) as JobRecord);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
@@ -49,7 +51,7 @@ class FileJobStateStore {
     const operation = this.writes.then(async () => {
       const records = await this.read();
       const index = records.findIndex((item) => item.id === record.id);
-      const durable = { ...record };
+      const durable = redactSecrets(record) as JobRecord;
       if (index >= 0) records[index] = durable;
       else records.push(durable);
 

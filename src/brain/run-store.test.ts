@@ -9,10 +9,11 @@ import { FileRunStore } from "./run-store.js";
 test("FileRunStore serializes concurrent writes across store instances", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-run-store-test-"));
   try {
+    const secret = "ghp_" + "A".repeat(36);
     const snapshot = {
       version: 1 as const,
       runId: "run-test-1",
-      task: "test",
+      task: "task token=" + secret,
       understanding: { objective: "test", constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [], risk: "low" as const, successCriteria: [], ambiguities: [] },
       plan: { strategy: "initial" as const, reason: "test", steps: [] },
       acceptanceCriteria: [],
@@ -35,6 +36,7 @@ test("FileRunStore serializes concurrent writes across store instances", async (
     assert.ok(loaded);
     assert.match(loaded.checkpointId, /^checkpoint-(?:[0-9]|1[0-9])$/);
     assert.equal(loaded.runId, snapshot.runId);
+    assert.ok(!JSON.stringify(loaded).includes(secret), "persisted snapshots must redact credential-shaped values");
 
     if (process.platform !== "win32") {
       const privateDirectory = path.join(root, createHash("sha256").update("test").digest("hex"));

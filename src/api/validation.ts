@@ -5,6 +5,10 @@ export function validateAgentRunInput(value: unknown): { valid: true; input: Age
     return { valid: false, error: "invalid_request_body" };
   }
   const input = value as Record<string, unknown>;
+  // Privileged execution grants are derived from authenticated API-key scopes, never request JSON.
+  if (Object.prototype.hasOwnProperty.call(input, "desktopCapabilities")) {
+    return { valid: false, error: "client_supplied_capabilities_forbidden" };
+  }
   if (typeof input.task !== "string" || !input.task.trim()) return { valid: false, error: "task_required" };
   if (input.task.length > 100_000) return { valid: false, error: "task_too_long" };
   if (input.context !== undefined && typeof input.context !== "string" && (input.context === null || typeof input.context !== "object" || Array.isArray(input.context))) {

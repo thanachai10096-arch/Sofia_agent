@@ -89,6 +89,53 @@ npm run build
 
 Use the repository's package scripts as the source of truth if a command differs in your environment.
 
+### Run a deterministic mock API
+
+This starts a local API without calling an external model provider. It requires a test token but no model credentials:
+
+```bash
+export SOFIA_API_KEY="replace-with-a-long-random-test-token"
+npm run example:mock-api
+curl -H "Authorization: Bearer $SOFIA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Say hello","async":false}' \
+  http://127.0.0.1:3000/v1/agent/runs
+```
+
+The mock provider always returns a deterministic placeholder response; this is an integration example, not a capability or quality benchmark.
+
+### Run the standalone API in Docker
+
+```bash
+docker build -t sofia-agent .
+docker run --rm -p 3000:3000 \
+  -e SOFIA_API_KEY="$SOFIA_API_KEY" \
+  -e SOFIA_API_KEY_HASH_SECRET="$SOFIA_API_KEY_HASH_SECRET" \
+  -e AI_GATEWAY_API_KEY="$AI_GATEWAY_API_KEY" \
+  -e SOFIA_FAST_MODEL="$SOFIA_FAST_MODEL" \
+  -e SOFIA_CODING_MODEL="$SOFIA_CODING_MODEL" \
+  -e SOFIA_REASONING_MODEL="$SOFIA_REASONING_MODEL" \
+  -v "$PWD/workspace:/workspace" \
+  -v sofia-agent-state:/data \
+  sofia-agent
+```
+
+Set a high-entropy `SOFIA_API_KEY` and an independent random `SOFIA_API_KEY_HASH_SECRET` (at least 32 bytes) in your deployment secret store. The standalone API stores only an HMAC-SHA-256 digest in the key map, enables durable local run/usage files, and binds to all interfaces inside the container. The file stores are single-process only; do not scale this container horizontally without a transactional shared store/queue. The image does not install browser binaries; browser automation remains opt-in and needs its own browser-runtime setup.
+
+### API key storage and quotas
+
+The standalone server accepts a high-entropy `SOFIA_API_KEY` and independent `SOFIA_API_KEY_HASH_SECRET` (at least 32 bytes) from the deployment secret store, computes an HMAC-SHA-256 digest, and configures the API using `apiKeyHashes` rather than storing the bearer token as an object key. The API also supports the legacy plaintext `apiKeys` configuration for compatibility; new deployments should prefer hashes. Authentication failures are throttled per client address. The API emits JSON request logs with a request ID, route template, status, and duration; optional metrics callbacks report request counts and latency without recording request bodies or credentials. For the full operational checklist, see [API security and deployment guide](docs/API_SECURITY.md). Known credential patterns are redacted from API responses, SSE events, and file-backed run/checkpoint/job snapshots. Redaction is pattern-based and cannot guarantee detection of arbitrary secrets, so never put production credentials in task prompts or repository files. Set SOFIA_API_KEY_SCOPES to the smallest required comma-separated scope set. To revoke the standalone key, remove or rotate the SOFIA_API_KEY secret and restart the service; the old hash is no longer accepted. Keep allowed origins explicit, leave shell/network capabilities disabled by default, and require approvals for high-risk actions.
+
+Run and tool-call quota counters can persist across restarts through `FileUsageStore`. This file-backed store is single-process only; use a transactional shared store/queue before running multiple API workers or relying on quotas for billing. Keep the state directory on a persistent volume with restrictive permissions.
+
+### API specification
+
+The OpenAPI document is maintained at [openapi/openapi.yaml](openapi/openapi.yaml). A standalone API process exposes `/health` for liveness and `/ready` for readiness.
+
+### Real-model benchmark
+
+After configuring the provider and running `npm run build`, use `npm run benchmark:real-model`. See [docs/REAL-MODEL-BENCHMARK.md](docs/REAL-MODEL-BENCHMARK.md). Real model calls may incur cost; the script reports aggregate measurements and does not publish prompts or model outputs.
+
 ### Persistent local state
 
 By default, local job records, Brain run snapshots, and project memory are stored under the operating system's temporary directory. Temporary storage may be cleared by reboots, cleanup jobs, or container replacement, so it is not sufficient for production recovery. Configure an absolute, persistent directory before starting Sofia:
@@ -105,8 +152,8 @@ Browser access is disabled by default. To opt in:
 
 ```bash
 export SOFIA_ALLOW_BROWSER=true
-npm install
-npm ci\nnpx playwright install chromium
+npm ci
+npx playwright install chromium
 ```
 
 Only enable browser capability in environments where its permissions and policy are configured appropriately. Playwright traffic is routed through a local egress proxy that validates DNS answers and connects to the selected numeric IP, blocks private/internal destinations, and limits web traffic to HTTP port 80 and HTTPS port 443. Chromium QUIC and non-proxied WebRTC UDP are disabled to reduce direct-network bypasses. Sites that require non-standard ports may not work. Keep host/container egress controls enabled for defense in depth.
@@ -129,6 +176,30 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 ### Secure client integration
 
 **Keep the Sofia master API key on the server.** A browser should call your authenticated application backend, which then calls Sofia. Never ship a privileged Sofia API key in frontend JavaScript.
+
+### API key storage and quota persistence
+
+For deployments that should not keep bearer tokens in an in-memory configuration object, configure HMAC-SHA-256 token digests using an independent random `SOFIA_API_KEY_HASH_SECRET` of at least 32 bytes. Do not reuse the bearer token as the HMAC secret or use a human password as an API key.
+
+```ts
+import { createHmac } from "node:crypto";
+import { createSofiaApi, FileUsageStore } from "sofia-agent";
+
+const token = process.env.SOFIA_API_KEY;
+if (!token) throw new Error("SOFIA_API_KEY is required");
+const hashSecret = process.env.SOFIA_API_KEY_HASH_SECRET;
+if (!hashSecret || Buffer.byteLength(hashSecret, "utf8") < 32) throw new Error("SOFIA_API_KEY_HASH_SECRET must be at least 32 bytes");
+const tokenHash = createHmac("sha256", hashSecret).update(token).digest("hex");
+
+const server = createSofiaApi(dependencies, {
+  apiKeys: {},
+  apiKeyHashes: { [tokenHash]: ["agent:run", "agent:read"] },
+  apiKeyHashSecret: hashSecret,
+  usageStore: new FileUsageStore("/var/lib/sofia/usage"),
+});
+```
+
+Authentication failures are throttled per client address. `FileUsageStore` persists daily quota counters across restarts, but it is a local single-process store; use a transactional shared store/queue adapter before running multiple API workers. Keep the usage directory on a persistent volume with restrictive OS permissions.
 
 ## `> Browser & local runtime`
 

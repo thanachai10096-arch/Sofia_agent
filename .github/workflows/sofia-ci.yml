@@ -15,18 +15,22 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate (Ubuntu)
+    name: Validate (Ubuntu, Node.js ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 24
+          node-version: ${{ matrix.node-version }}
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
@@ -40,6 +44,13 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Test coverage
+        if: matrix.node-version == 24
+        run: npm run test:coverage
+
+      - name: Smoke-test mock API example
+        run: node scripts/mock-api-smoke.mjs
+
       - name: Build
         run: npm run build
 
@@ -50,10 +61,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
 
@@ -80,6 +91,9 @@ jobs:
       - name: Verify browser egress proxy against public HTTP and HTTPS
         run: node scripts/browser-egress-proxy-smoke.mjs
 
+      - name: Build production container image
+        run: docker build --tag sofia-agent-ci .
+
 
   browser-runtime-smoke:
     name: Playwright browser egress integration
@@ -87,10 +101,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
 
@@ -118,10 +132,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
 

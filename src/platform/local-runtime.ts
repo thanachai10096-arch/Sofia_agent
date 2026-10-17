@@ -93,6 +93,10 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
   };
 
   const run: WorkspaceRuntime["run"] = async (command, args = [], options = {}) => {
+    const shellEnabled = /^(?:true|1|yes|on)$/i.test((process.env.SOFIA_ALLOW_SHELL ?? "").trim());
+    if (shellEnabled && process.env.SOFIA_SANDBOX_MODE !== "docker") {
+      throw new Error("SOFIA_ALLOW_SHELL requires SOFIA_SANDBOX_MODE=docker so shell execution is isolated.");
+    }
     const cwd = await contained(options.cwd ?? ".");
     const timeout = options.timeoutMs ?? 60_000;
     try {
@@ -189,7 +193,27 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
     run,
     git: async (args, options = {}) => {
       assertSafeGitArgs(args);
+      if (["clone", "fetch", "pull", "push"].includes(args[0] ?? "")) {
+        throw new Error("Network-capable Git operations require a dedicated allowlisted network transport and are disabled in the local runtime.");
+      }
+      const shellEnabled = /^(?:true|1|yes|on)$/i.test((process.env.SOFIA_ALLOW_SHELL ?? "").trim());
+      if (shellEnabled && process.env.SOFIA_SANDBOX_MODE !== "docker") {
+        throw new Error("SOFIA_ALLOW_SHELL requires SOFIA_SANDBOX_MODE=docker so Git execution is isolated.");
+      }
       const cwd = await contained(options.cwd ?? ".");
+      if (process.env.SOFIA_ALLOW_SHELL && /^(?:true|1|yes|on)$/i.test(process.env.SOFIA_ALLOW_SHELL.trim()) &&
+          process.env.SOFIA_SANDBOX_MODE === "docker") {
+        const image = process.env.SOFIA_SANDBOX_IMAGE;
+        if (!image) throw new Error("SOFIA_SANDBOX_IMAGE must name a preloaded SHA-256-pinned container image when shell execution is enabled.");
+        const sandbox = new ContainerSandbox({ image });
+        return await sandbox.run("git", args, {
+          workspaceRoot: base,
+          cwd: path.relative(base, cwd),
+          timeoutMs: options.timeoutMs ?? 60_000,
+          maxOutputBytes: 8 * 1024 * 1024,
+          allowNetwork: false,
+        });
+      }
       try {
         const result = await execFileAsync("git", args, {
           cwd,

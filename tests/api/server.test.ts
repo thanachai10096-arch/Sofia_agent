@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { FileRunRecordStore } from "../../src/api/run-record-store.js";
+import { createNodeWorkspaceRuntime } from "../../src/platform/local-runtime.js";
+import { MapToolRegistry } from "../../src/tools/types.js";
+import { defaultPolicy } from "../../src/security/policy.js";
 import test from "node:test";
 import { createSofiaApi } from "../../src/api/server.js";
 import type { AgentDependencies } from "../../src/agent/types.js";
+import type { SofiaApiConfig } from "../../src/api/types.js";
 import type { ModelProvider, ModelRoute } from "../../src/models/types.js";
 
 const route: ModelRoute = {
@@ -21,11 +30,12 @@ function dependencies(provider: ModelProvider): AgentDependencies {
   };
 }
 
-async function startApi(provider: ModelProvider) {
+async function startApi(provider: ModelProvider, overrides: Partial<SofiaApiConfig> = {}) {
   const server = createSofiaApi(dependencies(provider), {
     apiKeys: { "test-token": ["agent:run"] },
     allowedOrigins: ["https://app.example"],
     requestTimeoutMs: 5_000,
+    ...overrides,
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -166,4 +176,548 @@ test("job API enforces owner isolation for reads, resume, cancel, and list", asy
   assert.deepEqual((await listed.json() as { jobs: unknown[] }).jobs, []);
   assert.equal(job.resumeCalls, 0, "unauthorized caller must not invoke resume");
   assert.equal(job.cancelCalls, 0, "unauthorized caller must not invoke cancel");
+});
+
+
+test("API routes match pathname when query parameters are present", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const { server, url } = await startApi(provider);
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/v1/usage?view=summary", {
+    headers: { authorization: "Bearer test-token" },
+  });
+  assert.equal(response.status, 200);
+});
+
+test("API concurrency limit applies to async, sync, and SSE run modes", async (t) => {
+  let markStarted!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const provider: ModelProvider = {
+    async generate() {
+      markStarted();
+      await blocked;
+      return { text: "done" };
+    },
+  };
+  const { server, url } = await startApi(provider, { maxConcurrentRunsPerKey: 1 });
+  t.after(async () => {
+    release();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+  const headers = { authorization: "Bearer test-token", "content-type": "application/json" };
+  const first = await fetch(url + "/v1/agent/runs", {
+    method: "POST", headers, body: JSON.stringify({ task: "first run", async: true }),
+  });
+  assert.equal(first.status, 202);
+  await started;
+
+  const sync = await fetch(url + "/v1/agent/runs", {
+    method: "POST", headers, body: JSON.stringify({ task: "second run" }),
+  });
+  assert.equal(sync.status, 429);
+  assert.deepEqual(await sync.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+
+  const stream = await fetch(url + "/v1/agent/runs/stream", {
+    method: "POST", headers, body: JSON.stringify({ task: "third run" }),
+  });
+  assert.equal(stream.status, 429);
+  assert.deepEqual(await stream.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+  release();
+});
+
+
+test("SSE reports request timeout separately from user cancellation", async (t) => {
+  const provider: ModelProvider = {
+    generate(_request, _route, options) {
+      const signal = options?.signal;
+      assert.ok(signal);
+      return new Promise((_, reject) => {
+        const onAbort = () => reject(new Error("provider aborted"));
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+  };
+  const { server, url } = await startApi(provider, { requestTimeoutMs: 50 });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await streamRequest(url);
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.match(body, /"status":"failed"/);
+  assert.match(body, /Run timed out\./);
+  assert.doesNotMatch(body, /Run cancelled\./);
+});
+
+
+test("API restores idempotency keys from durable run records after restart", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "sofia-idempotency-restart-"));
+  let providerCalls = 0;
+  const provider: ModelProvider = {
+    async generate() {
+      providerCalls += 1;
+      return { text: "durable result" };
+    },
+  };
+  let currentServer: ReturnType<typeof createSofiaApi> | undefined;
+  const closeCurrent = async () => {
+    if (!currentServer) return;
+    const server = currentServer;
+    currentServer = undefined;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  };
+  try {
+    const store = new FileRunRecordStore(directory);
+    let instance = await startApi(provider, { runStore: store });
+    currentServer = instance.server;
+    const headers = {
+      authorization: "Bearer test-token",
+      "content-type": "application/json",
+      "idempotency-key": "retry-after-restart",
+    };
+    const body = JSON.stringify({ task: "perform this task once", async: true });
+    const created = await fetch(instance.url + "/v1/agent/runs", { method: "POST", headers, body });
+    assert.equal(created.status, 202);
+    const createdRun = await created.json() as { id: string };
+    let status = "";
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const response = await fetch(instance.url + "/v1/agent/runs/" + createdRun.id, {
+        headers: { authorization: "Bearer test-token" },
+      });
+      status = (await response.json() as { status: string }).status;
+      if (status === "completed" || status === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(status, "completed");
+    const callsAfterFirstRun = providerCalls;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await closeCurrent();
+
+    instance = await startApi(provider, { runStore: new FileRunRecordStore(directory) });
+    currentServer = instance.server;
+    const retried = await fetch(instance.url + "/v1/agent/runs", { method: "POST", headers, body });
+    assert.equal(retried.status, 200);
+    const retriedRun = await retried.json() as { id: string };
+    assert.equal(retriedRun.id, createdRun.id);
+    assert.equal(providerCalls, callsAfterFirstRun, "retry must not execute the task again");
+  } finally {
+    await closeCurrent();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("API exposes separate liveness and configurable readiness probes", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const { server, url } = await startApi(provider, { readinessCheck: () => false });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const health = await fetch(url + "/health");
+  assert.equal(health.status, 200);
+  assert.deepEqual(await health.json().then((value) => ({ ok: (value as { ok: boolean }).ok })), { ok: true });
+  const ready = await fetch(url + "/ready?probe=1");
+  assert.equal(ready.status, 503);
+  assert.deepEqual(await ready.json(), { ready: false });
+});
+
+
+test("API enforces tool-call quota before execution for sync, async, and SSE runs", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "sofia-api-tool-quota-"));
+  let executions = 0;
+  const tool = {
+    name: "workspace.read_file",
+    description: "Read a workspace file",
+    effects: ["read"] as const,
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    async execute() {
+      executions += 1;
+      return "unexpected tool execution";
+    },
+  };
+  let generation = 0;
+  const provider: ModelProvider = {
+    async generate(request) {
+      generation += 1;
+      if (request.step === 1) {
+        return {
+          text: "",
+          assistantMessage: { role: "assistant", content: "" },
+          toolCalls: [{ id: "quota-call-" + generation, name: "workspace.read_file", input: { path: "README.md" } }],
+        };
+      }
+      return { text: "completed" };
+    },
+  };
+  const server = createSofiaApi({
+    ...dependencies(provider),
+    runtime: createNodeWorkspaceRuntime(directory),
+    tools: new MapToolRegistry([tool]),
+    policy: defaultPolicy,
+  }, {
+    apiKeys: { "quota-token": ["agent:run"] },
+    maxToolCallsPerKeyPerDay: 0,
+    requestTimeoutMs: 2000,
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const url = "http://127.0.0.1:" + address.port;
+  const headers = { authorization: "Bearer quota-token", "content-type": "application/json" };
+  try {
+    const sync = await fetch(url + "/v1/agent/runs", {
+      method: "POST", headers, body: JSON.stringify({ task: "read a file" }),
+    });
+    assert.equal(sync.status, 429);
+    assert.match(JSON.stringify(await sync.json()), /tool-call quota exceeded/);
+    assert.equal(executions, 0);
+
+    const asyncResponse = await fetch(url + "/v1/agent/runs", {
+      method: "POST", headers, body: JSON.stringify({ task: "read a file", async: true }),
+    });
+    assert.equal(asyncResponse.status, 202);
+    const asyncRun = await asyncResponse.json() as { id: string };
+    let asyncStatus = "";
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const statusResponse = await fetch(url + "/v1/agent/runs/" + asyncRun.id, {
+        headers: { authorization: "Bearer quota-token" },
+      });
+      const status = await statusResponse.json() as { status: string; error?: string };
+      asyncStatus = status.status;
+      if (asyncStatus === "failed") {
+        assert.match(status.error ?? "", /tool-call quota exceeded/);
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(asyncStatus, "failed");
+    assert.equal(executions, 0);
+
+    const stream = await fetch(url + "/v1/agent/runs/stream", {
+      method: "POST", headers, body: JSON.stringify({ task: "read a file" }),
+    });
+    assert.equal(stream.status, 200);
+    assert.match(await stream.text(), /API tool-call quota exceeded/);
+    assert.equal(executions, 0);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("API does not acknowledge an async run when durable persistence fails", async (t) => {
+  let providerCalls = 0;
+  const provider: ModelProvider = {
+    async generate() {
+      providerCalls += 1;
+      return { text: "must not run" };
+    },
+  };
+  const runStore = {
+    loadAllSync: () => [],
+    async save() { throw new Error("synthetic store outage"); },
+    async remove() {},
+  };
+  const { server, url } = await startApi(provider, { runStore });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test-token",
+      "content-type": "application/json",
+      "idempotency-key": "durability-failure",
+    },
+    body: JSON.stringify({ task: "must not be accepted", async: true }),
+  });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "run_persistence_unavailable" });
+  assert.equal(providerCalls, 0);
+});
+
+
+test("API emits structured request logs and bounded-cardinality metrics", async (t) => {
+  const logs: Array<{ level: string; event: string; requestId: string; route: string; statusCode: number; durationMs: number }> = [];
+  const metrics: Array<{ name: string; value: number; labels: Record<string, string> }> = [];
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const { server, url } = await startApi(provider, {
+    logger: (entry) => logs.push(entry),
+    metrics: (metric) => metrics.push(metric),
+  });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/health?details=1");
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("x-request-id") ?? "", /^[0-9a-f-]{36}$/i);
+  await response.json();
+  assert.equal(logs.length, 1);
+  const log = logs[0];
+  assert.ok(log);
+  assert.equal(log.event, "http.request");
+  assert.equal(log.route, "/health");
+  assert.equal(log.statusCode, 200);
+  assert.ok(log.durationMs >= 0);
+  assert.deepEqual(metrics.map((metric) => metric.name), [
+    "sofia_api_requests_total",
+    "sofia_api_request_duration_ms",
+  ]);
+  const requestMetric = metrics[0];
+  assert.ok(requestMetric);
+  assert.equal(requestMetric.labels.route, "/health");
+});
+
+
+test("API prevents another key from reading or cancelling a run", async () => {
+  const provider: ModelProvider = { async generate() { return { text: "owner result" }; } };
+  const server = createSofiaApi(dependencies(provider), {
+    apiKeys: {
+      "owner-run-token": ["agent:run", "agent:read"],
+      "other-run-token": ["agent:run", "agent:read"],
+    },
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const url = "http://127.0.0.1:" + address.port;
+  try {
+    const created = await fetch(url + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer owner-run-token", "content-type": "application/json" },
+      body: JSON.stringify({ task: "private run", async: true }),
+    });
+    assert.equal(created.status, 202);
+    const run = await created.json() as { id: string };
+
+    const read = await fetch(url + "/v1/agent/runs/" + run.id, {
+      headers: { authorization: "Bearer other-run-token" },
+    });
+    assert.equal(read.status, 404);
+    const cancel = await fetch(url + "/v1/agent/runs/" + run.id, {
+      method: "DELETE",
+      headers: { authorization: "Bearer other-run-token" },
+    });
+    assert.equal(cancel.status, 404);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API responses redact credential-shaped values returned by a provider", async (t) => {
+  const secret = "sk-" + "A".repeat(28);
+  const provider: ModelProvider = {
+    async generate() { return { text: "Provider output included token=" + secret }; },
+  };
+  const { server, url } = await startApi(provider);
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+    body: JSON.stringify({ task: "return a safe result" }),
+  });
+  assert.equal(response.status, 200);
+  const body = JSON.stringify(await response.json());
+  assert.ok(!body.includes(secret), "provider credentials must not be returned to API clients");
+  assert.match(body, /REDACTED/);
+});
+
+
+test("API authenticates keyed API key digests without changing legacy key support", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const token = "a-long-random-test-token-for-hmac";
+  const secret = "test-only-hmac-secret-that-is-at-least-32-bytes";
+  const digest = createHmac("sha256", secret).update(token).digest("hex");
+  const { server, url } = await startApi(provider, {
+    apiKeys: {},
+    apiKeyHashes: { [digest]: ["agent:read"] },
+    apiKeyHashSecret: secret,
+  });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/v1/usage", {
+    headers: { authorization: "Bearer " + token },
+  });
+  assert.equal(response.status, 200);
+});
+
+
+test("API CORS preflight only allows configured origins", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const { server, url } = await startApi(provider, { allowedOrigins: ["https://app.example"] });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+
+  const allowed = await fetch(url + "/v1/agent/runs", {
+    method: "OPTIONS",
+    headers: { origin: "https://app.example", "access-control-request-method": "POST" },
+  });
+  assert.equal(allowed.status, 204);
+  assert.equal(allowed.headers.get("access-control-allow-origin"), "https://app.example");
+
+  const blocked = await fetch(url + "/v1/agent/runs", {
+    method: "OPTIONS",
+    headers: { origin: "https://untrusted.example", "access-control-request-method": "POST" },
+  });
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.headers.get("access-control-allow-origin"), null);
+});
+
+test("API rejects oversized request bodies before starting an agent run", async (t) => {
+  let providerCalls = 0;
+  const provider: ModelProvider = {
+    async generate() { providerCalls += 1; return { text: "unused" }; },
+  };
+  const { server, url } = await startApi(provider, { maxBodyBytes: 64 });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+
+  const response = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+    body: JSON.stringify({ task: "x".repeat(500) }),
+  });
+  assert.equal(response.status, 413);
+  assert.deepEqual(await response.json(), { error: "request_body_too_large" });
+  assert.equal(providerCalls, 0);
+});
+
+
+test("SSE runs share the per-key concurrency limit and release the slot on disconnect", async (t) => {
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const provider: ModelProvider = {
+    generate(_request, _route, options) {
+      markStarted();
+      const signal = options?.signal;
+      return new Promise((_, reject) => {
+        const onAbort = () => reject(new Error("provider aborted"));
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+  };
+  const { server, url } = await startApi(provider, {
+    maxConcurrentRunsPerKey: 1,
+    requestTimeoutMs: 5_000,
+  });
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  const headers = { authorization: "Bearer test-token", "content-type": "application/json" };
+  const firstClient = new AbortController();
+  const first = await fetch(url + "/v1/agent/runs/stream", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ task: "long running stream" }),
+    signal: firstClient.signal,
+  });
+  assert.equal(first.status, 200);
+  await started;
+
+  const blocked = await fetch(url + "/v1/agent/runs/stream", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ task: "second stream must be blocked" }),
+  });
+  assert.equal(blocked.status, 429);
+  assert.deepEqual(await blocked.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+
+  firstClient.abort();
+  await first.body?.cancel().catch(() => undefined);
+  let retried: Response | undefined;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    retried = await fetch(url + "/v1/agent/runs/stream", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ task: "slot should be reusable" }),
+    });
+    if (retried.status !== 429) break;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(retried?.status, 200, "disconnect should release the concurrency slot");
+  await retried?.body?.cancel().catch(() => undefined);
+});
+
+
+test("API concurrency limits isolate authenticated keys and deny a zero limit", async (t) => {
+  let firstStarted!: () => void;
+  let secondStarted!: () => void;
+  let release!: () => void;
+  const startedOne = new Promise<void>((resolve) => { firstStarted = resolve; });
+  const startedTwo = new Promise<void>((resolve) => { secondStarted = resolve; });
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let calls = 0;
+  const provider: ModelProvider = {
+    async generate() {
+      calls += 1;
+      if (calls === 1) firstStarted();
+      if (calls === 2) secondStarted();
+      await blocked;
+      return { text: "completed" };
+    },
+  };
+  const { server, url } = await startApi(provider, {
+    apiKeys: {
+      "test-token": ["agent:run", "agent:read"],
+      "other-token": ["agent:run", "agent:read"],
+    },
+    maxConcurrentRunsPerKey: 1,
+  });
+  t.after(async () => {
+    release();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+  const request = (token: string) => fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+    body: JSON.stringify({ task: "hold slot", async: true }),
+  });
+  const first = await request("test-token");
+  assert.equal(first.status, 202);
+  const firstRun = await first.json() as { id: string };
+  await startedOne;
+
+  const otherKey = await request("other-token");
+  assert.equal(otherKey.status, 202, "a separate authenticated key should have its own slot");
+  const otherRun = await otherKey.json() as { id: string };
+  await startedTwo;
+
+  const sameKey = await request("test-token");
+  assert.equal(sameKey.status, 429, "the same key must remain limited while its run is active");
+  assert.deepEqual(await sameKey.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+
+  release();
+  for (const [id, token] of [[firstRun.id, "test-token"], [otherRun.id, "other-token"]] as const) {
+    let status = "running";
+    for (let attempt = 0; attempt < 50 && status === "running"; attempt += 1) {
+      const response = await fetch(url + "/v1/agent/runs/" + id, {
+        headers: { authorization: "Bearer " + token },
+      });
+      status = (await response.json() as { status: string }).status;
+      if (status === "running") await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(status, "completed");
+  }
+});
+
+test("API concurrency limit zero denies run creation", async (t) => {
+  let providerCalls = 0;
+  const provider: ModelProvider = {
+    async generate() { providerCalls += 1; return { text: "must not run" }; },
+  };
+  const { server, url } = await startApi(provider, { maxConcurrentRunsPerKey: 0 });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+    body: JSON.stringify({ task: "should be denied" }),
+  });
+  assert.equal(response.status, 429);
+  assert.deepEqual(await response.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+  assert.equal(providerCalls, 0);
 });

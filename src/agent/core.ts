@@ -42,6 +42,16 @@ export class SofiaAgent {
       ...(request.maxSteps !== undefined ? { maxSteps: request.maxSteps } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
       ...(request.desktopCapabilities?.length ? { desktopCapabilities: request.desktopCapabilities } : {}),
+      onEvent: (event) => {
+        const metadata = { stepId: "stepId" in event ? event.stepId : undefined };
+        if (event.type === "brain.tool.started") {
+          emit({ type: "tool.started", message: "Brain tool execution started.", metadata });
+        } else if (event.type === "brain.tool.completed") {
+          emit({ type: "tool.completed", message: "Brain tool execution completed.", metadata });
+        } else if (event.type === "brain.tool.failed") {
+          emit({ type: "tool.failed", message: "Brain tool execution failed.", metadata });
+        }
+      },
     });
 
     emit({ type: "run.started", message: "Sofia Brain run started." });
@@ -212,6 +222,9 @@ export class SofiaAgent {
               step,
               metadata: { tool: call.name },
             });
+
+            // API observers can abort the run to enforce quotas before side effects.
+            request.signal?.throwIfAborted();
 
             if (requiresApproval && this.deps.approval) {
               const approved = await this.deps.approval({

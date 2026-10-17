@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { DesktopCapability } from "../desktop/types.js";
@@ -9,6 +9,7 @@ import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
+import { redactSecrets } from "../security/guard.js";
 
 interface ActiveRun {
   id: string;
@@ -20,6 +21,9 @@ interface ActiveRun {
   updatedAt: number;
   ownerKeyId: string;
   desktopCapabilities: DesktopCapability[];
+  idempotencyKeyHash?: string;
+  requestFingerprint?: string;
+  toolQuotaExceeded?: boolean;
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -61,11 +65,19 @@ async function body(req: IncomingMessage, maxBytes: number): Promise<unknown> {
 function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   const header = req.headers.authorization ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  // Reject inherited object properties and malformed scope values.
-  if (!token || !Object.prototype.hasOwnProperty.call(config.apiKeys, token)) return null;
-  const scopes = config.apiKeys[token];
+  if (!token) return null;
+  const tokenHash = config.apiKeyHashSecret
+    ? createHmac("sha256", config.apiKeyHashSecret).update(token).digest("hex")
+    : createHash("sha256").update(token).digest("hex");
+  const hashedKeys = config.apiKeyHashes ?? {};
+  // Prefer hash-only configuration; retain the legacy map for backward compatibility.
+  const scopes = Object.prototype.hasOwnProperty.call(hashedKeys, tokenHash)
+    ? hashedKeys[tokenHash]
+    : Object.prototype.hasOwnProperty.call(config.apiKeys, token)
+      ? config.apiKeys[token]
+      : undefined;
   if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === "string")) return null;
-  return { keyId: createHash("sha256").update(token).digest("hex").slice(0, 32), scopes };
+  return { keyId: tokenHash.slice(0, 32), scopes };
 }
 
 function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapability[] {
@@ -115,6 +127,21 @@ function pathId(url: string): string | null {
   return match?.[1] ?? null;
 }
 
+function routeLabel(pathname: string): string {
+  if (["/health", "/ready", "/v1/usage", "/v1/agent/runs", "/v1/agent/runs/stream", "/v1/jobs"].includes(pathname)) return pathname;
+  if (/^\/v1\/agent\/runs\/[^/]+$/.test(pathname)) return "/v1/agent/runs/:runId";
+  if (/^\/v1\/jobs\/[^/]+$/.test(pathname)) return "/v1/jobs/:jobId";
+  const jobAction = pathname.match(/^\/v1\/jobs\/[^/]+\/(resume|cancel)$/);
+  if (jobAction) return "/v1/jobs/:jobId/" + jobAction[1];
+  return "/_unmatched";
+}
+
+
+/** Keep provider/tool exception details out of client responses and persisted run records. */
+function publicAgentError(): string {
+  return "Agent execution failed.";
+}
+
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
@@ -129,20 +156,34 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
-  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
+  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStore);
   const runs = new Map<string, ActiveRun>();
+  const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   const runStore = config.runStore;
+  const recordForRun = (run: ActiveRun): RunRecord => ({
+    id: run.id, status: run.status,
+    ...(run.result ? { result: redactSecrets(run.result) as RunRecord["result"] } : {}),
+    ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
+    ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+    ...(run.idempotencyKeyHash ? { idempotencyKeyHash: run.idempotencyKeyHash } : {}),
+    ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
+  });
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
-    const record: RunRecord = {
-      id: run.id, status: run.status,
-      ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
-      ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
-      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
-    };
-    void runStore.save(record);
+    const record = recordForRun(run);
+    void Promise.resolve().then(() => runStore.save(record)).catch((error: unknown) => {
+      // Store failures must be observable without creating an unhandled rejection.
+      console.error(JSON.stringify({
+        level: "error",
+        event: "api.run_persist_failed",
+        errorClass: error instanceof Error ? error.name : "UnknownError",
+      }));
+    });
   };
-  if (runStore) for (const record of runStore.loadAllSync()) {
+  const persistDurably = async (run: ActiveRun): Promise<void> => {
+    if (runStore) await runStore.save(recordForRun(run));
+  };
+  if (runStore) for (const record of runStore.loadAllSync().sort((a, b) => a.createdAt - b.createdAt)) {
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
@@ -156,29 +197,66 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       controller: new AbortController(), createdAt: record.createdAt,
       updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
       desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+      ...(record.idempotencyKeyHash ? { idempotencyKeyHash: record.idempotencyKeyHash } : {}),
+      ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
     };
-    runs.set(run.id, run); if (interrupted) persist(run);
+    runs.set(run.id, run);
+    if (run.idempotencyKeyHash && run.requestFingerprint) {
+      idempotency.set(run.ownerKeyId + ":" + run.idempotencyKeyHash, { runId: run.id, fingerprint: run.requestFingerprint });
+    }
+    if (interrupted) persist(run);
   }
-  const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   const activeByKey = new Map<string, number>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
+  const reserveActive = (keyId: string): boolean => {
+    const active = activeByKey.get(keyId) ?? 0;
+    if (active >= maxConcurrentRunsPerKey) return false;
+    activeByKey.set(keyId, active + 1);
+    return true;
+  };
+  const releaseActive = (keyId: string): void => {
+    const current = activeByKey.get(keyId) ?? 0;
+    if (current <= 1) activeByKey.delete(keyId);
+    else activeByKey.set(keyId, current - 1);
+  };
   const retention = integerSetting("runRetentionMs", config.runRetentionMs, 24 * 60 * 60 * 1000, 0, 365 * 24 * 60 * 60 * 1000);
   let lastPruneAt = 0;
+  const authFailures = new Map<string, { count: number; windowStartedAt: number; blockedUntil: number }>();
+  const authWindowMs = 60_000;
+  const authBlockMs = 60_000;
+  const authFailureLimit = 10;
 
   const publicResponse = (run: ActiveRun): AgentRunResponse => ({
     id: run.id,
     status: run.status,
-    ...(run.result ? { result: run.result } : {}),
+    ...(run.result ? { result: redactSecrets(run.result) as AgentRunResponse["result"] } : {}),
     ...(run.error ? { error: run.error } : {}),
   });
+
+  const publicJob = (job: unknown): unknown => {
+    const safe = redactSecrets(job);
+    if (safe && typeof safe === "object" && "status" in safe && "error" in safe) {
+      const record = safe as Record<string, unknown>;
+      if (record.status === "failed" && typeof record.error === "string") {
+        return { ...record, error: "Job execution failed." };
+      }
+    }
+    return safe;
+  };
 
   const startRun = (run: ActiveRun, input: AgentRunInput) => {
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
       persist(run);
-      const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        if (!run.controller.signal.aborted) {
+          timedOut = true;
+          run.controller.abort(new Error("Run timed out."));
+        }
+      }, requestTimeoutMs);
       try {
         const result = await agent.run({
           principalId: run.ownerKeyId,
@@ -188,28 +266,33 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
+          onEvent: (event) => {
+            if (event.type === "tool.started" && !usage.recordToolCalls(run.ownerKeyId)) {
+              run.toolQuotaExceeded = true;
+              run.controller.abort(new Error("API tool-call quota exceeded."));
+            }
+          },
         });
         if (run.controller.signal.aborted) {
-          run.status = "cancelled";
-          run.error ??= "Run cancelled.";
+          run.status = timedOut || run.toolQuotaExceeded ? "failed" : "cancelled";
+          run.error ??= timedOut ? "Run timed out." : run.toolQuotaExceeded ? "API tool-call quota exceeded." : "Run cancelled.";
         } else {
           run.result = result;
           run.status = "completed";
         }
       } catch (error) {
         if (run.controller.signal.aborted) {
-          run.status = "cancelled";
-          run.error = "Run cancelled.";
+          run.status = timedOut || run.toolQuotaExceeded ? "failed" : "cancelled";
+          run.error = timedOut ? "Run timed out." : run.toolQuotaExceeded ? "API tool-call quota exceeded." : "Run cancelled.";
         } else {
           run.status = "failed";
-          run.error = error instanceof Error ? error.message : "Agent failed";
+          run.error = publicAgentError();
         }
       } finally {
         clearTimeout(timer);
         run.updatedAt = Date.now();
         persist(run);
-        const current = activeByKey.get(run.ownerKeyId) ?? 1;
-        if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
+        releaseActive(run.ownerKeyId);
       }
     })();
   };
@@ -226,8 +309,36 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
+    const requestPath = new URL(req.url ?? "/", "http://localhost").pathname;
+    const requestId = randomUUID();
+    const requestStartedAt = Date.now();
+    const route = routeLabel(requestPath);
+    res.setHeader("x-request-id", requestId);
+    res.once("finish", () => {
+      const durationMs = Math.max(0, Date.now() - requestStartedAt);
+      const statusCode = res.statusCode;
+      const entry = {
+        level: statusCode >= 500 ? "error" as const : statusCode >= 400 ? "warn" as const : "info" as const,
+        event: "http.request" as const,
+        requestId,
+        method: req.method ?? "UNKNOWN",
+        route,
+        statusCode,
+        durationMs,
+      };
+      try {
+        if (config.logger) config.logger(entry);
+        else console.log(JSON.stringify(entry));
+      } catch { /* Observability must not change API behavior. */ }
+      if (config.metrics) {
+        try {
+          config.metrics({ name: "sofia_api_requests_total", value: 1, labels: { method: entry.method, route, status: String(statusCode) } });
+          config.metrics({ name: "sofia_api_request_duration_ms", value: durationMs, labels: { method: entry.method, route } });
+        } catch { /* Metrics sink failures must not change API behavior. */ }
+      }
+    });
     try {
-      if (discordRoute && req.url === discordRoutePath) {
+      if (discordRoute && requestPath === discordRoutePath) {
         await handleDiscordInteractionHttpRequest(req, res, discordRoute.transport, discordMaxBodyBytes);
         return;
       }
@@ -244,7 +355,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return res.end();
       }
 
-      if (req.method === "GET" && req.url === "/health") {
+      if (req.method === "GET" && requestPath === "/health") {
         return json(res, 200, {
           ok: true,
           service: "sofia-agent-api",
@@ -253,66 +364,96 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }, origin, config);
       }
 
-      if (!req.url?.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, origin, config);
+      if (req.method === "GET" && requestPath === "/ready") {
+        let ready = true;
+        try {
+          ready = config.readinessCheck ? await config.readinessCheck() : true;
+        } catch {
+          ready = false;
+        }
+        return json(res, ready ? 200 : 503, { ready }, origin, config);
+      }
 
+      if (!requestPath.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, origin, config);
+
+      const clientAddress = req.socket.remoteAddress ?? "unknown";
+      const now = Date.now();
+      const previousFailure = authFailures.get(clientAddress);
+      if (previousFailure && previousFailure.blockedUntil > now) {
+        res.setHeader("retry-after", String(Math.max(1, Math.ceil((previousFailure.blockedUntil - now) / 1000))));
+        return json(res, 429, { error: "authentication_rate_limited" }, origin, config);
+      }
+      const currentFailure = !previousFailure || now - previousFailure.windowStartedAt >= authWindowMs
+        ? { count: 0, windowStartedAt: now, blockedUntil: 0 }
+        : previousFailure;
       const auth = authenticate(req, config);
-      if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
+      if (!auth) {
+        currentFailure.count += 1;
+        if (currentFailure.count >= authFailureLimit) currentFailure.blockedUntil = now + authBlockMs;
+        authFailures.set(clientAddress, currentFailure);
+        if (authFailures.size > 10_000) {
+          const oldest = authFailures.keys().next().value;
+          if (oldest !== undefined && oldest !== clientAddress) authFailures.delete(oldest);
+        }
+        return json(res, 401, { error: "unauthorized" }, origin, config);
+      }
+      authFailures.delete(clientAddress);
 
       // Authorization scopes are enforced at the API boundary, not merely used to
       // derive desktop capabilities. Admin scopes do not implicitly grant run access.
-      const isRunRequest = req.method === "POST" && (req.url === "/v1/agent/runs" || req.url === "/v1/agent/runs/stream" || req.url === "/v1/jobs");
+      const isRunRequest = req.method === "POST" && (requestPath === "/v1/agent/runs" || requestPath === "/v1/agent/runs/stream" || requestPath === "/v1/jobs");
       if (isRunRequest && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobReadRequest = req.method === "GET" && (req.url === "/v1/jobs" || (req.url?.startsWith("/v1/jobs/") === true && !req.url.endsWith("/resume") && !req.url.endsWith("/cancel")));
+      const isJobReadRequest = req.method === "GET" && (requestPath === "/v1/jobs" || (requestPath.startsWith("/v1/jobs/") === true && !requestPath.endsWith("/resume") && !requestPath.endsWith("/cancel")));
       if (isJobReadRequest && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
       }
-      const isRunRead = req.method === "GET" && pathId(req.url ?? "") !== null;
+      const isRunRead = req.method === "GET" && pathId(requestPath) !== null;
       if (isRunRead && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
       }
-      const isRunCancellation = req.method === "DELETE" && pathId(req.url ?? "") !== null;
+      const isRunCancellation = req.method === "DELETE" && pathId(requestPath) !== null;
       if (isRunCancellation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
+      const isJobMutation = req.method === "POST" && requestPath.startsWith("/v1/jobs/") === true && (requestPath.endsWith("/resume") || requestPath.endsWith("/cancel"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
 
       const adminScope = config.securityAdminScope ?? "security:admin";
       const isSecurityAdmin = auth.scopes.includes(adminScope);
-      if (req.method === "GET" && req.url === "/v1/learning/diagnostics") {
+      if (req.method === "GET" && requestPath === "/v1/learning/diagnostics") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         if (!deps.learningDiagnostics) return json(res, 503, { error: "learning_diagnostics_unavailable" }, origin, config);
         return json(res, 200, deps.learningDiagnostics(), origin, config);
       }
-      if (req.method === "GET" && req.url === "/v1/security/status") {
+      if (req.method === "GET" && requestPath === "/v1/security/status") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         return json(res, 200, {
           ...deps.securityController?.status?.(),
           auditEvents: deps.securityAudit && "list" in deps.securityAudit ? (deps.securityAudit as { list: () => unknown[] }).list().length : 0,
         }, origin, config);
       }
-      if (req.method === "POST" && req.url === "/v1/security/kill") {
+      if (req.method === "POST" && requestPath === "/v1/security/kill") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         const input = (await body(req, maxBytes)) as { reason?: unknown };
         deps.securityController?.kill(typeof input.reason === "string" && input.reason.trim() ? input.reason.trim() : "Security administrator activated kill switch.");
         return json(res, 202, { ok: true, status: deps.securityController?.status?.() }, origin, config);
       }
-      if (req.method === "POST" && req.url === "/v1/security/revive") {
+      if (req.method === "POST" && requestPath === "/v1/security/revive") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         deps.securityController?.revive();
         return json(res, 200, { ok: true, status: deps.securityController?.status?.() }, origin, config);
       }
-      if (req.method === "GET" && req.url === "/v1/security/audit") {
+      if (req.method === "GET" && requestPath === "/v1/security/audit") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         const events = deps.securityAudit && "list" in deps.securityAudit ? (deps.securityAudit as { list: () => unknown[] }).list() : [];
         return json(res, 200, { events }, origin, config);
       }
 
-      const id = pathId(req.url);
+      const id = pathId(requestPath);
       if (id && req.method === "GET") {
         const run = runs.get(id);
         if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
@@ -331,7 +472,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return json(res, 200, publicResponse(run), origin, config);
       }
 
-      if (req.method === "POST" && req.url === "/v1/agent/runs/stream") {
+      if (req.method === "POST" && requestPath === "/v1/agent/runs/stream") {
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
@@ -339,9 +480,19 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try { usage.consume(auth.keyId); } catch {
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
         }
+        if (!reserveActive(auth.keyId)) {
+          res.setHeader("retry-after", "2");
+          return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
+        }
         const runId = randomUUID();
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+        let timedOut = false;
+        const timer = setTimeout(() => {
+          if (!controller.signal.aborted) {
+            timedOut = true;
+            controller.abort(new Error("Run timed out."));
+          }
+        }, requestTimeoutMs);
         const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
         runs.set(runId, run);
         persist(run);
@@ -357,6 +508,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (!res.writableEnded) controller.abort(new Error("SSE client disconnected."));
         };
         res.on("close", abortOnDisconnect);
+        let toolQuotaExceeded = false;
         try {
           run.status = "running";
           const result = await agent.run({
@@ -367,16 +519,24 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
-            onEvent: (event) => send({ type: "event", runId, event }),
+            onEvent: (event) => {
+              send({ type: "event", runId, event: redactSecrets(event) });
+              if (event.type === "tool.started" && !usage.recordToolCalls(auth.keyId)) {
+                toolQuotaExceeded = true;
+                controller.abort(new Error("API tool-call quota exceeded."));
+              }
+            },
           });
-          if (controller.signal.aborted) throw new Error("Run cancelled.");
+          if (controller.signal.aborted) throw new Error(timedOut ? "Run timed out." : toolQuotaExceeded ? "API tool-call quota exceeded." : "Run cancelled.");
           run.result = result;
           run.status = "completed";
-          send({ type: "result", runId, status: "completed", result: run.result });
+          send({ type: "result", runId, status: "completed", result: redactSecrets(run.result) });
         } catch (error) {
-          run.status = controller.signal.aborted ? "cancelled" : "failed";
-          run.error = controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Agent failed";
+          run.status = timedOut || toolQuotaExceeded ? "failed" : controller.signal.aborted ? "cancelled" : "failed";
+          run.error = timedOut ? "Run timed out." : toolQuotaExceeded ? "API tool-call quota exceeded." : controller.signal.aborted ? "Run cancelled." : publicAgentError();
           send({ type: "error", runId, status: run.status, error: run.error });
+        } finally {
+          releaseActive(auth.keyId);
         }
         send({ type: "done", runId });
         run.updatedAt = Date.now();
@@ -387,7 +547,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return;
       }
 
-      if (req.method === "POST" && req.url === "/v1/agent/runs") {
+      if (req.method === "POST" && requestPath === "/v1/agent/runs") {
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
@@ -402,7 +562,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (idempotencyKey && (idempotencyKey.length > 128 || /[\x00-\x1f\x7f]/.test(idempotencyKey))) {
             return json(res, 400, { error: "invalid_idempotency_key" }, origin, config);
           }
-          const idempotencyId = idempotencyKey ? `${auth.keyId}:${idempotencyKey}` : undefined;
+          const idempotencyKeyHash = idempotencyKey ? createHash("sha256").update(idempotencyKey).digest("hex") : undefined;
+          const idempotencyId = idempotencyKeyHash ? auth.keyId + ":" + idempotencyKeyHash : undefined;
           const requestFingerprint = idempotencyFingerprint({
             task: input.task,
             ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
@@ -420,13 +581,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
             if (existing) idempotency.delete(idempotencyId);
           }
-          const active = activeByKey.get(auth.keyId) ?? 0;
-          if (active >= maxConcurrentRunsPerKey) {
+          try { usage.consume(auth.keyId); } catch {
+            return json(res, 429, { error: "quota_exceeded" }, origin, config);
+          }
+          if (!reserveActive(auth.keyId)) {
             res.setHeader("retry-after", "2");
             return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
-          }
-          try { usage.consume(auth.keyId); } catch (error) {
-            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
           }
           const runId = randomUUID();
           const run: ActiveRun = {
@@ -437,11 +597,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             updatedAt: Date.now(),
             ownerKeyId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            ...(idempotencyKeyHash ? { idempotencyKeyHash } : {}),
+            ...(idempotencyId ? { requestFingerprint } : {}),
           };
           runs.set(runId, run);
-          persist(run);
           if (idempotencyId) idempotency.set(idempotencyId, { runId, fingerprint: requestFingerprint });
-          activeByKey.set(auth.keyId, active + 1);
+          try {
+            // Persist the accepted queued state before returning 202 so a restart cannot lose its idempotency key.
+            await persistDurably(run);
+          } catch {
+            runs.delete(runId);
+            if (idempotencyId) idempotency.delete(idempotencyId);
+            releaseActive(auth.keyId);
+            return json(res, 503, { error: "run_persistence_unavailable" }, origin, config);
+          }
           startRun(run, {
             ...input,
             ...(input.context !== undefined
@@ -452,13 +621,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 202, publicResponse(run), origin, config);
         }
 
-        try { usage.consume(auth.keyId); } catch (error) {
-          return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+        try { usage.consume(auth.keyId); } catch {
+          return json(res, 429, { error: "quota_exceeded" }, origin, config);
+        }
+        if (!reserveActive(auth.keyId)) {
+          res.setHeader("retry-after", "2");
+          return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
         }
 
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+        const timer = setTimeout(() => controller.abort(new Error("Run timed out.")), requestTimeoutMs);
         const runId = randomUUID();
+        let toolQuotaExceeded = false;
         try {
           const result = await agent.run({
             principalId: auth.keyId,
@@ -468,23 +642,34 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
+            onEvent: (event) => {
+              if (event.type === "tool.started" && !usage.recordToolCalls(auth.keyId)) {
+                toolQuotaExceeded = true;
+                controller.abort(new Error("API tool-call quota exceeded."));
+              }
+            },
           });
           if (controller.signal.aborted) {
+            if (toolQuotaExceeded) return json(res, 429, { id: runId, status: "failed", error: "API tool-call quota exceeded." }, origin, config);
             return json(res, 504, { id: runId, status: "failed", error: "Request timed out or was cancelled." }, origin, config);
           }
-          return json(res, 200, { id: runId, status: "completed", result }, origin, config);
+          return json(res, 200, { id: runId, status: "completed", result: redactSecrets(result) }, origin, config);
         } catch (error) {
-          return json(res, 502, {
+          if (controller.signal.aborted && toolQuotaExceeded) {
+            return json(res, 429, { id: runId, status: "failed", error: "API tool-call quota exceeded." }, origin, config);
+          }
+          return json(res, controller.signal.aborted ? 504 : 502, {
             id: runId,
             status: "failed",
-            error: controller.signal.aborted ? "Request timed out or was cancelled." : error instanceof Error ? error.message : "Agent failed",
+            error: controller.signal.aborted ? "Request timed out or was cancelled." : publicAgentError(),
           }, origin, config);
         } finally {
           clearTimeout(timer);
+          releaseActive(auth.keyId);
         }
       }
 
-      const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
+      const jobMatch = requestPath.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
       if (jobMatch && deps.jobRuntime) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
@@ -494,11 +679,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 404, { error: "job_not_found" }, origin, config);
         }
         if (req.method === "GET" && !action) {
-          return json(res, 200, job, origin, config);
+          return json(res, 200, publicJob(job), origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
-          catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
+          try { return json(res, 202, publicJob(await deps.jobRuntime.resume(jobId)), origin, config); }
+          catch { return json(res, 409, { error: "job_resume_failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
           const cancelled = await deps.jobRuntime.cancel(jobId);
@@ -506,13 +691,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      if (req.method === "GET" && req.url === "/v1/jobs") {
+      if (req.method === "GET" && requestPath === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
         const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
-        return json(res, 200, { jobs }, origin, config);
+        return json(res, 200, { jobs: jobs.map(publicJob) }, origin, config);
       }
 
-      if (req.method === "POST" && req.url === "/v1/jobs") {
+      if (req.method === "POST" && requestPath === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
@@ -525,13 +710,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ownerKeyId: auth.keyId,
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });
-          return json(res, 202, job, origin, config);
+          return json(res, 202, publicJob(job), origin, config);
         } catch (error) {
-          return json(res, 502, { error: "job_submit_failed", message: error instanceof Error ? error.message : "Job submission failed" }, origin, config);
+          return json(res, 502, { error: "job_submit_failed" }, origin, config);
         }
       }
 
-      if (req.method === "GET" && req.url.startsWith("/v1/usage")) {
+      if (req.method === "GET" && requestPath.startsWith("/v1/usage")) {
         return json(res, 200, usage.get(auth.keyId), origin, config);
       }
 

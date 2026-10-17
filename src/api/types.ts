@@ -1,5 +1,6 @@
 import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
+import type { UsageStore } from "./usage.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 
 export interface AgentRunInput {
@@ -36,8 +37,28 @@ export interface ApiAuth {
   scopes: string[];
 }
 
+export interface ApiLogEntry {
+  level: "info" | "warn" | "error";
+  event: "http.request";
+  requestId: string;
+  method: string;
+  route: string;
+  statusCode: number;
+  durationMs: number;
+}
+export interface ApiMetric {
+  name: "sofia_api_requests_total" | "sofia_api_request_duration_ms";
+  value: number;
+  labels: Record<string, string>;
+}
+
 export interface SofiaApiConfig {
+  /** Legacy plaintext-token map. Prefer apiKeyHashes for deployments that can store only hashes. */
   apiKeys: Record<string, string[]>;
+  /** SHA-256 or HMAC-SHA-256 hex digest of each bearer token mapped to its scopes. */
+  apiKeyHashes?: Record<string, string[]>;
+  /** Optional independent secret used as the HMAC key for hash-only API key authentication. */
+  apiKeyHashSecret?: string;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
@@ -52,6 +73,14 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Optional persistent API usage quota store; local file stores are single-process only. */
+  usageStore?: UsageStore;
+  /** Structured request logger; defaults to one JSON line per request. */
+  logger?: (entry: ApiLogEntry) => void;
+  /** Optional metrics sink; callback failures never affect request handling. */
+  metrics?: (metric: ApiMetric) => void;
+  /** Optional readiness probe for orchestrators; false keeps /ready at HTTP 503. */
+  readinessCheck?: () => boolean | Promise<boolean>;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
