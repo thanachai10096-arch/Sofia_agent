@@ -1,3 +1,8 @@
+export { McpClient } from "./mcp/client.js";
+export type { McpTransport, McpClientOptions, McpToolDescription, McpResourceDescription } from "./mcp/client.js";
+export { McpStdioTransport, McpHttpTransport } from "./mcp/transports.js";
+export type { McpStdioTransportOptions, McpHttpTransportOptions } from "./mcp/transports.js";
+
 export { SofiaAgent } from "./agent/core.js";
 export { classifyTask } from "./agent/classifier.js";
 export { ModelRouter } from "./models/router.js";
@@ -59,7 +64,3 @@ export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/gua
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
 export { VoiceWorkflow } from "./voice/workflow.js";
 export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpeechProvider, VoiceAgentReply, VoiceTurnResult, VoiceWorkflowOptions } from "./voice/workflow.js";
-export { McpClient } from "./mcp/client.js";
-export type { McpTransport, McpClientOptions, McpToolDescription, McpResourceDescription } from "./mcp/client.js";
-export { McpStdioTransport, McpHttpTransport } from "./mcp/transports.js";
-export type { McpStdioTransportOptions, McpHttpTransportOptions } from "./mcp/transports.js";
