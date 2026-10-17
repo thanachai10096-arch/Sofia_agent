@@ -295,28 +295,70 @@ export class CronScheduler {
     let job: JobRecord | undefined;
     let errorText: string | undefined;
     let status: CronExecution["status"] = "failed";
+    const maxAttempts = Math.max(1, Math.min(11, (schedule.maxRetries ?? 0) + 1));
     try {
-      const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId });
-      job = submitted;
-      await this.store.transact(async state => {
-        const execution = state.history.find(h => h.id === executionId);
-        if (execution) { execution.status = "running"; execution.jobId = submitted.id; }
-        const current = state.schedules.find(s => s.id === schedule.id);
-        if (current) current.lastJobId = submitted.id;
-      });
-      const timeout = new AbortController();
-      const timeoutId = setTimeout(() => timeout.abort(new Error("Scheduled task timed out")), schedule.timeoutMs);
-      const onAbort = () => timeout.abort(controller.signal.reason);
-      controller.signal.addEventListener("abort", onAbort, { once: true });
-      try {
-        const result = await this.waitForJob(submitted.id, timeout.signal);
-        status = result.status === "completed" ? "completed" : result.status === "cancelled" ? "cancelled" : "failed";
-        if (status === "failed") errorText = result.error ?? "Scheduled job failed";
-      } finally {
-        clearTimeout(timeoutId);
-        controller.signal.removeEventListener("abort", onAbort);
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (controller.signal.aborted) {
+          status = "cancelled";
+          errorText = String(controller.signal.reason ?? "Scheduled execution cancelled");
+          break;
+        }
+        try {
+          const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId });
+          job = submitted;
+          await this.store.transact(async state => {
+            const execution = state.history.find(h => h.id === executionId);
+            if (execution) {
+              execution.status = "running";
+              execution.jobId = submitted.id;
+              execution.attempt = attempt;
+            }
+            const current = state.schedules.find(s => s.id === schedule.id);
+            if (current) current.lastJobId = submitted.id;
+          });
+
+          const timeout = new AbortController();
+          const timeoutId = setTimeout(() => timeout.abort(new Error("Scheduled task timed out")), schedule.timeoutMs);
+          const onAbort = () => timeout.abort(controller.signal.reason ?? new Error("Scheduled execution cancelled"));
+          controller.signal.addEventListener("abort", onAbort, { once: true });
+          let result: JobRecord | undefined;
+          let waitError: unknown;
+          try {
+            result = await this.waitForJob(submitted.id, timeout.signal);
+          } catch (error) {
+            waitError = error;
+          } finally {
+            clearTimeout(timeoutId);
+            controller.signal.removeEventListener("abort", onAbort);
+          }
+
+          if (waitError !== undefined) {
+            // Abort the actual runtime job too; aborting the polling loop alone is not cancellation.
+            await this.runtime.cancel(submitted.id).catch(() => false);
+            if (controller.signal.aborted) {
+              status = "cancelled";
+              errorText = String(controller.signal.reason ?? waitError);
+              break;
+            }
+            errorText = waitError instanceof Error ? waitError.message : String(waitError);
+            status = "failed";
+          } else if (result) {
+            status = result.status === "completed" ? "completed" : result.status === "cancelled" ? "cancelled" : "failed";
+            errorText = status === "failed" ? result.error ?? "Scheduled job failed" : undefined;
+          }
+
+          if (status === "completed" || status === "cancelled" || attempt === maxAttempts || controller.signal.aborted) break;
+        } catch (error) {
+          errorText = error instanceof Error ? error.message : String(error);
+          status = controller.signal.aborted ? "cancelled" : "failed";
+          if (status === "cancelled" || attempt === maxAttempts) break;
+        }
       }
-    } catch (error) { errorText = error instanceof Error ? error.message : String(error); }
+    } catch (error) {
+      errorText = error instanceof Error ? error.message : String(error);
+      status = controller.signal.aborted ? "cancelled" : "failed";
+    }
+
     await this.store.transact(async state => {
       const execution = state.history.find(h => h.id === executionId);
       const current = state.schedules.find(s => s.id === schedule.id);
@@ -329,7 +371,7 @@ export class CronScheduler {
       if (current) {
         current.lastRunAt = this.now().toISOString();
         current.lastJobId = job?.id;
-        current.consecutiveFailures = status === "completed" ? 0 : current.consecutiveFailures + 1;
+        current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled" ? current.consecutiveFailures : current.consecutiveFailures + 1;
       }
       await this.recordAudit(state, { at: this.now().toISOString(), actor: "scheduler", action: "schedule.finished", scheduleId: schedule.id, detail: status });
     }).catch(() => undefined);
