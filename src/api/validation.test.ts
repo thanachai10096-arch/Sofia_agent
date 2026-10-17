@@ -22,6 +22,16 @@ test("API run validation enforces execution bounds and primitive types", () => {
   assert.equal(validateAgentRunInput({ task: "run", priority: "urgent" }).valid, false);
 });
 
+test("API run validation preserves optional session IDs and rejects invalid values", () => {
+  assert.deepEqual(validateAgentRunInput({ task: "continue", sessionId: "conversation-42" }), {
+    valid: true,
+    input: { task: "continue", sessionId: "conversation-42" },
+  });
+  assert.equal(validateAgentRunInput({ task: "continue", sessionId: 7 }).valid, false);
+  assert.equal(validateAgentRunInput({ task: "continue", sessionId: "   " }).valid, false);
+  assert.equal(validateAgentRunInput({ task: "continue", sessionId: "x".repeat(257) }).valid, false);
+});
+
 test("API run validation rejects malformed acceptance criteria", () => {
   assert.equal(validateAgentRunInput({ task: "run", acceptanceCriteria: [{}] }).valid, false);
   assert.equal(validateAgentRunInput({ task: "run", acceptanceCriteria: new Array(51).fill({}) }).valid, false);
