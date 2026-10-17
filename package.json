@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-tests.mjs",
     "cli": "tsx src/cli/index.ts",
-    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs"
+    "start": "node dist/api/entrypoint.js",
+    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs",
+    "discord:register-command": "node scripts/register-discord-command.mjs"
   },
   "engines": {
     "node": ">=20"

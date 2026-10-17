@@ -1,0 +1,23 @@
+name: Register Sofia Discord Slash Command
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  register-command:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check out approved branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/discord-interactions-test
+      - name: Register only Sofia /run in the configured guild
+        env:
+          DISCORD_APPLICATION_ID: "1560955381314883684"
+          DISCORD_GUILD_ID: "1560960016104562749"
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: node scripts/register-discord-command.mjs

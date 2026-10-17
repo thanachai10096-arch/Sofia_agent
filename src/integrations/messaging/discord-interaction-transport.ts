@@ -35,6 +35,9 @@ export interface DiscordInteractionTransportOptions {
   commandName?: string;
   taskOptionName?: string;
   commandPrefix?: string;
+  /** Explicit allowlists; all other users/channels are denied before dispatch. */
+  allowedUserIds?: string[];
+  allowedChannelIds?: string[];
   fetchImpl?: typeof fetch;
   onError?: (event: "inbound_handler_failed" | "delivery_failed", status?: number) => void;
 }
@@ -155,6 +158,12 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
       const author = interaction.member?.user ?? interaction.user;
       if (!author?.id || !/^\d{1,24}$/.test(author.id) || author.bot) {
         return { status: 200, body: { type: 4, data: { content: "This command is not available to bots.", flags: 64 } } };
+      }
+      const allowedUsers = options.allowedUserIds;
+      const allowedChannels = options.allowedChannelIds;
+      if ((allowedUsers && (!allowedUsers.length || !allowedUsers.includes(author.id))) ||
+          (allowedChannels && (!allowedChannels.length || !allowedChannels.includes(interaction.channel_id)))) {
+        return { status: 200, body: { type: 4, data: { content: "You are not authorized to use Sofia in this channel.", flags: 64 } } };
       }
       const taskValue = interaction.data.options?.find((option) => option.name === taskOptionName)?.value;
       const task = typeof taskValue === "string" ? taskValue : "";
