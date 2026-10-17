@@ -122,3 +122,36 @@ test("API E2E authenticates, starts an async run, deduplicates retries, and isol
     await closeServer();
   }
 });
+
+test("API mounts the opt-in Discord route before API-key auth and preserves raw bytes", async () => {
+  let receivedRawBody = "";
+  const transport = {
+    async handleRequest(input: { rawBody: Uint8Array }) {
+      receivedRawBody = Buffer.from(input.rawBody).toString("utf8");
+      return { status: 200 as const, body: { type: 1 } };
+    },
+  } as unknown as import("../src/integrations/messaging/discord-interaction-transport.js").DiscordInteractionTransport;
+  const server = createSofiaApi(dependencies(), {
+    apiKeys: {},
+    discordInteractionRoute: { transport },
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address() as AddressInfo;
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const rawBody = '{ "type": 1, "data": { "name": "run" } }';
+    const response = await fetch(`${baseUrl}/v1/integrations/discord/interactions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: rawBody,
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { type: 1 });
+    assert.equal(receivedRawBody, rawBody);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
