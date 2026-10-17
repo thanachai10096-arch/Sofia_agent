@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { DiscordInteractionTransportOptions } from "./discord-interaction-transport.js";
 import type { createDiscordInteractionTransport } from "./discord-interaction-transport.js";
 
 type DiscordInteractionTransport = ReturnType<typeof createDiscordInteractionTransport>;
@@ -33,7 +32,7 @@ export async function handleDiscordInteractionHttpRequest(
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
       size += bytes.byteLength;
       if (size > maxBodyBytes) {
-        // Drain the remainder so the connection can be reused; never parse oversized input.
+        // Stop retaining data and drain the remainder before returning an error.
         req.resume();
         res.writeHead(413, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
         res.end(JSON.stringify({ error: "request_too_large" }));
