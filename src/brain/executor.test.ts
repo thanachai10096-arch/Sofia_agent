@@ -512,3 +512,108 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
   assert.equal(replannedActionCalls, 1, "changed action must not be skipped due to a reused step ID");
   assert.equal(report.completed, true, report.summary);
 });
+
+
+test("Brain retrieves project memory using the current task and avoids listing unrelated entries", async () => {
+  let searchedQuery = "";
+  let listCalls = 0;
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      projectMemory: {
+        async save() {},
+        async list() {
+          listCalls += 1;
+          return [];
+        },
+        async find(query) {
+          searchedQuery = query;
+          return [];
+        },
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.match(searchedQuery, /Create hello\.txt/);
+  assert.ok(searchedQuery.length <= 4_000);
+  assert.equal(listCalls, 0);
+});
+
+test("Brain falls back to listing project memory when relevance search fails", async () => {
+  let listCalls = 0;
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      projectMemory: {
+        async save() {},
+        async list() {
+          listCalls += 1;
+          return [];
+        },
+        async find() {
+          throw new Error("search unavailable");
+        },
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(listCalls, 1);
+});
