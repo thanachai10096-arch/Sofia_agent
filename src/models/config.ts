@@ -13,12 +13,12 @@ function numberEnv(name: string, fallback: number) {
 export function loadModelConfigFromEnv(): SofiaModelConfig {
   // Prefer Gemini when configured. Keep legacy gateway support for backward compatibility.
   const geminiKey =
-    process.env.GEMINI_API_KEY?.trim() ??
-    process.env.Gemini_API_Key?.trim() ??
+    process.env.GEMINI_API_KEY?.trim() ||
+    process.env.Gemini_API_Key?.trim() ||
     "";
   const legacyApiKey =
-    process.env.SOFIA_AI_GATEWAY_API_KEY?.trim() ??
-    process.env.AI_GATEWAY_API_KEY?.trim() ??
+    process.env.SOFIA_AI_GATEWAY_API_KEY?.trim() ||
+    process.env.AI_GATEWAY_API_KEY?.trim() ||
     "";
   const useGemini = geminiKey.length > 0;
   const apiKey = useGemini ? geminiKey : legacyApiKey;
