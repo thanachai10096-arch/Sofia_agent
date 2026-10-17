@@ -283,7 +283,7 @@ export class ContainerSandbox implements Sandbox {
   private readonly runner: ContainerCommandRunner;
 
   constructor(private readonly options: ContainerSandboxOptions) {
-    if (!/^.+@sha256:[a-f0-9]{64}$/i.test(options.image) || options.image.includes("\\0")) {
+    if (!/^.+@sha256:[a-f0-9]{64}$/i.test(options.image) || options.image.includes("\0")) {
       throw new Error("Container image must be pinned by an immutable sha256 digest.");
     }
     this.dockerPath = options.dockerPath ?? "docker";
@@ -296,8 +296,8 @@ export class ContainerSandbox implements Sandbox {
     limits: SandboxLimits,
     signal?: AbortSignal,
   ): Promise<{ stdout: string; stderr: string; code: number }> {
-    if (!command.trim() || command.includes("\\0")) throw new Error("A valid container command is required.");
-    if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string" || arg.includes("\\0"))) {
+    if (!command.trim() || command.includes("\0")) throw new Error("A valid container command is required.");
+    if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string" || arg.includes("\0"))) {
       throw new Error("Command arguments must be strings without NUL bytes.");
     }
     if (!limits.workspaceRoot.trim()) throw new Error("A workspace root is required.");
