@@ -42,15 +42,15 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
   }
   async list(){return (await this.read()).filter(entry=>!containsPromptInjection(entry.content));}
   async find(query: string) {
-    const terms = [...new Set(query.toLocaleLowerCase().match(/[\\p{L}\\p{N}_-]+/gu) ?? [])];
+    const terms = [...new Set(query.toLocaleLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
     if (terms.length === 0) return [];
 
     const phrase = terms.join(" ");
     return (await this.list())
       .map((entry) => {
         const content = entry.content.toLocaleLowerCase();
-        const contentTerms = new Set(content.match(/[\\p{L}\\p{N}_-]+/gu) ?? []);
-        const kindTerms = new Set(entry.kind.toLocaleLowerCase().split(/[-_\\s]+/));
+        const contentTerms = new Set(content.match(/[\p{L}\p{N}_-]+/gu) ?? []);
+        const kindTerms = new Set(entry.kind.toLocaleLowerCase().split(/[-_\s]+/));
         const matched = terms.reduce(
           (count, term) => count + (contentTerms.has(term) ? 1 : 0),
           0,
