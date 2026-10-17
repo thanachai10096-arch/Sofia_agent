@@ -151,7 +151,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(run.idempotencyKeyHash ? { idempotencyKeyHash: run.idempotencyKeyHash } : {}),
       ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
-    void runStore.save(record).catch((error: unknown) => {
+    void Promise.resolve().then(() => runStore.save(record)).catch((error: unknown) => {
       // Store failures must be observable without creating an unhandled rejection.
       console.error("[sofia] failed to persist run record", error instanceof Error ? error.message : "unknown error");
     });
@@ -214,8 +214,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       persist(run);
       let timedOut = false;
       const timer = setTimeout(() => {
-        timedOut = true;
-        run.controller.abort(new Error("Run timed out."));
+        if (!run.controller.signal.aborted) {
+          timedOut = true;
+          run.controller.abort(new Error("Run timed out."));
+        }
       }, requestTimeoutMs);
       try {
         const result = await agent.run({
@@ -405,8 +407,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const controller = new AbortController();
         let timedOut = false;
         const timer = setTimeout(() => {
-          timedOut = true;
-          controller.abort(new Error("Run timed out."));
+          if (!controller.signal.aborted) {
+            timedOut = true;
+            controller.abort(new Error("Run timed out."));
+          }
         }, requestTimeoutMs);
         const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
         runs.set(runId, run);
