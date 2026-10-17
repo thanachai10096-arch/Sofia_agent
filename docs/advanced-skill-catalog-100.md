@@ -1,6 +1,6 @@
 # Sofia Agent — Advanced Skill Catalog (100)
 
-**Status: partial implementation.** The catalog contains 100 capabilities. Forty runtime/security/memory/quality/research/workflow/evolution/multi-agent skills have implementation and acceptance tests and are marked `verified`; the remaining 60 entries are `planned`. A skill becomes `implemented` only after a handler exists and `verified` only after its acceptance criteria pass. Catalog metadata must never grant permissions by itself.
+**Status: partial implementation.** The catalog contains 100 capabilities. Forty-five runtime/security/memory/quality/research/workflow/evolution/multi-agent skills have implementation and acceptance tests and are marked `verified`; the remaining 55 entries are `planned`. A skill becomes `implemented` only after a handler exists and `verified` only after its acceptance criteria pass. Catalog metadata must never grant permissions by itself.
 
 ## Shared implementation contract
 
@@ -36,15 +36,15 @@ Every runnable skill must: (1) declare a versioned input/output schema; (2) use 
 
 ### Software Engineering
 
-- **coding.01 — Repository Mapper** — Risk: `may-write`; approval: **policy-dependent**. Repository Mapper: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **coding.02 — Codebase Semantic Search** — Risk: `may-write`; approval: **policy-dependent**. Codebase Semantic Search: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **coding.01 — Repository Mapper** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Repository Mapper: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **coding.02 — Codebase Semantic Search** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Codebase Semantic Search: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **coding.03 — Change Impact Analyzer** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Change Impact Analyzer: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **coding.04 — Implementation Planner** — Risk: `read-only`; approval: **policy-dependent**. Implementation Planner: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **coding.04 — Implementation Planner** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Implementation Planner: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **coding.05 — Patch Generator** — Risk: `may-write`; approval: **required for sensitive actions**. Patch Generator: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **coding.06 — TypeScript Specialist** — Risk: `read-only`; approval: **policy-dependent**. TypeScript Specialist: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **coding.06 — TypeScript Specialist** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. TypeScript Specialist: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **coding.07 — Python Specialist** — Risk: `may-write`; approval: **policy-dependent**. Python Specialist: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **coding.08 — API Contract Designer** — Risk: `may-write`; approval: **policy-dependent**. API Contract Designer: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **coding.09 — Refactoring Planner** — Risk: `read-only`; approval: **policy-dependent**. Refactoring Planner: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **coding.09 — Refactoring Planner** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Refactoring Planner: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **coding.10 — Code Review Auditor** — Risk: `may-write`; approval: **policy-dependent**. Code Review Auditor: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 
 ### Testing & Quality
