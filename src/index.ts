@@ -50,3 +50,7 @@ export { MemorySecurityAudit } from "./security/audit.js";
 export { assessAction, containsPromptInjection, redactSecrets, riskFor } from "./security/guard.js";
 export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/guard.js";
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
+
+export { MemorySessionStore } from "./session/store.js";
+export { SqliteSessionStore } from "./session/sqlite-store.js";
+export type { Session } from "./session/store.js";
