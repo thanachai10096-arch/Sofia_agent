@@ -114,3 +114,85 @@ test("API E2E authenticates, starts an async run, deduplicates retries, and isol
     await closeServer();
   }
 });
+
+
+test("API tool quotas stop Brain-backed tool execution in sync, async, and SSE modes", async () => {
+  let sideEffects = 0;
+  const deps: AgentDependencies = {
+    provider: {} as AgentDependencies["provider"],
+    router: { select: () => ({ id: "unused" }), markUnhealthy: () => undefined } as unknown as AgentDependencies["router"],
+    reviewer: { review: async () => ({ approved: true, reason: "approved" }) },
+    brainFactory: (options) => ({
+      runId: "brain-quota-test",
+      async run() {
+        // Brain emits this before entering ToolGateway.execute(). The API quota
+        // hook must abort the shared signal before this simulated side effect.
+        options.onEvent?.({ type: "brain.tool.started", runId: "brain-quota-test", stepId: "write-1" });
+        options.signal?.throwIfAborted();
+        sideEffects += 1;
+        return {
+          completed: true,
+          summary: "unexpected completion",
+          state: "completed",
+          changedFiles: [],
+          verification: { passed: true, checks: [] },
+          usage: { steps: 1, toolCalls: 1, modelCalls: 1, reservedOrUsedTokens: 1, replans: 0 },
+        } as never;
+      },
+    } as unknown as SofiaBrain),
+  };
+
+  const server = createSofiaApi(deps, {
+    apiKeys: { "quota-test-key": ["agent:run"] },
+    maxToolCallsPerKeyPerDay: 0,
+    requestTimeoutMs: 5_000,
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address() as AddressInfo;
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    authorization: "Bearer quota-test-key",
+    "content-type": "application/json",
+  };
+  try {
+    const sync = await fetch(`${baseUrl}/v1/agent/runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ task: "attempt a tool" }),
+    });
+    assert.equal(sync.status, 429);
+    assert.match(await sync.text(), /API tool-call quota exceeded/);
+
+    const asyncStart = await fetch(`${baseUrl}/v1/agent/runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ task: "attempt a tool asynchronously", async: true }),
+    });
+    assert.equal(asyncStart.status, 202);
+    const { id } = await asyncStart.json() as { id: string };
+    let asyncBody = "";
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const response = await fetch(`${baseUrl}/v1/agent/runs/${id}`, {
+        headers: { authorization: "Bearer quota-test-key" },
+      });
+      asyncBody = await response.text();
+      if (asyncBody.includes('"status":"failed"')) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    assert.match(asyncBody, /API tool-call quota exceeded/);
+
+    const streaming = await fetch(`${baseUrl}/v1/agent/runs/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ task: "attempt a tool over SSE" }),
+    });
+    assert.equal(streaming.status, 200);
+    assert.match(await streaming.text(), /API tool-call quota exceeded/);
+    assert.equal(sideEffects, 0, "no over-quota Brain tool may reach its side effect");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
