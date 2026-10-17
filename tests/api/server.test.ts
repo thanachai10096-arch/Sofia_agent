@@ -3,6 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileRunRecordStore } from "../../src/api/run-record-store.js";
+import { createNodeWorkspaceRuntime } from "../../src/platform/local-runtime.js";
+import { MapToolRegistry } from "../../src/tools/types.js";
+import { defaultPolicy } from "../../src/security/policy.js";
 import test from "node:test";
 import { createSofiaApi } from "../../src/api/server.js";
 import type { AgentDependencies } from "../../src/agent/types.js";
@@ -314,4 +317,96 @@ test("API exposes separate liveness and configurable readiness probes", async (t
   const ready = await fetch(url + "/ready?probe=1");
   assert.equal(ready.status, 503);
   assert.deepEqual(await ready.json(), { ready: false });
+});
+
+
+test("API enforces tool-call quota before execution for sync, async, and SSE runs", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "sofia-api-tool-quota-"));
+  let executions = 0;
+  const tool = {
+    name: "workspace.read_file",
+    description: "Read a workspace file",
+    effects: ["read"] as const,
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    async execute() {
+      executions += 1;
+      return "unexpected tool execution";
+    },
+  };
+  let generation = 0;
+  const provider: ModelProvider = {
+    async generate() {
+      generation += 1;
+      if (generation % 2 === 1) {
+        return {
+          text: "",
+          assistantMessage: { role: "assistant", content: "" },
+          toolCalls: [{ id: "quota-call-" + generation, name: "workspace.read_file", input: { path: "README.md" } }],
+        };
+      }
+      return { text: "completed" };
+    },
+  };
+  const server = createSofiaApi({
+    ...dependencies(provider),
+    runtime: createNodeWorkspaceRuntime(directory),
+    tools: new MapToolRegistry([tool]),
+    policy: defaultPolicy,
+  }, {
+    apiKeys: { "quota-token": ["agent:run"] },
+    maxToolCallsPerKeyPerDay: 0,
+    requestTimeoutMs: 2000,
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const url = "http://127.0.0.1:" + address.port;
+  const headers = { authorization: "Bearer quota-token", "content-type": "application/json" };
+  try {
+    const sync = await fetch(url + "/v1/agent/runs", {
+      method: "POST", headers, body: JSON.stringify({ task: "read a file" }),
+    });
+    assert.equal(sync.status, 429);
+    assert.match(JSON.stringify(await sync.json()), /tool-call quota exceeded/);
+    assert.equal(executions, 0);
+
+    const asyncResponse = await fetch(url + "/v1/agent/runs", {
+      method: "POST", headers, body: JSON.stringify({ task: "read a file", async: true }),
+    });
+    assert.equal(asyncResponse.status, 202);
+    const asyncRun = await asyncResponse.json() as { id: string };
+    let asyncStatus = "";
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const statusResponse = await fetch(url + "/v1/agent/runs/" + asyncRun.id, {
+        headers: { authorization: "Bearer quota-token" },
+      });
+      const status = await statusResponse.json() as { status: string; error?: string };
+      asyncStatus = status.status;
+      if (asyncStatus === "failed") {
+        assert.match(status.error ?? "", /tool-call quota exceeded/);
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(asyncStatus, "failed");
+    assert.equal(executions, 0);
+
+    const stream = await fetch(url + "/v1/agent/runs/stream", {
+      method: "POST", headers, body: JSON.stringify({ task: "read a file" }),
+    });
+    assert.equal(stream.status, 200);
+    assert.match(await stream.text(), /API tool-call quota exceeded/);
+    assert.equal(executions, 0);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
 });
