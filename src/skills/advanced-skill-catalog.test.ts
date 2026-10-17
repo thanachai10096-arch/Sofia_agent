@@ -33,8 +33,9 @@ test("privileged skills require approval and only tested core handlers are verif
   assert.deepEqual(verified.map((skill) => skill.id).sort(), [
     "runtime.01", "runtime.02", "runtime.03", "runtime.08", "runtime.09", "runtime.10",
     "security.01", "security.02", "security.04", "security.05", "security.06",
+    "conversation.02", "conversation.04", "conversation.05", "conversation.09",
   ].sort());
-  assert.equal(ADVANCED_SKILLS.filter((skill) => skill.status === "planned").length, 89);
+  assert.equal(ADVANCED_SKILLS.filter((skill) => skill.status === "planned").length, 85);
   assert.ok(ADVANCED_SKILLS.filter((skill) => skill.risk === "privileged").length > 0);
   assert.ok(ADVANCED_SKILLS
     .filter((skill) => skill.risk === "privileged")
