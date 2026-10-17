@@ -38,9 +38,9 @@ test("Gemini key selects Gemini OpenAI-compatible endpoint and default model", (
   process.env.GEMINI_API_KEY = "test-key";
   const config = loadModelConfigFromEnv();
   assert.equal(config.routes.length, 4);
-  assert.equal(config.providers.fast.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
-  assert.equal(config.providers.fast.model, "gemini-2.5-flash");
-  assert.equal(config.providers.coding.model, "gemini-2.5-flash");
+  assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
+  assert.equal(config.providers.fast?.model, "gemini-2.5-flash");
+  assert.equal(config.providers.coding?.model, "gemini-2.5-flash");
 });
 
 test("Gemini key takes precedence over legacy gateway key", () => {
@@ -49,8 +49,8 @@ test("Gemini key takes precedence over legacy gateway key", () => {
   process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
   process.env.GEMINI_MODEL = "gemini-test-model";
   const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.fast.apiKey, "gemini-test-key");
-  assert.equal(config.providers.fast.model, "gemini-test-model");
+  assert.equal(config.providers.fast?.apiKey, "gemini-test-key");
+  assert.equal(config.providers.fast?.model, "gemini-test-model");
 });
 
 test("Gemini-specific route model overrides shared Gemini model", () => {
@@ -59,8 +59,8 @@ test("Gemini-specific route model overrides shared Gemini model", () => {
   process.env.GEMINI_MODEL = "gemini-shared";
   process.env.GEMINI_CODING_MODEL = "gemini-coding";
   const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.coding.model, "gemini-coding");
-  assert.equal(config.providers.fast.model, "gemini-shared");
+  assert.equal(config.providers.coding?.model, "gemini-coding");
+  assert.equal(config.providers.fast?.model, "gemini-shared");
 });
 
 test("legacy gateway configuration remains supported when Gemini is absent", () => {
@@ -70,6 +70,6 @@ test("legacy gateway configuration remains supported when Gemini is absent", () 
   process.env.SOFIA_FAST_MODEL = "legacy-fast";
   const config = loadModelConfigFromEnv();
   assert.equal(config.routes.length, 1);
-  assert.equal(config.providers.fast.baseUrl, "https://gateway.example/v1");
-  assert.equal(config.providers.fast.model, "legacy-fast");
+  assert.equal(config.providers.fast?.baseUrl, "https://gateway.example/v1");
+  assert.equal(config.providers.fast?.model, "legacy-fast");
 });
