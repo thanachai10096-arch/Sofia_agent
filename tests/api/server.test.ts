@@ -440,3 +440,29 @@ test("API does not acknowledge an async run when durable persistence fails", asy
   assert.deepEqual(await response.json(), { error: "run_persistence_unavailable" });
   assert.equal(providerCalls, 0);
 });
+
+
+test("API emits structured request logs and bounded-cardinality metrics", async (t) => {
+  const logs: Array<{ level: string; event: string; requestId: string; route: string; statusCode: number; durationMs: number }> = [];
+  const metrics: Array<{ name: string; value: number; labels: Record<string, string> }> = [];
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const { server, url } = await startApi(provider, {
+    logger: (entry) => logs.push(entry),
+    metrics: (metric) => metrics.push(metric),
+  });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/health?details=1");
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("x-request-id") ?? "", /^[0-9a-f-]{36}$/i);
+  await response.json();
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].event, "http.request");
+  assert.equal(logs[0].route, "/health");
+  assert.equal(logs[0].statusCode, 200);
+  assert.ok(logs[0].durationMs >= 0);
+  assert.deepEqual(metrics.map((metric) => metric.name), [
+    "sofia_api_requests_total",
+    "sofia_api_request_duration_ms",
+  ]);
+  assert.equal(metrics[0].labels.route, "/health");
+});
