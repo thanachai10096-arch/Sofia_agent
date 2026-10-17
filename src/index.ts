@@ -33,6 +33,7 @@ export { permissionPolicyEvaluator, leastPrivilegePlanner, promptInjectionDetect
 export { contextSummarizer, memoryConflictResolver, longContextCompressor, createProjectMemoryRetrievalHandler, registerVerifiedMemorySkills } from "./skills/memory-handlers.js";
 export { changeImpactAnalyzer, testStrategyBuilder, regressionTestSelector, acceptanceCriteriaVerifier, staticAnalysisCoordinator, registerVerifiedQualitySkills } from "./skills/quality-handlers.js";
 export { toolArgumentValidator, webResearchPlanner, claimEvidenceMapper, freshnessChecker, citationBuilder, registerVerifiedResearchSkills } from "./skills/research-handlers.js";
+export { workflowBuilder, rateLimitManager, businessProcessMapper, workflowReplayTester, toolResultNormalizer, stableWorkflowFingerprint, registerVerifiedWorkflowSkills } from "./skills/workflow-handlers.js";
 export type { AdvancedSkillExecutionContext, AdvancedSkillTraceEvent, AdvancedSkillHandler, AdvancedSkillExecutionOptions, AdvancedSkillApprovalRequest, AdvancedSkillApprovalVerifier } from "./skills/advanced-skill-runtime.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
 export { AgentEvaluationRunner } from "./evaluation.js";
