@@ -108,10 +108,15 @@ export class EvolutionEngine {
     const key = normalizeTaskType(taskType);
     return ids.map(id => {
       const s = this.get(id);
-      const globalRate = s.attempts ? s.successes / s.attempts : 0.5;
+      // Use a Beta(1, 1) prior so one lucky outcome does not make a
+      // barely-tested skill appear perfectly reliable. As evidence grows,
+      // the smoothed estimate converges toward the observed success rate.
+      const globalRate = (s.successes + 1) / (s.attempts + 2);
       const local = ownValue(s.taskTypes, key);
       const localEvidence = local ? 1 - Math.exp(-local.attempts / 3) : 0;
-      const localRate = local?.attempts ? local.successes / local.attempts : globalRate;
+      const localRate = local
+        ? (local.successes + 1) / (local.attempts + 2)
+        : globalRate;
       const rate = globalRate * (1 - localEvidence) + localRate * localEvidence;
       const evidence = 1 - Math.exp(-s.attempts / 5);
       const score = rate * 70 + s.confidence * 20 + evidence * 10 - Math.min(10, s.avgRecoveryRounds * 2);
