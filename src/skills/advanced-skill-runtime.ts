@@ -99,18 +99,29 @@ export class AdvancedSkillRegistry {
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let abortListener: (() => void) | undefined;
+    const executionController = new AbortController();
     const stop = new Promise<never>((_, reject) => {
-      timeout = setTimeout(() => reject(new AdvancedSkillPolicyError(
-        `Skill ${id} exceeded timeout of ${timeoutMs}ms`, "TIMEOUT",
-      )), timeoutMs);
-      abortListener = () => reject(new AdvancedSkillPolicyError(
-        `Skill ${id} was aborted during execution`, "ABORTED",
-      ));
+      timeout = setTimeout(() => {
+        executionController.abort();
+        reject(new AdvancedSkillPolicyError(
+          `Skill ${id} exceeded timeout of ${timeoutMs}ms`, "TIMEOUT",
+        ));
+      }, timeoutMs);
+      abortListener = () => {
+        executionController.abort();
+        reject(new AdvancedSkillPolicyError(
+          `Skill ${id} was aborted during execution`, "ABORTED",
+        ));
+      };
       context.signal.addEventListener("abort", abortListener, { once: true });
     });
 
+    const executionContext: AdvancedSkillExecutionContext = {
+      ...context,
+      signal: executionController.signal,
+    };
     try {
-      const output = await Promise.race([Promise.resolve().then(() => handler(input, context)), stop]);
+      const output = await Promise.race([Promise.resolve().then(() => handler(input, executionContext)), stop]);
       context.emitTrace?.({ type: "skill.completed", skillId: id, at: new Date().toISOString() });
       return output as TOutput;
     } catch (error) {
