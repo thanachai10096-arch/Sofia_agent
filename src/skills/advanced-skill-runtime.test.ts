@@ -68,6 +68,21 @@ test("registry rejects missing skills and pre-aborted executions", async () => {
     (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "ABORTED");
 });
 
+test("mid-flight cancellation aborts the handler signal", async () => {
+  const registry = new AdvancedSkillRegistry();
+  const controller = new AbortController();
+  let handlerSignal: AbortSignal | undefined;
+  registry.register(definition(), (_input, executionContext) => {
+    handlerSignal = executionContext.signal;
+    return new Promise((resolve) => setTimeout(() => resolve("late"), 100));
+  });
+  const pending = registry.execute("test.skill", null, context(false, controller.signal));
+  setTimeout(() => controller.abort(), 5);
+  await assert.rejects(pending,
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "ABORTED");
+  assert.equal(handlerSignal?.aborted, true);
+});
+
 test("registry times out slow handlers and aborts their execution signal", async () => {
   const registry = new AdvancedSkillRegistry();
   let signal: AbortSignal | undefined;
