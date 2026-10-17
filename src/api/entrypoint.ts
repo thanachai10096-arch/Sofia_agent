@@ -148,8 +148,19 @@ if (discordConfigured) {
           // Delivery may be unavailable during shutdown; durable job state remains persisted.
         }
       });
-    } catch {
-      await discordTransport?.sendMessage(message.channelId, "Sofia could not start or complete that task. Check the server logs for a redacted error.", undefined, message.id);
+    } catch (error) {
+      // Log only the error class, never task text, credentials, interaction tokens, or raw provider messages.
+      console.error("Discord command handler failed:", error instanceof Error ? error.name : "UnknownError");
+      try {
+        await discordTransport?.sendMessage(
+          message.channelId,
+          "Sofia could not start or complete that task. Check the server logs for a redacted error.",
+          undefined,
+          message.id,
+        );
+      } catch {
+        console.error("Discord command error reply delivery failed.");
+      }
     }
   });
 
