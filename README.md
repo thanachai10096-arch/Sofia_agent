@@ -25,6 +25,18 @@ Sofia Agent is a standalone agent runtime and platform. It turns a request into 
 
 > **Model routing is an internal policy.** End users do not choose models; Sofia decides how requests are handled.
 
+
+## Open source and contribution
+
+Sofia Agent is distributed under the [MIT License](LICENSE). Review third-party dependency and artwork licenses before redistribution.
+
+- **Contribute:** [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Report security issues:** [SECURITY.md](SECURITY.md)
+- **Open-source and commercial roadmap boundaries:** [docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md](docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md)
+- **Shared access architecture:** [docs/UNIFIED_ACCESS_ARCHITECTURE.md](docs/UNIFIED_ACCESS_ARCHITECTURE.md)
+
+Hosted and enterprise services described in the roadmap are potential offerings, not a claim that they are currently available.
+
 ## `> Execution lifecycle`
 
 ```text
