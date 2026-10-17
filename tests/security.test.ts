@@ -68,4 +68,20 @@ it("shared tool-effect classification marks privileged actions consistently", ()
   assert.deepEqual(classifyToolEffects("browser.open"), ["browser", "network"]);
   assert.deepEqual(classifyToolEffects("desktop.input.click"), ["destructive"]);
   assert.deepEqual(classifyToolEffects("workspace.read_file"), ["read"]);
+
+  it("redacts multiline PEM private keys embedded in plain text", () => {
+    const pem = [
+      "-----BEGIN PRIVATE KEY-----",
+      "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC...",
+      "sensitive-key-material",
+      "-----END PRIVATE KEY-----",
+    ].join("\n");
+    const sanitized = redactSecrets(`tool output before\\n${pem}\\nafter tool output`) as string;
+    assert.equal(sanitized.includes("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"), false);
+    assert.equal(sanitized.includes("sensitive-key-material"), false);
+    assert.equal(sanitized.includes("[REDACTED PRIVATE KEY]"), true);
+    assert.equal(sanitized.includes("before"), true);
+    assert.equal(sanitized.includes("after tool output"), true);
+  });
+
 });
