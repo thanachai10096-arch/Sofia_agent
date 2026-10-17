@@ -11,6 +11,10 @@ function numberEnv(name: string, fallback: number) {
 }
 
 export function loadModelConfigFromEnv(): SofiaModelConfig {
+  const openRouterKey =
+    process.env.OPENROUTER_API_KEY?.trim() ||
+    process.env.OPENROUTER?.trim() ||
+    "";
   const geminiKey =
     process.env.GEMINI_API_KEY?.trim() ||
     process.env.Gemini_API_Key?.trim() ||
@@ -21,22 +25,32 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     process.env.AI_GATEWAY_API_KEY?.trim() ||
     "";
 
-  // Prefer an explicitly configured Kimi key for Test; otherwise preserve
-  // the existing gateway/Gemini selection behavior.
-  const useKimi = kimiKey.length > 0;
-  const useGemini = !useKimi && geminiKey.length > 0 && legacyApiKey.length === 0;
-  const apiKey = useKimi ? kimiKey : useGemini ? geminiKey : legacyApiKey;
-  const baseUrl = useKimi
-    ? (process.env.KIMI_API_BASE_URL?.trim() || "https://api.moonshot.ai/v1")
-    : useGemini
-      ? (process.env.GEMINI_API_BASE_URL?.trim() ||
-         "https://generativelanguage.googleapis.com/v1beta/openai")
-      : (process.env.SOFIA_AI_GATEWAY_URL?.trim() ||
-         "https://ai-gateway.vercel.sh/v1");
+  // Explicit provider keys are prioritized in this order for Test deployments.
+  // Existing Kimi, Gemini, and gateway behavior is retained when OpenRouter is absent.
+  const useOpenRouter = openRouterKey.length > 0;
+  const useKimi = !useOpenRouter && kimiKey.length > 0;
+  const useGemini =
+    !useOpenRouter && !useKimi && geminiKey.length > 0 && legacyApiKey.length === 0;
+  const apiKey = useOpenRouter
+    ? openRouterKey
+    : useKimi
+      ? kimiKey
+      : useGemini
+        ? geminiKey
+        : legacyApiKey;
+  const baseUrl = useOpenRouter
+    ? (process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1")
+    : useKimi
+      ? (process.env.KIMI_API_BASE_URL?.trim() || "https://api.moonshot.ai/v1")
+      : useGemini
+        ? (process.env.GEMINI_API_BASE_URL?.trim() ||
+           "https://generativelanguage.googleapis.com/v1beta/openai")
+        : (process.env.SOFIA_AI_GATEWAY_URL?.trim() ||
+           "https://ai-gateway.vercel.sh/v1");
 
   if (!apiKey) {
     throw new Error(
-      "Set Kimi_key to use Kimi, GEMINI_API_KEY to use Gemini, or SOFIA_AI_GATEWAY_API_KEY for the legacy gateway.",
+      "Set OPENROUTER_API_KEY (or OPENROUTER) for OpenRouter, Kimi_key for Kimi, GEMINI_API_KEY for Gemini, or SOFIA_AI_GATEWAY_API_KEY for the legacy gateway.",
     );
   }
 
@@ -54,14 +68,18 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
 
   for (const [id, capabilities, cost, latency, quality] of definitions) {
     const configuredModel = process.env[`SOFIA_${id.toUpperCase()}_MODEL`]?.trim();
-    const model = useKimi
-      ? (process.env[`KIMI_${id.toUpperCase()}_MODEL`]?.trim() ||
-         process.env.KIMI_MODEL?.trim() ||
-         configuredModel ||
-         "kimi-k2.5")
-      : useGemini
-        ? (process.env[`GEMINI_${id.toUpperCase()}_MODEL`]?.trim() || geminiModel)
-        : configuredModel;
+    const model = useOpenRouter
+      ? (process.env[`OPENROUTER_${id.toUpperCase()}_MODEL`]?.trim() ||
+         process.env.OPENROUTER_MODEL?.trim() ||
+         "openrouter/free")
+      : useKimi
+        ? (process.env[`KIMI_${id.toUpperCase()}_MODEL`]?.trim() ||
+           process.env.KIMI_MODEL?.trim() ||
+           configuredModel ||
+           "kimi-k2.5")
+        : useGemini
+          ? (process.env[`GEMINI_${id.toUpperCase()}_MODEL`]?.trim() || geminiModel)
+          : configuredModel;
 
     if (!model) continue;
 
@@ -79,11 +97,13 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
 
   if (!routes.length) {
     throw new Error(
-      useKimi
-        ? "Kimi is configured, but no Kimi model route could be created."
-        : useGemini
-          ? "Gemini is configured, but no Gemini model route could be created."
-          : "Configure at least one SOFIA_*_MODEL environment variable.",
+      useOpenRouter
+        ? "OpenRouter is configured, but no OpenRouter model route could be created."
+        : useKimi
+          ? "Kimi is configured, but no Kimi model route could be created."
+          : useGemini
+            ? "Gemini is configured, but no Gemini model route could be created."
+            : "Configure at least one SOFIA_*_MODEL environment variable.",
     );
   }
 

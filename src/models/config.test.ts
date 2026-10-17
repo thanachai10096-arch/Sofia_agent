@@ -3,6 +3,14 @@ import { afterEach, test } from "node:test";
 import { loadModelConfigFromEnv } from "./config.js";
 
 const names = [
+  "OPENROUTER_API_KEY",
+  "OPENROUTER",
+  "OPENROUTER_BASE_URL",
+  "OPENROUTER_MODEL",
+  "OPENROUTER_FAST_MODEL",
+  "OPENROUTER_CODING_MODEL",
+  "OPENROUTER_REASONING_MODEL",
+  "OPENROUTER_VISION_MODEL",
   "Kimi_key",
   "KIMI_API_KEY",
   "KIMI_API_BASE_URL",
@@ -41,6 +49,36 @@ afterEach(() => {
   }
 });
 
+test("OpenRouter key selects OpenRouter endpoint and defaults to free model router", () => {
+  clear();
+  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.routes.length, 4);
+  assert.equal(config.providers.fast?.apiKey, "openrouter-test-key");
+  assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(config.providers.fast?.model, "openrouter/free");
+  assert.equal(config.providers.coding?.model, "openrouter/free");
+});
+
+test("existing OPENROUTER variable is accepted and provider-specific models can override default", () => {
+  clear();
+  process.env.OPENROUTER = "openrouter-test-key";
+  process.env.OPENROUTER_CODING_MODEL = "qwen/qwen3-coder:free";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "openrouter-test-key");
+  assert.equal(config.providers.coding?.model, "qwen/qwen3-coder:free");
+});
+
+test("OpenRouter key takes precedence over other configured provider keys", () => {
+  clear();
+  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+  process.env.Kimi_key = "kimi-test-key";
+  process.env.SOFIA_AI_GATEWAY_API_KEY = "gateway-test-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "openrouter-test-key");
+  assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
+});
+
 test("Gemini key selects Gemini OpenAI-compatible endpoint and default model", () => {
   clear();
   process.env.GEMINI_API_KEY = "test-key";
@@ -51,7 +89,7 @@ test("Gemini key selects Gemini OpenAI-compatible endpoint and default model", (
   assert.equal(config.providers.coding?.model, "gemini-2.5-flash");
 });
 
-test("explicit Sofia gateway key takes precedence when both keys are present", () => {
+test("explicit Sofia gateway key takes precedence when Gemini and gateway keys are present", () => {
   clear();
   process.env.GEMINI_API_KEY = "gemini-test-key";
   process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
@@ -85,7 +123,7 @@ test("legacy gateway configuration remains supported when Gemini is absent", () 
   assert.equal(config.providers.fast?.model, "legacy-fast");
 });
 
-test("Kimi key takes precedence and selects the Moonshot OpenAI-compatible endpoint", () => {
+test("Kimi key takes precedence when OpenRouter is absent and selects Moonshot endpoint", () => {
   clear();
   process.env.Kimi_key = "kimi-test-key";
   process.env.SOFIA_AI_GATEWAY_API_KEY = "gateway-test-key";
