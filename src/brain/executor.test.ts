@@ -615,3 +615,42 @@ test("Brain preserves the highest-ranked project memories when limiting context"
   assert.equal(selected[0]?.content, "ranked-memory-0");
   assert.equal(selected[11]?.content, "ranked-memory-11");
 });
+
+
+test("Brain aborts after a tool-start policy event before invoking the tool", async () => {
+  const controller = new AbortController();
+  const tools = makeTools();
+  let executions = 0;
+  const execute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    executions += 1;
+    return execute(call, context);
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+      onEvent(event) {
+        if (event.type === "brain.tool.started") controller.abort(new Error("API tool-call quota exceeded."));
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5000,
+    },
+  });
+
+  const report = await brain.run({ task: "Create hello.txt", signal: controller.signal });
+  assert.equal(report.completed, false);
+  assert.match(report.summary, /API tool-call quota exceeded/);
+  assert.equal(executions, 0, "tool execution must not begin after the quota abort");
+});
