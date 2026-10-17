@@ -482,8 +482,8 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "id": "tools.02",
     "name": "Tool Argument Validator",
     "category": "Tools & Automation",
-    "risk": "may-write",
-    "status": "planned",
+    "risk": "read-only",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Tool Argument Validator: tools & automation capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -564,7 +564,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Web Research Planner",
     "category": "Research & Knowledge",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Web Research Planner: research & knowledge capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -582,7 +582,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Claim Evidence Mapper",
     "category": "Research & Knowledge",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Claim Evidence Mapper: research & knowledge capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -600,7 +600,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Freshness Checker",
     "category": "Research & Knowledge",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Freshness Checker: research & knowledge capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -627,7 +627,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Citation Builder",
     "category": "Research & Knowledge",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Citation Builder: research & knowledge capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
