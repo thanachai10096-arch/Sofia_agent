@@ -100,7 +100,9 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
 export function redactSecrets(value: unknown): unknown {
   if (typeof value === "string") {
     return value
-      .replace(/(?:Bearer\s+)[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
+      // Private keys can leak inside plain text, not only under a labelled object key.
+      .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, "[REDACTED PRIVATE KEY]")
+      .replace(/(?:Bearer\\s+)[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
       .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
   }
   if (Array.isArray(value)) return value.map(redactSecrets);
