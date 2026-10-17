@@ -67,11 +67,44 @@ export const tokenBudgetPlanner = (input: unknown) => {
   return { tokenLimit, estimatedTokens, usableTokens, reserveRatio, fitsTokens, costLimit, estimatedCost, fitsCost, allowedByEstimate: fitsTokens && fitsCost, recommendation: fitsTokens && fitsCost ? "within-budget" : "reduce-scope-or-request-approved-budget", executesWork: false };
 };
 
+/** Compares supplied variant evaluations; a recommendation never deploys a prompt. */
+export const promptVariantEvaluator = (input: unknown) => {
+  const value = inputRecord(input);
+  const variants = list(value.variants, "variants", 50).map((variant) => {
+    const id = text(variant.id, "variant id");
+    const sampleSize = numberInRange(variant.sampleSize, "sampleSize", 1, 1_000_000);
+    const passRate = numberInRange(variant.passRate, "passRate", 0, 1);
+    const safetyIncidents = numberInRange(variant.safetyIncidents ?? 0, "safetyIncidents", 0, sampleSize);
+    const evidenceId = text(variant.evidenceId, "evidenceId");
+    return { id, sampleSize, passRate, safetyIncidents, evidenceId };
+  });
+  if (variants.length === 0 || new Set(variants.map(item => item.id)).size !== variants.length) throw new TypeError("Provide unique prompt variant IDs.");
+  const safe = variants.filter(item => item.safetyIncidents === 0).sort((a, b) => b.passRate - a.passRate || b.sampleSize - a.sampleSize);
+  return { variants: [...variants].sort((a, b) => b.passRate - a.passRate), recommendedForHumanReview: safe[0] ?? null, excludedVariantIds: variants.filter(item => item.safetyIncidents > 0).map(item => item.id), deploymentAllowed: false };
+};
+
+/** Eligibility only. The registry requires trusted approval before this handler can run. */
+export const skillPromotionGate: AdvancedSkillHandler = (input) => {
+  const value = inputRecord(input);
+  const skillId = text(value.skillId, "skillId");
+  const attempts = numberInRange(value.attempts, "attempts", 0, 1_000_000);
+  const successes = numberInRange(value.successes, "successes", 0, attempts);
+  const safetyIncidents = numberInRange(value.safetyIncidents, "safetyIncidents", 0, attempts);
+  if (!Array.isArray(value.evidenceIds) || value.evidenceIds.length === 0 || value.evidenceIds.length > 100 || value.evidenceIds.some(item => typeof item !== "string" || !item.trim())) throw new TypeError("evidenceIds must contain 1 to 100 non-empty evidence IDs.");
+  const minimumAttempts = numberInRange(value.minimumAttempts ?? 30, "minimumAttempts", 1, 1_000_000);
+  const minimumSuccessRate = numberInRange(value.minimumSuccessRate ?? 0.95, "minimumSuccessRate", 0, 1);
+  const successRate = attempts === 0 ? 0 : successes / attempts;
+  const eligible = attempts >= minimumAttempts && successRate >= minimumSuccessRate && safetyIncidents === 0;
+  return { skillId, attempts, successes, successRate, safetyIncidents, evidenceIds: [...new Set(value.evidenceIds as string[])], eligibleForReview: eligible, promotionApplied: false, decision: eligible ? "eligible-for-human-review" : "not-eligible" };
+};
+
 export function registerVerifiedEvolutionSkills(registry: AdvancedSkillRegistry): string[] {
   const entries: Array<{ id: string; handler: AdvancedSkillHandler }> = [
     { id: "evolution.01", handler: skillSuccessScorer },
     { id: "evolution.03", handler: skillRankingEngine },
+    { id: "evolution.04", handler: promptVariantEvaluator },
     { id: "evolution.06", handler: tokenBudgetPlanner },
+    { id: "evolution.09", handler: skillPromotionGate },
   ];
   const registered: string[] = [];
   for (const entry of entries) {
