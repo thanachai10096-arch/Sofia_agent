@@ -22,6 +22,7 @@ interface ActiveRun {
   desktopCapabilities: DesktopCapability[];
   idempotencyKeyHash?: string;
   requestFingerprint?: string;
+  toolQuotaExceeded?: boolean;
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -233,18 +234,24 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
+          onEvent: (event) => {
+            if (event.type === "tool.started" && !usage.recordToolCalls(run.ownerKeyId)) {
+              run.toolQuotaExceeded = true;
+              run.controller.abort(new Error("API tool-call quota exceeded."));
+            }
+          },
         });
         if (run.controller.signal.aborted) {
-          run.status = timedOut ? "failed" : "cancelled";
-          run.error ??= timedOut ? "Run timed out." : "Run cancelled.";
+          run.status = timedOut || run.toolQuotaExceeded ? "failed" : "cancelled";
+          run.error ??= timedOut ? "Run timed out." : run.toolQuotaExceeded ? "API tool-call quota exceeded." : "Run cancelled.";
         } else {
           run.result = result;
           run.status = "completed";
         }
       } catch (error) {
         if (run.controller.signal.aborted) {
-          run.status = timedOut ? "failed" : "cancelled";
-          run.error = timedOut ? "Run timed out." : "Run cancelled.";
+          run.status = timedOut || run.toolQuotaExceeded ? "failed" : "cancelled";
+          run.error = timedOut ? "Run timed out." : run.toolQuotaExceeded ? "API tool-call quota exceeded." : "Run cancelled.";
         } else {
           run.status = "failed";
           run.error = publicAgentError();
@@ -432,6 +439,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (!res.writableEnded) controller.abort(new Error("SSE client disconnected."));
         };
         res.on("close", abortOnDisconnect);
+        let toolQuotaExceeded = false;
         try {
           run.status = "running";
           const result = await agent.run({
@@ -442,15 +450,21 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
-            onEvent: (event) => send({ type: "event", runId, event }),
+            onEvent: (event) => {
+              send({ type: "event", runId, event });
+              if (event.type === "tool.started" && !usage.recordToolCalls(auth.keyId)) {
+                toolQuotaExceeded = true;
+                controller.abort(new Error("API tool-call quota exceeded."));
+              }
+            },
           });
-          if (controller.signal.aborted) throw new Error(timedOut ? "Run timed out." : "Run cancelled.");
+          if (controller.signal.aborted) throw new Error(timedOut ? "Run timed out." : toolQuotaExceeded ? "API tool-call quota exceeded." : "Run cancelled.");
           run.result = result;
           run.status = "completed";
           send({ type: "result", runId, status: "completed", result: run.result });
         } catch (error) {
-          run.status = timedOut ? "failed" : controller.signal.aborted ? "cancelled" : "failed";
-          run.error = timedOut ? "Run timed out." : controller.signal.aborted ? "Run cancelled." : publicAgentError();
+          run.status = timedOut || toolQuotaExceeded ? "failed" : controller.signal.aborted ? "cancelled" : "failed";
+          run.error = timedOut ? "Run timed out." : toolQuotaExceeded ? "API tool-call quota exceeded." : controller.signal.aborted ? "Run cancelled." : publicAgentError();
           send({ type: "error", runId, status: run.status, error: run.error });
         } finally {
           releaseActive(auth.keyId);
@@ -541,6 +555,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(new Error("Run timed out.")), requestTimeoutMs);
         const runId = randomUUID();
+        let toolQuotaExceeded = false;
         try {
           const result = await agent.run({
             principalId: auth.keyId,
@@ -550,13 +565,23 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
+            onEvent: (event) => {
+              if (event.type === "tool.started" && !usage.recordToolCalls(auth.keyId)) {
+                toolQuotaExceeded = true;
+                controller.abort(new Error("API tool-call quota exceeded."));
+              }
+            },
           });
           if (controller.signal.aborted) {
+            if (toolQuotaExceeded) return json(res, 429, { id: runId, status: "failed", error: "API tool-call quota exceeded." }, origin, config);
             return json(res, 504, { id: runId, status: "failed", error: "Request timed out or was cancelled." }, origin, config);
           }
           return json(res, 200, { id: runId, status: "completed", result }, origin, config);
         } catch (error) {
-          return json(res, 502, {
+          if (controller.signal.aborted && toolQuotaExceeded) {
+            return json(res, 429, { id: runId, status: "failed", error: "API tool-call quota exceeded." }, origin, config);
+          }
+          return json(res, controller.signal.aborted ? 504 : 502, {
             id: runId,
             status: "failed",
             error: controller.signal.aborted ? "Request timed out or was cancelled." : publicAgentError(),
