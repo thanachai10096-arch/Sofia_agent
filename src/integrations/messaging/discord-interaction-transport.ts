@@ -33,6 +33,8 @@ export interface DiscordInteractionTransportOptions {
   publicKeyHex: string;
   botToken: string;
   commandName?: string;
+  /** Additional top-level slash commands that share the same verified transport. */
+  additionalCommandNames?: string[];
   taskOptionName?: string;
   commandPrefix?: string;
   /** Explicit allowlists; all other users/channels are denied before dispatch. */
@@ -55,6 +57,8 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
   const commandName = options.commandName ?? "run";
   const taskOptionName = options.taskOptionName ?? "task";
   const commandPrefix = options.commandPrefix ?? "/run";
+  const commandNames = [...new Set([commandName, ...(options.additionalCommandNames ?? [])])];
+  if (commandNames.some((name) => !/^[a-z0-9_-]{1,32}$/.test(name))) throw new Error("Invalid Discord command name.");
   for (const [name, value] of [["commandName", commandName], ["taskOptionName", taskOptionName], ["commandPrefix", commandPrefix]] as const) {
     if (!value.trim() || value.length > 128 || /[\r\n\0]/.test(value)) throw new Error(`Invalid Discord ${name}.`);
   }
@@ -152,7 +156,8 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
       if (pendingInteractions.size >= 5_000) {
         return { status: 503, body: { error: "Discord interaction capacity reached." } };
       }
-      if (interaction.data?.name !== commandName) {
+      const incomingCommand = interaction.data?.name;
+      if (!incomingCommand || !commandNames.includes(incomingCommand)) {
         return { status: 200, body: { type: 4, data: { content: "Unsupported command.", flags: 64 } } };
       }
       const author = interaction.member?.user ?? interaction.user;
@@ -165,14 +170,17 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
           (allowedChannels && (!allowedChannels.length || !allowedChannels.includes(interaction.channel_id)))) {
         return { status: 200, body: { type: 4, data: { content: "You are not authorized to use Sofia in this channel.", flags: 64 } } };
       }
-      const taskValue = interaction.data.options?.find((option) => option.name === taskOptionName)?.value;
-      const task = typeof taskValue === "string" ? taskValue : "";
+      const optionName = incomingCommand === commandName ? taskOptionName : "job_id";
+      const optionValue = interaction.data.options?.find((option) => option.name === optionName)?.value;
+      const argument = typeof optionValue === "string" ? optionValue : "";
       const event: VerifiedDiscordMessage = {
         signatureVerified: true,
         id: interaction.id,
         channelId: interaction.channel_id,
         author: { id: author.id, ...(author.username ? { username: author.username } : {}), bot: false },
-        content: task ? `${commandPrefix} ${task}` : commandPrefix,
+        content: incomingCommand === commandName
+          ? (argument ? `${commandPrefix} ${argument}` : commandPrefix)
+          : (argument ? `/${incomingCommand} ${argument}` : `/${incomingCommand}`),
         createdAt: now,
         attachments: [],
       };
