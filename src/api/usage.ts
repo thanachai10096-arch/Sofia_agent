@@ -19,7 +19,7 @@ export class FileUsageStore implements UsageStore {
     try { names = readdirSync(this.directory); } catch { return []; }
     const records: UsageRecord[] = [];
     for (const name of names) {
-      if (!/^[a-f0-9]{32}\\.json$/.test(name)) continue;
+      if (!/^[a-f0-9]{32}\.json$/.test(name)) continue;
       try {
         const value: unknown = JSON.parse(readFileSync(path.join(this.directory, name), "utf8"));
         if (!value || typeof value !== "object" || Array.isArray(value)) continue;
