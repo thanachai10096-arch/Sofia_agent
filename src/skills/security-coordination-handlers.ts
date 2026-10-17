@@ -239,7 +239,7 @@ export const humanGoalAlignmentMonitor = (input: unknown) => {
   const supportedGoalIds = texts(value.supportedGoalIds, "supportedGoalIds", 100);
   const prohibited = bool(value.matchesProhibitedAction, "matchesProhibitedAction");
   const unexplained = goals.filter(goal => !supportedGoalIds.includes(goal));
-  const aligned = goals.length > 0 && supportedGoalIds.length > 0 && !prohibited;
+  const aligned = goals.length > 0 && unexplained.length === 0 && !prohibited;
   return { aligned, decision: prohibited ? "deny-and-review" : aligned ? "eligible-for-scope-check" : "needs-human-clarification", proposedActionHash: createHash("sha256").update(action).digest("hex"), unsupportedGoals: unexplained, executionPerformed: false };
 };
 
