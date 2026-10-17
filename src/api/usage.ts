@@ -61,7 +61,6 @@ export class UsageLimiter {
 
   consume(keyId: string, toolCalls = 0): void {
     if (!Number.isSafeInteger(toolCalls) || toolCalls < 0) throw new Error("Invalid tool call usage amount.");
-    if (!/^[a-f0-9]{32}$/.test(keyId)) throw new Error("Invalid API usage key ID.");
     const now = Date.now();
     const previous = this.records.get(keyId);
     const current: UsageRecord = previous ? { ...previous } : { keyId, runs: 0, toolCalls: 0, startedAt: now };
