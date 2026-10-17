@@ -31,7 +31,7 @@ test("lookup returns a known skill and safely returns undefined for unknown IDs"
 test("privileged skills require approval and only tested core handlers are verified", () => {
   const verified = ADVANCED_SKILLS.filter((skill) => skill.status === "verified");
   assert.deepEqual(verified.map((skill) => skill.id).sort(), [
-    "runtime.01", "runtime.02", "runtime.03", "runtime.08", "runtime.09", "runtime.10",
+    "runtime.01", "runtime.02", "runtime.03", "runtime.04", "runtime.05", "runtime.07", "runtime.08", "runtime.09", "runtime.10",
     "security.01", "security.02", "security.04", "security.05", "security.06",
     "conversation.02", "conversation.04", "conversation.05", "conversation.09",
     "coding.03", "testing.01", "testing.05", "testing.08", "testing.09",
@@ -41,7 +41,7 @@ test("privileged skills require approval and only tested core handlers are verif
     "agents.01", "agents.02", "agents.05", "agents.06", "agents.08",
     "coding.01", "coding.02", "coding.04", "coding.06", "coding.09",
   ].sort());
-  assert.equal(ADVANCED_SKILLS.filter((skill) => skill.status === "implemented").length, 3);
+  assert.equal(ADVANCED_SKILLS.filter((skill) => skill.status === "implemented").length, 0);
   assert.equal(ADVANCED_SKILLS.filter((skill) => skill.status === "planned").length, 52);
   assert.ok(ADVANCED_SKILLS.filter((skill) => skill.risk === "privileged").length > 0);
   assert.ok(ADVANCED_SKILLS
