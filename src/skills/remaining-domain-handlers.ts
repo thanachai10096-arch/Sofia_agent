@@ -33,7 +33,9 @@ export const patchGenerator = (input: unknown) => {
   const patch = text(value.patch, "patch", 100_000);
   const touchedPaths = texts(value.touchedPaths, "touchedPaths", 200);
   const blockedPaths = touchedPaths.filter(path => path.startsWith("/") || /^[A-Za-z]:/.test(path) || path.split(/[\\/]/).some(part => part === ".." || [".git", "node_modules", ".env", "secrets"].includes(part.toLowerCase())));
-  return { objective, patchPreview: redactSecrets(patch).slice(0, 20_000), patchHash: createHash("sha256").update(patch).digest("hex"), touchedPaths, blockedPaths, eligibleForReview: blockedPaths.length === 0, applied: false };
+  const redactedPatch = redactSecrets(patch);
+  const patchPreview = typeof redactedPatch === "string" ? redactedPatch.slice(0, 20_000) : "[REDACTED]";
+  return { objective, patchPreview, patchHash: createHash("sha256").update(patch).digest("hex"), touchedPaths, blockedPaths, eligibleForReview: blockedPaths.length === 0, applied: false };
 };
 
 /** Plans Python-focused review from supplied metadata; does not run Python or install packages. */
