@@ -42,24 +42,38 @@ export async function handleDiscordInteractionHttpRequest(
     return;
   }
   if (oversized) {
-    res.writeHead(413, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+    res.writeHead(413, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", connection: "close" });
     res.end(JSON.stringify({ error: "request_too_large" }));
     return;
   }
 
   const signatureHeader = req.headers["x-signature-ed25519"];
   const timestampHeader = req.headers["x-signature-timestamp"];
-  const result = await transport.handleRequest({
-    headers: {
-      "x-signature-ed25519": typeof signatureHeader === "string" ? signatureHeader : undefined,
-      "x-signature-timestamp": typeof timestampHeader === "string" ? timestampHeader : undefined,
-    },
-    rawBody: Buffer.concat(chunks),
-  });
-  res.writeHead(result.status, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-  });
-  res.end(JSON.stringify(result.body));
+  try {
+    const result = await transport.handleRequest({
+      headers: {
+        "x-signature-ed25519": typeof signatureHeader === "string" ? signatureHeader : undefined,
+        "x-signature-timestamp": typeof timestampHeader === "string" ? timestampHeader : undefined,
+      },
+      rawBody: Buffer.concat(chunks),
+    });
+    res.writeHead(result.status, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
+    res.end(JSON.stringify(result.body));
+  } catch {
+    // Never leak transport exceptions, tokens, or request contents to clients.
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
+    res.writeHead(503, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
+    res.end(JSON.stringify({ error: "messaging_transport_unavailable" }));
+  }
 }
