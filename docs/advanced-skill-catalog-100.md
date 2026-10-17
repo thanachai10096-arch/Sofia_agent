@@ -1,6 +1,6 @@
 # Sofia Agent — Advanced Skill Catalog (100)
 
-**Status: partial implementation.** The catalog contains 100 capabilities. Eleven deterministic runtime/security skills (`runtime.01`, `.02`, `.03`, `.08`, `.09`, `.10`, `security.01`, `.02`, `.04`, `.05`, `.06`) have handlers and acceptance tests and are marked `verified`; the remaining 89 entries are still `planned`. A skill becomes `implemented` only after a handler exists and `verified` only after its acceptance criteria pass. Catalog metadata must never grant permissions by itself.
+**Status: partial implementation.** The catalog contains 100 capabilities. Fifteen deterministic runtime/security/memory skills (`runtime.01`, `.02`, `.03`, `.08`, `.09`, `.10`, `security.01`, `.02`, `.04`, `.05`, `.06`, `conversation.02`, `.04`, `.05`, `.09`) have handlers and acceptance tests and are marked `verified`; the remaining 85 entries are still `planned`. A skill becomes `implemented` only after a handler exists and `verified` only after its acceptance criteria pass. Catalog metadata must never grant permissions by itself.
 
 ## Shared implementation contract
 
@@ -24,14 +24,14 @@ Every runnable skill must: (1) declare a versioned input/output schema; (2) use 
 ### Conversation & Memory
 
 - **conversation.01 — Natural Conversation** — Risk: `read-only`; approval: **policy-dependent**. Natural Conversation: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **conversation.02 — Context Summarizer** — Risk: `may-write`; approval: **policy-dependent**. Context Summarizer: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **conversation.02 — Context Summarizer** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Context Summarizer: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **conversation.03 — User Preference Memory** — Risk: `read-only`; approval: **policy-dependent**. User Preference Memory: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **conversation.04 — Project Memory Retrieval** — Risk: `may-write`; approval: **policy-dependent**. Project Memory Retrieval: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **conversation.05 — Memory Conflict Resolver** — Risk: `read-only`; approval: **policy-dependent**. Memory Conflict Resolver: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **conversation.04 — Project Memory Retrieval** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Project Memory Retrieval: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **conversation.05 — Memory Conflict Resolver** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Memory Conflict Resolver: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **conversation.06 — Conversation-to-Task Parser** — Risk: `may-write`; approval: **policy-dependent**. Conversation-to-Task Parser: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **conversation.07 — Clarifying Question Planner** — Risk: `read-only`; approval: **policy-dependent**. Clarifying Question Planner: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **conversation.08 — Session Handoff** — Risk: `read-only`; approval: **policy-dependent**. Session Handoff: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **conversation.09 — Long-Context Compressor** — Risk: `read-only`; approval: **policy-dependent**. Long-Context Compressor: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **conversation.09 — Long-Context Compressor** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Long-Context Compressor: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **conversation.10 — Memory Retention Policy** — Risk: `may-write`; approval: **policy-dependent**. Memory Retention Policy: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 
 ### Software Engineering
