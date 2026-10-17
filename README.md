@@ -26,6 +26,12 @@ Sofia Agent is a standalone agent runtime and platform. It turns a request into 
 > **Model routing is an internal policy.** End users do not choose models; Sofia decides how requests are handled.
 
 
+## `> Advanced skill catalog`
+
+The repository includes a **100-item advanced skill catalog** across runtime/recovery, conversation/memory, software engineering, testing, security, tools, research, multi-agent coordination, workflows, and learning/optimization. Forty-eight handlers are `verified`; 52 additional handlers are `implemented` and awaiting CI verification; no catalog entries remain `planned`. CI run [39011108763](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/39011108763) passed on Ubuntu, Windows, and macOS, plus browser-egress and container-sandbox integration for the runtime-recovery implementation commit; the later catalog/test/docs sync still requires its own regression run. See [the full catalog and rollout plan](docs/advanced-skill-catalog-100.md).
+
+**Important status distinction:** the catalog is not 100 implemented skills. Forty-eight handlers are `verified`; 52 additional handlers are `implemented` and awaiting CI verification; no catalog entries remain `planned`. The guarded dispatcher registers only verified definitions. Handlers that perform side effects must still use Sofia's existing Tool Registry and runtime security controls. Catalog metadata alone never grants access.
+
 ## Open source and contribution
 
 Sofia Agent is distributed under the [MIT License](LICENSE). Review third-party dependency and artwork licenses before redistribution.
