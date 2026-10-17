@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { AdvancedSkillPolicyError, AdvancedSkillRegistry } from "./advanced-skill-runtime.js";
 import type { AdvancedSkillDefinition } from "./advanced-skill-catalog.js";
+import { SecurityController } from "../security/controller.js";
 
 function definition(overrides: Partial<AdvancedSkillDefinition> = {}): AdvancedSkillDefinition {
   return {
@@ -105,4 +106,28 @@ test("registry times out slow handlers and aborts their execution signal", async
   await assert.rejects(registry.execute("test.skill", null, context(), { timeoutMs: 5 }),
     (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "TIMEOUT");
   assert.equal(signal?.aborted, true);
+});
+
+
+test("security kill switch blocks new skill runs and aborts active runs", async () => {
+  const security = new SecurityController();
+  const registry = new AdvancedSkillRegistry(() => true, security);
+  let handlerSignal: AbortSignal | undefined;
+  let invoked = false;
+  registry.register(definition(), (_input, executionContext) => {
+    invoked = true;
+    handlerSignal = executionContext.signal;
+    return new Promise((resolve) => setTimeout(() => resolve("late"), 100));
+  });
+
+  const pending = registry.execute("test.skill", null, context());
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  security.kill("test emergency");
+  await assert.rejects(pending,
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "ABORTED");
+  assert.equal(invoked, true);
+  assert.equal(handlerSignal?.aborted, true);
+
+  await assert.rejects(registry.execute("test.skill", null, context()),
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "SECURITY_STOPPED");
 });
