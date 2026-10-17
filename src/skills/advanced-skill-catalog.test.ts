@@ -28,8 +28,12 @@ test("lookup returns a known skill and safely returns undefined for unknown IDs"
   assert.equal(getAdvancedSkill("not-a-real-skill"), undefined);
 });
 
-test("privileged skills always require approval and entries are explicitly planned", () => {
-  assert.ok(ADVANCED_SKILLS.every((skill) => skill.status === "planned"));
+test("privileged skills require approval and only tested core handlers are verified", () => {
+  const verified = ADVANCED_SKILLS.filter((skill) => skill.status === "verified");
+  assert.deepEqual(verified.map((skill) => skill.id).sort(), [
+    "runtime.01", "runtime.02", "runtime.03", "runtime.08", "runtime.09", "runtime.10",
+  ].sort());
+  assert.equal(ADVANCED_SKILLS.filter((skill) => skill.status === "planned").length, 94);
   assert.ok(ADVANCED_SKILLS.filter((skill) => skill.risk === "privileged").length > 0);
   assert.ok(ADVANCED_SKILLS
     .filter((skill) => skill.risk === "privileged")
