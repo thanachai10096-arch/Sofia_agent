@@ -171,7 +171,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
         return { status: 200, body: { type: 4, data: { content: "You are not authorized to use Sofia in this channel.", flags: 64 } } };
       }
       const optionName = incomingCommand === commandName ? taskOptionName : "job_id";
-      const optionValue = interaction.data.options?.find((option) => option.name === optionName)?.value;
+      const optionValue = interaction.data?.options?.find((option) => option.name === optionName)?.value;
       const argument = typeof optionValue === "string" ? optionValue : "";
       const event: VerifiedDiscordMessage = {
         signatureVerified: true,
