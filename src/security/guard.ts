@@ -75,7 +75,7 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
 
 function collectHttpUrls(value: unknown, output: string[] = []): string[] {
   if (typeof value === "string") {
-    const matches = value.match(/https?:\\/\\/[^\\s"'<>]+/gi) ?? [];
+    const matches = value.match(/https?:\/\/[^\s"'<>]+/gi) ?? [];
     for (const match of matches) output.push(match.replace(/[),.;]+$/g, ""));
   } else if (Array.isArray(value)) {
     for (const item of value) collectHttpUrls(item, output);
