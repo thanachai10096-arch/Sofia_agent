@@ -553,5 +553,6 @@ test("Brain aborts immediately after a tool-start policy event before executing 
     signal: controller.signal,
   });
   assert.equal(report.completed, false);
+  assert.match(report.summary, /API tool-call quota exceeded/);
   assert.equal(executions, 0, "tool execution must not begin after policy abort");
 });
