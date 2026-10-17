@@ -133,8 +133,7 @@ export const regressionTestSelector = (input: unknown) => {
 };
 
 /** Adapts the evidence-backed completion verifier to the testing catalog entry. */
-export const acceptanceCriteriaVerifier: AdvancedSkillHandler = (input, context) =>
-  completionVerifier(input, context);
+export const acceptanceCriteriaVerifier = completionVerifier;
 
 /** Summarizes supplied static-analysis results; it never claims to run the checks itself. */
 export const staticAnalysisCoordinator = (input: unknown) => {
