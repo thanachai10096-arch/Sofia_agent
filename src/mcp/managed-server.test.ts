@@ -28,7 +28,7 @@ test("managed MCP bridge exposes only allowlisted namespaced tools", async () =>
   assert.deepEqual(connected.tools.map((tool) => tool.name), ["mcp.docs.lookup"]);
   assert.deepEqual(connected.tools[0]?.effects, ["network", "read"]);
   const result = await connected.tools[0]!.execute({ query: "hello" }, { runtime: {} as never });
-  assert.match(JSON.stringify(result), /tools\/call/);
+  assert.match(JSON.stringify(result), /"query":"hello"/);
   await connected.close();
   assert.equal(transport.closed, true);
 });
