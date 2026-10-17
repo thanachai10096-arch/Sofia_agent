@@ -40,3 +40,33 @@ test("authorization prevents another owner from disabling a schedule", async () 
   const created = await scheduler.create({ name: "owned", task: "task", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice" }, "alice");
   await assert.rejects(() => scheduler.setEnabled(created.id, false, "bob"), /not authorized/i);
 });
+
+test("failed cron jobs retry up to the configured limit", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  const runtime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      submitted++;
+      return { id: "retry-job-" + submitted, status: "queued", task: input.task } as JobRecord;
+    },
+    async get(id: string) {
+      return { id, status: id.endsWith("1") ? "failed" : "completed", task: "retry task", ...(id.endsWith("1") ? { error: "transient failure" } : {}) } as JobRecord;
+    },
+    async cancel() { return true; }, async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const created = await scheduler.create({
+    name: "retry", task: "retry task", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice", maxRetries: 1,
+  }, "alice");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  await scheduler.tick();
+  for (let i = 0; i < 30 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(submitted, 2);
+  assert.equal(state.history[0].status, "completed");
+  assert.equal(state.history[0].attempt, 2);
+  assert.equal(state.history[0].scheduleId, created.id);
+});
