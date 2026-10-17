@@ -87,6 +87,14 @@ test("API E2E authenticates, starts an async run, deduplicates retries, and isol
     const repeated = await retry.json() as { id: string };
     assert.equal(repeated.id, initial.id);
 
+    const conflictingReuse = await fetch(`${baseUrl}/v1/agent/runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ task: "a different request", async: true }),
+    });
+    assert.equal(conflictingReuse.status, 409);
+    assert.equal((await conflictingReuse.json() as { error: string }).error, "idempotency_key_reused");
+
     let observed: { id: string; status: string; result?: { output?: string } } | undefined;
     for (let attempt = 0; attempt < 50; attempt += 1) {
       const poll = await fetch(`${baseUrl}/v1/agent/runs/${initial.id}`, {
