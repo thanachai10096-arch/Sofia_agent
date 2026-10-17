@@ -492,7 +492,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Tool Result Normalizer",
     "category": "Tools & Automation",
     "risk": "read-only",
-    "status": "verified",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Tool Result Normalizer: tools & automation capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -744,7 +744,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Workflow Builder",
     "category": "Workflow & Productivity",
     "risk": "read-only",
-    "status": "verified",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Workflow Builder: workflow & productivity capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -789,7 +789,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Rate Limit Manager",
     "category": "Workflow & Productivity",
     "risk": "read-only",
-    "status": "verified",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Rate Limit Manager: workflow & productivity capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -816,7 +816,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Business Process Mapper",
     "category": "Workflow & Productivity",
     "risk": "read-only",
-    "status": "verified",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Business Process Mapper: workflow & productivity capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -825,7 +825,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Workflow Replay Tester",
     "category": "Workflow & Productivity",
     "risk": "read-only",
-    "status": "verified",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Workflow Replay Tester: workflow & productivity capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
