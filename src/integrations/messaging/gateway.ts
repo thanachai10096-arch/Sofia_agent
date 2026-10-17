@@ -1,10 +1,12 @@
-import type { ChatPlatform } from "../chat-adapter.js";
+import type { ChatPlatform, ChatMessageDeduplicator } from "../chat-adapter.js";
 import type { InboundMessage, MessagingAdapter, MessagingLogger, OutboundMessage } from "./types.js";
 
 export interface MessagingGatewayOptions {
   adapters: readonly MessagingAdapter[];
   enabled?: boolean;
   allowUser?: (input: { platform: ChatPlatform; userId: string; channelId: string }) => boolean | Promise<boolean>;
+  /** Reuse the existing atomic deduplicator where available; no second store is created here. */
+  deduplicator?: ChatMessageDeduplicator;
   onMessage: (message: InboundMessage, signal: AbortSignal) => Promise<string | void>;
   logger?: MessagingLogger;
   maxMessagesPerWindow?: number;
@@ -14,7 +16,7 @@ export interface MessagingGatewayOptions {
 export interface MessagingGateway {
   start(): Promise<void>;
   stop(): Promise<void>;
-  dispatch(message: InboundMessage): Promise<{ status: "disabled" | "forbidden" | "rate_limited" | "handled" }>;
+  dispatch(message: InboundMessage): Promise<{ status: "disabled" | "forbidden" | "duplicate" | "rate_limited" | "handled" }>;
   send(platform: ChatPlatform, message: OutboundMessage): Promise<boolean>;
 }
 export function createMessagingGateway(options: MessagingGatewayOptions): MessagingGateway {
@@ -34,15 +36,24 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
   let stopped = false;
   const now = options.now ?? Date.now;
   const log = options.logger;
-  function key(platform: string, user: string, channel: string) {
-    return [platform, user, channel].map((part) => `${part.length}:${part}`).join("|");
+  function key(...parts: string[]) {
+    return parts.map((part) => `${part.length}:${part}`).join("|");
   }
   return {
     async start() {
       if (!enabled || started || stopped) return;
       started = true;
       try {
-        await Promise.all([...adapters.values()].map((adapter) => adapter.start(controller.signal, async (message) => { await this.dispatch(message); })));
+        await Promise.all([...adapters.values()].map((adapter) => adapter.start(controller.signal, async (message) => {
+          try {
+            await this.dispatch(message);
+          } catch (error) {
+            log?.warn("messaging_dispatch_failed", {
+              platform: message.platform,
+              errorType: error instanceof Error ? error.name : "unknown",
+            });
+          }
+        })));
       } catch (error) {
         controller.abort();
         await Promise.allSettled([...adapters.values()].map((adapter) => adapter.stop()));
@@ -62,10 +73,24 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
     async dispatch(message) {
       if (!enabled || stopped) return { status: "disabled" };
       const identity = message.identity;
-      if (identity.platform !== message.platform || !identity.userId || !identity.channelId || !identity.conversationId) {
+      if (identity.platform !== message.platform || !identity.userId || !identity.channelId ||
+          !identity.conversationId || !message.messageId || message.messageId.length > 512) {
         return { status: "forbidden" };
       }
-      if (!(await (options.allowUser?.({ platform: message.platform, userId: identity.userId, channelId: identity.channelId }) ?? false))) {
+      let allowed = false;
+      try {
+        allowed = await (options.allowUser?.({
+          platform: message.platform,
+          userId: identity.userId,
+          channelId: identity.channelId,
+        }) ?? false);
+      } catch (error) {
+        log?.warn("messaging_policy_failed", {
+          platform: message.platform,
+          errorType: error instanceof Error ? error.name : "unknown",
+        });
+      }
+      if (!allowed) {
         log?.warn("messaging_access_denied", { platform: message.platform });
         return { status: "forbidden" };
       }
@@ -78,12 +103,26 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
       }
       recent.push(now());
       counts.set(rateKey, recent);
-      const reply = await options.onMessage(message, controller.signal);
-      if (reply?.trim()) {
-        const adapter = adapters.get(message.platform);
-        if (adapter) await adapter.send({ conversationId: identity.conversationId, text: reply });
+
+      // The key shape matches the existing chat dispatcher's provider/channel/message scope.
+      const dedupeKey = key(message.platform, identity.channelId, message.messageId);
+      if (options.deduplicator && !(await options.deduplicator.claim(dedupeKey))) {
+        return { status: "duplicate" };
       }
-      return { status: "handled" };
+      try {
+        const reply = await options.onMessage(message, controller.signal);
+        if (reply?.trim()) {
+          const adapter = adapters.get(message.platform);
+          if (adapter) {
+            const receipt = await adapter.send({ conversationId: identity.conversationId, text: reply });
+            if (receipt.state !== "sent") log?.warn("messaging_reply_delivery_failed", { platform: message.platform });
+          }
+        }
+        return { status: "handled" };
+      } catch (error) {
+        if (options.deduplicator) await options.deduplicator.release(dedupeKey);
+        throw error;
+      }
     },
     async send(platform, message) {
       if (!enabled || stopped) return false;
