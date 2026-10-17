@@ -49,6 +49,7 @@ Do not configure Production variables until Preview has passed the acceptance ch
 - [ ] Unallowlisted users and channels cannot start runs.
 - [ ] A valid `/run task` starts exactly one Sofia run and returns the run ID before Discord's deadline.
 - [ ] Retry/replay behavior is verified under concurrent requests and API timeout cases.
+- [ ] Replace process-local idempotency with a shared atomic durable store before relying on duplicate suppression across API instances or restarts.
 - [ ] Confirm Sofia API run status remains available after restarts and across instances.
 - [ ] Register the command against the verified Preview URL and perform a live staging smoke test.
 - [ ] Review the PR and explicitly approve production deployment separately.
