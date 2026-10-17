@@ -41,7 +41,7 @@ function isFailureCategory(value: unknown): value is FailureCategory {
 }
 
 /** Deterministic clarification hints; it does not invent missing user intent. */
-export const intentClarifier: AdvancedSkillHandler = (input) => {
+export const intentClarifier = (input: unknown) => {
   const value = asRecord(input);
   const goal = requiredString(value, "goal");
   const context = typeof value.context === "string" ? value.context.trim().slice(0, 4_000) : "";
@@ -66,7 +66,7 @@ export const intentClarifier: AdvancedSkillHandler = (input) => {
 };
 
 /** Splits explicit user-provided task boundaries; it never claims semantic decomposition. */
-export const goalDecomposer: AdvancedSkillHandler = (input) => {
+export const goalDecomposer = (input: unknown) => {
   const value = asRecord(input);
   const goal = requiredString(value, "goal");
   const supplied = stringArray(value.subtasks, "subtasks");
@@ -82,7 +82,7 @@ export const goalDecomposer: AdvancedSkillHandler = (input) => {
   };
 };
 
-export const planBuilder: AdvancedSkillHandler = (input) => {
+export const planBuilder = (input: unknown) => {
   const value = asRecord(input);
   const steps = stringArray(value.steps, "steps");
   if (steps.length === 0) throw new TypeError("Skill input steps must contain at least one step.");
@@ -114,7 +114,7 @@ const RETRY_STRATEGIES: Record<FailureCategory, Strategy> = {
   unknown: "inspect-evidence",
 };
 
-export const retryStrategist: AdvancedSkillHandler = (input) => {
+export const retryStrategist = (input: unknown) => {
   const value = asRecord(input);
   const category = value.category;
   if (!isFailureCategory(category)) throw new TypeError("Skill input category is not a recognized failure category.");
@@ -150,7 +150,7 @@ const FAILURE_PATTERNS: ReadonlyArray<{ category: FailureCategory; pattern: RegE
   { category: "runtime_error", pattern: /exception|runtime error|uncaught|crashed|stack trace/i },
 ];
 
-export const failureClassifier: AdvancedSkillHandler = (input) => {
+export const failureClassifier = (input: unknown) => {
   const value = asRecord(input);
   const message = requiredString(value, "message", 8_000);
   const match = FAILURE_PATTERNS.find(item => item.pattern.test(message));
@@ -163,7 +163,7 @@ export const failureClassifier: AdvancedSkillHandler = (input) => {
   };
 };
 
-export const completionVerifier: AdvancedSkillHandler = (input) => {
+export const completionVerifier = (input: unknown) => {
   const value = asRecord(input);
   if (!Array.isArray(value.criteria) || value.criteria.length === 0 || value.criteria.length > 40) {
     throw new TypeError("Skill input criteria must be a non-empty array of at most 40 criteria.");
