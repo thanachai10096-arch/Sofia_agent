@@ -21,7 +21,10 @@ test("ranking engine sorts evidence-backed candidates with transparent weights",
     { id: "fast", successRate: 0.95, latencyMs: 100, cost: 0.2, evidenceId: "run-2", sampleSize: 40 },
   ] }) as { ranked: Array<{ id: string; score: number }>; weights: { success: number; latency: number; cost: number }; mutatesRegistry: boolean };
   assert.equal(result.ranked[0]?.id, "fast");
-  assert.ok(Math.abs(result.weights.success + result.weights.latency + result.weights.cost - 1) < Number.EPSILON);
+  assert.ok(
+    Math.abs(result.weights.success + result.weights.latency + result.weights.cost - 1) < 1e-12,
+    "weights should sum to 1 within floating-point tolerance",
+  );
   assert.equal(result.mutatesRegistry, false);
 });
 
