@@ -4,17 +4,21 @@ This module is additive and submits work through the existing `JobRuntime`; it d
 
 ## Use
 
-Construct `CronScheduler` with a `JobRuntime`, call `recover()` once during startup, then call `create` and invoke `tick()` from the host's timer/worker loop. `recover()` reconciles persisted runtime job IDs and monitors live jobs; a claimed execution without a persisted job ID is marked indeterminate and is not automatically resubmitted, because the previous process may have submitted it immediately before crashing. The default `FileCronStore` persists schedules, execution history and audit events under Sofia's cron state directory. Set `SOFIA_STATE_DIR` to a durable absolute path in production. For multi-host deployments, inject a `CronStore` backed by a transactional database; filesystem locks only coordinate processes sharing a local filesystem.
+When `createSofiaApi` receives `deps.jobRuntime`, the API calls `recover()` during startup and starts a one-second `tick()` loop after the server begins listening. Standalone hosts can construct `CronScheduler`, call `recover()` once, and then invoke `tick()` periodically. The scheduler stops its API-owned timer when the server closes.
+
+`recover()` reconciles persisted runtime job IDs and monitors live jobs. A claimed execution without a persisted job ID is marked indeterminate and is not automatically resubmitted, because the previous process may have submitted it immediately before crashing. The default `FileCronStore` persists schedules, execution history and audit events under Sofia's cron state directory. Set `SOFIA_STATE_DIR` to a durable absolute path in production. For multi-host deployments, inject a `CronStore` backed by a transactional database; filesystem locks only coordinate processes sharing a local filesystem.
 
 Cron syntax supports five fields (minute hour day-of-month month day-of-week), numbers, lists, ranges and steps. Recurring schedules use IANA time zones such as `Asia/Bangkok`. One-time schedules use `runAt` with an ISO-8601 timestamp that includes `Z` or an explicit UTC offset; provide exactly one of `cron` or `runAt`. `maxRetries` controls additional attempts, bounded to ten retries. A timeout requests cancellation of the underlying runtime job, not just the scheduler's polling loop.
 
 ## Operational limitations
 
-This is an additive module and is not yet wired into the API/server lifecycle. The host must call `tick()` periodically. A crash between persisting a claim and persisting the runtime job ID remains inherently indeterminate: recovery records the uncertainty and suppresses automatic resubmission to avoid duplicate side effects. Exactly-once execution across that window requires idempotency support in the runtime or an atomic outbox/transactional dispatch integration. Misfires at least one minute late follow the configured policy: `skip` records a skipped occurrence; `run-once` dispatches one coalesced execution and advances the next run beyond the current time. Deterministic tests cover both paths. Validate real file-lock behavior and recovery before unattended production use. For multi-host use, provide a transactional database-backed store. Configure explicit authorization for deployments with admin/operator roles.
+A crash between persisting a claim and persisting the runtime job ID remains inherently indeterminate: recovery records the uncertainty and suppresses automatic resubmission to avoid duplicate side effects. Exactly-once execution across that window requires idempotency support in the runtime or an atomic outbox/transactional dispatch integration. Retries are at-least-once attempts: a failed job may already have performed partial external side effects, so tasks should be idempotent or use their own deduplication key before enabling retries. The timeout bounds runtime-job monitoring after submission; deployments should also ensure the underlying `JobRuntime.submit()` has its own bounded timeout.
 
-## API integration
+Misfires at least one minute late follow the configured policy: `skip` records a skipped occurrence; `run-once` dispatches one coalesced execution and advances the next run beyond the current time. Validate file-lock behavior and recovery before unattended production use. The file store is intended for processes sharing a local filesystem, not multi-host coordination. This is a foundation, not a guarantee of exactly-once delivery.
 
-When `createSofiaApi` receives `deps.jobRuntime`, the API automatically runs startup recovery and starts a one-second scheduler tick loop after the server begins listening. The loop is stopped when the server closes. Cron endpoints remain unavailable if no job runtime is configured.
+## API routes
+
+Cron endpoints remain unavailable if no job runtime is configured.
 
 - `POST /v1/cron/schedules` — create a recurring schedule with `cron` or a one-time schedule with `runAt`.
 - `GET /v1/cron/schedules` — list schedules owned by the authenticated API key.
@@ -22,4 +26,4 @@ When `createSofiaApi` receives `deps.jobRuntime`, the API automatically runs sta
 - `POST /v1/cron/schedules/:id/enable` and `/disable` — toggle a schedule.
 - `DELETE /v1/cron/schedules/:id` — disable the schedule and cancel its active runtime job if present.
 
-Grant `cron:read` to list schedules/history and `cron:manage` to create, enable, disable or cancel schedules. Ownership is derived from the authenticated API key; clients cannot choose another owner's `ownerKeyId`.
+Grant `cron:read` to list schedules/history and `cron:manage` to create, enable, disable or cancel schedules. Ownership is derived from the authenticated API key; clients cannot choose another owner's `ownerKeyId`. The API does not currently apply a separate per-key schedule-count quota; deploy behind trusted API-key provisioning and operational rate/concurrency controls until that quota is added.
