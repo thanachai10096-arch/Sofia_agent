@@ -642,3 +642,82 @@ test("SSE runs share the per-key concurrency limit and release the slot on disco
   assert.equal(retried?.status, 200, "disconnect should release the concurrency slot");
   await retried?.body?.cancel().catch(() => undefined);
 });
+
+
+test("API concurrency limits isolate authenticated keys and deny a zero limit", async (t) => {
+  let firstStarted!: () => void;
+  let secondStarted!: () => void;
+  let release!: () => void;
+  const startedOne = new Promise<void>((resolve) => { firstStarted = resolve; });
+  const startedTwo = new Promise<void>((resolve) => { secondStarted = resolve; });
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let calls = 0;
+  const provider: ModelProvider = {
+    async generate() {
+      calls += 1;
+      if (calls === 1) firstStarted();
+      if (calls === 2) secondStarted();
+      await blocked;
+      return { text: "completed" };
+    },
+  };
+  const { server, url } = await startApi(provider, {
+    apiKeys: {
+      "test-token": ["agent:run", "agent:read"],
+      "other-token": ["agent:run", "agent:read"],
+    },
+    maxConcurrentRunsPerKey: 1,
+  });
+  t.after(async () => {
+    release();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+  const request = (token: string) => fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+    body: JSON.stringify({ task: "hold slot", async: true }),
+  });
+  const first = await request("test-token");
+  assert.equal(first.status, 202);
+  const firstRun = await first.json() as { id: string };
+  await startedOne;
+
+  const otherKey = await request("other-token");
+  assert.equal(otherKey.status, 202, "a separate authenticated key should have its own slot");
+  const otherRun = await otherKey.json() as { id: string };
+  await startedTwo;
+
+  const sameKey = await request("test-token");
+  assert.equal(sameKey.status, 429, "the same key must remain limited while its run is active");
+  assert.deepEqual(await sameKey.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+
+  release();
+  for (const id of [firstRun.id, otherRun.id]) {
+    let status = "running";
+    for (let attempt = 0; attempt < 50 && status === "running"; attempt += 1) {
+      const response = await fetch(url + "/v1/agent/runs/" + id, {
+        headers: { authorization: "Bearer test-token" },
+      });
+      status = (await response.json() as { status: string }).status;
+      if (status === "running") await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(status, "completed");
+  }
+});
+
+test("API concurrency limit zero denies run creation", async (t) => {
+  let providerCalls = 0;
+  const provider: ModelProvider = {
+    async generate() { providerCalls += 1; return { text: "must not run" }; },
+  };
+  const { server, url } = await startApi(provider, { maxConcurrentRunsPerKey: 0 });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+    body: JSON.stringify({ task: "should be denied" }),
+  });
+  assert.equal(response.status, 429);
+  assert.deepEqual(await response.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+  assert.equal(providerCalls, 0);
+});
