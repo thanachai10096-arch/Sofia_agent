@@ -1,0 +1,72 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createMessagingGateway } from "./gateway.js";
+import { splitMessage } from "./format.js";
+import { messagingSessionKey } from "./session-key.js";
+import { verifyDiscordRequest, verifyTelegramWebhookSecret } from "./platform-security.js";
+import type { InboundMessage, MessagingAdapter } from "./types.js";
+
+const message = (overrides: Partial<InboundMessage> = {}): InboundMessage => ({
+  platform: "telegram", messageId: "m1",
+  identity: { platform: "telegram", userId: "u1", channelId: "c1", conversationId: "conv1" },
+  text: "hello", attachments: [], receivedAt: 1, ...overrides,
+});
+function adapter(sent: string[] = [], platform: "telegram" | "discord" = "telegram"): MessagingAdapter {
+  return {
+    platform, async start() {}, async stop() {},
+    async send(input) { sent.push(input.text); return { state: "sent" }; },
+  };
+}
+
+test("gateway is disabled by default and never invokes handler", async () => {
+  let called = false;
+  const gateway = createMessagingGateway({ adapters: [adapter()], onMessage: async () => { called = true; return "reply"; } });
+  assert.deepEqual(await gateway.dispatch(message()), { status: "disabled" });
+  await gateway.start();
+  assert.equal(called, false);
+});
+test("gateway enforces allowlist before invoking Sofia handler", async () => {
+  let called = false;
+  const gateway = createMessagingGateway({ enabled: true, adapters: [adapter()], allowUser: () => false, onMessage: async () => { called = true; } });
+  assert.deepEqual(await gateway.dispatch(message()), { status: "forbidden" });
+  assert.equal(called, false);
+});
+test("gateway routes an allowed message through injected shared handler and replies", async () => {
+  const sent: string[] = [];
+  const gateway = createMessagingGateway({ enabled: true, adapters: [adapter(sent)], allowUser: () => true, onMessage: async (m) => m.text.toUpperCase() });
+  assert.deepEqual(await gateway.dispatch(message()), { status: "handled" });
+  assert.deepEqual(sent, ["HELLO"]);
+  await gateway.stop();
+  assert.equal(await gateway.send("telegram", { conversationId: "conv1", text: "x" }), false);
+});
+test("rate limit is scoped by platform, user and channel", async () => {
+  let time = 1_000;
+  const gateway = createMessagingGateway({ enabled: true, adapters: [adapter()], allowUser: () => true, maxMessagesPerWindow: 1, now: () => time, onMessage: async () => {} });
+  assert.equal((await gateway.dispatch(message())).status, "handled");
+  assert.equal((await gateway.dispatch(message({ messageId: "m2" }))).status, "rate_limited");
+  time += 60_001;
+  assert.equal((await gateway.dispatch(message({ messageId: "m3" }))).status, "handled");
+});
+test("session keys isolate platform, user and conversation without separator collisions", () => {
+  const base = message().identity;
+  assert.notEqual(messagingSessionKey(base), messagingSessionKey({ ...base, userId: "u2" }));
+  assert.notEqual(messagingSessionKey(base), messagingSessionKey({ ...base, platform: "discord" }));
+  assert.notEqual(messagingSessionKey(base), messagingSessionKey({ ...base, conversationId: "conv2" }));
+  assert.notEqual(messagingSessionKey({ ...base, userId: "a|b" }), messagingSessionKey({ ...base, userId: "a", conversationId: "b|conv1" }));
+});
+test("Telegram webhook secret check fails closed", () => {
+  assert.equal(verifyTelegramWebhookSecret("secret", "secret"), true);
+  assert.equal(verifyTelegramWebhookSecret("wrong", "secret"), false);
+  assert.equal(verifyTelegramWebhookSecret(undefined, "secret"), false);
+});
+test("Discord signature verifier rejects missing, malformed and stale requests", () => {
+  assert.equal(verifyDiscordRequest({ publicKeyHex: undefined, signatureHex: undefined, timestamp: undefined, rawBody: Buffer.from("{}") }), false);
+  assert.equal(verifyDiscordRequest({ publicKeyHex: "x", signatureHex: "x", timestamp: "1", rawBody: Buffer.from("{}") }), false);
+});
+test("message chunking respects limits and preserves meaningful text", () => {
+  const text = "first line\n" + "x".repeat(90) + "\nlast";
+  const chunks = splitMessage(text, 40);
+  assert.ok(chunks.every((chunk) => chunk.length <= 40));
+  assert.equal(chunks.join(""), text.replace(/\n/g, "").replace(/ /g, "")) === false;
+  assert.equal(chunks.join("").replace(/\n/g, ""), text.replace(/\n/g, ""));
+});
