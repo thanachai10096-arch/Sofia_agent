@@ -122,6 +122,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
   const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
   let cronTimer: NodeJS.Timeout | undefined;
+  let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
   const persist = (run: ActiveRun) => {
@@ -619,7 +620,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       void (async () => {
         try {
           await cronScheduler.recover();
+          if (cronClosed) return;
           await cronScheduler.tick();
+          if (cronClosed) return;
           cronTimer = setInterval(() => { void cronScheduler.tick().catch(() => undefined); }, 1_000);
         } catch {
           // Fail closed: do not dispatch scheduled work if recovery could not complete.
@@ -627,6 +630,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       })();
     });
     server.on("close", () => {
+      cronClosed = true;
       if (cronTimer) clearInterval(cronTimer);
       cronTimer = undefined;
     });
