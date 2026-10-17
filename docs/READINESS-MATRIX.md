@@ -30,6 +30,7 @@
 | User memory and expanded skills | PR #108, head `2e952c660db9b6a90d65eae2fdb9f038d3b0d3d6`; previously observed CI run `38932929113` passed its reported jobs | PR only | Test consent, per-principal scope, clear/delete, secret filtering, quarantine and restart persistence |
 | Skill policy integration | PR #94, head `b80920cedaeb20ad72afc6692e301d16477ca777`; reports non-mergeable and no PR workflow run was found in the audit | PR only; conflict/CI gate | Resolve conflicts; prove ranking uses verified outcomes only and external skills remain quarantined until trusted |
 | Bounded agent coordination | PR #113, head `6e16187599816f4acc26fc3c8ffd5c9df201508e`; previously observed CI run `38850030018` passed its reported jobs | PR only | Test inherited principal, permissions, workspace, budgets, bounded fanout/depth, cancellation and audit continuity |
+| 100-skill catalog and guarded dispatcher | PR #122, head `0d37e897f639fb74e303769ecb8d75e5ae302775`; includes 100 planned catalog entries and only registers `verified` handlers. A prior CI run exposed a gateway timeout test issue; test now keeps a referenced timer alive until abort. Latest-head CI is pending at snapshot | PR only; no claim of 100 runnable skills | Verify latest CI, integrate against current `main`, and ensure real handlers use tool policy/approval and cancellation correctly |
 
 ## API quota constraints
 
