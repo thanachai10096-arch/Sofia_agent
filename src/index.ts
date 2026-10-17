@@ -70,6 +70,8 @@ export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpe
 
 export { createChatCommandHandler } from "./integrations/chat-adapter.js";
 export { FileChatMessageDeduplicator } from "./integrations/file-chat-deduplicator.js";
+export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHAT_DEDUPE_RELEASE_SCRIPT } from "./integrations/redis-chat-deduplicator.js";
+export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export type { ChatPlatform, VerifiedChatCommand, ChatCommandHandlerOptions, ChatDispatchResult, ChatAccessPolicy, ChatMessageDeduplicator, ChatRunStarter } from "./integrations/chat-adapter.js";
 
 export { createMessagingGateway } from "./integrations/messaging/gateway.js";
