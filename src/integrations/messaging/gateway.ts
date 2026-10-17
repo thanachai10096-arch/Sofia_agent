@@ -56,6 +56,7 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
         })));
       } catch (error) {
         controller.abort();
+        stopped = true;
         await Promise.allSettled([...adapters.values()].map((adapter) => adapter.stop()));
         started = false;
         log?.warn("messaging_start_failed", { errorType: error instanceof Error ? error.name : "unknown" });
@@ -73,8 +74,11 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
     async dispatch(message) {
       if (!enabled || stopped) return { status: "disabled" };
       const identity = message.identity;
-      if (identity.platform !== message.platform || !identity.userId || !identity.channelId ||
-          !identity.conversationId || !message.messageId || message.messageId.length > 512) {
+      if (identity.platform !== message.platform || !identity.userId || identity.userId.length > 256 ||
+          !identity.channelId || identity.channelId.length > 256 || !identity.conversationId ||
+          identity.conversationId.length > 256 || !message.messageId || message.messageId.length > 512 ||
+          typeof message.text !== "string" || message.text.length > 100_000 ||
+          !Array.isArray(message.attachments) || message.attachments.length > 50) {
         return { status: "forbidden" };
       }
       let allowed = false;
@@ -96,6 +100,14 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
       }
       const rateKey = key(message.platform, identity.userId, identity.channelId);
       const cutoff = now() - windowMs;
+      if (counts.size >= 10_000 && !counts.has(rateKey)) {
+        for (const [storedKey, timestamps] of counts) {
+          const fresh = timestamps.filter((timestamp) => timestamp > cutoff);
+          if (fresh.length) counts.set(storedKey, fresh);
+          else counts.delete(storedKey);
+        }
+        if (counts.size >= 10_000) return { status: "rate_limited" };
+      }
       const recent = (counts.get(rateKey) ?? []).filter((timestamp) => timestamp > cutoff);
       if (recent.length >= max) {
         counts.set(rateKey, recent);
