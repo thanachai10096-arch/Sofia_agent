@@ -209,8 +209,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     for (const [id, run] of runs) {
       if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id); }
     }
-    for (const [key, runId] of idempotency) {
-      if (!runs.has(runId)) idempotency.delete(key);
+    for (const [key, entry] of idempotency) {
+      if (!runs.has(entry.runId)) idempotency.delete(key);
     }
   };
 
