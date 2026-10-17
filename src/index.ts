@@ -27,6 +27,7 @@ export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
 export { InMemorySkillsPlatform } from "./skills/platform.js";
 export { skillSuccessScorer, skillRankingEngine, promptVariantEvaluator, tokenBudgetPlanner, skillPromotionGate, registerVerifiedEvolutionSkills } from "./skills/evolution-handlers.js";
 export { agentTaskDelegator, specialistRouter, handoffContractManager, parallelWorkCoordinator, disagreementResolver, registerVerifiedAgentCoordinationSkills } from "./skills/agent-coordination-handlers.js";
+export { repositoryMapper, codebaseSemanticSearch, implementationPlanner, typeScriptDiagnosticTriage, refactoringPlanner, registerVerifiedCodingPlanningSkills } from "./skills/coding-planning-handlers.js";
 export { ADVANCED_SKILLS, ADVANCED_SKILL_COUNT, getAdvancedSkill, listAdvancedSkillsByCategory, validateAdvancedSkillCatalog } from "./skills/advanced-skill-catalog.js";
 export type { AdvancedSkillDefinition, SkillRisk, SkillStatus } from "./skills/advanced-skill-catalog.js";
 export { AdvancedSkillRegistry, AdvancedSkillPolicyError } from "./skills/advanced-skill-runtime.js";
