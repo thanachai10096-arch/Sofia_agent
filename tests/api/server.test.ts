@@ -218,3 +218,26 @@ test("API concurrency limit applies to async, sync, and SSE run modes", async (t
   assert.deepEqual(await stream.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
   release();
 });
+
+
+test("SSE reports request timeout separately from user cancellation", async (t) => {
+  const provider: ModelProvider = {
+    generate(_request, _route, options) {
+      const signal = options?.signal;
+      assert.ok(signal);
+      return new Promise((_, reject) => {
+        const onAbort = () => reject(new Error("provider aborted"));
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+  };
+  const { server, url } = await startApi(provider, { requestTimeoutMs: 50 });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await streamRequest(url);
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.match(body, /"status":"failed"/);
+  assert.match(body, /Run timed out\\./);
+  assert.doesNotMatch(body, /Run cancelled\\./);
+});
