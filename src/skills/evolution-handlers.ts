@@ -84,7 +84,7 @@ export const promptVariantEvaluator = (input: unknown) => {
 };
 
 /** Eligibility only. The registry requires trusted approval before this handler can run. */
-export const skillPromotionGate: AdvancedSkillHandler = (input) => {
+export const skillPromotionGate = (input: unknown) => {
   const value = inputRecord(input);
   const skillId = text(value.skillId, "skillId");
   const attempts = numberInRange(value.attempts, "attempts", 0, 1_000_000);
