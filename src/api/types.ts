@@ -37,7 +37,10 @@ export interface ApiAuth {
 }
 
 export interface SofiaApiConfig {
+  /** Legacy plaintext-token map. Prefer apiKeyHashes for deployments that can store only hashes. */
   apiKeys: Record<string, string[]>;
+  /** SHA-256 hex digest of each bearer token mapped to its scopes; allows hash-only API key configuration. */
+  apiKeyHashes?: Record<string, string[]>;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
