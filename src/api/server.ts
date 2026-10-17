@@ -305,6 +305,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }, origin, config);
       }
 
+      if (req.method === "GET" && requestPath === "/ready") {
+        let ready = true;
+        try {
+          ready = config.readinessCheck ? await config.readinessCheck() : true;
+        } catch {
+          ready = false;
+        }
+        return json(res, ready ? 200 : 503, { ready }, origin, config);
+      }
+
       if (!requestPath.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, origin, config);
 
       const clientAddress = req.socket.remoteAddress ?? "unknown";
