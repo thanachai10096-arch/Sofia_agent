@@ -41,10 +41,41 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
     }
   }
   async list(){return (await this.read()).filter(entry=>!containsPromptInjection(entry.content));}
-  async find(query:string){
-    const terms=query.toLowerCase().split(/\s+/).filter(Boolean);
-    return (await this.list()).map(entry=>({entry,score:terms.reduce((s,t)=>s+(entry.content.toLowerCase().includes(t)?2:0)+(entry.kind.includes(t)?1:0),0)}))
-      .filter(x=>x.score>0).sort((a,b)=>b.score-a.score||b.entry.updatedAt.localeCompare(a.entry.updatedAt)).map(x=>x.entry).slice(0,12);
+  async find(query: string) {
+    const terms = [...new Set(query.toLocaleLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
+    if (terms.length === 0) return [];
+
+    const phrase = terms.join(" ");
+    return (await this.list())
+      .map((entry) => {
+        const content = entry.content.toLocaleLowerCase();
+        const contentTerms = new Set(content.match(/[\p{L}\p{N}_-]+/gu) ?? []);
+        const kindTerms = new Set(entry.kind.toLocaleLowerCase().split(/[-_\s]+/));
+        const matched = terms.reduce(
+          (count, term) => count + (contentTerms.has(term) ? 1 : 0),
+          0,
+        );
+        const kindMatches = terms.reduce(
+          (count, term) => count + (kindTerms.has(term) ? 1 : 0),
+          0,
+        );
+        const confidence = Number.isFinite(entry.confidence)
+          ? Math.max(0, Math.min(1, entry.confidence))
+          : 0;
+        const phraseBonus = phrase.length > 2 && content.includes(phrase) ? 3 : 0;
+        return {
+          entry,
+          score: matched * 2 + kindMatches + phraseBonus + confidence * 0.25,
+          matched,
+        };
+      })
+      .filter((item) => item.matched > 0)
+      .sort((a, b) =>
+        b.score - a.score ||
+        b.entry.updatedAt.localeCompare(a.entry.updatedAt),
+      )
+      .map((item) => item.entry)
+      .slice(0, 12);
   }
   readSync(): ProjectMemoryEntry[] {
     try { const entries=JSON.parse(readFileSync(this.file,"utf8")) as ProjectMemoryEntry[]; return entries.filter(entry=>!containsPromptInjection(entry.content)); }
