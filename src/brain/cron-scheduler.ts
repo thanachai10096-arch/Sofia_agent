@@ -61,6 +61,7 @@ export interface CronSchedulerOptions {
   now?: () => Date;
   authorize?: (actor: string, action: "create" | "update" | "cancel" | "run", schedule?: CronSchedule) => Promise<boolean> | boolean;
   maxConcurrent?: number;
+  maxSchedulesPerOwner?: number;
   audit?: (event: CronAuditEvent) => void | Promise<void>;
 }
 
@@ -101,8 +102,9 @@ export class FileCronStore implements CronStore {
               process.kill(owner.pid!, 0);
             } catch (ownerError) {
               if ((ownerError as NodeJS.ErrnoException).code === "ESRCH") {
-                await fs.rm(this.lock, { force: true });
-                continue;
+                // Never unlink a stale lock based on an earlier read: another process
+                // could replace the path in between and lose its live lock.
+                throw new Error("Cron scheduler state lock appears stale; verify no scheduler process is active before removing it: " + this.lock);
               }
               if ((ownerError as NodeJS.ErrnoException).code !== "EPERM") throw ownerError;
             }
@@ -199,6 +201,7 @@ export class CronScheduler {
   private readonly now: () => Date;
   private readonly authorize: NonNullable<CronSchedulerOptions["authorize"]>;
   private readonly maxConcurrent: number;
+  private readonly maxSchedulesPerOwner: number;
   private readonly auditCallback?: CronSchedulerOptions["audit"];
   private ticking = false;
   private readonly active = new Map<string, AbortController>();
@@ -208,11 +211,19 @@ export class CronScheduler {
     this.now = options.now ?? (() => new Date());
     this.authorize = options.authorize ?? ((actor, _action, schedule) => !!actor && (!schedule || actor === schedule.ownerKeyId));
     this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
+    this.maxSchedulesPerOwner = Math.max(1, Math.min(10_000, Math.floor(options.maxSchedulesPerOwner ?? 100)));
     this.auditCallback = options.audit;
   }
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
     state.audit.push(event);
     if (state.audit.length > 2_000) state.audit.splice(0, state.audit.length - 2_000);
+    // Bound persisted execution history: newest 500 entries per schedule and 10,000 overall.
+    const scheduleHistory = state.history.filter(item => item.scheduleId === event.scheduleId);
+    if (scheduleHistory.length > 500) {
+      const removeIds = new Set(scheduleHistory.slice(0, scheduleHistory.length - 500).map(item => item.id));
+      state.history = state.history.filter(item => !removeIds.has(item.id));
+    }
+    if (state.history.length > 10_000) state.history.splice(0, state.history.length - 10_000);
     await this.auditCallback?.(event);
   }
   async create(input: CronScheduleInput, actor: string): Promise<CronSchedule> {
@@ -238,6 +249,10 @@ export class CronScheduler {
       consecutiveFailures: 0,
     };
     return this.store.transact(async state => {
+      const ownedCount = state.schedules.filter(item => item.ownerKeyId === actor).length;
+      if (ownedCount >= this.maxSchedulesPerOwner) {
+        throw new Error("Schedule quota exceeded for this API key (maximum " + this.maxSchedulesPerOwner + ")");
+      }
       state.schedules.push(schedule);
       await this.recordAudit(state, { at: now, actor, action: "schedule.created", scheduleId: schedule.id });
       return { ...schedule };
