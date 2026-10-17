@@ -217,7 +217,9 @@ export const agentResultReviewer = (input: unknown) => {
 /** Finds cycles and repeated states in supplied agent traces; does not cancel agents. */
 export const loopDeadlockDetector = (input: unknown) => {
   const value = rec(input);
-  const states = texts(value.states, "states", 2_000);
+  const rawStates = value.states;
+  if (!Array.isArray(rawStates) || rawStates.length > 2_000 || rawStates.some(state => typeof state !== "string" || !state.trim() || state.length > 2_000)) throw new TypeError("states must be a bounded list of non-empty strings.");
+  const states = rawStates.map(state => (state as string).trim());
   const stateCounts = new Map<string, number>();
   for (const state of states) stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
   const repeatedStates = [...stateCounts.entries()].filter(([, count]) => count > 2).map(([state, count]) => ({ state, count }));
