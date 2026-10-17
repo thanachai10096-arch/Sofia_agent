@@ -32,7 +32,7 @@ export const patchGenerator = (input: unknown) => {
   const objective = text(value.objective, "objective", 2_000);
   const patch = text(value.patch, "patch", 100_000);
   const touchedPaths = texts(value.touchedPaths, "touchedPaths", 200);
-  const blockedPaths = touchedPaths.filter(path => path.split(/[\\/]/).some(part => [".git", "node_modules", ".env", "secrets"].includes(part.toLowerCase())));
+  const blockedPaths = touchedPaths.filter(path => path.startsWith("/") || /^[A-Za-z]:/.test(path) || path.split(/[\\/]/).some(part => part === ".." || [".git", "node_modules", ".env", "secrets"].includes(part.toLowerCase())));
   return { objective, patchPreview: redactSecrets(patch).slice(0, 20_000), patchHash: createHash("sha256").update(patch).digest("hex"), touchedPaths, blockedPaths, eligibleForReview: blockedPaths.length === 0, applied: false };
 };
 
@@ -91,7 +91,7 @@ export const auditTrailWriter = (input: unknown) => {
   const actionId = text(value.actionId, "actionId", 200);
   const outcome = text(value.outcome, "outcome", 100);
   const reason = value.reason === undefined ? "" : redactSecrets(text(value.reason, "reason", 2_000));
-  const at = value.at === undefined ? new Date(0).toISOString() : text(value.at, "at", 100);
+  const at = value.at === undefined ? null : text(value.at, "at", 100);
   const event = { eventType, actorId, actionId, outcome, reason, at };
   return { event, eventHash: createHash("sha256").update(JSON.stringify(event)).digest("hex"), persisted: false, secretsIncludedByThisHandler: false };
 };
