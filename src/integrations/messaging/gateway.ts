@@ -42,7 +42,7 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
       if (!enabled || started || stopped) return;
       started = true;
       try {
-        await Promise.all([...adapters.values()].map((adapter) => adapter.start(controller.signal)));
+        await Promise.all([...adapters.values()].map((adapter) => adapter.start(controller.signal, async (message) => { await this.dispatch(message); })));
       } catch (error) {
         controller.abort();
         await Promise.allSettled([...adapters.values()].map((adapter) => adapter.stop()));
