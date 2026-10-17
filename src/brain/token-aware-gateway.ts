@@ -107,10 +107,10 @@ function classifyProviderFailure(error: unknown): string {
     if (code === 404) {
       // Use only allowlisted classifications from provider text. Never emit the
       // provider body, URL, request payload, or credentials into run logs.
-      if (/model[^\\n]{0,80}(not found|does not exist|not available)|not found[^\\n]{0,80}model/i.test(message)) {
+      if (/model[^\n]{0,160}(not found|does not exist|not available)|not found[^\n]{0,160}model/i.test(message)) {
         return "provider_http_404_model_not_found";
       }
-      if (/endpoint|route|path[^\\n]{0,80}(not found|does not exist)|not found[^\\n]{0,80}(endpoint|route|path)/i.test(message)) {
+      if (/(endpoint|route|path)[^\n]{0,160}(not found|does not exist)|not found[^\n]{0,160}(endpoint|route|path)/i.test(message)) {
         return "provider_http_404_endpoint_not_found";
       }
       return "provider_http_404_endpoint_or_model";
