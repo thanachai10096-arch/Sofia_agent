@@ -124,6 +124,16 @@ function pathId(url: string): string | null {
   return match?.[1] ?? null;
 }
 
+function routeLabel(pathname: string): string {
+  if (["/health", "/ready", "/v1/usage", "/v1/agent/runs", "/v1/agent/runs/stream", "/v1/jobs"].includes(pathname)) return pathname;
+  if (/^\/v1\/agent\/runs\/[^/]+$/.test(pathname)) return "/v1/agent/runs/:runId";
+  if (/^\/v1\/jobs\/[^/]+$/.test(pathname)) return "/v1/jobs/:jobId";
+  const jobAction = pathname.match(/^\/v1\/jobs\/[^/]+\/(resume|cancel)$/);
+  if (jobAction) return "/v1/jobs/:jobId/" + jobAction[1];
+  return "/_unmatched";
+}
+
+
 /** Keep provider/tool exception details out of client responses and persisted run records. */
 function publicAgentError(): string {
   return "Agent execution failed.";
@@ -282,6 +292,33 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
     const requestPath = new URL(req.url ?? "/", "http://localhost").pathname;
+    const requestId = randomUUID();
+    const requestStartedAt = Date.now();
+    const route = routeLabel(requestPath);
+    res.setHeader("x-request-id", requestId);
+    res.once("finish", () => {
+      const durationMs = Math.max(0, Date.now() - requestStartedAt);
+      const statusCode = res.statusCode;
+      const entry = {
+        level: statusCode >= 500 ? "error" as const : statusCode >= 400 ? "warn" as const : "info" as const,
+        event: "http.request" as const,
+        requestId,
+        method: req.method ?? "UNKNOWN",
+        route,
+        statusCode,
+        durationMs,
+      };
+      try {
+        if (config.logger) config.logger(entry);
+        else console.log(JSON.stringify(entry));
+      } catch { /* Observability must not change API behavior. */ }
+      if (config.metrics) {
+        try {
+          config.metrics({ name: "sofia_api_requests_total", value: 1, labels: { method: entry.method, route, status: String(statusCode) } });
+          config.metrics({ name: "sofia_api_request_duration_ms", value: durationMs, labels: { method: entry.method, route } });
+        } catch { /* Metrics sink failures must not change API behavior. */ }
+      }
+    });
     try {
       if (discordRoute && requestPath === discordRoutePath) {
         await handleDiscordInteractionHttpRequest(req, res, discordRoute.transport, discordMaxBodyBytes);
