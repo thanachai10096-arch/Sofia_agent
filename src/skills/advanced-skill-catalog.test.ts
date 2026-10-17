@@ -39,9 +39,10 @@ test("privileged skills require approval and only tested core handlers are verif
     "tools.03", "workflow.01", "workflow.06", "workflow.09", "workflow.10",
     "evolution.01", "evolution.03", "evolution.04", "evolution.06", "evolution.09",
     "agents.01", "agents.02", "agents.05", "agents.06", "agents.08",
+    "coding.01", "coding.02", "coding.04", "coding.06", "coding.09",
   ].sort());
   assert.equal(ADVANCED_SKILLS.filter((skill) => skill.status === "implemented").length, 0);
-  assert.equal(ADVANCED_SKILLS.filter((skill) => skill.status === "planned").length, 60);
+  assert.equal(ADVANCED_SKILLS.filter((skill) => skill.status === "planned").length, 55);
   assert.ok(ADVANCED_SKILLS.filter((skill) => skill.risk === "privileged").length > 0);
   assert.ok(ADVANCED_SKILLS
     .filter((skill) => skill.risk === "privileged")
