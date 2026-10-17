@@ -340,9 +340,9 @@ test("API enforces tool-call quota before execution for sync, async, and SSE run
   };
   let generation = 0;
   const provider: ModelProvider = {
-    async generate() {
+    async generate(request) {
       generation += 1;
-      if (generation % 2 === 1) {
+      if (request.step === 1) {
         return {
           text: "",
           assistantMessage: { role: "assistant", content: "" },
