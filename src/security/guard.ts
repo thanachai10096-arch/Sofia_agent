@@ -101,9 +101,9 @@ export function redactSecrets(value: unknown): unknown {
   if (typeof value === "string") {
     return value
       // Common provider tokens can leak in otherwise unlabelled tool output.
-      .replace(/\\b(?:sk-(?:live|proj|test)?-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\\b/gi, "[REDACTED]")
-      .replace(/(?:Bearer\\s+)[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]")
-      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|password|authorization|secret[_-]?key|session[_-]?token)\\s*[:=]\\s*[^\\s,}"']+/gi, "$1=[REDACTED]");
+      .replace(/\b(?:sk-(?:live|proj|test)?-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/gi, "[REDACTED]")
+      .replace(/(?:Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]")
+      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|password|authorization|secret[_-]?key|session[_-]?token)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
   }
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value && typeof value === "object") {
