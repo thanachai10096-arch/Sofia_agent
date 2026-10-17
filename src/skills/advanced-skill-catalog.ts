@@ -312,7 +312,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Integration Test Designer",
     "category": "Testing & Quality",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Integration Test Designer: testing & quality capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -321,7 +321,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "End-to-End Test Planner",
     "category": "Testing & Quality",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "End-to-End Test Planner: testing & quality capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -339,7 +339,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Flaky Test Detector",
     "category": "Testing & Quality",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Flaky Test Detector: testing & quality capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -375,7 +375,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Release Readiness Auditor",
     "category": "Testing & Quality",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Release Readiness Auditor: testing & quality capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -402,7 +402,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Secret Leak Detector",
     "category": "Security & Permissions",
     "risk": "privileged",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Secret Leak Detector: security & permissions capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -438,7 +438,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Command Risk Classifier",
     "category": "Security & Permissions",
     "risk": "privileged",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Command Risk Classifier: security & permissions capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -447,7 +447,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Approval Gate Manager",
     "category": "Security & Permissions",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Approval Gate Manager: security & permissions capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -465,7 +465,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Security Regression Tester",
     "category": "Security & Permissions",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Security Regression Tester: security & permissions capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -501,7 +501,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Browser Workflow Planner",
     "category": "Tools & Automation",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Browser Workflow Planner: tools & automation capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -510,7 +510,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Browser State Verifier",
     "category": "Tools & Automation",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Browser State Verifier: tools & automation capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -537,7 +537,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Git Workflow Operator",
     "category": "Tools & Automation",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Git Workflow Operator: tools & automation capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -555,7 +555,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "External Action Approval",
     "category": "Tools & Automation",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "External Action Approval: tools & automation capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -672,7 +672,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Agent Message Validator",
     "category": "Multi-Agent Coordination",
     "risk": "privileged",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Agent Message Validator: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -681,7 +681,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Shared Task Board",
     "category": "Multi-Agent Coordination",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Shared Task Board: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -708,7 +708,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Agent Result Reviewer",
     "category": "Multi-Agent Coordination",
     "risk": "privileged",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Agent Result Reviewer: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -726,7 +726,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Loop and Deadlock Detector",
     "category": "Multi-Agent Coordination",
     "risk": "privileged",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Loop and Deadlock Detector: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -735,7 +735,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Human-Goal Alignment Monitor",
     "category": "Multi-Agent Coordination",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Human-Goal Alignment Monitor: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -753,7 +753,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Workflow Trigger Evaluator",
     "category": "Workflow & Productivity",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Workflow Trigger Evaluator: workflow & productivity capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -771,7 +771,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Long-Running Job Monitor",
     "category": "Workflow & Productivity",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Long-Running Job Monitor: workflow & productivity capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -798,7 +798,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "SLA Watchdog",
     "category": "Workflow & Productivity",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "SLA Watchdog: workflow & productivity capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -807,7 +807,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Notification Planner",
     "category": "Workflow & Productivity",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Notification Planner: workflow & productivity capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -843,7 +843,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Failure Memory Curator",
     "category": "Learning & Optimization",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Failure Memory Curator: learning & optimization capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
