@@ -56,7 +56,7 @@ export class FileRunStore implements RunStore {
 
   async load(runId: string): Promise<BrainRunSnapshot | undefined> {
     try {
-      return JSON.parse(await fs.readFile(this.file(runId), "utf8")) as BrainRunSnapshot;
+      return redactSecrets(JSON.parse(await fs.readFile(this.file(runId), "utf8"))) as BrainRunSnapshot;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
