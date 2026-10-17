@@ -14,7 +14,8 @@
     "test": "node scripts/run-tests.mjs",
     "cli": "tsx src/cli/index.ts",
     "start": "node dist/api/entrypoint.js",
-    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs"
+    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs",
+    "discord:register-command": "node scripts/register-discord-command.mjs"
   },
   "engines": {
     "node": ">=20"
