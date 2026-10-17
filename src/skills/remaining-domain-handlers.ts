@@ -108,7 +108,7 @@ export const toolDiscoveryRouter = (input: unknown) => {
     const matched = requiredCapabilities.filter(capability => capabilities.includes(capability));
     return { id, available, matchedCapabilities: matched, missingCapabilities: requiredCapabilities.filter(capability => !matched.includes(capability)), score: requiredCapabilities.length ? matched.length / requiredCapabilities.length : 0 };
   }).filter(item => item.available).sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-  return { goal, rankedTools: tools, noSuitableTool: tools.length === 0 || tools[0].score < 1, invokedTool: false };
+  return { goal, rankedTools: tools, noSuitableTool: tools.length === 0 || (tools[0]?.score ?? 0) < 1, invokedTool: false };
 };
 
 /** Creates a bounded terminal execution request for Sofia's existing permission-enforcing runtime. */
