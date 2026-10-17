@@ -130,6 +130,27 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 
 **Keep the Sofia master API key on the server.** A browser should call your authenticated application backend, which then calls Sofia. Never ship a privileged Sofia API key in frontend JavaScript.
 
+### API key storage and quota persistence
+
+For deployments that should not keep bearer tokens in an in-memory configuration object, configure SHA-256 token hashes. The hash is the lowercase hexadecimal digest of the full, high-entropy bearer token; do not use a human password as an API key.
+
+```ts
+import { createHash } from "node:crypto";
+import { createSofiaApi, FileUsageStore } from "sofia-agent";
+
+const token = process.env.SOFIA_API_KEY;
+if (!token) throw new Error("SOFIA_API_KEY is required");
+const tokenHash = createHash("sha256").update(token).digest("hex");
+
+const server = createSofiaApi(dependencies, {
+  apiKeys: {},
+  apiKeyHashes: { [tokenHash]: ["agent:run", "agent:read"] },
+  usageStore: new FileUsageStore("/var/lib/sofia/usage"),
+});
+```
+
+Authentication failures are throttled per client address. `FileUsageStore` persists daily quota counters across restarts, but it is a local single-process store; use a transactional shared store/queue adapter before running multiple API workers. Keep the usage directory on a persistent volume with restrictive OS permissions.
+
 ## `> Browser & local runtime`
 
 - Browser automation is opt-in and policy-controlled.
