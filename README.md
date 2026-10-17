@@ -68,9 +68,9 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 
 ## `> Advanced skill catalog`
 
-The repository includes a **100-item advanced skill catalog** across runtime/recovery, conversation/memory, software engineering, testing, security, tools, research, multi-agent coordination, workflows, and learning/optimization. Fifteen deterministic runtime/security/memory handlers now have acceptance tests and are marked `verified`; the other 85 entries remain `planned`. See [the full catalog and rollout plan](docs/advanced-skill-catalog-100.md).
+The repository includes a **100-item advanced skill catalog** across runtime/recovery, conversation/memory, software engineering, testing, security, tools, research, multi-agent coordination, workflows, and learning/optimization. Twenty deterministic runtime/security/memory/quality handlers now have acceptance tests and are marked `verified`; the other 80 entries remain `planned`. See [the full catalog and rollout plan](docs/advanced-skill-catalog-100.md).
 
-**Important status distinction:** the catalog is not 100 implemented skills. Fifteen deterministic runtime/security/memory handlers are currently marked `verified` after acceptance tests; the other 85 entries remain `planned`. The guarded dispatcher registers only verified definitions. Handlers that perform side effects must still use Sofia's existing Tool Registry and runtime security controls. Catalog metadata alone never grants access.
+**Important status distinction:** the catalog is not 100 implemented skills. Twenty deterministic runtime/security/memory/quality handlers are currently marked `verified` after acceptance tests; the other 80 entries remain `planned`. The guarded dispatcher registers only verified definitions. Handlers that perform side effects must still use Sofia's existing Tool Registry and runtime security controls. Catalog metadata alone never grants access.
 
 ## `> Quick start`
 
