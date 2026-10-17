@@ -111,6 +111,61 @@ paths:
         "200": { description: Cancellation accepted }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { description: Run not found }
+  /v1/jobs:
+    get:
+      summary: List recent jobs for the authenticated key
+      responses:
+        "200": { description: Recent jobs }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: Create a durable job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunRequest"
+      responses:
+        "202": { description: Job accepted }
+        "400": { description: Invalid request }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/jobs/{jobId}:
+    parameters:
+      - in: path
+        name: jobId
+        required: true
+        schema: { type: string }
+    get:
+      summary: Read a job owned by the authenticated key
+      responses:
+        "200": { description: Job status }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: Job not found }
+  /v1/jobs/{jobId}/resume:
+    post:
+      summary: Request resume of an owned durable job
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Resume request accepted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: Job not found }
+  /v1/jobs/{jobId}/cancel:
+    post:
+      summary: Cancel an owned durable job
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Cancellation accepted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: Job not found }
 components:
   securitySchemes:
     bearerAuth:
