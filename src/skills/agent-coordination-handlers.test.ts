@@ -69,8 +69,13 @@ test("disagreement resolver preserves conflicting claims and requires review", (
   assert.equal(result.autoResolved, false);
 });
 
-test("verified coordination skills register only after catalog verification", () => {
+test("verified agent coordination skills register without launching agents", async () => {
   const registry = new AdvancedSkillRegistry();
-  assert.deepEqual(registerVerifiedAgentCoordinationSkills(registry), []);
-  assert.equal(registry.has("agents.01"), false);
+  const ids = registerVerifiedAgentCoordinationSkills(registry);
+  assert.deepEqual(ids, ["agents.01", "agents.02", "agents.05", "agents.06", "agents.08"]);
+  assert.ok(ids.every(id => registry.has(id)));
+  const result = await registry.execute("agents.01", { goal: "Prepare release notes", tasks: [
+    { id: "research", description: "Gather release facts", acceptanceCriteria: ["Cite release source"], allowedCapabilities: ["web.read"] },
+  ] }, { principalId: "test-user", signal: new AbortController().signal }) as { executionStarted: boolean };
+  assert.equal(result.executionStarted, false);
 });
