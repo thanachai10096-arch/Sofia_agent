@@ -1,4 +1,7 @@
 export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
+export { runSkillLifecycleWorkflow } from "./brain/skill-lifecycle-workflow.js";
+export { createManagedSkillLearningHandler } from "./brain/managed-skill-learning.js";
+export type { SkillLifecycleWorkflowOptions, SkillLifecycleWorkflowResult } from "./brain/skill-lifecycle-workflow.js";
 export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
 
 export { SofiaAgent } from "./agent/core.js";

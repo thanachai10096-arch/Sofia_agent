@@ -12,7 +12,7 @@ import {
 import { runVerification } from "./verification.js";
 import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
 import { compactSkillContext, matchSkills } from "./skills.js";
-import type { SkillLedger } from "./learning.js";
+import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
@@ -87,6 +87,7 @@ interface Dependencies {
   allowNetwork?: boolean;
   onEvent?: (event: BrainEvent) => void;
   skillLedger?: SkillLedger;
+  onSkillCandidate?: (candidate: LearnedSkillCandidate, runId: string, principalId?: string) => Promise<boolean>;
   projectContext?: ProjectContext;
   projectContextLoader?: () => Promise<ProjectContext>;
   repositoryMap?: RepositoryMap;
@@ -1158,7 +1159,7 @@ export class SofiaBrain {
         const last = this.diagnoses[this.diagnoses.length - 1]!;
         const strategy = this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation";
         const evidenceIds = verification.flatMap((item) => item.evidenceIds);
-        this.dependencies.skillLedger.record({
+        const learnedCandidate: LearnedSkillCandidate = {
           name: "repair-" + last.category,
           trigger: last.message.slice(0, 240),
           category: last.category,
@@ -1166,7 +1167,18 @@ export class SofiaBrain {
           procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
           verification: verification.map((item) => item.criterionId),
           evidenceIds,
-        });
+        };
+        // Managed production learning must be approved before entering the active ledger.
+        // A missing handler preserves legacy behavior for standalone Brain embeddings.
+        let mayActivate = !this.dependencies.onSkillCandidate;
+        if (this.dependencies.onSkillCandidate) {
+          try {
+            mayActivate = await this.dependencies.onSkillCandidate(learnedCandidate, this.runId, input.principalId);
+          } catch {
+            mayActivate = false;
+          }
+        }
+        if (mayActivate) this.dependencies.skillLedger.record(learnedCandidate);
         if (this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
