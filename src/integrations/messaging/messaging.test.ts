@@ -31,6 +31,15 @@ test("gateway enforces allowlist before invoking Sofia handler", async () => {
   assert.deepEqual(await gateway.dispatch(message()), { status: "forbidden" });
   assert.equal(called, false);
 });
+test("policy errors fail closed", async () => {
+  let called = false;
+  const gateway = createMessagingGateway({
+    enabled: true, adapters: [adapter()], allowUser: async () => { throw new Error("policy unavailable"); },
+    onMessage: async () => { called = true; },
+  });
+  assert.deepEqual(await gateway.dispatch(message()), { status: "forbidden" });
+  assert.equal(called, false);
+});
 test("gateway routes an allowed message through injected shared handler and replies", async () => {
   const sent: string[] = [];
   const gateway = createMessagingGateway({ enabled: true, adapters: [adapter(sent)], allowUser: () => true, onMessage: async (m) => m.text.toUpperCase() });
@@ -39,6 +48,32 @@ test("gateway routes an allowed message through injected shared handler and repl
   await gateway.stop();
   assert.equal(await gateway.send("telegram", { conversationId: "conv1", text: "x" }), false);
 });
+test("gateway reuses the injected atomic deduplicator and releases failed work", async () => {
+  const claimed = new Set<string>();
+  const released: string[] = [];
+  const deduplicator = {
+    claim(key: string) { if (claimed.has(key)) return false; claimed.add(key); return true; },
+    release(key: string) { released.push(key); claimed.delete(key); },
+  };
+  let calls = 0;
+  const gateway = createMessagingGateway({
+    enabled: true, adapters: [adapter()], allowUser: () => true, deduplicator,
+    onMessage: async () => { calls++; return "ok"; },
+  });
+  assert.equal((await gateway.dispatch(message())).status, "handled");
+  assert.equal((await gateway.dispatch(message())).status, "duplicate");
+  assert.equal(calls, 1);
+  await gateway.stop();
+
+  const failing = createMessagingGateway({
+    enabled: true, adapters: [adapter()], allowUser: () => true, deduplicator,
+    onMessage: async () => { throw new Error("temporary downstream failure"); },
+  });
+  await assert.rejects(() => failing.dispatch(message({ messageId: "m2" })), /temporary downstream failure/);
+  assert.equal(released.length, 1);
+  assert.ok(![...claimed].some((key) => key.endsWith("2:m2")));
+  await failing.stop();
+});
 test("rate limit is scoped by platform, user and channel", async () => {
   let time = 1_000;
   const gateway = createMessagingGateway({ enabled: true, adapters: [adapter()], allowUser: () => true, maxMessagesPerWindow: 1, now: () => time, onMessage: async () => {} });
@@ -46,6 +81,7 @@ test("rate limit is scoped by platform, user and channel", async () => {
   assert.equal((await gateway.dispatch(message({ messageId: "m2" }))).status, "rate_limited");
   time += 60_001;
   assert.equal((await gateway.dispatch(message({ messageId: "m3" }))).status, "handled");
+  await gateway.stop();
 });
 test("session keys isolate platform, user and conversation without separator collisions", () => {
   const base = message().identity;
