@@ -12,7 +12,7 @@ import {
 import { runVerification } from "./verification.js";
 import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrategy } from "./failure-analysis.js";
 import { compactSkillContext, matchSkills } from "./skills.js";
-import type { SkillLedger } from "./learning.js";
+import type { SkillLedger, LearnedSkillCandidate } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
@@ -87,6 +87,7 @@ interface Dependencies {
   allowNetwork?: boolean;
   onEvent?: (event: BrainEvent) => void;
   skillLedger?: SkillLedger;
+  onSkillCandidate?: (candidate: LearnedSkillCandidate) => Promise<boolean>;
   projectContext?: ProjectContext;
   projectContextLoader?: () => Promise<ProjectContext>;
   repositoryMap?: RepositoryMap;
@@ -1158,7 +1159,7 @@ export class SofiaBrain {
         const last = this.diagnoses[this.diagnoses.length - 1]!;
         const strategy = this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation";
         const evidenceIds = verification.flatMap((item) => item.evidenceIds);
-        this.dependencies.skillLedger.record({
+        const learnedCandidate: LearnedSkillCandidate = {
           name: "repair-" + last.category,
           trigger: last.message.slice(0, 240),
           category: last.category,
@@ -1166,7 +1167,15 @@ export class SofiaBrain {
           procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
           verification: verification.map((item) => item.criterionId),
           evidenceIds,
-        });
+        };
+        // Learning is opt-in: absence of a host approval callback must fail closed.
+        const learningApproved = this.dependencies.onSkillCandidate
+          ? await this.dependencies.onSkillCandidate(learnedCandidate)
+          : false;
+        if (learningApproved) {
+          this.dependencies.skillLedger.record(learnedCandidate);
+          this.emit({ type: "brain.learning.recorded" });
+        }
         if (this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
@@ -1174,7 +1183,6 @@ export class SofiaBrain {
           await this.wait(() => this.dependencies.projectMemory!.save(entry));
           this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
         }
-        this.emit({ type: "brain.learning.recorded" });
       }
 
       return this.report(
