@@ -547,3 +547,42 @@ test("API authenticates keyed API key digests without changing legacy key suppor
   });
   assert.equal(response.status, 200);
 });
+
+
+test("API CORS preflight only allows configured origins", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const { server, url } = await startApi(provider, { allowedOrigins: ["https://app.example"] });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+
+  const allowed = await fetch(url + "/v1/agent/runs", {
+    method: "OPTIONS",
+    headers: { origin: "https://app.example", "access-control-request-method": "POST" },
+  });
+  assert.equal(allowed.status, 204);
+  assert.equal(allowed.headers.get("access-control-allow-origin"), "https://app.example");
+
+  const blocked = await fetch(url + "/v1/agent/runs", {
+    method: "OPTIONS",
+    headers: { origin: "https://untrusted.example", "access-control-request-method": "POST" },
+  });
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.headers.get("access-control-allow-origin"), null);
+});
+
+test("API rejects oversized request bodies before starting an agent run", async (t) => {
+  let providerCalls = 0;
+  const provider: ModelProvider = {
+    async generate() { providerCalls += 1; return { text: "unused" }; },
+  };
+  const { server, url } = await startApi(provider, { maxBodyBytes: 64 });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+
+  const response = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+    body: JSON.stringify({ task: "x".repeat(500) }),
+  });
+  assert.equal(response.status, 413);
+  assert.deepEqual(await response.json(), { error: "request_body_too_large" });
+  assert.equal(providerCalls, 0);
+});
