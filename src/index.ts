@@ -27,6 +27,8 @@ export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
 export { InMemorySkillsPlatform } from "./skills/platform.js";
 export { ADVANCED_SKILLS, ADVANCED_SKILL_COUNT, getAdvancedSkill, listAdvancedSkillsByCategory, validateAdvancedSkillCatalog } from "./skills/advanced-skill-catalog.js";
 export type { AdvancedSkillDefinition, SkillRisk, SkillStatus } from "./skills/advanced-skill-catalog.js";
+export { AdvancedSkillRegistry, AdvancedSkillPolicyError } from "./skills/advanced-skill-runtime.js";
+export type { AdvancedSkillExecutionContext, AdvancedSkillTraceEvent, AdvancedSkillHandler, AdvancedSkillExecutionOptions } from "./skills/advanced-skill-runtime.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
 export { AgentEvaluationRunner } from "./evaluation.js";
 export { EvolutionEngine } from "./brain/evolution.js";
