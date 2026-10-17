@@ -800,7 +800,7 @@ test("DurableJobRuntime cross-process cancellation aborts the active lease owner
       if (child.exitCode !== null) break;
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
     }
-    assert.ok(output.includes("started\\n"), "child worker must acquire its lease before cancellation");
+    assert.ok(output.includes("started\\n"), "child worker must acquire its lease before cancellation: " + errors + " stdout=" + output);
     const jobId = /job:([0-9a-f-]+)/i.exec(output)?.[1];
     assert.ok(jobId, "child worker must report its job ID");
     const canceller = new DurableJobRuntime(() => ({
