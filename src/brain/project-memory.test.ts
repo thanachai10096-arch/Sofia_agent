@@ -67,3 +67,23 @@ test("project memory returns no results for empty or punctuation-only queries", 
   assert.deepEqual(await store.find("   "), []);
   assert.deepEqual(await store.find("!?..."), []);
 });
+
+test("project memory ranks entries matching more query terms ahead of weaker matches", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-multi-term-"));
+  const store = new FileProjectMemoryStore("multi-term-project", root);
+  const now = new Date().toISOString();
+  await store.save({
+    id: "weak", project: "multi-term-project", kind: "decision",
+    content: "Build pipeline notes", confidence: 1,
+    createdAt: now, updatedAt: now, uses: 0,
+  });
+  await store.save({
+    id: "strong", project: "multi-term-project", kind: "convention",
+    content: "Build test typecheck before release", confidence: 0.5,
+    createdAt: now, updatedAt: now, uses: 0,
+  });
+
+  const results = await store.find("build test typecheck");
+  assert.equal(results[0]?.id, "strong");
+  assert.equal(results.some((entry) => entry.id === "weak"), true);
+});
