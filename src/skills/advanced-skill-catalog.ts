@@ -222,7 +222,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Change Impact Analyzer",
     "category": "Software Engineering",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Change Impact Analyzer: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -294,7 +294,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Test Strategy Builder",
     "category": "Testing & Quality",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Test Strategy Builder: testing & quality capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -330,7 +330,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Regression Test Selector",
     "category": "Testing & Quality",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Regression Test Selector: testing & quality capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -357,7 +357,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Acceptance Criteria Verifier",
     "category": "Testing & Quality",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Acceptance Criteria Verifier: testing & quality capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -366,7 +366,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Static Analysis Coordinator",
     "category": "Testing & Quality",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Static Analysis Coordinator: testing & quality capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
