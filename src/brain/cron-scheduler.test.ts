@@ -275,6 +275,10 @@ test("one-time schedules reject ambiguous or invalid timing input", async () => 
     timeZone: "UTC", ownerKeyId: "alice",
   }, "alice"), /exactly one/i);
   await assert.rejects(() => scheduler.create({
+    name: "empty-cron-and-run-at", task: "task", cron: "", runAt: "2026-10-17T00:01:00.000Z",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice"), /exactly one/i);
+  await assert.rejects(() => scheduler.create({
     name: "invalid-once", task: "task", runAt: "not-a-date", timeZone: "UTC", ownerKeyId: "alice",
   }, "alice"), /valid ISO-8601/i);
 });
