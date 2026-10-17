@@ -356,8 +356,18 @@ export class SofiaBrain {
 
     if (!this.projectMemoryLoaded && this.dependencies.projectMemory) {
       this.projectMemoryLoaded = true;
-      try { this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.list()); }
-      catch { this.projectMemory = []; }
+      // Prefer memories relevant to the current reasoning payload instead of
+      // blindly attaching the last entries written to disk. Keep a bounded
+      // query so memory retrieval cannot grow with a large request payload.
+      const memoryQuery = JSON.stringify(payload).slice(0, 4000);
+      try {
+        this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.find(memoryQuery));
+      } catch {
+        // Preserve compatibility with stores whose search backend is temporarily
+        // unavailable; list() is the existing best-effort fallback.
+        try { this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.list()); }
+        catch { this.projectMemory = []; }
+      }
     }
 
     for (;;) {
