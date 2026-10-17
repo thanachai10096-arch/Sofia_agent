@@ -347,6 +347,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+            ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
@@ -437,6 +438,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+            ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
@@ -495,6 +497,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           const job = await deps.jobRuntime.submit({
             task: input.task,
+            ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
             ownerKeyId: auth.keyId,
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });
