@@ -16,7 +16,8 @@
     "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs",
     "start:api": "node dist/src/api/standalone.js",
     "test:coverage": "node scripts/run-tests.mjs --coverage",
-    "example:mock-api": "tsx examples/mock-api.ts"
+    "example:mock-api": "tsx examples/mock-api.ts",
+    "benchmark:real-model": "node scripts/benchmark-real-model.mjs"
   },
   "engines": {
     "node": ">=22"
