@@ -41,6 +41,8 @@ export { EvolutionEngine } from "./brain/evolution.js";
 export type { SkillPerformance, SkillRanking, EvolutionSnapshot, LearningDiagnostics } from "./brain/evolution.js";
 export type * from "./brain/edit-engine.js";
 export { McpClient } from "./mcp/client.js";
+export { connectManagedMcpServer } from "./mcp/managed-server.js";
+export type { ManagedMcpServer, ManagedMcpServerOptions } from "./mcp/managed-server.js";
 export type { McpTransport, McpClientOptions, McpToolDescription, McpResourceDescription } from "./mcp/client.js";
 export { McpStdioTransport, McpHttpTransport } from "./mcp/transports.js";
 export type { McpStdioTransportOptions, McpHttpTransportOptions } from "./mcp/transports.js";
