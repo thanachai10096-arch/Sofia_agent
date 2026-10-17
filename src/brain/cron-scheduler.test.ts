@@ -54,6 +54,9 @@ test("cron next occurrence respects timezone offset and weekday", () => {
 test("invalid timezone and malformed cron expressions are rejected", () => {
   assert.throws(() => nextCronOccurrence("* * *", "UTC", new Date()));
   assert.throws(() => nextCronOccurrence("* * * * *", "Not/AZone", new Date()));
+  assert.throws(() => nextCronOccurrence(",1 * * * *", "UTC", new Date()), /invalid cron field/i);
+  assert.throws(() => nextCronOccurrence("1,,2 * * * *", "UTC", new Date()), /invalid cron field/i);
+  assert.throws(() => nextCronOccurrence("-5 * * * *", "UTC", new Date()), /invalid cron range/i);
 });
 test("two scheduler instances cannot claim the same occurrence through a transactional store", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
