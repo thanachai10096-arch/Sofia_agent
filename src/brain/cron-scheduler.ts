@@ -124,7 +124,7 @@ export class FileCronStore implements CronStore {
 function parseField(source: string, min: number, max: number): Set<number> {
   const values = new Set<number>();
   for (const part of source.split(",")) {
-    const [base, stepRaw] = part.split("/");
+    const [base = "", stepRaw] = part.split("/");
     if (part.split("/").length > 2) throw new Error("Invalid cron field: " + source);
     const step = stepRaw === undefined ? 1 : Number(stepRaw);
     if (!Number.isInteger(step) || step < 1) throw new Error("Invalid cron step: " + source);
@@ -147,9 +147,9 @@ function parseCron(expression: string): ParsedCron {
   const fields = expression.trim().split(/\s+/);
   if (fields.length !== 5) throw new Error("Cron expression must contain exactly five fields");
   return {
-    minute: parseField(fields[0], 0, 59), hour: parseField(fields[1], 0, 23),
-    day: parseField(fields[2], 1, 31), month: parseField(fields[3], 1, 12),
-    weekday: parseField(fields[4], 0, 7), dayWildcard: fields[2] === "*", weekdayWildcard: fields[4] === "*",
+    minute: parseField(fields[0] ?? "", 0, 59), hour: parseField(fields[1] ?? "", 0, 23),
+    day: parseField(fields[2] ?? "", 1, 31), month: parseField(fields[3] ?? "", 1, 12),
+    weekday: parseField(fields[4] ?? "", 0, 7), dayWildcard: fields[2] === "*", weekdayWildcard: fields[4] === "*",
   };
 }
 function localParts(date: Date, timeZone: string): { minute: number; hour: number; day: number; month: number; weekday: number } {
