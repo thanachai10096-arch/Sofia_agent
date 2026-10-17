@@ -9,7 +9,10 @@ export type ScheduleStatus = "enabled" | "disabled";
 export interface CronScheduleInput {
   name: string;
   task: string;
-  cron: string;
+  /** Five-field cron expression for recurring schedules. Mutually exclusive with runAt. */
+  cron?: string;
+  /** ISO-8601 timestamp for a one-time schedule. Mutually exclusive with cron. */
+  runAt?: string;
   timeZone: string;
   ownerKeyId: string;
   enabled?: boolean;
@@ -215,7 +218,12 @@ export class CronScheduler {
   async create(input: CronScheduleInput, actor: string): Promise<CronSchedule> {
     if (!await this.authorize(actor, "create")) throw new Error("Not authorized to create cron schedule");
     if (!input.name.trim() || !input.task.trim() || !input.ownerKeyId.trim()) throw new Error("name, task and ownerKeyId are required");
-    nextCronOccurrence(input.cron, input.timeZone, this.now());
+    if (!!input.cron === !!input.runAt) throw new Error("Provide exactly one of cron or runAt");
+    const initialRun = input.cron
+      ? nextCronOccurrence(input.cron, input.timeZone, this.now())
+      : new Date(input.runAt!);
+    if (!Number.isFinite(initialRun.getTime())) throw new Error("runAt must be a valid ISO-8601 timestamp");
+    if (!input.cron) new Intl.DateTimeFormat("en-US", { timeZone: input.timeZone }).format(initialRun);
     const now = this.now().toISOString();
     const schedule: CronSchedule = {
       ...input, enabled: undefined, misfirePolicy: input.misfirePolicy ?? "skip",
@@ -223,7 +231,7 @@ export class CronScheduler {
       timeoutMs: Math.max(1_000, Math.min(3_600_000, Math.floor(input.timeoutMs ?? 120_000))),
       id: randomUUID(), status: input.enabled === false ? "disabled" : "enabled",
       createdAt: now, updatedAt: now,
-      nextRunAt: nextCronOccurrence(input.cron, input.timeZone, this.now()).toISOString(),
+      nextRunAt: initialRun.toISOString(),
       consecutiveFailures: 0,
     };
     return this.store.transact(async state => {
@@ -283,10 +291,15 @@ export class CronScheduler {
           const scheduledFor = due.nextRunAt;
           const lateByMs = now.getTime() - Date.parse(scheduledFor);
           const isMisfire = lateByMs >= 60_000;
-          const next = isMisfire
-            ? nextCronOccurrence(due.cron, due.timeZone, now)
-            : nextCronOccurrence(due.cron, due.timeZone, new Date(scheduledFor));
-          due.nextRunAt = next.toISOString();
+          if (due.cron) {
+            const next = isMisfire
+              ? nextCronOccurrence(due.cron, due.timeZone, now)
+              : nextCronOccurrence(due.cron, due.timeZone, new Date(scheduledFor));
+            due.nextRunAt = next.toISOString();
+          } else {
+            // One-time schedules are disabled atomically with their claim.
+            due.status = "disabled";
+          }
           due.updatedAt = now.toISOString();
           const previous = state.history.find(h => h.scheduleId === due.id && h.scheduledFor === scheduledFor);
           if (previous) return undefined;
