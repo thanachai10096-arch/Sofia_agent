@@ -42,3 +42,36 @@ test("SofiaAgent does not create a session unless sessionId is provided", async 
   await agent.run({ task: "Do not persist this turn" });
   assert.equal(sessions.get("conversation-1"), undefined);
 });
+
+test("SofiaAgent keeps concurrent turns for one session in transcript order", async () => {
+  const sessions = new MemorySessionStore();
+  let active = 0;
+  let maxActive = 0;
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async ({ task }) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return { text: `Completed: ${task}` };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await Promise.all([
+    agent.run({ task: "first turn", sessionId: "shared-session" }),
+    agent.run({ task: "second turn", sessionId: "shared-session" }),
+  ]);
+
+  assert.equal(maxActive, 1);
+  assert.deepEqual(sessions.get("shared-session")?.messages, [
+    "user: first turn",
+    "assistant: Completed: first turn",
+    "user: second turn",
+    "assistant: Completed: second turn",
+  ]);
+});
