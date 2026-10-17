@@ -110,9 +110,10 @@ test("workspace runtime fails closed when shell is enabled without Docker isolat
   process.env.SOFIA_ALLOW_SHELL = "true";
   delete process.env.SOFIA_SANDBOX_MODE;
   try {
-    const result = await f.runtime.run(process.execPath, ["-e", "process.exit(0)"]);
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /SOFIA_ALLOW_SHELL requires SOFIA_SANDBOX_MODE=docker/);
+    await assert.rejects(
+      f.runtime.run(process.execPath, ["-e", "process.exit(0)"]),
+      /SOFIA_ALLOW_SHELL requires SOFIA_SANDBOX_MODE=docker/,
+    );
   } finally {
     if (oldShell === undefined) delete process.env.SOFIA_ALLOW_SHELL;
     else process.env.SOFIA_ALLOW_SHELL = oldShell;
