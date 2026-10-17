@@ -2,44 +2,53 @@
 
 ## Status
 
-**Not production-ready on Vercel yet.** The repository has Discord signature verification and a Node HTTP route, but that is not by itself a Vercel Functions entry point. Do not configure the Discord Developer Portal to point at a guessed URL or deploy this integration until the serverless lifecycle and persistence requirements below are addressed.
+A first-pass Vercel Node Function now exists at `api/discord/interactions.ts` on this PR branch. It verifies Discord's Ed25519 signature against the exact raw request bytes, answers the Discord PING handshake, enforces an explicit user + channel allowlist, and forwards `/run task` to the existing Sofia HTTPS API using its async-run and idempotency-key contract.
 
-## What already exists
+**This is not yet approved for production.** No Vercel deployment, environment configuration, Discord command registration, build, or live test has been performed.
 
-- `createDiscordInteractionTransport()` verifies Discord Ed25519 signatures against the exact raw request bytes.
-- `handleDiscordInteractionHttpRequest()` enforces POST-only requests and a bounded raw body.
-- `createSofiaApi()` can mount the optional route at `/v1/integrations/discord/interactions` when a transport is supplied.
-- `createSofiaMessagingHandler()` routes explicit `/run <task>` commands through Sofia's existing authorization and idempotency contract.
-- Messaging is opt-in and unknown users must be denied by the injected policy.
+## Function behavior
 
-## Why a direct Vercel wrapper is unsafe without more work
+- Route file: `api/discord/interactions.ts` (Vercel Node Function route: `/api/discord/interactions`).
+- Request body parsing is disabled; signature verification uses the original raw bytes and has a 64 KiB request limit.
+- Invalid/stale signatures are rejected. PING interactions receive `{ "type": 1 }`.
+- User IDs and channel IDs must both be explicitly present in the server-side allowlists. Empty allowlists deny all commands.
+- The function sends `POST /v1/agent/runs` with `async: true` to a separately hosted Sofia API, using a stable idempotency key derived from the Discord interaction ID.
+- The response is an immediate ephemeral acceptance/rejection message; it does not wait for the agent task to finish.
+- It does not require the Discord bot token for this slash-command-only path because replies use the interaction response itself. Do not add a bot token unless a separately reviewed feature needs it.
+- Sofia API request timeout is bounded to 1.8 seconds to leave room under Discord's acknowledgement deadline. Real-world latency still needs staging verification.
 
-1. The current API is a Node `createServer` composition, not a Vercel Functions handler. No Vercel entry point or `vercel.json` was found on `main`.
-2. The Discord transport has an in-memory active flag, callback, abort controller, and pending interaction-token map. A serverless entry point must initialize this lifecycle correctly for each invocation and complete the Discord response work within the platform's invocation lifetime. Starting a transport in one invocation and expecting it to remain active in another is not valid.
-3. The default run, memory, checkpoint, job, and message-deduplication stores include file/process-local implementations. Vercel function instances are not a durable shared filesystem or a single long-lived process. A production deployment needs reviewed durable/shared storage and concurrency-safe deduplication.
-4. Sofia's local workspace/process tools are not automatically safe or available in a serverless function. The serverless composition must explicitly limit capabilities and use an approved remote execution/workspace backend; it must not silently enable local terminal or workspace access.
-5. Discord requires a prompt initial interaction response. The handler must be tested for the three-second acknowledgement deadline, background continuation, token expiry, and retries on the actual Vercel runtime.
+## Vercel server-side environment variables
 
-## Required implementation before deployment
+Set these only in Vercel Project Settings → Environment Variables. Never commit values or expose them in client bundles.
 
-- Add a real Vercel Function entry point that accepts the raw request body without JSON reserialization and calls the existing signature-verification logic.
-- Build a serverless-specific composition with explicit, least-privilege tool capabilities; do not blindly use the local factory.
-- Use durable stores for deduplication, run status, and any state that must survive a cold start or be shared across instances. Ensure idempotency is atomic across concurrent invocations.
-- Keep `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, Sofia API credentials, and database credentials in Vercel server-side environment variables only. Never prefix secrets with `NEXT_PUBLIC_` and never commit them.
-- Keep the bot disabled until an explicit allowlist/access policy is wired and tested. Preserve the existing command handler's authorization check and do not double-claim the same deduplication key.
-- Register the Discord `/run` application command with a `task` string option using a separate controlled setup step. Do not invent the deployed interaction URL.
-- Add automated tests for valid/invalid/stale signatures, malformed and oversized bodies, unauthorized users, duplicate/replayed interactions, cold starts, and concurrent invocations.
-- Run `npm run typecheck`, `npm run build`, and `npm test` on the PR head, then perform a staging-only live Discord smoke test before production approval.
+- `DISCORD_PUBLIC_KEY` — the application's public key from Discord Developer Portal.
+- `DISCORD_ALLOWED_USER_IDS` — comma-separated Discord user IDs allowed to start runs. No wildcard support.
+- `DISCORD_ALLOWED_CHANNEL_IDS` — comma-separated Discord channel IDs allowed to start runs. No wildcard support.
+- `SOFIA_API_BASE_URL` — root HTTPS base URL of the separately hosted Sofia API, without credentials/query/fragment.
+- `SOFIA_API_KEY` — a narrowly scoped server-side API key allowed to start runs.
+- Optional `DISCORD_COMMAND_NAME` — defaults to `run`.
 
-## Safe environment variable names
+Do not configure Production variables until Preview has passed the acceptance checklist. The actual deployment URL must come from Vercel after a deployment; do not guess it.
 
-Use server-side Vercel Environment Variables (Production/Preview/Development as appropriate):
+## Important remaining limitations
 
-- `DISCORD_PUBLIC_KEY` — Discord application's public key (not the bot token).
-- `DISCORD_BOT_TOKEN` — bot token, server-only.
-- `SOFIA_API_BASE_URL` — actual HTTPS base URL of the separately hosted Sofia API, if using the SDK bridge.
-- `SOFIA_API_KEY` — narrowly scoped server-side key for the SDK bridge.
-- `SOFIA_MESSAGING_ENABLED` — keep unset or set to `false` until all gates pass.
-- Durable database / Redis variables only after the corresponding store and client are implemented and tested.
+1. **No live verification yet.** The new file has not been typechecked or run in a Vercel Preview environment in this workflow.
+2. **Sofia API must already be hosted separately.** This function does not run the Sofia agent runtime inside Vercel; it calls the configured HTTPS API.
+3. **The Sofia API currently documents process-local idempotency.** The stable key helps retry safety, but cross-instance atomic deduplication and durable run-state storage remain production requirements.
+4. **Access policy is an explicit static allowlist.** Keep both lists restrictive. If you need dynamic policy, wire a reviewed server-side policy/store before broadening access.
+5. **Discord command registration is a separate setup step.** Register `/run` with one required string option named `task` using the correct application ID and test guild. Do not publish the endpoint until the Preview URL is confirmed.
+6. The serverless function must not be composed with Sofia's local workspace/terminal runtime. Execution capability boundaries belong in the separately hosted Sofia API and must be reviewed there.
 
-Do not put placeholder values into production settings. Do not enable the integration until the deployment URL, data stores, access policy, and end-to-end tests are verified.
+## Acceptance checklist before production
+
+- [ ] Install dependencies and run `npm run typecheck`, `npm run build`, and `npm test`.
+- [ ] Deploy to Vercel Preview and verify the generated function route exists.
+- [ ] Configure Preview-only environment variables and narrow test user/channel allowlists.
+- [ ] Discord PING succeeds; invalid and stale signatures fail.
+- [ ] Oversized body, malformed JSON, non-POST methods, and missing configuration fail closed.
+- [ ] Unallowlisted users and channels cannot start runs.
+- [ ] A valid `/run task` starts exactly one Sofia run and returns the run ID before Discord's deadline.
+- [ ] Retry/replay behavior is verified under concurrent requests and API timeout cases.
+- [ ] Confirm Sofia API run status remains available after restarts and across instances.
+- [ ] Register the command against the verified Preview URL and perform a live staging smoke test.
+- [ ] Review the PR and explicitly approve production deployment separately.
