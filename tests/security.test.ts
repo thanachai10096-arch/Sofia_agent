@@ -68,4 +68,24 @@ it("shared tool-effect classification marks privileged actions consistently", ()
   assert.deepEqual(classifyToolEffects("browser.open"), ["browser", "network"]);
   assert.deepEqual(classifyToolEffects("desktop.input.click"), ["destructive"]);
   assert.deepEqual(classifyToolEffects("workspace.read_file"), ["read"]);
+  assert.deepEqual(classifyToolEffects("project.verify"), ["shell"]);
+});
+
+
+test("execution policy accepts common true values without silently disabling capabilities", async () => {
+  const { loadExecutionPolicyFromEnv } = await import("../src/security/policy.js");
+  const names = ["SOFIA_ALLOW_BROWSER", "SOFIA_ALLOW_SHELL"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    process.env.SOFIA_ALLOW_BROWSER = "TRUE";
+    process.env.SOFIA_ALLOW_SHELL = "1";
+    const policy = loadExecutionPolicyFromEnv();
+    assert.equal(policy.allowBrowser, true);
+    assert.equal(policy.allowShell, true);
+  } finally {
+    for (const name of names) {
+      const value = previous[name];
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
 });
