@@ -73,6 +73,8 @@ export type { ChatPlatform, VerifiedChatCommand, ChatCommandHandlerOptions, Chat
 
 export { createMessagingGateway } from "./integrations/messaging/gateway.js";
 export type { MessagingGateway, MessagingGatewayOptions, MessagingRateLimiter } from "./integrations/messaging/gateway.js";
+export { RedisMessagingRateLimiter, REDIS_MESSAGING_RATE_LIMIT_SCRIPT } from "./integrations/messaging/redis-rate-limiter.js";
+export type { RedisEvalClient, RedisMessagingRateLimiterOptions } from "./integrations/messaging/redis-rate-limiter.js";
 export { createTelegramAdapter } from "./integrations/messaging/telegram.js";
 export type { TelegramTransport, TelegramUpdate } from "./integrations/messaging/telegram.js";
 export { createTelegramHttpTransport } from "./integrations/messaging/telegram-http-transport.js";
