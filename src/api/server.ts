@@ -6,6 +6,7 @@ import type { DesktopCapability } from "../desktop/types.js";
 import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } from "./types.js";
 import { UsageLimiter } from "./usage.js";
 import { idempotencyFingerprint } from "./idempotency.js";
+import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 
@@ -117,6 +118,15 @@ function pathId(url: string): string | null {
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
+  const discordRoute = config.discordInteractionRoute;
+  const discordRoutePath = discordRoute?.path ?? "/v1/integrations/discord/interactions";
+  const discordMaxBodyBytes = discordRoute?.maxBodyBytes ?? 1_000_000;
+  if (discordRoute && (!discordRoutePath.startsWith("/") || discordRoutePath.includes("?") || discordRoutePath.includes("#"))) {
+    throw new Error("Discord interaction route path must be an absolute path without query or fragment.");
+  }
+  if (discordRoute && (!Number.isSafeInteger(discordMaxBodyBytes) || discordMaxBodyBytes < 1 || discordMaxBodyBytes > 1_000_000)) {
+    throw new Error("Discord interaction route maxBodyBytes must be between 1 and 1000000.");
+  }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
@@ -217,6 +227,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
     try {
+      if (discordRoute && req.url === discordRoutePath) {
+        await handleDiscordInteractionHttpRequest(req, res, discordRoute.transport, discordMaxBodyBytes);
+        return;
+      }
+
       if (Date.now() - lastPruneAt > 30_000) { lastPruneAt = Date.now(); prune(); }
 
       if (req.method === "OPTIONS") {
