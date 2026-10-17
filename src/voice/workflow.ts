@@ -49,7 +49,7 @@ function withTimeout<T>(parent: AbortSignal, timeoutMs: number, label: string, o
     if (controller.signal.aborted) onAbort();
     else controller.signal.addEventListener("abort", onAbort, { once: true });
   });
-  return Promise.race([operation(controller.signal), aborted]).finally(() => {
+  return Promise.race([Promise.resolve().then(() => operation(controller.signal)), aborted]).finally(() => {
     clearTimeout(timer);
     parent.removeEventListener("abort", abortParent);
     if (onAbort) controller.signal.removeEventListener("abort", onAbort);
@@ -81,7 +81,7 @@ export class VoiceWorkflow {
     this.maxTranscriptChars = validateLimit(options.maxTranscriptChars ?? 20_000, "maxTranscriptChars", 100, 100_000);
     this.stageTimeoutMs = validateLimit(options.stageTimeoutMs ?? 30_000, "stageTimeoutMs", 100, 300_000);
     this.allowedMimeTypes = new Set((options.allowedMimeTypes ?? DEFAULT_MIME_TYPES).map((item) => item.toLowerCase().split(";")[0]!.trim()));
-    if (this.allowedMimeTypes.size === 0) throw new Error("At least one allowed audio MIME type is required");
+    if (this.allowedMimeTypes.size === 0 || [...this.allowedMimeTypes].some((item) => !item.startsWith("audio/"))) throw new Error("Allowed MIME types must be audio types");
   }
 
   async processAudio(input: VoiceAudioInput, signal: AbortSignal): Promise<VoiceTurnResult> {
