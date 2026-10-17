@@ -20,4 +20,4 @@ ENV SOFIA_API_PORT=3000
 VOLUME ["/workspace", "/data"]
 EXPOSE 3000
 USER node
-CMD ["node", "/app/dist/src/api/standalone.js"]
+CMD ["node", "/app/dist/api/standalone.js"]
