@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { FileRunRecordStore } from "../../src/api/run-record-store.js";
 import test from "node:test";
 import { createSofiaApi } from "../../src/api/server.js";
 import type { AgentDependencies } from "../../src/agent/types.js";
@@ -240,4 +244,61 @@ test("SSE reports request timeout separately from user cancellation", async (t) 
   assert.match(body, /"status":"failed"/);
   assert.match(body, /Run timed out\\./);
   assert.doesNotMatch(body, /Run cancelled\\./);
+});
+
+
+test("API restores idempotency keys from durable run records after restart", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "sofia-idempotency-restart-"));
+  let providerCalls = 0;
+  const provider: ModelProvider = {
+    async generate() {
+      providerCalls += 1;
+      return { text: "durable result" };
+    },
+  };
+  let currentServer: ReturnType<typeof createSofiaApi> | undefined;
+  const closeCurrent = async () => {
+    if (!currentServer) return;
+    const server = currentServer;
+    currentServer = undefined;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  };
+  try {
+    const store = new FileRunRecordStore(directory);
+    let instance = await startApi(provider, { runStore: store });
+    currentServer = instance.server;
+    const headers = {
+      authorization: "Bearer test-token",
+      "content-type": "application/json",
+      "idempotency-key": "retry-after-restart",
+    };
+    const body = JSON.stringify({ task: "perform this task once", async: true });
+    const created = await fetch(instance.url + "/v1/agent/runs", { method: "POST", headers, body });
+    assert.equal(created.status, 202);
+    const createdRun = await created.json() as { id: string };
+    let status = "";
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const response = await fetch(instance.url + "/v1/agent/runs/" + createdRun.id, {
+        headers: { authorization: "Bearer test-token" },
+      });
+      status = (await response.json() as { status: string }).status;
+      if (status === "completed" || status === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(status, "completed");
+    const callsAfterFirstRun = providerCalls;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await closeCurrent();
+
+    instance = await startApi(provider, { runStore: new FileRunRecordStore(directory) });
+    currentServer = instance.server;
+    const retried = await fetch(instance.url + "/v1/agent/runs", { method: "POST", headers, body });
+    assert.equal(retried.status, 200);
+    const retriedRun = await retried.json() as { id: string };
+    assert.equal(retriedRun.id, createdRun.id);
+    assert.equal(providerCalls, callsAfterFirstRun, "retry must not execute the task again");
+  } finally {
+    await closeCurrent();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
