@@ -145,3 +145,39 @@ test("SQLite transcripts survive closing and reopening Sofia's session store", a
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("SQLite transcript files and WAL sidecars are private on POSIX without loosening existing paths", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-permissions-"));
+  const privateDir = path.join(root, "new-private-dir");
+  const file = path.join(privateDir, "sessions.sqlite");
+  let store: SqliteSessionStore | undefined;
+  try {
+    store = await SqliteSessionStore.open(file);
+    store.save({ id: "private-session", messages: ["private transcript"], updatedAt: 0 });
+
+    assert.equal(fs.statSync(privateDir).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    for (const suffix of ["-wal", "-shm"]) {
+      const sidecar = `${file}${suffix}`;
+      assert.equal(fs.existsSync(sidecar), true, `expected SQLite sidecar ${suffix}`);
+      assert.equal(fs.statSync(sidecar).mode & 0o077, 0, `${suffix} must not allow group/other access`);
+    }
+
+    store.close();
+    store = undefined;
+
+    // Reopening an existing database tightens group/other access, but an existing
+    // directory's permissions are not changed as a side effect.
+    fs.chmodSync(file, 0o644);
+    fs.chmodSync(privateDir, 0o750);
+    store = await SqliteSessionStore.open(file);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(privateDir).mode & 0o777, 0o750);
+  } finally {
+    store?.close();
+    fs.chmodSync(privateDir, 0o700);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
