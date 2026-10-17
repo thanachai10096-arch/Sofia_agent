@@ -4,7 +4,7 @@ import path from "node:path";
 import type { AgentRunStatus } from "./types.js";
 import type { AgentResult } from "../agent/types.js";
 
-export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; }
+export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; idempotencyKeyHash?:string; requestFingerprint?:string; }
 export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; }
 const SAFE_ID=/^[A-Za-z0-9-]{8,64}$/;
 const STATUSES=new Set(["queued","running","completed","failed","cancelled"]);
@@ -26,6 +26,9 @@ function validRecord(value:unknown,filename:string):value is RunRecord {
  if(typeof r.ownerKeyId!=="string"||!/^[a-f0-9]{32}$/.test(r.ownerKeyId))return false;
  if(!Array.isArray(r.desktopCapabilities)||!r.desktopCapabilities.every((x)=>typeof x==="string"&&CAPABILITIES.has(x)))return false;
  if(r.error!==undefined&&(typeof r.error!=="string"||r.error.length>20_000))return false;
+ if(r.idempotencyKeyHash!==undefined&&(typeof r.idempotencyKeyHash!=="string"||!/^[a-f0-9]{64}$/.test(r.idempotencyKeyHash)))return false;
+ if(r.requestFingerprint!==undefined&&(typeof r.requestFingerprint!=="string"||!/^[a-f0-9]{64}$/.test(r.requestFingerprint)))return false;
+ if((r.idempotencyKeyHash===undefined)!==(r.requestFingerprint===undefined))return false;
  if(r.result!==undefined&&!validResult(r.result))return false;
  if(r.status==="completed"&&r.result===undefined)return false;
  if(r.status==="failed"&&r.error===undefined)return false;
