@@ -29,6 +29,18 @@ function validatePackage(value: SkillPackage): SkillPackage {
     throw new Error("Invalid skill package or skill id");
   }
   if (typeof value.version !== "string" || !value.version.trim() || value.version.length > 100) throw new Error("Invalid skill version");
+  if (!["builtin", "learned", "project", "custom", "marketplace"].includes(String(value.source))) throw new Error("Invalid skill source");
+  const skill = value.skill;
+  if (typeof skill.name !== "string" || !skill.name.trim() || skill.name.length > 200 ||
+      typeof skill.description !== "string" || !skill.description.trim() || skill.description.length > 2000 ||
+      !Array.isArray(skill.triggers) || skill.triggers.length === 0 || !skill.triggers.every((item) => typeof item === "string" && item.trim() && item.length <= 500) ||
+      !Array.isArray(skill.categories) || skill.categories.length === 0 || !skill.categories.every((item) => typeof item === "string" && item.trim() && item.length <= 100) ||
+      !["initial", "inspect-evidence", "fix-implementation", "fix-environment", "alternative-tool"].includes(String(skill.strategy)) ||
+      !Array.isArray(skill.procedure) || skill.procedure.length < 2 || !skill.procedure.every((item) => typeof item === "string" && item.trim() && item.length <= 2000) ||
+      !Array.isArray(skill.verification) || skill.verification.length === 0 || !skill.verification.every((item) => ["typecheck", "test", "build"].includes(String(item)))) {
+    throw new Error("Invalid skill metadata");
+  }
+  if (value.publisher !== undefined && (typeof value.publisher !== "string" || value.publisher.length > 200)) throw new Error("Invalid skill publisher");
   return clone(value);
 }
 
@@ -197,13 +209,48 @@ export class VersionedSkillLifecycle {
       throw new Error("Unsupported or corrupt skill lifecycle store");
     }
     const records: SkillLifecycleRecord[] = parsed.records.map((item) => {
-      if (!isRecord(item) || typeof item.id !== "string" || typeof item.skillId !== "string" ||
-          !["candidate", "verified", "rejected", "active", "superseded", "rolled_back"].includes(String(item.status))) {
+      if (!isRecord(item) || typeof item.id !== "string" || !item.id.trim() || item.id.length > 200 ||
+          typeof item.skillId !== "string" || !item.skillId.trim() ||
+          !["candidate", "verified", "rejected", "active", "superseded", "rolled_back"].includes(String(item.status)) ||
+          !isRecord(item.provenance) || typeof item.provenance.source !== "string" || !item.provenance.source.trim() ||
+          !Array.isArray(item.provenance.evidenceIds) || !item.provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
+          typeof item.provenance.confidence !== "number" || !Number.isFinite(item.provenance.confidence) ||
+          item.provenance.confidence < 0 || item.provenance.confidence > 1 ||
+          typeof item.createdAt !== "string" || typeof item.updatedAt !== "string") {
         throw new Error("Invalid skill lifecycle record");
       }
-      return clone(item) as unknown as SkillLifecycleRecord;
+      const safePackage = validatePackage(item.package as SkillPackage);
+      if (safePackage.skill.id !== item.skillId) throw new Error("Skill lifecycle package id does not match record");
+      if (item.evaluation !== undefined) {
+        if (!isRecord(item.evaluation) || typeof item.evaluation.passed !== "boolean" || !Array.isArray(item.evaluation.checks) ||
+            item.evaluation.checks.length === 0 || !item.evaluation.checks.every((check) =>
+              isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
+          throw new Error("Invalid skill lifecycle evaluation");
+        }
+      }
+      if (item.status === "active" &&
+          (!isRecord(item.evaluation) || item.evaluation.passed !== true ||
+           !Array.isArray(item.evaluation.checks) || item.evaluation.checks.length === 0 ||
+           !item.evaluation.checks.every((check) => isRecord(check) && check.passed === true) ||
+           item.provenance.confidence < this.minimumConfidence)) {
+        throw new Error("Active skill lifecycle record lacks valid evaluation or confidence");
+      }
+      return { ...(clone(item) as unknown as SkillLifecycleRecord), package: safePackage };
     });
-    this.snapshot = { schemaVersion: 1, records, activeBySkill: parsed.activeBySkill as Record<string, string> };
+    const activeBySkill: Record<string, string> = {};
+    for (const [skillId, recordId] of Object.entries(parsed.activeBySkill)) {
+      if (typeof recordId !== "string" || !recordId.trim()) throw new Error("Invalid skill lifecycle active pointer");
+      const record = records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
+      if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
+      if (Object.prototype.hasOwnProperty.call(activeBySkill, skillId)) throw new Error("Duplicate skill lifecycle active pointer");
+      activeBySkill[skillId] = recordId;
+    }
+    for (const record of records) {
+      if (record.status === "active" && activeBySkill[record.skillId] !== record.id) {
+        throw new Error("Active skill lifecycle record is missing its active pointer: " + record.skillId);
+      }
+    }
+    this.snapshot = { schemaVersion: 1, records, activeBySkill };
   }
   private persist(): void {
     const directory = path.dirname(this.file);
