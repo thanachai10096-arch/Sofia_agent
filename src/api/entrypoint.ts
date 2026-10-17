@@ -53,7 +53,7 @@ if (discordConfigured) {
         signal: discordAbort.signal,
       });
       const prefix = result.status === "completed" ? "Sofia completed the task." : "Sofia job " + result.status + ".";
-      const response = prefix + "\\nJob ID: " + result.id + "\\n" + result.summary;
+      const response = prefix + "\nJob ID: " + result.id + "\n" + result.summary;
       const safeResponse = response.length > 1700 ? response.slice(0, 1690) + "… (truncated)" : response;
       await discordTransport?.sendMessage(message.channelId, safeResponse, undefined, message.id);
     } catch {
