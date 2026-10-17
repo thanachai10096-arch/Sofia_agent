@@ -61,6 +61,20 @@
 - Batch evaluation should default to one worker when cases share a workspace. Trajectory exports may contain sensitive information even after redaction.
 - A cloud backend interface or mock contract test is not a remote execution service. Do not claim remote execution until a real provider, workload isolation, authentication, quotas, cancellation, artifacts, and monitoring are validated.
 
+## Additive foundations integrated during this audit window
+
+The following changes have been merged into `main` and passed their post-merge CI runs at the time of integration. These are foundations with explicit limitations, not claims of complete production integrations:
+
+- **PR #127 — MCP client:** opt-in stdio/HTTP client and Sofia tool adapters. The adapter still relies on Sofia's existing Tool Registry / Tool Gateway / policy path. The HTTP transport is not itself an SSRF defense; deployment egress controls and trusted endpoint configuration remain required.
+- **PR #128 — Persistent skills:** optional file-backed registry with defensive copies and schema validation. It is local and single-process, not a shared transactional store.
+- **PR #130 — Batch evaluation:** bounded batch runner and optional redacted JSONL trajectories. This exports evaluation evidence; it does not train models or automatically promote skills.
+- **PR #131 — Subagents:** bounded coordinator primitive with fresh runtime factories and isolated context. Brain task decomposition and parent verification remain the host's responsibility.
+- **PR #134 — Voice:** provider-agnostic STT/TTS workflow. No provider or messaging-platform voice adapter is bundled, and duration validation depends on host metadata until a media adapter independently validates it.
+- **PR #136 — Skill lifecycle:** versioned candidate evaluation, promotion gates, and rollback. It remains opt-in and is not automatically connected to the existing learned-skill path.
+- **PR #137 — Cloud execution contract:** local backend contract tests and readiness documentation only; no remote execution backend was added.
+
+These additions preserve the existing local defaults and should continue to be treated as opt-in capabilities until their host integrations and deployment-specific controls are validated.
+
 ## Required CI/release checklist
 
 - [ ] Exact PR head passes license check, typecheck, full tests, and build.
@@ -73,4 +87,4 @@
 
 ## Current conclusion
 
-Sofia has meaningful policy, browser-egress, sandbox, job-recovery, and verification foundations. The main remaining risk is not simply missing features: it is **integration evidence**. Feature branches and open PRs are not part of main until merged, and a green feature-branch run does not prove the combined system is correct. Merge incrementally, preserve fail-closed behavior, and require CI on the final integrated head.
+Sofia has meaningful policy, browser-egress, sandbox, job-recovery, and verification foundations, and the additive PRs listed above are now integrated into main. The main remaining risk is not simply missing features: it is **integration evidence**. Passing CI after each merge is necessary but does not replace host-level integration tests, production configuration review, or security validation. Preserve fail-closed behavior and require CI on the final integrated head.
