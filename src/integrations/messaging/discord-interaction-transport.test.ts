@@ -42,8 +42,8 @@ test("Discord transport verifies raw signatures, handles ping and dispatches sla
   assert.deepEqual(event, { content: "/run inspect repository", id: "interaction-1" });
 
   assert.deepEqual(await transport.sendMessage("123456789", "Sofia accepted"), { messageId: "987654321" });
-  assert.equal(sent[0].url, "https://discord.com/api/v10/channels/123456789/messages");
-  assert.equal((sent[0].init?.headers as Record<string, string>).authorization, `Bot ${botToken}`);
+  assert.equal(sent[0]?.url, "https://discord.com/api/v10/channels/123456789/messages");
+  assert.equal((sent[0]?.init?.headers as Record<string, string>).authorization, `Bot ${botToken}`);
   await transport.stop();
 });
 
