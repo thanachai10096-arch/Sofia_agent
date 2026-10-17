@@ -101,7 +101,8 @@ function collectHttpUrls(value: unknown, output: string[] = []): string[] {
 }
 
 function redactPrivateKeyBlocks(value: string): string {
-  const labels = new Set(["PRIVATE", "RSA", "EC", "OPENSSH", "DSA", "ENCRYPTED"]);
+  const prefixes = new Set(["", "RSA ", "EC ", "OPENSSH ", "DSA ", "ENCRYPTED "]);
+  const header = " PRIVATE KEY-----";
   let result = "";
   let cursor = 0;
   while (cursor < value.length) {
@@ -109,20 +110,20 @@ function redactPrivateKeyBlocks(value: string): string {
     if (begin < 0) return result + value.slice(cursor);
     result += value.slice(cursor, begin);
     const labelStart = begin + "-----BEGIN ".length;
-    const headerEnd = value.indexOf(" PRIVATE KEY-----", labelStart);
+    const headerEnd = value.indexOf(header, labelStart);
     if (headerEnd < 0) {
       result += value.slice(begin, labelStart);
       cursor = labelStart;
       continue;
     }
-    const label = value.slice(labelStart, headerEnd);
-    if (!labels.has(label)) {
+    const prefix = value.slice(labelStart, headerEnd);
+    if (!prefixes.has(prefix)) {
       result += value.slice(begin, labelStart);
       cursor = labelStart;
       continue;
     }
-    const endMarker = "-----END " + label + " PRIVATE KEY-----";
-    const end = value.indexOf(endMarker, headerEnd + " PRIVATE KEY-----".length);
+    const endMarker = "-----END " + prefix + "PRIVATE KEY-----";
+    const end = value.indexOf(endMarker, headerEnd + header.length);
     if (end < 0) {
       result += value.slice(begin, labelStart);
       cursor = labelStart;
