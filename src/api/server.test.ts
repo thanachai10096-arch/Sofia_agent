@@ -22,7 +22,10 @@ test("API sessions are persisted and scoped to the authenticated API key", async
     reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
     sessionStore: sessions,
   }, {
-    apiKeys: { "key-one": [], "key-two": [] },
+    apiKeys: {
+      "key-one": ["agent:run", "agent:read"],
+      "key-two": ["agent:run", "agent:read"],
+    },
   });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
