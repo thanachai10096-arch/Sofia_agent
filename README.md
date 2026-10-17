@@ -121,6 +121,12 @@ docker run --rm -p 3000:3000 \
 
 Set a high-entropy `SOFIA_API_KEY` in your deployment secret store. The standalone API stores only its SHA-256 hash in the key map, enables durable local run/usage files, and binds to all interfaces inside the container. The file stores are single-process only; do not scale this container horizontally without a transactional shared store/queue. The image does not install browser binaries; browser automation remains opt-in and needs its own browser-runtime setup.
 
+### API key storage and quotas
+
+The standalone server accepts a high-entropy `SOFIA_API_KEY` from the deployment secret store, computes its SHA-256 digest, and configures the API using `apiKeyHashes` rather than storing the bearer token as an object key. The API also supports the legacy plaintext `apiKeys` configuration for compatibility; new deployments should prefer hashes. Authentication failures are throttled per client address.
+
+Run and tool-call quota counters can persist across restarts through `FileUsageStore`. This file-backed store is single-process only; use a transactional shared store/queue before running multiple API workers or relying on quotas for billing. Keep the state directory on a persistent volume with restrictive permissions.
+
 ### API specification
 
 The OpenAPI document is maintained at [openapi/openapi.yaml](openapi/openapi.yaml). A standalone API process exposes `/health` for liveness and `/ready` for readiness.
