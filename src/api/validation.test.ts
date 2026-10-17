@@ -34,3 +34,11 @@ test("API run validation rejects malformed acceptance criteria", () => {
     }],
   }).valid, true);
 });
+
+
+test("API run validation rejects client-supplied desktop capabilities", () => {
+  assert.deepEqual(validateAgentRunInput({
+    task: "run a task",
+    desktopCapabilities: ["desktop.read", "desktop.input"],
+  }), { valid: false, error: "client_supplied_capabilities_forbidden" });
+});
