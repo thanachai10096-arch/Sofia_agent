@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { createSofiaAgentDependencies } from "../models/factory.js";
@@ -18,7 +18,11 @@ function positiveInteger(name: string, fallback: number, maximum: number): numbe
 
 const token = process.env.SOFIA_API_KEY?.trim();
 if (!token) throw new Error("SOFIA_API_KEY must be provided by the deployment secret store.");
-const tokenHash = createHash("sha256").update(token).digest("hex");
+const hashSecret = process.env.SOFIA_API_KEY_HASH_SECRET;
+if (!hashSecret || Buffer.byteLength(hashSecret, "utf8") < 32) {
+  throw new Error("SOFIA_API_KEY_HASH_SECRET must be a secret of at least 32 bytes from the deployment secret store.");
+}
+const tokenHash = createHmac("sha256", hashSecret).update(token).digest("hex");
 const host = process.env.SOFIA_API_HOST?.trim() || "127.0.0.1";
 const port = positiveInteger("SOFIA_API_PORT", 3000, 65_535);
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE || process.cwd());
@@ -37,6 +41,7 @@ const scopes = (process.env.SOFIA_API_KEY_SCOPES || "agent:run,agent:read")
 const server = createSofiaApi(createSofiaAgentDependencies(workspace), {
   apiKeys: {},
   apiKeyHashes: { [tokenHash]: scopes },
+  apiKeyHashSecret: hashSecret,
   allowedOrigins,
   runStore: new FileRunRecordStore(path.join(stateDirectory, "runs")),
   usageStore: new FileUsageStore(path.join(stateDirectory, "usage")),
