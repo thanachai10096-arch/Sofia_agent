@@ -285,8 +285,13 @@ export class CronScheduler {
       while (this.active.size < this.maxConcurrent) {
         const claim = await this.store.transact(async state => {
           const now = this.now();
-          const due = state.schedules.filter(s => s.status === "enabled" && Date.parse(s.nextRunAt) <= now.getTime())
-            .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))[0];
+          const activeExecutions = state.history.filter(item => item.status === "claimed" || item.status === "running").length;
+          if (activeExecutions >= this.maxConcurrent) return undefined;
+          const due = state.schedules.filter(s =>
+            s.status === "enabled" &&
+            Date.parse(s.nextRunAt) <= now.getTime() &&
+            !state.history.some(item => item.scheduleId === s.id && (item.status === "claimed" || item.status === "running"))
+          ).sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))[0];
           if (!due) return undefined;
           const scheduledFor = due.nextRunAt;
           const lateByMs = now.getTime() - Date.parse(scheduledFor);
