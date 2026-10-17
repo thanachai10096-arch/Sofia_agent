@@ -66,6 +66,12 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 | **Platform services** | Agent profiles and templates, skills platform, cloud execution backend contract, and evaluation runner. |
 | **SDK & API** | A stable, model-agnostic public surface for desktop, mobile, web, and third-party clients. |
 
+## `> Advanced skill catalog`
+
+The repository includes a **100-item advanced skill roadmap** across runtime/recovery, conversation/memory, software engineering, testing, security, tools, research, multi-agent coordination, workflows, and learning/optimization. See [the full catalog and rollout plan](docs/advanced-skill-catalog-100.md).
+
+**Important status distinction:** catalog entries are currently marked `planned`; they are not 100 implemented skills. A handler can be registered with the guarded dispatcher only after its definition is marked `verified`. Handlers must still use Sofia's existing Tool Registry and runtime security controls for side effects. Catalog metadata alone never grants access.
+
 ## `> Quick start`
 
 ```bash
