@@ -88,10 +88,32 @@ export class GatewayError extends Error {
       | "provider_cap_exceeded"
       | "incomplete_output"
       | "model_call_failed",
+    diagnostic?: string,
   ) {
-    super(code);
+    super(diagnostic ? `${code}: ${diagnostic}` : code);
     this.name = "GatewayError";
   }
+}
+
+// Log only a coarse, allowlisted provider failure classification. Never propagate
+// provider response bodies, URLs, request payloads, or credentials into run logs.
+function classifyProviderFailure(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown_provider_error";
+  const message = error.message;
+  const status = message.match(/Model gateway request failed \((\d{3})\)/i)?.[1];
+  if (status) {
+    const code = Number(status);
+    if (code === 401 || code === 403) return `provider_http_${code}_auth_or_access`;
+    if (code === 404) return "provider_http_404_endpoint_or_model";
+    if (code === 429) return "provider_http_429_rate_or_quota_limit";
+    if (code >= 500) return `provider_http_${code}_server_error`;
+    return `provider_http_${code}_request_rejected`;
+  }
+  if (/timed? ?out|timeout|abort/i.test(message)) return "provider_timeout";
+  if (/fetch failed|network|econn|enotfound|eai_again/i.test(message)) return "provider_network_error";
+  if (/invalid json/i.test(message)) return "provider_invalid_json";
+  if (/no message|empty response/i.test(message)) return "provider_empty_response";
+  return "provider_error";
 }
 
 class ContextTooLarge extends Error {}
@@ -344,7 +366,7 @@ export class TokenAwareGateway {
         }
 
         if (error instanceof GatewayError) throw error;
-        throw new GatewayError("model_call_failed");
+        throw new GatewayError("model_call_failed", classifyProviderFailure(error));
       }
     })();
 
