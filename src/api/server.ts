@@ -5,6 +5,7 @@ import type { AgentDependencies } from "../agent/types.js";
 import type { DesktopCapability } from "../desktop/types.js";
 import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } from "./types.js";
 import { UsageLimiter } from "./usage.js";
+import { idempotencyFingerprint } from "./idempotency.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 
@@ -148,7 +149,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     };
     runs.set(run.id, run); if (interrupted) persist(run);
   }
-  const idempotency = new Map<string, string>();
+  const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   const activeByKey = new Map<string, number>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
@@ -387,9 +388,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 400, { error: "invalid_idempotency_key" }, origin, config);
           }
           const idempotencyId = idempotencyKey ? `${auth.keyId}:${idempotencyKey}` : undefined;
+          const requestFingerprint = idempotencyFingerprint({
+            task: input.task,
+            ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
+            ...(input.context !== undefined ? { context: input.context } : {}),
+            ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
+            ...(input.acceptanceCriteria !== undefined ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
+            ...(input.priority !== undefined ? { priority: input.priority } : {}),
+          });
           if (idempotencyId) {
             const existing = idempotency.get(idempotencyId);
-            const existingRun = existing ? runs.get(existing) : undefined;
+            const existingRun = existing ? runs.get(existing.runId) : undefined;
+            if (existing && existingRun && existing.fingerprint !== requestFingerprint) {
+              return json(res, 409, { error: "idempotency_key_reused", message: "This idempotency key was already used with a different request." }, origin, config);
+            }
             if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
             if (existing) idempotency.delete(idempotencyId);
           }
@@ -413,7 +425,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           };
           runs.set(runId, run);
           persist(run);
-          if (idempotencyId) idempotency.set(idempotencyId, runId);
+          if (idempotencyId) idempotency.set(idempotencyId, { runId, fingerprint: requestFingerprint });
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
             ...input,
