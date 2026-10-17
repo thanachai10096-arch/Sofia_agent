@@ -229,8 +229,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
+    const requestPath = new URL(req.url ?? "/", "http://localhost").pathname;
     try {
-      if (discordRoute && req.url === discordRoutePath) {
+      if (discordRoute && requestPath === discordRoutePath) {
         await handleDiscordInteractionHttpRequest(req, res, discordRoute.transport, discordMaxBodyBytes);
         return;
       }
@@ -247,7 +248,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return res.end();
       }
 
-      if (req.method === "GET" && req.url === "/health") {
+      if (req.method === "GET" && requestPath === "/health") {
         return json(res, 200, {
           ok: true,
           service: "sofia-agent-api",
@@ -256,66 +257,66 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }, origin, config);
       }
 
-      if (!req.url?.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, origin, config);
+      if (!requestPath.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, origin, config);
 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
       // Authorization scopes are enforced at the API boundary, not merely used to
       // derive desktop capabilities. Admin scopes do not implicitly grant run access.
-      const isRunRequest = req.method === "POST" && (req.url === "/v1/agent/runs" || req.url === "/v1/agent/runs/stream" || req.url === "/v1/jobs");
+      const isRunRequest = req.method === "POST" && (requestPath === "/v1/agent/runs" || requestPath === "/v1/agent/runs/stream" || requestPath === "/v1/jobs");
       if (isRunRequest && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobReadRequest = req.method === "GET" && (req.url === "/v1/jobs" || (req.url?.startsWith("/v1/jobs/") === true && !req.url.endsWith("/resume") && !req.url.endsWith("/cancel")));
+      const isJobReadRequest = req.method === "GET" && (requestPath === "/v1/jobs" || (requestPath.startsWith("/v1/jobs/") === true && !requestPath.endsWith("/resume") && !requestPath.endsWith("/cancel")));
       if (isJobReadRequest && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
       }
-      const isRunRead = req.method === "GET" && pathId(req.url ?? "") !== null;
+      const isRunRead = req.method === "GET" && pathId(requestPath) !== null;
       if (isRunRead && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
       }
-      const isRunCancellation = req.method === "DELETE" && pathId(req.url ?? "") !== null;
+      const isRunCancellation = req.method === "DELETE" && pathId(requestPath) !== null;
       if (isRunCancellation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
+      const isJobMutation = req.method === "POST" && requestPath.startsWith("/v1/jobs/") === true && (requestPath.endsWith("/resume") || requestPath.endsWith("/cancel"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
 
       const adminScope = config.securityAdminScope ?? "security:admin";
       const isSecurityAdmin = auth.scopes.includes(adminScope);
-      if (req.method === "GET" && req.url === "/v1/learning/diagnostics") {
+      if (req.method === "GET" && requestPath === "/v1/learning/diagnostics") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         if (!deps.learningDiagnostics) return json(res, 503, { error: "learning_diagnostics_unavailable" }, origin, config);
         return json(res, 200, deps.learningDiagnostics(), origin, config);
       }
-      if (req.method === "GET" && req.url === "/v1/security/status") {
+      if (req.method === "GET" && requestPath === "/v1/security/status") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         return json(res, 200, {
           ...deps.securityController?.status?.(),
           auditEvents: deps.securityAudit && "list" in deps.securityAudit ? (deps.securityAudit as { list: () => unknown[] }).list().length : 0,
         }, origin, config);
       }
-      if (req.method === "POST" && req.url === "/v1/security/kill") {
+      if (req.method === "POST" && requestPath === "/v1/security/kill") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         const input = (await body(req, maxBytes)) as { reason?: unknown };
         deps.securityController?.kill(typeof input.reason === "string" && input.reason.trim() ? input.reason.trim() : "Security administrator activated kill switch.");
         return json(res, 202, { ok: true, status: deps.securityController?.status?.() }, origin, config);
       }
-      if (req.method === "POST" && req.url === "/v1/security/revive") {
+      if (req.method === "POST" && requestPath === "/v1/security/revive") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         deps.securityController?.revive();
         return json(res, 200, { ok: true, status: deps.securityController?.status?.() }, origin, config);
       }
-      if (req.method === "GET" && req.url === "/v1/security/audit") {
+      if (req.method === "GET" && requestPath === "/v1/security/audit") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         const events = deps.securityAudit && "list" in deps.securityAudit ? (deps.securityAudit as { list: () => unknown[] }).list() : [];
         return json(res, 200, { events }, origin, config);
       }
 
-      const id = pathId(req.url);
+      const id = pathId(requestPath);
       if (id && req.method === "GET") {
         const run = runs.get(id);
         if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
@@ -334,7 +335,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return json(res, 200, publicResponse(run), origin, config);
       }
 
-      if (req.method === "POST" && req.url === "/v1/agent/runs/stream") {
+      if (req.method === "POST" && requestPath === "/v1/agent/runs/stream") {
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
@@ -390,7 +391,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return;
       }
 
-      if (req.method === "POST" && req.url === "/v1/agent/runs") {
+      if (req.method === "POST" && requestPath === "/v1/agent/runs") {
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
@@ -487,7 +488,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
+      const jobMatch = requestPath.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
       if (jobMatch && deps.jobRuntime) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
@@ -509,13 +510,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      if (req.method === "GET" && req.url === "/v1/jobs") {
+      if (req.method === "GET" && requestPath === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
         const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
         return json(res, 200, { jobs }, origin, config);
       }
 
-      if (req.method === "POST" && req.url === "/v1/jobs") {
+      if (req.method === "POST" && requestPath === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
@@ -534,7 +535,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      if (req.method === "GET" && req.url.startsWith("/v1/usage")) {
+      if (req.method === "GET" && requestPath.startsWith("/v1/usage")) {
         return json(res, 200, usage.get(auth.keyId), origin, config);
       }
 
