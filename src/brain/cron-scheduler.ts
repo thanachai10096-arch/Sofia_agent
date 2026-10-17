@@ -222,7 +222,10 @@ export class CronScheduler {
     const initialRun = input.cron
       ? nextCronOccurrence(input.cron, input.timeZone, this.now())
       : new Date(input.runAt!);
-    if (!Number.isFinite(initialRun.getTime())) throw new Error("runAt must be a valid ISO-8601 timestamp");
+    const isoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+    if (!input.cron && (!input.runAt || !isoTimestamp.test(input.runAt) || !Number.isFinite(initialRun.getTime()))) {
+      throw new Error("runAt must be a valid ISO-8601 timestamp with a timezone");
+    }
     if (!input.cron) new Intl.DateTimeFormat("en-US", { timeZone: input.timeZone }).format(initialRun);
     const now = this.now().toISOString();
     const schedule: CronSchedule = {
