@@ -70,3 +70,57 @@ test("failed cron jobs retry up to the configured limit", async () => {
   assert.equal(state.history[0].attempt, 2);
   assert.equal(state.history[0].scheduleId, created.id);
 });
+
+
+test("skip misfire policy records missed occurrence without submitting a job", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  const runtime = {
+    async submit() { submitted++; throw new Error("should not submit skipped occurrence"); },
+    async get() { return undefined; }, async cancel() { return true; }, async list() { return []; },
+    async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  await scheduler.create({
+    name: "skip-missed", task: "task", cron: "* * * * *", timeZone: "UTC",
+    ownerKeyId: "alice", misfirePolicy: "skip",
+  }, "alice");
+  now = new Date("2026-10-17T00:05:00.000Z");
+  await scheduler.tick();
+  assert.equal(submitted, 0);
+  assert.equal(state.history.length, 1);
+  assert.equal(state.history[0].status, "skipped");
+  assert.equal(state.schedules[0].nextRunAt, "2026-10-17T00:06:00.000Z");
+});
+
+test("run-once misfire policy coalesces backlog into one execution", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  const runtime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      submitted++;
+      return { id: "misfire-job", status: "completed", task: input.task } as JobRecord;
+    },
+    async get() { return { id: "misfire-job", status: "completed", task: "task" } as JobRecord; },
+    async cancel() { return true; }, async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  await scheduler.create({
+    name: "coalesce-missed", task: "task", cron: "* * * * *", timeZone: "UTC",
+    ownerKeyId: "alice", misfirePolicy: "run-once",
+  }, "alice");
+  now = new Date("2026-10-17T00:05:00.000Z");
+  await scheduler.tick();
+  for (let i = 0; i < 30 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(submitted, 1);
+  assert.equal(state.history.length, 1);
+  assert.equal(state.history[0].status, "completed");
+  assert.equal(state.history[0].scheduledFor, "2026-10-17T00:01:00.000Z");
+  assert.equal(state.schedules[0].nextRunAt, "2026-10-17T00:06:00.000Z");
+});
