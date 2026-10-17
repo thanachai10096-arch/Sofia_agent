@@ -24,16 +24,10 @@ if (!botToken || /[\r\n]/.test(botToken)) {
 }
 
 const endpoint = `https://discord.com/api/v10/applications/${applicationId}/guilds/${guildId}/commands`;
-const response = await fetch(endpoint, {
-  method: "POST",
-  headers: {
-    authorization: `Bot ${botToken}`,
-    "content-type": "application/json",
-  },
-  body: JSON.stringify({
+const commands = [
+  {
     name: "run",
     description: "Send a task to Sofia Agent",
-    type: 1,
     options: [{
       name: "task",
       description: "Task for Sofia to execute",
@@ -41,15 +35,46 @@ const response = await fetch(endpoint, {
       required: true,
       max_length: 4000,
     }],
-  }),
-});
+  },
+  {
+    name: "status",
+    description: "Check a Sofia job you own",
+    options: [{
+      name: "job_id",
+      description: "Sofia job ID",
+      type: 3,
+      required: true,
+      max_length: 64,
+    }],
+  },
+  {
+    name: "cancel",
+    description: "Cancel a Sofia job you own",
+    options: [{
+      name: "job_id",
+      description: "Sofia job ID",
+      type: 3,
+      required: true,
+      max_length: 64,
+    }],
+  },
+];
 
-if (!response.ok) {
-  // Do not print request headers or the bot token.
-  const body = await response.text();
-  console.error(`Discord command registration failed (HTTP ${response.status}).`);
-  if (body) console.error(body.slice(0, 1000));
-  process.exit(1);
+for (const command of commands) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      authorization: `Bot ${botToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ ...command, type: 1 }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    console.error(`Discord command registration failed for /${command.name} (HTTP ${response.status}).`);
+    if (body) console.error(body.slice(0, 1000));
+    process.exit(1);
+  }
+  const registered = await response.json();
+  console.log(`Registered /${command.name} for guild ${guildId} (command ID: ${registered.id}).`);
 }
-const command = await response.json();
-console.log(`Registered /run for guild ${guildId} (command ID: ${command.id}).`);
