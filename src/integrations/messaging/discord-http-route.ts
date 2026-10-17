@@ -1,7 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { createDiscordInteractionTransport } from "./discord-interaction-transport.js";
-
-type DiscordInteractionTransport = ReturnType<typeof createDiscordInteractionTransport>;
+import type { DiscordInteractionTransport } from "./discord-interaction-transport.js";
 
 /**
  * Node HTTP route helper for an existing HTTPS server. Call this only for the
