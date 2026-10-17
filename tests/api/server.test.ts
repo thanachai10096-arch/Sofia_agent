@@ -302,3 +302,16 @@ test("API restores idempotency keys from durable run records after restart", asy
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("API exposes separate liveness and configurable readiness probes", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const { server, url } = await startApi(provider, { readinessCheck: () => false });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const health = await fetch(url + "/health");
+  assert.equal(health.status, 200);
+  assert.deepEqual(await health.json().then((value) => ({ ok: (value as { ok: boolean }).ok })), { ok: true });
+  const ready = await fetch(url + "/ready?probe=1");
+  assert.equal(ready.status, 503);
+  assert.deepEqual(await ready.json(), { ready: false });
+});
