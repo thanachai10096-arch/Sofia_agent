@@ -33,7 +33,9 @@ if (files.length === 0) {
 }
 
 const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
-const result = spawnSync(process.execPath, [tsxCli, "--test", ...files], {
+const coverage = process.argv.includes("--coverage");
+const nodeArgs = coverage ? ["--experimental-test-coverage"] : [];
+const result = spawnSync(process.execPath, [...nodeArgs, tsxCli, "--test", ...files], {
   cwd: root,
   stdio: "inherit",
 });
