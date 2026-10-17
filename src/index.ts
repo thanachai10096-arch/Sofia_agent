@@ -70,3 +70,5 @@ export { checkpointManager, naturalConversation, userPreferenceMemory, conversat
 export { registerVerifiedSecurityCoordinationSkills } from "./skills/security-coordination-handlers.js";
 
 export { browserWorkflowPlanner, browserStateVerifier } from "./skills/security-coordination-handlers.js";
+
+export { approvalGateManager, securityRegressionTester } from "./skills/security-coordination-handlers.js";
