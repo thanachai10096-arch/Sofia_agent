@@ -62,8 +62,16 @@ test("refactoring planner requires baseline and regression evidence", () => {
   assert.equal(result.safeToApplyAutomatically, false);
 });
 
-test("coding planning skills register only when catalog definitions are verified", () => {
+test("verified coding planning skills register through the guarded dispatcher", async () => {
   const registry = new AdvancedSkillRegistry();
-  assert.deepEqual(registerVerifiedCodingPlanningSkills(registry), []);
-  assert.equal(registry.has("coding.01"), false);
+  const ids = registerVerifiedCodingPlanningSkills(registry);
+  assert.deepEqual(ids, ["coding.01", "coding.02", "coding.04", "coding.06", "coding.09"]);
+  assert.ok(ids.every(id => registry.has(id)));
+  const result = await registry.execute("coding.04", {
+    goal: "Add a small feature",
+    candidateFiles: ["src/a.ts"],
+    acceptanceCriteria: ["Existing API remains compatible"],
+    constraints: ["No destructive changes"],
+  }, { principalId: "test-user", signal: new AbortController().signal }) as { planOnly: boolean };
+  assert.equal(result.planOnly, true);
 });
