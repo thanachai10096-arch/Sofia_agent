@@ -140,7 +140,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
       ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
     };
-    void runStore.save(record);
+    void runStore.save(record).catch((error: unknown) => {
+      // Store failures must be observable without creating an unhandled rejection.
+      console.error("[sofia] failed to persist run record", error instanceof Error ? error.message : "unknown error");
+    });
   };
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
