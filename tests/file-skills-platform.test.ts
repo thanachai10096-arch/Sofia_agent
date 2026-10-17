@@ -44,7 +44,6 @@ test("FileSkillsPlatform returns defensive copies", () => {
     const store = new FileSkillsPlatform(path.join(directory, "skills.json"));
     store.register(fixture());
     const returned = store.get("test-skill")!;
-    returned.skill.procedure as string[];
     (returned.skill.procedure as string[]).push("mutated");
     assert.deepEqual(store.get("test-skill")?.skill.procedure, ["inspect evidence", "verify outcome"]);
   });
