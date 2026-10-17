@@ -528,7 +528,20 @@ test("Brain retrieves project memory using the current task and avoids listing u
     },
     limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
   });
-  const report = await brain.run({ task: "Create hello.txt" });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
   assert.equal(report.completed, true, report.summary);
   assert.match(searchedQuery, /Create hello\.txt/);
   assert.ok(searchedQuery.length <= 4000);
@@ -548,7 +561,20 @@ test("Brain falls back to listing project memory when relevance search fails", a
     },
     limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
   });
-  const report = await brain.run({ task: "Create hello.txt" });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
   assert.equal(report.completed, true, report.summary);
   assert.equal(listCalls, 1);
 });
@@ -570,7 +596,20 @@ test("Brain preserves the highest-ranked project memories when limiting context"
     },
     limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
   });
-  const report = await brain.run({ task: "Create hello.txt" });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
   assert.equal(report.completed, true, report.summary);
   assert.equal(selected.length, 12);
   assert.equal(selected[0]?.content, "ranked-memory-0");
