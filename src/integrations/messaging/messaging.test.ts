@@ -132,3 +132,28 @@ test("gateway correlates Discord replies to their deferred interaction", async (
   assert.equal(outbound[0]?.interactionId, "interaction-42");
   await gateway.stop();
 });
+
+test("gateway refuses oversized normalized messages before handler execution", async () => {
+  let called = false;
+  const gateway = createMessagingGateway({
+    enabled: true,
+    adapters: [adapter()],
+    allowUser: () => true,
+    onMessage: async () => { called = true; },
+  });
+  assert.equal((await gateway.dispatch(message({ text: "x".repeat(100_001) }))).status, "forbidden");
+  assert.equal(called, false);
+  await gateway.stop();
+});
+
+test("gateway does not pretend a failed startup can be restarted with an aborted signal", async () => {
+  const broken: MessagingAdapter = {
+    platform: "telegram",
+    async start() { throw new Error("transport failed"); },
+    async stop() {},
+    async send() { return { state: "sent" }; },
+  };
+  const gateway = createMessagingGateway({ enabled: true, adapters: [broken], allowUser: () => true, onMessage: async () => "reply" });
+  await assert.rejects(() => gateway.start(), /transport failed/);
+  assert.equal((await gateway.dispatch(message())).status, "disabled");
+});
