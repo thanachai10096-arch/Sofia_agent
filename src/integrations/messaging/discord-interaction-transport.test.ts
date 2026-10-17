@@ -76,7 +76,7 @@ test("Discord transport rejects invalid configuration", () => {
 });
 
 test("Discord transport accepts additional allowlisted slash command names and forwards their job ID", async () => {
-  const transport = createDiscordInteractionTransport({ publicKeyHex, botToken, additionalCommandNames: ["status", "cancel"] });
+  const transport = createDiscordInteractionTransport({ publicKeyHex, botToken, additionalCommandNames: ["status", "cancel"], fetchImpl: async () => response({ id: "987654321" }) });
   let received = "";
   await transport.start(new AbortController().signal, async (event) => { received = event.content; });
   const body = Buffer.from(JSON.stringify({
