@@ -105,3 +105,30 @@ test("message chunking respects limits and preserves meaningful text", () => {
   assert.ok(chunks.every((chunk) => chunk.length <= 40));
   assert.equal(chunks.join(""), text);
 });
+
+test("gateway correlates Discord replies to their deferred interaction", async () => {
+  const outbound: Array<{ conversationId: string; text: string; interactionId?: string }> = [];
+  const discord: MessagingAdapter = {
+    platform: "discord",
+    async start() {},
+    async stop() {},
+    async send(input) {
+      outbound.push(input);
+      return { state: "sent" };
+    },
+  };
+  const gateway = createMessagingGateway({
+    enabled: true,
+    adapters: [discord],
+    allowUser: () => true,
+    onMessage: async () => "reply",
+  });
+  const discordMessage = message({
+    platform: "discord",
+    messageId: "interaction-42",
+    identity: { platform: "discord", userId: "u1", channelId: "c1", conversationId: "c1" },
+  });
+  assert.equal((await gateway.dispatch(discordMessage)).status, "handled");
+  assert.equal(outbound[0]?.interactionId, "interaction-42");
+  await gateway.stop();
+});
