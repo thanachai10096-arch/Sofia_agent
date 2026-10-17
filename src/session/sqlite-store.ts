@@ -34,7 +34,7 @@ export class SqliteSessionStore {
   private constructor(private readonly db: SqliteDatabase) {}
 
   static async open(filePath = path.join(sofiaStateDirectory("sessions"), "sessions.sqlite")): Promise<SqliteSessionStore> {
-    const absolutePath = path.resolve(filePath);
+    const absolutePath = filePath === ":memory:" ? filePath : path.resolve(filePath);
     if (absolutePath !== ":memory:") fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolutePath);
@@ -168,11 +168,7 @@ export class SqliteSessionStore {
     const rows = this.db.prepare(
       "SELECT id, updated_at FROM sessions ORDER BY updated_at DESC, id ASC LIMIT ? OFFSET ?",
     ).all(limit, offset) as Array<{ id: string; updated_at: number }>;
-    return rows.map((row) => ({
-      id: row.id,
-      updatedAt: row.updated_at,
-      messages: this.listMessages(row.id, { limit: 500, offset: 0 }),
-    }));
+    return rows.map((row) => this.get(row.id)).filter((session): session is Session => session !== undefined);
   }
 
   search(query: string, options: { limit?: number; offset?: number } = {}): Session[] {
