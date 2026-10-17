@@ -242,8 +242,8 @@ test("SSE reports request timeout separately from user cancellation", async (t) 
   assert.equal(response.status, 200);
   const body = await response.text();
   assert.match(body, /"status":"failed"/);
-  assert.match(body, /Run timed out\\./);
-  assert.doesNotMatch(body, /Run cancelled\\./);
+  assert.match(body, /Run timed out\./);
+  assert.doesNotMatch(body, /Run cancelled\./);
 });
 
 
