@@ -122,8 +122,8 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "id": "conversation.02",
     "name": "Context Summarizer",
     "category": "Conversation & Memory",
-    "risk": "may-write",
-    "status": "planned",
+    "risk": "read-only",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Context Summarizer: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -140,8 +140,8 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "id": "conversation.04",
     "name": "Project Memory Retrieval",
     "category": "Conversation & Memory",
-    "risk": "may-write",
-    "status": "planned",
+    "risk": "read-only",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Project Memory Retrieval: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -150,7 +150,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Memory Conflict Resolver",
     "category": "Conversation & Memory",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Memory Conflict Resolver: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -186,7 +186,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Long-Context Compressor",
     "category": "Conversation & Memory",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Long-Context Compressor: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
