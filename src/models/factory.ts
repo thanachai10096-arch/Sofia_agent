@@ -23,6 +23,12 @@ import { FileRunStore } from "../brain/run-store.js";
 import { DurableJobRuntime } from "../brain/job-runtime.js";
 import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
+import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
+import { runSkillLifecycleWorkflow } from "../brain/skill-lifecycle-workflow.js";
+import type { LearnedSkillCandidate } from "../brain/learning.js";
+import { InMemorySkillsPlatform, type SkillPackage } from "../skills/platform.js";
+import { actionHash } from "../security/guard.js";
+import { randomUUID } from "node:crypto";
 import { EvolutionEngine } from "../brain/evolution.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
@@ -37,12 +43,18 @@ function intEnv(name:string,fallback:number,minimum=0){const value=Number(proces
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink}):NonNullable<AgentDependencies["brainFactory"]>{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];onSkillCandidate?:(candidate:LearnedSkillCandidate)=>Promise<boolean>;lifecycle?:VersionedSkillLifecycle;security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=config.routes.map(route=>createInternalRoute({modelProvider:provider,route}));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
+  for (const record of dependencies.lifecycle?.list().filter(item=>item.status==="active") ?? []) {
+    const skill=record.package.skill;
+    const category=skill.categories[0];
+    const trigger=skill.triggers[0];
+    if (category && trigger) skillLedger.record({name:skill.name,trigger,category,strategy:skill.strategy,procedure:[...skill.procedure],verification:[...skill.verification],evidenceIds:[...record.provenance.evidenceIds]});
+  }
   return ({signal,maxSteps,principalId,desktopCapabilities,onRunSnapshot})=>{
     const runLimit:BudgetLimit={maxTokens:intEnv("SOFIA_BRAIN_MAX_TOKENS",60000,1),maxCostNanoUsd:bigintEnv("SOFIA_BRAIN_MAX_COST_NANO_USD",NO_COST_CAP),maxCalls:intEnv("SOFIA_BRAIN_MAX_MODEL_CALLS",12,1),maxInFlight:intEnv("SOFIA_BRAIN_MAX_IN_FLIGHT",1,1)};
     const models=config.routes.map(route=>({key:route.providerId??route.id,limit:{maxTokens:intEnv("SOFIA_BRAIN_MODEL_MAX_TOKENS",runLimit.maxTokens,1),maxCostNanoUsd:runLimit.maxCostNanoUsd,maxCalls:runLimit.maxCalls,maxInFlight:runLimit.maxInFlight},price:{inputNanoUsdPerToken:bigintEnv("SOFIA_"+route.id.toUpperCase()+"_INPUT_NANO_USD",0n),outputNanoUsdPerToken:bigintEnv("SOFIA_"+route.id.toUpperCase()+"_OUTPUT_NANO_USD",0n)}})).filter((m,i,a)=>a.findIndex(x=>x.key===m.key)===i);
@@ -65,7 +77,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const subagents=createSubagentRuntime(reasoner,toolGateway);
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
-    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot},limits});
+    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate:dependencies.onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot},limits});
   };
 }
 
@@ -75,7 +87,29 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const tools=createToolRegistry([...createBuiltinTools(),...browserTools]);
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
-  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
+  const skillPlatform=new InMemorySkillsPlatform();
+  const skillLifecycle=new VersionedSkillLifecycle(skillPlatform,async (pkg:SkillPackage)=>{
+    const passed=Boolean(pkg.skill.name.trim()&&pkg.skill.description.trim()&&pkg.skill.triggers.length>0&&pkg.skill.procedure.length>=2&&pkg.skill.verification.length>0&&pkg.skill.categories.length>0);
+    return {passed,checks:[{name:"skill-metadata-quality",passed}]};
+  },{file:path.join(workspace,".sofia","skill-lifecycle.json"),minimumConfidence:0.7});
+  const onSkillCandidate=async(candidate:LearnedSkillCandidate):Promise<boolean>=>{
+    if(!approval||candidate.evidenceIds.length===0) return false;
+    const skillId="learned:"+candidate.category;
+    const skillPackage:SkillPackage={
+      skill:{id:skillId,name:candidate.name,description:"Learned from a verified Sofia recovery; requires reviewed promotion.",triggers:[candidate.trigger],categories:[candidate.category],strategy:candidate.strategy,procedure:[...candidate.procedure],verification:["test"]},
+      source:"learned",
+      version:String(skillLifecycle.list(skillId).length+1)+".0.0",
+    };
+    const result=await runSkillLifecycleWorkflow(skillLifecycle,skillPackage,{source:"brain-recovery",evidenceIds:[...candidate.evidenceIds],confidence:0.85},{
+      approvePromotion:async record=>{
+        const input={candidateId:record.id,skillId:record.skillId,version:record.package.version,evidenceIds:record.provenance.evidenceIds};
+        const runId=randomUUID();
+        return approval({runId,toolName:"skill.promote",input,actionHash:actionHash(runId,"skill.promote",input),risk:"high"});
+      },
+    });
+    return result.activated;
+  };
+  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,onSkillCandidate,lifecycle:skillLifecycle,security,audit});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,learningDiagnostics:()=>evolution.getDiagnostics()};
 }
