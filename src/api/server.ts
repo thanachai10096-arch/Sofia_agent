@@ -515,7 +515,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 201, created, origin, config);
           } catch (error) {
             const message = error instanceof Error ? error.message : "Invalid cron schedule";
-            return json(res, 400, { error: "invalid_cron_schedule", message }, origin, config);
+            return json(res, message.startsWith("Schedule quota exceeded") ? 429 : 400, { error: message.startsWith("Schedule quota exceeded") ? "quota_exceeded" : "invalid_cron_schedule", message }, origin, config);
           }
         }
         if (historyMatch && req.method === "GET") {
