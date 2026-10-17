@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { JobRecord, JobRuntime } from "../../brain/job-runtime.js";
-import { runDiscordTaskAsDurableJob } from "./discord-durable-job.js";
+import { buildDiscordSessionContext, runDiscordTaskAsDurableJob } from "./discord-durable-job.js";
 
 function runtimeFor(records: JobRecord[]): JobRuntime {
   return {
@@ -77,4 +77,28 @@ test("Discord can acknowledge a durable job before its result is available", asy
     status: "completed",
     summary: "Finished later",
   });
+});
+
+test("Discord session context is scoped to a session and only uses completed jobs", async () => {
+  const records: JobRecord[] = [
+    {
+      id: "job-a", status: "completed", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+      task: "inspect README", ownerKeyId: "discord:123", sessionKey: "discord-session-a",
+      result: { summary: "README uses MIT licensing", completed: true } as JobRecord["result"],
+    },
+    {
+      id: "job-b", status: "completed", createdAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z",
+      task: "private other channel", ownerKeyId: "discord:123", sessionKey: "discord-session-b",
+      result: { summary: "Do not leak this", completed: true } as JobRecord["result"],
+    },
+    {
+      id: "job-c", status: "running", createdAt: "2026-01-03T00:00:00.000Z", updatedAt: "2026-01-03T00:00:00.000Z",
+      task: "unfinished task", ownerKeyId: "discord:123", sessionKey: "discord-session-a",
+    },
+  ];
+  const context = await buildDiscordSessionContext(runtimeFor(records), "discord-session-a");
+  assert.match(context, /README uses MIT licensing/);
+  assert.doesNotMatch(context, /Do not leak this/);
+  assert.doesNotMatch(context, /unfinished task/);
+  assert.match(context, /untrusted historical data/i);
 });
