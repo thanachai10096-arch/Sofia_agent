@@ -12,7 +12,7 @@ function signed(rawBody: Uint8Array, timestamp = String(Math.floor(Date.now() / 
 }
 const response = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
 
-test("Discord transport verifies raw signatures, handles ping and dispatches slash commands", async () => {
+test("Discord transport verifies raw signatures and edits deferred interaction response", async () => {
   const sent: Array<{ url: string; init?: RequestInit }> = [];
   const transport = createDiscordInteractionTransport({
     publicKeyHex,
@@ -24,14 +24,21 @@ test("Discord transport verifies raw signatures, handles ping and dispatches sla
   });
   let resolveEvent!: (event: { content: string; id: string }) => void;
   const eventPromise = new Promise<{ content: string; id: string }>((resolve) => { resolveEvent = resolve; });
-  await transport.start(new AbortController().signal, async (event) => resolveEvent({ content: event.content, id: event.id }));
+  await transport.start(new AbortController().signal, async (event) => {
+    await transport.sendMessage(event.channelId, "Sofia accepted", undefined, event.id);
+    resolveEvent({ content: event.content, id: event.id });
+  });
 
   const ping = Buffer.from(JSON.stringify({ type: 1 }));
   assert.deepEqual(await transport.handleRequest(signed(ping)), { status: 200, body: { type: 1 } });
 
   const body = Buffer.from(JSON.stringify({
-    type: 2, id: "interaction-1", channel_id: "123456789",
-    member: { user: { id: "user-1", username: "tester" } },
+    type: 2,
+    id: "222222222222",
+    application_id: "111111111111",
+    token: "interaction-token-abc",
+    channel_id: "123456789",
+    member: { user: { id: "333333333333", username: "tester" } },
     data: { name: "run", options: [{ name: "task", type: 3, value: "inspect repository" }] },
   }));
   assert.deepEqual(await transport.handleRequest(signed(body)), { status: 200, body: { type: 5 } });
@@ -39,11 +46,11 @@ test("Discord transport verifies raw signatures, handles ping and dispatches sla
     eventPromise,
     new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for Discord command")), 1_000)),
   ]);
-  assert.deepEqual(event, { content: "/run inspect repository", id: "interaction-1" });
+  assert.deepEqual(event, { content: "/run inspect repository", id: "222222222222" });
 
-  assert.deepEqual(await transport.sendMessage("123456789", "Sofia accepted"), { messageId: "987654321" });
-  assert.equal(sent[0]?.url, "https://discord.com/api/v10/channels/123456789/messages");
-  assert.equal((sent[0]?.init?.headers as Record<string, string>).authorization, `Bot ${botToken}`);
+  assert.equal(sent[0]?.url, "https://discord.com/api/v10/webhooks/111111111111/interaction-token-abc/messages/@original");
+  assert.equal(sent[0]?.init?.method, "PATCH");
+  assert.equal(JSON.parse(String(sent[0]?.init?.body)).content, "Sofia accepted");
   await transport.stop();
 });
 
