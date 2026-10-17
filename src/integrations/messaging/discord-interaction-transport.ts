@@ -26,6 +26,9 @@ export interface DiscordInteractionResult {
   status: 200 | 400 | 401 | 503;
   body: Record<string, unknown>;
 }
+export type DiscordInteractionTransport = DiscordTransport & {
+  handleRequest(input: DiscordInteractionRequest): Promise<DiscordInteractionResult>;
+};
 export interface DiscordInteractionTransportOptions {
   publicKeyHex: string;
   botToken: string;
@@ -42,7 +45,7 @@ export interface DiscordInteractionTransportOptions {
  * second HTTP server or mutate Sofia's API server. Slash commands are deferred
  * immediately; Sofia's reply is delivered through the configured bot account.
  */
-export function createDiscordInteractionTransport(options: DiscordInteractionTransportOptions) {
+export function createDiscordInteractionTransport(options: DiscordInteractionTransportOptions): DiscordInteractionTransport {
   if (!/^[0-9a-f]{64}$/i.test(options.publicKeyHex)) throw new Error("Discord public key must be 32-byte hex.");
   if (!/^[A-Za-z0-9._-]{20,256}$/.test(options.botToken)) throw new Error("Discord bot token has an invalid format.");
   const commandName = options.commandName ?? "run";
@@ -56,7 +59,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
   let active = false;
   let controller: AbortController | undefined;
 
-  const transport: DiscordTransport & { handleRequest(input: DiscordInteractionRequest): Promise<DiscordInteractionResult> } = {
+  const transport: DiscordInteractionTransport = {
     async start(signal, onMessage) {
       if (active) return;
       active = true;
