@@ -1147,10 +1147,14 @@ export class SofiaBrain {
           verification: verification.map((item) => item.criterionId),
           evidenceIds,
         };
+        // Learning is opt-in: absence of a host approval callback must fail closed.
         const learningApproved = this.dependencies.onSkillCandidate
           ? await this.dependencies.onSkillCandidate(learnedCandidate)
-          : true;
-        if (learningApproved) this.dependencies.skillLedger.record(learnedCandidate);
+          : false;
+        if (learningApproved) {
+          this.dependencies.skillLedger.record(learnedCandidate);
+          this.emit({ type: "brain.learning.recorded" });
+        }
         if (this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
@@ -1158,7 +1162,6 @@ export class SofiaBrain {
           await this.wait(() => this.dependencies.projectMemory!.save(entry));
           this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
         }
-        this.emit({ type: "brain.learning.recorded" });
       }
 
       return this.report(
