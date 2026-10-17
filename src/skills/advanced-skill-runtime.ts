@@ -110,13 +110,19 @@ export class AdvancedSkillRegistry {
     }
     if (definition.requiresApproval || definition.risk === "privileged") {
       const approval = context.approval;
-      const approved = approval
-        ? await this.verifyApproval({
+      let approved = false;
+      if (approval && context.principalId.trim()) {
+        try {
+          approved = await this.verifyApproval({
             skillId: id,
             principalId: context.principalId,
             requestId: approval.requestId,
-          })
-        : false;
+          });
+        } catch {
+          // Approval infrastructure errors must fail closed.
+          approved = false;
+        }
+      }
       if (!approved) {
         context.emitTrace?.({ type: "skill.denied", skillId: id, at: new Date().toISOString(), detail: "approval required" });
         throw new AdvancedSkillPolicyError(`Approval required for skill ${id}`, "APPROVAL_REQUIRED");
