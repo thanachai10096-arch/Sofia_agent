@@ -93,9 +93,6 @@ export { MemorySessionStore } from "./session/store.js";
 export { SqliteSessionStore } from "./session/sqlite-store.js";
 export type { Session } from "./session/store.js";
 
-export { createSofiaAgentDependencies } from "./models/factory.js";
-export { RedisMessagingRateLimiter, REDIS_MESSAGING_RATE_LIMIT_SCRIPT } from "./integrations/messaging/redis-rate-limiter.js";
-export type { RedisEvalClient, RedisMessagingRateLimiterOptions } from "./integrations/messaging/redis-rate-limiter.js";
 export { skillSuccessScorer, skillRankingEngine, promptVariantEvaluator, tokenBudgetPlanner, skillPromotionGate, registerVerifiedEvolutionSkills } from "./skills/evolution-handlers.js";
 export { agentTaskDelegator, specialistRouter, handoffContractManager, parallelWorkCoordinator, disagreementResolver, registerVerifiedAgentCoordinationSkills } from "./skills/agent-coordination-handlers.js";
 export { repositoryMapper, codebaseSemanticSearch, implementationPlanner, typeScriptDiagnosticTriage, refactoringPlanner, registerVerifiedCodingPlanningSkills } from "./skills/coding-planning-handlers.js";
