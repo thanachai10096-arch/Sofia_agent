@@ -692,11 +692,11 @@ test("API concurrency limits isolate authenticated keys and deny a zero limit", 
   assert.deepEqual(await sameKey.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
 
   release();
-  for (const id of [firstRun.id, otherRun.id]) {
+  for (const [id, token] of [[firstRun.id, "test-token"], [otherRun.id, "other-token"]] as const) {
     let status = "running";
     for (let attempt = 0; attempt < 50 && status === "running"; attempt += 1) {
       const response = await fetch(url + "/v1/agent/runs/" + id, {
-        headers: { authorization: "Bearer test-token" },
+        headers: { authorization: "Bearer " + token },
       });
       status = (await response.json() as { status: string }).status;
       if (status === "running") await new Promise<void>((resolve) => setTimeout(resolve, 10));
