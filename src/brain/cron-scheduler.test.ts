@@ -167,14 +167,10 @@ test("recovery reconciles persisted jobs and suppresses indeterminate resubmissi
 test("file cron store serializes concurrent processes without losing updates", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "sofia-cron-lock-test-"));
   const moduleUrl = pathToFileURL(path.join(process.cwd(), "src", "brain", "cron-scheduler.ts")).href;
-  const script = `
-    import { FileCronStore } from ${JSON.stringify(moduleUrl)};
-    const store = new FileCronStore("multi-process-lock-test", process.env.CRON_TEST_ROOT);
-    await store.transact(async state => {
-      await new Promise(resolve => setTimeout(resolve, 40));
-      state.audit.push({ at: new Date().toISOString(), actor: "test", action: "lock.test", scheduleId: String(state.audit.length) });
-    });
-  `;
+  const script = "import { FileCronStore } from " + JSON.stringify(moduleUrl) + ";\n" +
+    "const store = new FileCronStore('multi-process-lock-test', process.env.CRON_TEST_ROOT);\n" +
+    "await store.transact(async state => { await new Promise(resolve => setTimeout(resolve, 40)); " +
+    "state.audit.push({ at: new Date().toISOString(), actor: 'test', action: 'lock.test', scheduleId: String(state.audit.length) }); });";
   const cli = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
   const runChild = () => new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [cli, "--eval", script], {
