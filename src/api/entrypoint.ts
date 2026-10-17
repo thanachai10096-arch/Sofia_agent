@@ -161,9 +161,11 @@ if (discordConfigured) {
       if (!job.ownerKeyId?.startsWith("discord:") || !job.notificationChannelId ||
           job.notificationDelivered || job.status === "queued" || job.status === "running") continue;
       try {
-        const message = job.snapshot
-          ? "Sofia recovered interrupted job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
-          : "Sofia recovered interrupted job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
+        const message = job.status === "completed"
+          ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
+          : job.snapshot
+            ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
+            : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
         await discordTransport.sendMessage(job.notificationChannelId, message);
         await deps.jobRuntime.markNotificationDelivered?.(job.id);
       } catch {
