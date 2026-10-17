@@ -35,10 +35,6 @@ export async function runDiscordTaskAsDurableJob(
   while (current.status === "queued" || current.status === "running") {
     options.signal?.throwIfAborted();
     await new Promise<void>((resolve, reject) => {
-      if (pollIntervalMs === 0) {
-        resolve();
-        return;
-      }
       const timer = setTimeout(() => {
         options.signal?.removeEventListener("abort", onAbort);
         resolve();
