@@ -74,3 +74,5 @@ export { browserWorkflowPlanner, browserStateVerifier } from "./skills/security-
 export { approvalGateManager, securityRegressionTester } from "./skills/security-coordination-handlers.js";
 
 export { integrationTestDesigner, endToEndTestPlanner, flakyTestDetector, releaseReadinessAuditor } from "./skills/security-coordination-handlers.js";
+
+export { agentMessageValidator, sharedTaskBoard, agentResultReviewer, loopDeadlockDetector, humanGoalAlignmentMonitor } from "./skills/security-coordination-handlers.js";
