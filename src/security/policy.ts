@@ -14,7 +14,7 @@ export const defaultPolicy:ExecutionPolicy={
 };
 const riskRank:Record<RiskLevel,number>={low:0,medium:1,high:2,critical:3};
 export function loadExecutionPolicyFromEnv():ExecutionPolicy{
-  const bool=(name:string,fallback:boolean)=>process.env[name]===undefined?fallback:process.env[name]==="true";
+  const bool=(name:string,fallback:boolean)=>{const value=process.env[name];if(value===undefined)return fallback;return /^(?:true|1|yes|on)$/i.test(value.trim());};
   const num=(name:string,fallback:number)=>{const n=Number(process.env[name]);return Number.isFinite(n)&&n>0?n:fallback;};
   const raw=process.env.SOFIA_MAX_RISK;
   const maxRisk:RiskLevel=raw==="low"||raw==="medium"||raw==="high"||raw==="critical"?raw:defaultPolicy.maxRisk;
@@ -59,7 +59,9 @@ export function classifyToolEffects(name: string): ToolEffect[] {
   if (name === "desktop.input.click" || name === "desktop.input.type_text" ||
       name === "desktop.input.press_key") return ["destructive"];
   if (name === "workspace.read_file" || name === "workspace.list_files" ||
-      name === "workspace.search" || name === "git.diff" || name === "project.verify") return ["read"];
+      name === "workspace.search" || name === "git.diff") return ["read"];
+  // Verification invokes workspace package scripts (typecheck/test/build), which can execute arbitrary code.
+  if (name === "project.verify") return ["shell"];
   if (name === "git.run") return ["read", "write", "shell", "network"];
   // Unknown registered tools are privileged until the operator explicitly declares effects.
   return ["destructive"];
