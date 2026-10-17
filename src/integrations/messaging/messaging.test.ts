@@ -83,6 +83,41 @@ test("rate limit is scoped by platform, user and channel", async () => {
   assert.equal((await gateway.dispatch(message({ messageId: "m3" }))).status, "handled");
   await gateway.stop();
 });
+test("gateway uses injected shared rate limiter and fails closed when it errors", async () => {
+  const consumed: Array<{ key: string; limit: number; windowMs: number; now: number }> = [];
+  const gateway = createMessagingGateway({
+    enabled: true,
+    adapters: [adapter()],
+    allowUser: () => true,
+    maxMessagesPerWindow: 2,
+    rateWindowMs: 5_000,
+    now: () => 1234,
+    rateLimiter: {
+      consume(input) { consumed.push(input); return false; },
+    },
+    onMessage: async () => { throw new Error("must not execute"); },
+  });
+  assert.equal((await gateway.dispatch(message())).status, "rate_limited");
+  assert.equal(consumed.length, 1);
+  assert.deepEqual(consumed[0], {
+    key: "8:telegram|2:u1|2:c1",
+    limit: 2,
+    windowMs: 5_000,
+    now: 1234,
+  });
+  await gateway.stop();
+
+  const broken = createMessagingGateway({
+    enabled: true,
+    adapters: [adapter()],
+    allowUser: () => true,
+    rateLimiter: { consume() { throw new Error("store unavailable"); } },
+    onMessage: async () => { throw new Error("must not execute"); },
+  });
+  assert.equal((await broken.dispatch(message())).status, "rate_limited");
+  await broken.stop();
+});
+
 test("session keys isolate platform, user and conversation without separator collisions", () => {
   const base = message().identity;
   assert.notEqual(messagingSessionKey(base), messagingSessionKey({ ...base, userId: "u2" }));
