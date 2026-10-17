@@ -90,14 +90,24 @@ export class FileCronStore implements CronStore {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
         try {
-          const info = await fs.stat(this.lock);
-          if (Date.now() - info.mtimeMs > 30_000) {
-            await fs.rm(this.lock, { force: true });
-            continue;
+          const owner = JSON.parse(await fs.readFile(this.lock, "utf8")) as { pid?: number };
+          if (!Number.isInteger(owner.pid) || (owner.pid ?? 0) < 1) {
+            if (Date.now() >= deadline) throw new Error("Cron scheduler state lock has no valid owner");
+          } else {
+            try {
+              process.kill(owner.pid!, 0);
+            } catch (ownerError) {
+              if ((ownerError as NodeJS.ErrnoException).code === "ESRCH") {
+                await fs.rm(this.lock, { force: true });
+                continue;
+              }
+              if ((ownerError as NodeJS.ErrnoException).code !== "EPERM") throw ownerError;
+            }
           }
         } catch (statError) {
           if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
-          throw statError;
+          if ((statError as NodeJS.ErrnoException).code !== "SyntaxError") throw statError;
+          if (Date.now() >= deadline) throw new Error("Cron scheduler state lock owner could not be read");
         }
         if (Date.now() >= deadline) throw new Error("Timed out waiting for cron scheduler state lock");
         await new Promise(resolve => setTimeout(resolve, 15));
@@ -324,6 +334,12 @@ export class CronScheduler {
         try {
           const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId });
           job = submitted;
+          if (controller.signal.aborted) {
+            await this.runtime.cancel(submitted.id).catch(() => false);
+            status = "cancelled";
+            errorText = String(controller.signal.reason ?? "Scheduled execution cancelled");
+            break;
+          }
           await this.store.transact(async state => {
             const execution = state.history.find(h => h.id === executionId);
             if (execution) {
