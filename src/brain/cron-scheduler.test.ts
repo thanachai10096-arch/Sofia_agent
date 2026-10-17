@@ -124,3 +124,36 @@ test("run-once misfire policy coalesces backlog into one execution", async () =>
   assert.equal(state.history[0].scheduledFor, "2026-10-17T00:01:00.000Z");
   assert.equal(state.schedules[0].nextRunAt, "2026-10-17T00:06:00.000Z");
 });
+
+
+test("recovery reconciles persisted jobs and suppresses indeterminate resubmission", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  const runtime = {
+    async submit() { submitted++; throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      return id === "persisted-job"
+        ? { id, status: "completed", task: "already ran" } as JobRecord
+        : undefined;
+    },
+    async cancel() { return true; }, async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const schedule = await scheduler.create({
+    name: "recover", task: "recovery task", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push(
+    { id: "lost-claim", scheduleId: schedule.id, scheduledFor: "2026-10-16T23:58:00.000Z",
+      startedAt: "2026-10-16T23:58:00.000Z", status: "claimed", attempt: 0 },
+    { id: "known-job", scheduleId: schedule.id, scheduledFor: "2026-10-16T23:59:00.000Z",
+      startedAt: "2026-10-16T23:59:00.000Z", status: "running", jobId: "persisted-job", attempt: 1 },
+  );
+  const result = await scheduler.recover();
+  assert.deepEqual(result, { reconciled: 2, monitoring: 0, indeterminate: 1 });
+  assert.equal(submitted, 0);
+  assert.equal(state.history.find((item: any) => item.id === "lost-claim").status, "failed");
+  assert.match(state.history.find((item: any) => item.id === "lost-claim").error, /indeterminate/i);
+  assert.equal(state.history.find((item: any) => item.id === "known-job").status, "completed");
+});
