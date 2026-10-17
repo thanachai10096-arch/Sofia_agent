@@ -86,7 +86,7 @@ export const sessionHandoff = (input: unknown) => {
   const pending = strings(value.pending, "pending", 100);
   const constraints = strings(value.constraints, "constraints", 100);
   const evidenceIds = strings(value.evidenceIds, "evidenceIds", 200);
-  return { summary: redactSecrets(summary), completed: completed.map(redactSecrets), pending: pending.map(redactSecrets), constraints: constraints.map(redactSecrets), evidenceIds, handoffCreated: true, sessionMutated: false };
+  return { summary: redactSecrets(summary), completed: completed.map(item => redactSecrets(item)), pending: pending.map(item => redactSecrets(item)), constraints: constraints.map(item => redactSecrets(item)), evidenceIds, handoffCreated: true, sessionMutated: false };
 };
 
 /** Applies a transparent retention recommendation to supplied metadata only. */
