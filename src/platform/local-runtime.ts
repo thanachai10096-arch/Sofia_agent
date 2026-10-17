@@ -193,6 +193,13 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
     run,
     git: async (args, options = {}) => {
       assertSafeGitArgs(args);
+      if (["clone", "fetch", "pull", "push"].includes(args[0] ?? "")) {
+        throw new Error("Network-capable Git operations require a dedicated allowlisted network transport and are disabled in the local runtime.");
+      }
+      const shellEnabled = /^(?:true|1|yes|on)$/i.test((process.env.SOFIA_ALLOW_SHELL ?? "").trim());
+      if (shellEnabled && process.env.SOFIA_SANDBOX_MODE !== "docker") {
+        throw new Error("SOFIA_ALLOW_SHELL requires SOFIA_SANDBOX_MODE=docker so Git execution is isolated.");
+      }
       const cwd = await contained(options.cwd ?? ".");
       try {
         const result = await execFileAsync("git", args, {
