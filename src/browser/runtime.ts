@@ -274,8 +274,13 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
   constructor(private readonly headless = true) {}
 
   async launch(): Promise<BrowserSession> {
-    const load = new Function("return import('playwright')") as () => Promise<any>;
-    const playwright = await load();
+    let playwright: any;
+    try {
+      const moduleName = "playwright";
+      playwright = await import(moduleName);
+    } catch {
+      throw new Error("Browser runtime requires the optional Playwright package. Install it with npm install playwright.");
+    }
     const proxy = await createBrowserEgressProxy();
     let browser: any;
     let context: any;
