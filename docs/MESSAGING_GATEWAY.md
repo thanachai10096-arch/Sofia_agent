@@ -35,6 +35,9 @@ At the application composition root:
 
 The code outline above is not a claim that the repository's API server is already wired to these transports. Keep secrets out of checked-in config, client builds, test fixtures, and logs.
 
+
+- The shared Sofia SDK supports an optional `idempotencyKey` for async runs. Reuse a key only for the same logical request; the API returns `409 idempotency_key_reused` if the same key is presented with a different request payload. This protection is currently process-local and is not persisted across server restarts.
+
 ## Production acceptance checklist
 
 - [ ] Typecheck, build, and full test suite pass on the PR head.
