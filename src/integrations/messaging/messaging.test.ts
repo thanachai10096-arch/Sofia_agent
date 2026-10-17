@@ -67,6 +67,5 @@ test("message chunking respects limits and preserves meaningful text", () => {
   const text = "first line\n" + "x".repeat(90) + "\nlast";
   const chunks = splitMessage(text, 40);
   assert.ok(chunks.every((chunk) => chunk.length <= 40));
-  assert.equal(chunks.join(""), text.replace(/\n/g, "").replace(/ /g, "")) === false;
-  assert.equal(chunks.join("").replace(/\n/g, ""), text.replace(/\n/g, ""));
+  assert.equal(chunks.join(""), text);
 });
