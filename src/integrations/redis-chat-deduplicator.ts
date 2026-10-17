@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { ChatMessageDeduplicator } from "../chat-adapter.js";
-import type { RedisEvalClient } from "./redis-rate-limiter.js";
+import type { ChatMessageDeduplicator } from "./chat-adapter.js";
+import type { RedisEvalClient } from "./messaging/redis-rate-limiter.js";
 
 /** Atomically claim a message key for the TTL if it has not already been claimed. */
 export const REDIS_CHAT_DEDUPE_CLAIM_SCRIPT = [
