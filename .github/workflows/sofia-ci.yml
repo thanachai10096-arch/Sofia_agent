@@ -84,6 +84,9 @@ jobs:
       - name: Verify browser egress proxy against public HTTP and HTTPS
         run: node scripts/browser-egress-proxy-smoke.mjs
 
+      - name: Build production container image
+        run: docker build --tag sofia-agent-ci .
+
 
   browser-runtime-smoke:
     name: Playwright browser egress integration
