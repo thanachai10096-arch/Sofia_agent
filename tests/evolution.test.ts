@@ -11,7 +11,7 @@ test("skill ranking improves after verified success and declines after failure",
   const afterSuccess = engine.rank(["test-repair", "new-skill"])[0];
   assert.ok(afterSuccess);
   assert.equal(afterSuccess.id, "test-repair");
-  assert.equal(afterSuccess.successRate, 1);
+  assert.equal(afterSuccess.successRate, 2 / 3);
   assert.equal(afterSuccess.attempts, 1);
 
   engine.recordFailure("test-repair", "assertion mismatch");
@@ -22,6 +22,22 @@ test("skill ranking improves after verified success and declines after failure",
   assert.equal(skill.attempts, 2);
   assert.equal(skill.failureHistory.at(-1)?.message, "assertion mismatch");
   assert.equal(skill.successHistory.length, 1);
+});
+
+test("skill ranking smooths tiny samples instead of treating one success as certainty", () => {
+  const engine = new EvolutionEngine();
+  engine.recordSuccess("one-shot-skill", 1, 0, "coding");
+  const one = engine.rank(["one-shot-skill"], "coding")[0];
+  assert.ok(one);
+  assert.ok(one.successRate < 1);
+  assert.ok(one.successRate > 0.5);
+
+  for (let i = 0; i < 20; i++) {
+    engine.recordSuccess("proven-skill", 2, 0, "coding");
+  }
+  const ranked = engine.rank(["one-shot-skill", "proven-skill"], "coding");
+  assert.equal(ranked[0]?.id, "proven-skill");
+  assert.ok((ranked[0]?.successRate ?? 0) > (ranked[1]?.successRate ?? 1));
 });
 
 test("run-level task type statistics track success and failure", () => {
