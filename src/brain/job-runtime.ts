@@ -18,6 +18,8 @@ export interface JobRecord {
   notificationChannelId?: string;
   /** Opaque per-user/per-channel key; never shared across Discord principals. */
   sessionKey?: string;
+  /** Original user task before historical session context is appended. */
+  sessionTask?: string;
   notificationDelivered?: boolean;
   snapshot?: BrainRunSnapshot;
   result?: Awaited<ReturnType<SofiaBrain["run"]>>;
@@ -26,7 +28,7 @@ export interface JobRecord {
 function isJobCancelled(record: JobRecord): boolean { return record.status === "cancelled"; }
 
 export interface JobRuntime {
-  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string }): Promise<JobRecord>;
+  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
@@ -101,7 +103,7 @@ export class DurableJobRuntime implements JobRuntime {
     this.state = new FileJobStateStore(namespace);
   }
 
-  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string }): Promise<JobRecord> {
+  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const record: JobRecord = {
@@ -109,6 +111,7 @@ export class DurableJobRuntime implements JobRuntime {
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
       ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
       ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
+      ...(input.sessionTask ? { sessionTask: input.sessionTask } : {}),
       notificationDelivered: false,
     };
     this.jobs.set(id, record);
