@@ -1,0 +1,106 @@
+[
+  {
+    "id": "typescript-tests",
+    "query": "How do I run the TypeScript test suite?",
+    "documents": [
+      {
+        "id": "ts-test-command",
+        "text": "Run the TypeScript tests with npm test and validate the project with npm run typecheck.",
+        "relevant": true
+      },
+      {
+        "id": "python-service",
+        "text": "The Python AI service exposes embeddings and reranking endpoints.",
+        "relevant": false
+      },
+      {
+        "id": "git-branch",
+        "text": "Create a feature branch before making changes and open a pull request.",
+        "relevant": false
+      },
+      {
+        "id": "ts-build",
+        "text": "Build the TypeScript project with npm run build.",
+        "relevant": true
+      }
+    ]
+  },
+  {
+    "id": "permission-boundary",
+    "query": "Which component is allowed to authorize tool execution?",
+    "documents": [
+      {
+        "id": "ts-authority",
+        "text": "The TypeScript Sofia Core owns identity, authorization, tool permissions, action approval, and execution policy.",
+        "relevant": true
+      },
+      {
+        "id": "python-ranking",
+        "text": "The Python AI service returns embedding vectors and document relevance scores only.",
+        "relevant": false
+      },
+      {
+        "id": "model-loading",
+        "text": "Sentence Transformer models are loaded lazily when the endpoint is first used.",
+        "relevant": false
+      },
+      {
+        "id": "approval",
+        "text": "Actions requiring approval must be authorized by the TypeScript control plane before execution.",
+        "relevant": true
+      }
+    ]
+  },
+  {
+    "id": "memory-fallback",
+    "query": "What happens when the semantic AI service is offline?",
+    "documents": [
+      {
+        "id": "fallback",
+        "text": "When semantic retrieval is disabled or unavailable, Sofia falls back to the existing lexical ProjectMemoryStore search.",
+        "relevant": true
+      },
+      {
+        "id": "docker",
+        "text": "The AI service container uses Python 3.12 slim and runs as an unprivileged user.",
+        "relevant": false
+      },
+      {
+        "id": "rerank",
+        "text": "The reranking endpoint scores candidate documents against a query.",
+        "relevant": false
+      },
+      {
+        "id": "no-model",
+        "text": "Python is optional and users can run core Sofia without downloading model weights.",
+        "relevant": true
+      }
+    ]
+  },
+  {
+    "id": "browser-security",
+    "query": "How should browser access be restricted?",
+    "documents": [
+      {
+        "id": "browser-egress",
+        "text": "Browser network egress should enforce an explicit allowlist and block private or local network destinations.",
+        "relevant": true
+      },
+      {
+        "id": "semantic-search",
+        "text": "Semantic search ranks project memory using embeddings and a cross encoder.",
+        "relevant": false
+      },
+      {
+        "id": "budget",
+        "text": "The token budget limits model calls and total context size.",
+        "relevant": false
+      },
+      {
+        "id": "browser-approval",
+        "text": "Browser and desktop capabilities must be controlled by explicit TypeScript permissions and action approvals.",
+        "relevant": true
+      }
+    ]
+  }
+]
