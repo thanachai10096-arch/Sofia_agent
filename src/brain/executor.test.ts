@@ -512,3 +512,44 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
   assert.equal(replannedActionCalls, 1, "changed action must not be skipped due to a reused step ID");
   assert.equal(report.completed, true, report.summary);
 });
+
+
+test("Brain aborts immediately after a tool-start policy event before executing the tool", async () => {
+  const controller = new AbortController();
+  const tools = makeTools();
+  let executions = 0;
+  const execute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    executions += 1;
+    return execute(call, context);
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+      onEvent(event) {
+        if (event.type === "brain.tool.started") {
+          controller.abort(new Error("API tool-call quota exceeded."));
+        }
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  await assert.rejects(
+    () => brain.run({ task: "Create hello.txt", signal: controller.signal }),
+  );
+  assert.equal(executions, 0, "tool execution must not begin after policy abort");
+});
