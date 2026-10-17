@@ -76,3 +76,5 @@ export { approvalGateManager, securityRegressionTester } from "./skills/security
 export { integrationTestDesigner, endToEndTestPlanner, flakyTestDetector, releaseReadinessAuditor } from "./skills/security-coordination-handlers.js";
 
 export { agentMessageValidator, sharedTaskBoard, agentResultReviewer, loopDeadlockDetector, humanGoalAlignmentMonitor } from "./skills/security-coordination-handlers.js";
+
+export { workflowTriggerEvaluator, longRunningJobMonitor, slaWatchdog, notificationPlanner, failureMemoryCurator } from "./skills/security-coordination-handlers.js";
