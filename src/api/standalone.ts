@@ -48,7 +48,7 @@ const server = createSofiaApi(createSofiaAgentDependencies(workspace), {
 });
 
 server.on("error", (error) => {
-  console.error(JSON.stringify({ level: "error", event: "api.server_error", message: error.message }));
+  console.error(JSON.stringify({ level: "error", event: "api.server_error", errorClass: error.name, code: "code" in error ? error.code : undefined }));
   process.exitCode = 1;
 });
 server.listen(port, host, () => {
@@ -67,7 +67,7 @@ const shutdown = (signal: string) => {
   console.log(JSON.stringify({ level: "info", event: "api.shutdown", signal }));
   server.close((error) => {
     if (error) {
-      console.error(JSON.stringify({ level: "error", event: "api.shutdown_error", message: error.message }));
+      console.error(JSON.stringify({ level: "error", event: "api.shutdown_error", errorClass: error.name }));
       process.exitCode = 1;
     }
   });
