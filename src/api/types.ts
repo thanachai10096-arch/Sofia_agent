@@ -58,6 +58,8 @@ export interface SofiaApiConfig {
   runStore?: RunRecordStore;
   /** Optional persistent API usage quota store; local file stores are single-process only. */
   usageStore?: UsageStore;
+  /** Optional readiness probe for orchestrators; false keeps /ready at HTTP 503. */
+  readinessCheck?: () => boolean | Promise<boolean>;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
