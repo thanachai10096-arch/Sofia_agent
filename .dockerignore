@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+dist
+coverage
+.sofia
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
