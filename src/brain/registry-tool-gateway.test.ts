@@ -6,6 +6,7 @@ import { createToolRegistry } from "../tools/registry.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { defaultPolicy } from "../security/policy.js";
 import { SecurityController } from "../security/controller.js";
+import { MemorySecurityAudit } from "../security/audit.js";
 import { MapToolRegistry } from "../tools/types.js";
 
 function runtime(): WorkspaceRuntime {
@@ -324,4 +325,66 @@ test("Brain tool gateway rejects invalid schema input before approval or executi
   assert.match(result.error?.message ?? "", /missing required property "content"/i);
   assert.equal(approvalCalls, 0, "malformed input must be rejected before prompting for approval");
   assert.equal(executions, 0, "malformed input must never reach the tool implementation");
+});
+
+
+test("tool gateway redacts secrets from tool output, errors, and audit records", async () => {
+  const audit = new MemorySecurityAudit();
+  const registry = new MapToolRegistry([
+    {
+      name: "custom.read",
+      description: "Return a fixture containing secret-shaped values",
+      inputSchema: { type: "object" },
+      effects: ["read"] as const,
+      async execute() {
+        return {
+          apiKey: "sk-live-secret-value",
+          message: "Authorization: Bearer abcdef123456",
+          freeText: "accidental unlabelled key sk-live-secret-value",
+          nested: { password: "hunter2" },
+        };
+      },
+    },
+    {
+      name: "custom.fail",
+      description: "Throw a fixture containing secret-shaped values",
+      inputSchema: { type: "object" },
+      effects: ["read"] as const,
+      async execute() {
+        throw new Error("api_key=sk-error-secret-value");
+      },
+    },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    undefined,
+    undefined,
+    undefined,
+    audit,
+  );
+  const context = {
+    runId: "redaction-test",
+    principalId: "test-principal",
+    signal: new AbortController().signal,
+    requireApproval: false,
+    notifyApproval() {},
+  };
+
+  const success = await gateway.execute({ tool: "custom.read", input: {} }, context);
+  assert.equal(success.ok, true);
+  const serialized = JSON.stringify(success.data);
+  assert.equal(serialized.includes("sk-live-secret-value"), false);
+  assert.equal(serialized.includes("unlabelled key [REDACTED]"), true);
+  assert.equal(serialized.includes("abcdef123456"), false);
+  assert.equal(serialized.includes("hunter2"), false);
+
+  const failure = await gateway.execute({ tool: "custom.fail", input: {} }, context);
+  assert.equal(failure.ok, false);
+  assert.equal(failure.error?.message.includes("sk-error-secret-value"), false);
+
+  const auditText = JSON.stringify(audit.list());
+  assert.equal(auditText.includes("sk-live-secret-value"), false);
+  assert.equal(auditText.includes("sk-error-secret-value"), false);
+  assert.equal(auditText.includes("hunter2"), false);
 });
