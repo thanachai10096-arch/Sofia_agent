@@ -135,8 +135,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
       }
       if (!/^\d{1,24}$/.test(interaction.id) || !/^\d{1,24}$/.test(interaction.channel_id) ||
           !interaction.application_id || !/^\d{1,24}$/.test(interaction.application_id) ||
-          typeof interaction.token !== "string" || !interaction.token || interaction.token.length > 256 ||
-          /[\x00-\x1f\x7f]/.test(interaction.token)) {
+          typeof interaction.token !== "string" || !/^[A-Za-z0-9._-]{1,256}$/.test(interaction.token)) {
         return { status: 400, body: { error: "Invalid Discord interaction metadata." } };
       }
       const now = Date.now();
