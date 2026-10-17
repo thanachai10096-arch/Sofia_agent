@@ -9,6 +9,7 @@ import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
+import { redactSecrets } from "../security/guard.js";
 
 interface ActiveRun {
   id: string;
@@ -159,7 +160,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const runStore = config.runStore;
   const recordForRun = (run: ActiveRun): RunRecord => ({
     id: run.id, status: run.status,
-    ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
+    ...(run.result ? { result: redactSecrets(run.result) as RunRecord["result"] } : {}),
     ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
     ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
     ...(run.idempotencyKeyHash ? { idempotencyKeyHash: run.idempotencyKeyHash } : {}),
@@ -227,7 +228,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const publicResponse = (run: ActiveRun): AgentRunResponse => ({
     id: run.id,
     status: run.status,
-    ...(run.result ? { result: run.result } : {}),
+    ...(run.result ? { result: redactSecrets(run.result) as AgentRunResponse["result"] } : {}),
     ...(run.error ? { error: run.error } : {}),
   });
 
@@ -506,7 +507,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
             onEvent: (event) => {
-              send({ type: "event", runId, event });
+              send({ type: "event", runId, event: redactSecrets(event) });
               if (event.type === "tool.started" && !usage.recordToolCalls(auth.keyId)) {
                 toolQuotaExceeded = true;
                 controller.abort(new Error("API tool-call quota exceeded."));
@@ -516,7 +517,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (controller.signal.aborted) throw new Error(timedOut ? "Run timed out." : toolQuotaExceeded ? "API tool-call quota exceeded." : "Run cancelled.");
           run.result = result;
           run.status = "completed";
-          send({ type: "result", runId, status: "completed", result: run.result });
+          send({ type: "result", runId, status: "completed", result: redactSecrets(run.result) });
         } catch (error) {
           run.status = timedOut || toolQuotaExceeded ? "failed" : controller.signal.aborted ? "cancelled" : "failed";
           run.error = timedOut ? "Run timed out." : toolQuotaExceeded ? "API tool-call quota exceeded." : controller.signal.aborted ? "Run cancelled." : publicAgentError();
@@ -639,7 +640,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             if (toolQuotaExceeded) return json(res, 429, { id: runId, status: "failed", error: "API tool-call quota exceeded." }, origin, config);
             return json(res, 504, { id: runId, status: "failed", error: "Request timed out or was cancelled." }, origin, config);
           }
-          return json(res, 200, { id: runId, status: "completed", result }, origin, config);
+          return json(res, 200, { id: runId, status: "completed", result: redactSecrets(result) }, origin, config);
         } catch (error) {
           if (controller.signal.aborted && toolQuotaExceeded) {
             return json(res, 429, { id: runId, status: "failed", error: "API tool-call quota exceeded." }, origin, config);
@@ -665,11 +666,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 404, { error: "job_not_found" }, origin, config);
         }
         if (req.method === "GET" && !action) {
-          return json(res, 200, job, origin, config);
+          return json(res, 200, redactSecrets(job), origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
-          catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
+          try { return json(res, 202, redactSecrets(await deps.jobRuntime.resume(jobId)), origin, config); }
+          catch { return json(res, 409, { error: "job_resume_failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
           const cancelled = await deps.jobRuntime.cancel(jobId);
@@ -680,7 +681,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (req.method === "GET" && requestPath === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
         const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
-        return json(res, 200, { jobs }, origin, config);
+        return json(res, 200, { jobs: redactSecrets(jobs) }, origin, config);
       }
 
       if (req.method === "POST" && requestPath === "/v1/jobs") {
@@ -696,9 +697,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ownerKeyId: auth.keyId,
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });
-          return json(res, 202, job, origin, config);
+          return json(res, 202, redactSecrets(job), origin, config);
         } catch (error) {
-          return json(res, 502, { error: "job_submit_failed", message: error instanceof Error ? error.message : "Job submission failed" }, origin, config);
+          return json(res, 502, { error: "job_submit_failed" }, origin, config);
         }
       }
 
