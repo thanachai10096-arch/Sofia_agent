@@ -585,6 +585,11 @@ export class SofiaBrain {
       stepId: step.id,
     });
 
+    // Event observers can enforce quotas or host policy by aborting the shared
+    // signal. Re-check immediately after notification, before ToolGateway.execute
+    // can produce any side effect.
+    this.signal.throwIfAborted();
+
     let result: ToolResult;
 
     try {
