@@ -1,12 +1,40 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { CronScheduler, FileCronStore, nextCronOccurrence, type CronStore } from "./cron-scheduler.js";
 import type { JobRecord, JobRuntime } from "./job-runtime.js";
+
+test("stale lock is not automatically unlinked because that can delete a replacement owner lock", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "sofia-cron-stale-lock-test-"));
+  const namespace = "stale-lock-safety-test";
+  const id = createHash("sha256").update(namespace).digest("hex");
+  const lockPath = path.join(root, id + ".json.lock");
+  await writeFile(lockPath, JSON.stringify({ pid: Number.MAX_SAFE_INTEGER, at: Date.now() }), { mode: 0o600 });
+  try {
+    const store = new FileCronStore(namespace, root);
+    await assert.rejects(() => store.transact(state => state.audit.length), /appears stale.*verify no scheduler process/i);
+    await access(lockPath);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("schedule quota is enforced atomically per owner", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const runtime = { async submit() { throw new Error("unused"); } } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, maxSchedulesPerOwner: 1 });
+  const input = { name: "limited", task: "task", runAt: "2026-10-18T00:00:00.000Z", timeZone: "UTC", ownerKeyId: "alice" };
+  await scheduler.create(input, "alice");
+  await assert.rejects(() => scheduler.create({ ...input, name: "second" }, "alice"), /quota exceeded/i);
+  await scheduler.create({ ...input, name: "bob schedule", ownerKeyId: "bob" }, "bob");
+  assert.equal(state.schedules.length, 2);
+});
 
 test("cron next occurrence respects timezone offset and weekday", () => {
   const next = nextCronOccurrence("0 9 * * 1-5", "Asia/Bangkok", new Date("2026-10-16T03:00:00.000Z"));
