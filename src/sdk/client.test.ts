@@ -25,6 +25,21 @@ test("mobile async start returns a durable run ID and sends async=true", async (
   assert.deepEqual(JSON.parse(String(request?.body)), { task: "inspect the project", async: true });
 });
 
+test("SDK forwards an optional persistent session ID to run endpoints", async () => {
+  let body: unknown;
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return response(200, { id: "run-session", status: "completed", result: { output: "done", kind: "text", steps: 1 } });
+    },
+  });
+
+  await client.run({ task: "continue our conversation", sessionId: "conversation-42" });
+  assert.deepEqual(body, { task: "continue our conversation", sessionId: "conversation-42" });
+});
+
 test("mobile polling retries transient server errors with bounded backoff", async () => {
   let calls = 0;
   const client = new SofiaClient({
