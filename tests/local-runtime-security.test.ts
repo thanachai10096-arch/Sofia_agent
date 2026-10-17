@@ -101,3 +101,24 @@ test("Docker sandbox mode fails closed without an explicitly pinned image", asyn
     await rm(f.parent, { recursive: true, force: true });
   }
 });
+
+
+test("workspace runtime fails closed when shell is enabled without Docker isolation", async () => {
+  const f = await fixture();
+  const oldShell = process.env.SOFIA_ALLOW_SHELL;
+  const oldMode = process.env.SOFIA_SANDBOX_MODE;
+  process.env.SOFIA_ALLOW_SHELL = "true";
+  delete process.env.SOFIA_SANDBOX_MODE;
+  try {
+    await assert.rejects(
+      f.runtime.run(process.execPath, ["-e", "process.exit(0)"]),
+      /SOFIA_ALLOW_SHELL requires SOFIA_SANDBOX_MODE=docker/,
+    );
+  } finally {
+    if (oldShell === undefined) delete process.env.SOFIA_ALLOW_SHELL;
+    else process.env.SOFIA_ALLOW_SHELL = oldShell;
+    if (oldMode === undefined) delete process.env.SOFIA_SANDBOX_MODE;
+    else process.env.SOFIA_SANDBOX_MODE = oldMode;
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});
