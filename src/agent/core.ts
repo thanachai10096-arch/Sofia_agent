@@ -10,7 +10,29 @@ import { validateToolInput } from "../tools/types.js";
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
 
+  private readonly sessionTails = new Map<string, Promise<void>>();
+
   async run(request: AgentRequest): Promise<AgentResult> {
+    const sessionId = request.sessionId;
+    if (!sessionId || !this.deps.sessionStore) return this.runUnlocked(request);
+
+    // Keep each session's turns contiguous so concurrent requests cannot save
+    // stale copies of the same transcript over one another.
+    const previous = this.sessionTails.get(sessionId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.catch(() => undefined).then(() => gate);
+    this.sessionTails.set(sessionId, tail);
+    await previous.catch(() => undefined);
+    try {
+      return await this.runUnlocked(request);
+    } finally {
+      release();
+      if (this.sessionTails.get(sessionId) === tail) this.sessionTails.delete(sessionId);
+    }
+  }
+
+  private async runUnlocked(request: AgentRequest): Promise<AgentResult> {
     const security = this.deps.securityController;
     const binding = security
       ? security.bindSignal(request.signal ?? new AbortController().signal)
