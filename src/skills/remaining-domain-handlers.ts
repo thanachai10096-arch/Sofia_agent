@@ -129,7 +129,7 @@ export const fileWorkspaceOperator = (input: unknown) => {
   if (!["read", "list", "search", "write", "patch", "delete"].includes(operation)) throw new TypeError("Unsupported workspace operation.");
   const relativePath = text(value.relativePath, "relativePath", 2_000);
   const parts = relativePath.replace(/\\/g, "/").split("/");
-  const traversal = relativePath.startsWith("/") || /^[A-Za-z]:/.test(relativePath) || parts.some(part => part === ".." || part === ".git" || part === "node_modules" || part === ".env");
+  const traversal = relativePath.startsWith("/") || /^[A-Za-z]:/.test(relativePath) || parts.some(part => part === ".." || [".git", "node_modules", ".env"].includes(part.toLowerCase()));
   const writeLike = ["write", "patch", "delete"].includes(operation);
   return { operation, relativePath, pathRejected: traversal, requiresApproval: writeLike, delegatedToWorkspaceRuntime: !traversal, filesystemAccessPerformed: false };
 };
