@@ -170,7 +170,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     const record = recordForRun(run);
     void Promise.resolve().then(() => runStore.save(record)).catch((error: unknown) => {
       // Store failures must be observable without creating an unhandled rejection.
-      console.error("[sofia] failed to persist run record", error instanceof Error ? error.message : "unknown error");
+      console.error(JSON.stringify({
+        level: "error",
+        event: "api.run_persist_failed",
+        errorClass: error instanceof Error ? error.name : "UnknownError",
+      }));
     });
   };
   const persistDurably = async (run: ActiveRun): Promise<void> => {
