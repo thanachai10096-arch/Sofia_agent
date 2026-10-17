@@ -383,8 +383,13 @@ export class CronScheduler {
       if (!record) throw new Error("Scheduled runtime job disappeared");
       if (record.status === "completed" || record.status === "failed" || record.status === "cancelled") return record;
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, 250);
-        const abort = () => { clearTimeout(timer); reject(signal.reason ?? new Error("Scheduled task aborted")); };
+        const cleanup = () => signal.removeEventListener("abort", abort);
+        const timer = setTimeout(() => { cleanup(); resolve(); }, 250);
+        const abort = () => {
+          clearTimeout(timer);
+          cleanup();
+          reject(signal.reason ?? new Error("Scheduled task aborted"));
+        };
         signal.addEventListener("abort", abort, { once: true });
         if (signal.aborted) abort();
       });
