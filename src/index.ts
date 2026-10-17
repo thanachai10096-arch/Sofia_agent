@@ -1,3 +1,6 @@
+export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
+export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
+
 export { SofiaAgent } from "./agent/core.js";
 export { classifyTask } from "./agent/classifier.js";
 export { ModelRouter } from "./models/router.js";
@@ -59,5 +62,3 @@ export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/gua
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
 export { VoiceWorkflow } from "./voice/workflow.js";
 export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpeechProvider, VoiceAgentReply, VoiceTurnResult, VoiceWorkflowOptions } from "./voice/workflow.js";
-export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
-export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
