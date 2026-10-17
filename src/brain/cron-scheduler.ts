@@ -217,13 +217,22 @@ export class CronScheduler {
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
     state.audit.push(event);
     if (state.audit.length > 2_000) state.audit.splice(0, state.audit.length - 2_000);
-    // Bound persisted execution history: newest 500 entries per schedule and 10,000 overall.
-    const scheduleHistory = state.history.filter(item => item.scheduleId === event.scheduleId);
-    if (scheduleHistory.length > 500) {
-      const removeIds = new Set(scheduleHistory.slice(0, scheduleHistory.length - 500).map(item => item.id));
+    // Bound terminal history without ever deleting claimed/running records: those records
+    // are the durable guard against duplicate dispatch and are required for recovery.
+    const terminal = (item: CronExecution) =>
+      item.status === "completed" || item.status === "failed" ||
+      item.status === "cancelled" || item.status === "skipped";
+    const scheduleTerminal = state.history.filter(item => item.scheduleId === event.scheduleId && terminal(item));
+    if (scheduleTerminal.length > 500) {
+      const removeIds = new Set(scheduleTerminal.slice(0, scheduleTerminal.length - 500).map(item => item.id));
       state.history = state.history.filter(item => !removeIds.has(item.id));
     }
-    if (state.history.length > 10_000) state.history.splice(0, state.history.length - 10_000);
+    if (state.history.length > 10_000) {
+      const excess = state.history.length - 10_000;
+      const removable = state.history.filter(terminal).slice(0, excess);
+      const removeIds = new Set(removable.map(item => item.id));
+      state.history = state.history.filter(item => !removeIds.has(item.id));
+    }
     await this.auditCallback?.(event);
   }
   async create(input: CronScheduleInput, actor: string): Promise<CronSchedule> {
