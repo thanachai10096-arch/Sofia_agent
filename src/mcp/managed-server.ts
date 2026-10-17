@@ -48,7 +48,7 @@ export async function connectManagedMcpServer(
     const tools: SofiaTool[] = [];
     for (const name of allowed) {
       const description = byName.get(name)!;
-      const schema = description.inputSchema;
+      const schema = description.inputSchema ?? { type: "object", properties: {}, additionalProperties: false };
       if (schema.type !== "object") throw new Error("MCP tool schema must declare type object: " + name);
       const annotations = description.annotations;
       const readOnly = annotations?.readOnlyHint === true && annotations.destructiveHint !== true;
