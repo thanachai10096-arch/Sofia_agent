@@ -71,11 +71,6 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "502": { description: Agent execution failed }
         "504": { description: Synchronous run timed out }
-    get:
-      summary: List recent runs for the authenticated key
-      responses:
-        "200": { description: Recent runs }
-        "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/agent/runs/stream:
     post:
       summary: Stream run events using Server-Sent Events
