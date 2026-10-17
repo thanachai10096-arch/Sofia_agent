@@ -27,22 +27,25 @@ export async function handleDiscordInteractionHttpRequest(
 
   const chunks: Buffer[] = [];
   let size = 0;
+  let oversized = false;
   try {
     for await (const chunk of req) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
       size += bytes.byteLength;
       if (size > maxBodyBytes) {
-        // Stop retaining data and drain the remainder before returning an error.
-        req.resume();
-        res.writeHead(413, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
-        res.end(JSON.stringify({ error: "request_too_large" }));
-        return;
+        oversized = true;
+        continue;
       }
-      chunks.push(bytes);
+      if (!oversized) chunks.push(bytes);
     }
   } catch {
     res.writeHead(400, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
     res.end(JSON.stringify({ error: "invalid_request_body" }));
+    return;
+  }
+  if (oversized) {
+    res.writeHead(413, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+    res.end(JSON.stringify({ error: "request_too_large" }));
     return;
   }
 
