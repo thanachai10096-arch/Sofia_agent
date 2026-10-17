@@ -1,6 +1,6 @@
 # Sofia Agent — Advanced Skill Catalog (100)
 
-**Status: partial implementation.** The catalog contains 100 capabilities. Forty-five runtime/security/memory/quality/research/workflow/evolution/multi-agent skills have implementation and acceptance tests and are marked `verified`; the remaining 55 entries are `planned`. A skill becomes `implemented` only after a handler exists and `verified` only after its acceptance criteria pass. Catalog metadata must never grant permissions by itself.
+**Status: partial implementation.** The catalog contains 100 capabilities. Forty-eight runtime/security/memory/quality/research/workflow/evolution/multi-agent/coding-planning skills have implementation and acceptance tests and are marked `verified`; the remaining 52 entries are `planned`. A skill becomes `implemented` only after a handler exists and `verified` only after its acceptance criteria pass. Catalog metadata must never grant permissions by itself.
 
 ## Shared implementation contract
 
