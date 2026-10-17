@@ -10,7 +10,7 @@ test("dependency scheduler returns stable topological order and parallel batches
     { id: "test", dependencies: ["inspect"] },
     { id: "inspect", dependencies: [] },
   ] }) as { order: string[]; batches: string[][]; executesTasks: boolean };
-  assert.deepEqual(result.order, ["inspect", "deploy", "docs", "test"].sort((a,b) => ["inspect","docs","test","deploy"].indexOf(a)-["inspect","docs","test","deploy"].indexOf(b)));
+  assert.deepEqual(result.order, ["inspect", "docs", "test", "deploy"]);
   assert.deepEqual(result.batches[0], ["inspect"]);
   assert.equal(result.executesTasks, false);
 });
