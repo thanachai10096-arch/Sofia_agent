@@ -65,7 +65,10 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
   const policyPath = normalized.replace(/\\/g, "/").toLowerCase();
   const segments = policyPath.split("/");
   if (blockedPaths.some((pattern) => {
-    const policyPattern = pattern.replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase();
+    const normalizedPattern = pattern.replace(/\\/g, "/");
+    let patternEnd = normalizedPattern.length;
+    while (patternEnd > 0 && normalizedPattern[patternEnd - 1] === "/") patternEnd--;
+    const policyPattern = normalizedPattern.slice(0, patternEnd).toLowerCase();
     return policyPath === policyPattern || policyPath.startsWith(policyPattern + "/") ||
       (!policyPattern.includes("/") && segments.includes(policyPattern));
   })) {
