@@ -18,7 +18,7 @@ export async function submitDiscordTask(
   task: string,
   principalId: string,
   signal?: AbortSignal,
-  metadata: { channelId?: string; sessionKey?: string } = {},
+  metadata: { channelId?: string; sessionKey?: string; sessionTask?: string } = {},
 ): Promise<DiscordDurableJobHandle> {
   if (!task.trim()) throw new Error("Discord task is required.");
   if (!principalId.trim()) throw new Error("Discord principal is required.");
@@ -29,6 +29,7 @@ export async function submitDiscordTask(
     ownerKeyId: principalId,
     ...(metadata.channelId ? { notificationChannelId: metadata.channelId } : {}),
     ...(metadata.sessionKey ? { sessionKey: metadata.sessionKey } : {}),
+    ...(metadata.sessionTask ? { sessionTask: metadata.sessionTask } : {}),
   });
   return { id: submitted.id, runtime };
 }
@@ -98,7 +99,7 @@ export async function buildDiscordSessionContext(runtime: JobRuntime, sessionKey
     .slice(0, limit)
     .reverse();
   const memories = jobs.map((job) => {
-    const task = String(redactSecrets(job.task)).trim().slice(0, 240);
+    const task = String(redactSecrets(job.sessionTask ?? job.task)).trim().slice(0, 240);
     const summary = String(redactSecrets(job.result?.summary ?? "")).trim().slice(0, 600);
     if (!task || !summary || containsPromptInjection(task) || containsPromptInjection(summary)) return "";
     return `Previous task: ${task}\nOutcome: ${summary}`;
