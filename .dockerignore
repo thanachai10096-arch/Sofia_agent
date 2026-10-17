@@ -1,5 +1,9 @@
 .git
 .github
+.npmrc
+.aws
+.ssh
+.git-credentials
 node_modules
 dist
 coverage
@@ -12,3 +16,9 @@ coverage
 *.key
 *.p12
 *.pfx
+*.crt
+*.cert
+*.secret
+credentials*
+id_rsa*
+id_ed25519*
