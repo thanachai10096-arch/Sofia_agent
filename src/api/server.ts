@@ -61,11 +61,17 @@ async function body(req: IncomingMessage, maxBytes: number): Promise<unknown> {
 function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   const header = req.headers.authorization ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  // Reject inherited object properties and malformed scope values.
-  if (!token || !Object.prototype.hasOwnProperty.call(config.apiKeys, token)) return null;
-  const scopes = config.apiKeys[token];
+  if (!token) return null;
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const hashedKeys = config.apiKeyHashes ?? {};
+  // Prefer hash-only configuration; retain the legacy map for backward compatibility.
+  const scopes = Object.prototype.hasOwnProperty.call(hashedKeys, tokenHash)
+    ? hashedKeys[tokenHash]
+    : Object.prototype.hasOwnProperty.call(config.apiKeys, token)
+      ? config.apiKeys[token]
+      : undefined;
   if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === "string")) return null;
-  return { keyId: createHash("sha256").update(token).digest("hex").slice(0, 32), scopes };
+  return { keyId: tokenHash.slice(0, 32), scopes };
 }
 
 function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapability[] {
@@ -179,6 +185,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   };
   const retention = integerSetting("runRetentionMs", config.runRetentionMs, 24 * 60 * 60 * 1000, 0, 365 * 24 * 60 * 60 * 1000);
   let lastPruneAt = 0;
+  const authFailures = new Map<string, { count: number; windowStartedAt: number; blockedUntil: number }>();
+  const authWindowMs = 60_000;
+  const authBlockMs = 60_000;
+  const authFailureLimit = 10;
 
   const publicResponse = (run: ActiveRun): AgentRunResponse => ({
     id: run.id,
@@ -273,8 +283,28 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       if (!requestPath.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, origin, config);
 
+      const clientAddress = req.socket.remoteAddress ?? "unknown";
+      const now = Date.now();
+      const previousFailure = authFailures.get(clientAddress);
+      if (previousFailure && previousFailure.blockedUntil > now) {
+        res.setHeader("retry-after", String(Math.max(1, Math.ceil((previousFailure.blockedUntil - now) / 1000))));
+        return json(res, 429, { error: "authentication_rate_limited" }, origin, config);
+      }
+      const currentFailure = !previousFailure || now - previousFailure.windowStartedAt >= authWindowMs
+        ? { count: 0, windowStartedAt: now, blockedUntil: 0 }
+        : previousFailure;
       const auth = authenticate(req, config);
-      if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
+      if (!auth) {
+        currentFailure.count += 1;
+        if (currentFailure.count >= authFailureLimit) currentFailure.blockedUntil = now + authBlockMs;
+        authFailures.set(clientAddress, currentFailure);
+        if (authFailures.size > 10_000) {
+          const oldest = authFailures.keys().next().value;
+          if (oldest !== undefined && oldest !== clientAddress) authFailures.delete(oldest);
+        }
+        return json(res, 401, { error: "unauthorized" }, origin, config);
+      }
+      authFailures.delete(clientAddress);
 
       // Authorization scopes are enforced at the API boundary, not merely used to
       // derive desktop capabilities. Admin scopes do not implicitly grant run access.
