@@ -38,6 +38,8 @@ export class McpStdioTransport implements McpTransport {
     }
     this.child = spawn(options.command, options.args ?? [], { cwd: options.cwd, env: safeEnv, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     this.reader = createInterface({ input: this.child.stdout });
+    // Drain stderr without echoing potentially sensitive server output into Sofia logs.
+    this.child.stderr.on("data", () => undefined);
     this.reader.on("line", (line) => {
       try {
         const message = parseMessage(line);
@@ -50,7 +52,7 @@ export class McpStdioTransport implements McpTransport {
         catch (error) { waiter.reject(error instanceof Error ? error : new Error("MCP request failed")); }
       } catch (error) { this.failAll(error instanceof Error ? error : new Error("MCP stdio protocol error")); }
     });
-    this.child.on("error", (error) => this.failAll(new Error("MCP server process error: " + error.message)));
+    this.child.on("error", (error) => { this.closed = true; this.failAll(new Error("MCP server process error: " + error.message)); });
     this.child.on("exit", (code, signal) => {
       this.closed = true;
       this.failAll(new Error("MCP server exited (code=" + (code ?? "null") + ", signal=" + (signal ?? "none") + ")"));
