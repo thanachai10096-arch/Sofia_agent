@@ -59,7 +59,10 @@ export class AdvancedSkillRegistry {
     if (this.skills.has(definition.id)) {
       throw new Error(`Skill handler already registered: ${definition.id}`);
     }
-    this.skills.set(definition.id, { definition, handler });
+    // Snapshot and freeze policy metadata so callers cannot weaken a registered
+    // skill by mutating the original object after registration.
+    const snapshot = Object.freeze({ ...definition });
+    this.skills.set(snapshot.id, { definition: snapshot, handler });
   }
 
   has(id: string): boolean {
