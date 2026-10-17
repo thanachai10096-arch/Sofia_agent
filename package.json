@@ -18,12 +18,12 @@
   "engines": {
     "node": ">=22"
   },
-  "dependencies": {
-    "playwright": "^1.55.0"
-  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.55.0"
   }
 }
