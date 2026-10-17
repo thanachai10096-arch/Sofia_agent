@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, copyFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
-import { SofiaAgent, createSofiaAgentDependencies } from "../dist/src/index.js";
+import { SofiaAgent, createSofiaAgentDependencies } from "../dist/index.js";
 
 if (!process.env.AI_GATEWAY_API_KEY) {
   console.error("Set AI_GATEWAY_API_KEY and the required SOFIA_*_MODEL variables before running the real-model benchmark.");
