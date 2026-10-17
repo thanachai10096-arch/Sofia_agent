@@ -11,7 +11,6 @@ function numberEnv(name: string, fallback: number) {
 }
 
 export function loadModelConfigFromEnv(): SofiaModelConfig {
-  // Prefer Gemini when configured. Keep legacy gateway support for backward compatibility.
   const geminiKey =
     process.env.GEMINI_API_KEY?.trim() ||
     process.env.Gemini_API_Key?.trim() ||
@@ -20,7 +19,11 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     process.env.SOFIA_AI_GATEWAY_API_KEY?.trim() ||
     process.env.AI_GATEWAY_API_KEY?.trim() ||
     "";
-  const useGemini = geminiKey.length > 0;
+
+  // When both credentials exist, honor the explicitly named Sofia gateway
+  // configuration. This prevents an unrelated/stale Gemini key from silently
+  // overriding SOFIA_*_MODEL settings and routing requests to a different API.
+  const useGemini = geminiKey.length > 0 && legacyApiKey.length === 0;
   const apiKey = useGemini ? geminiKey : legacyApiKey;
   const baseUrl = useGemini
     ? (process.env.GEMINI_API_BASE_URL?.trim() ||

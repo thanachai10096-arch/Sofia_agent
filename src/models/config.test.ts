@@ -43,14 +43,17 @@ test("Gemini key selects Gemini OpenAI-compatible endpoint and default model", (
   assert.equal(config.providers.coding?.model, "gemini-2.5-flash");
 });
 
-test("Gemini key takes precedence over legacy gateway key", () => {
+test("explicit Sofia gateway key takes precedence when both keys are present", () => {
   clear();
   process.env.GEMINI_API_KEY = "gemini-test-key";
   process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
-  process.env.GEMINI_MODEL = "gemini-test-model";
+  process.env.SOFIA_FAST_MODEL = "gateway-fast";
+  process.env.SOFIA_CODING_MODEL = "gateway-coding";
   const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.fast?.apiKey, "gemini-test-key");
-  assert.equal(config.providers.fast?.model, "gemini-test-model");
+  assert.equal(config.providers.fast?.apiKey, "legacy-test-key");
+  assert.equal(config.providers.fast?.baseUrl, "https://ai-gateway.vercel.sh/v1");
+  assert.equal(config.providers.fast?.model, "gateway-fast");
+  assert.equal(config.providers.coding?.model, "gateway-coding");
 });
 
 test("Gemini-specific route model overrides shared Gemini model", () => {
