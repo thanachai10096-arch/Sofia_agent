@@ -14,7 +14,7 @@ Status: opt-in gateway, command bridge, Telegram Bot API long polling transport,
 - The Discord interaction transport verifies the signature against the exact raw request body and timestamp before parsing. It can be mounted through the existing `createSofiaApi` using the optional `discordInteractionRoute` config; the route helper preserves raw bytes and enforces the body limit. The route is disabled unless a transport is explicitly configured. The host must expose the route over HTTPS. Unexpected transport errors return a generic 503, and no second server is created.
 - Discord slash commands are deferred immediately. The transport edits the deferred original response and uses interaction webhooks for extra message chunks, clearing the Discord loading state. Register the matching application command (default `/run` with a string option named `task`) in Discord.
 - Treat attachment URLs as untrusted; do not download or open them without a separately secured downloader that blocks private/loopback/link-local destinations, re-checks redirects and DNS, caps response size/time, and avoids forwarding credentials.
-- Gateway rate limits are in-memory and per process. Multi-instance production deployments need a shared limiter and durable deduplication store.
+- The default gateway rate limiter is in-memory and per process. `MessagingGatewayOptions.rateLimiter` accepts an application-provided atomic shared limiter; its `consume({ key, limit, windowMs, now })` must enforce the window atomically across workers. Limiter errors fail closed (the message is rate-limited). Multi-instance production deployments still need to provide a real shared-store implementation and durable deduplication store.
 
 ## Composition contract
 
@@ -49,7 +49,7 @@ The code outline above is not a claim that the repository's API server is alread
 - [ ] API keys and bot tokens never appear in logs, client assets, test snapshots, or error messages.
 - [ ] Graceful shutdown stops polling and rejects new dispatches.
 - [ ] Enable `discordInteractionRoute` only when a Discord transport is configured; expose it over HTTPS and keep the raw-body size limit enabled.
-- [ ] Multi-instance production deployment injects shared rate limiting and durable deduplication.
+- [ ] Multi-instance production deployment injects an atomic implementation of `MessagingRateLimiter` backed by a shared store and configures durable deduplication; verify behavior under concurrent requests and store outages.
 - [ ] Attachment downloading stays disabled until a separately reviewed SSRF-safe downloader exists.
 
 ## Current limitations
@@ -57,4 +57,4 @@ The code outline above is not a claim that the repository's API server is alread
 - No real provider tokens or production webhook URL are configured or tested here.
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
-- Attachment downloading, shared multi-process rate limiting, durable cross-host gateway rate limits, provider registration, and end-to-end live tests remain follow-up work.
+- Attachment downloading, a concrete shared-store `MessagingRateLimiter` implementation, durable cross-host gateway rate limits, provider registration, and end-to-end live tests remain follow-up work. The new interface is an injection point, not a bundled Redis/database implementation.

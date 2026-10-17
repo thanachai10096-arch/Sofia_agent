@@ -72,7 +72,7 @@ export { FileChatMessageDeduplicator } from "./integrations/file-chat-deduplicat
 export type { ChatPlatform, VerifiedChatCommand, ChatCommandHandlerOptions, ChatDispatchResult, ChatAccessPolicy, ChatMessageDeduplicator, ChatRunStarter } from "./integrations/chat-adapter.js";
 
 export { createMessagingGateway } from "./integrations/messaging/gateway.js";
-export type { MessagingGateway, MessagingGatewayOptions } from "./integrations/messaging/gateway.js";
+export type { MessagingGateway, MessagingGatewayOptions, MessagingRateLimiter } from "./integrations/messaging/gateway.js";
 export { createTelegramAdapter } from "./integrations/messaging/telegram.js";
 export type { TelegramTransport, TelegramUpdate } from "./integrations/messaging/telegram.js";
 export { createTelegramHttpTransport } from "./integrations/messaging/telegram-http-transport.js";

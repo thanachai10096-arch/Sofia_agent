@@ -1,12 +1,23 @@
 import type { ChatPlatform, ChatMessageDeduplicator } from "../chat-adapter.js";
 import type { InboundMessage, MessagingAdapter, MessagingLogger, OutboundMessage } from "./types.js";
 
+/**
+ * Atomic fixed-window rate-limit contract for shared stores (for example Redis
+ * or a database with an atomic upsert). Implementations must be safe across
+ * concurrent workers; returning false rejects the request. Store errors fail closed.
+ */
+export interface MessagingRateLimiter {
+  consume(input: { key: string; limit: number; windowMs: number; now: number }): boolean | Promise<boolean>;
+}
+
 export interface MessagingGatewayOptions {
   adapters: readonly MessagingAdapter[];
   enabled?: boolean;
   allowUser?: (input: { platform: ChatPlatform; userId: string; channelId: string }) => boolean | Promise<boolean>;
   /** Reuse the existing atomic deduplicator where available; no second store is created here. */
   deduplicator?: ChatMessageDeduplicator;
+  /** Optional atomic shared limiter; omit to retain the backwards-compatible in-memory limiter. */
+  rateLimiter?: MessagingRateLimiter;
   onMessage: (message: InboundMessage, signal: AbortSignal) => Promise<string | void>;
   logger?: MessagingLogger;
   maxMessagesPerWindow?: number;
@@ -99,22 +110,37 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
         return { status: "forbidden" };
       }
       const rateKey = key(message.platform, identity.userId, identity.channelId);
-      const cutoff = now() - windowMs;
-      if (counts.size >= 10_000 && !counts.has(rateKey)) {
-        for (const [storedKey, timestamps] of counts) {
-          const fresh = timestamps.filter((timestamp) => timestamp > cutoff);
-          if (fresh.length) counts.set(storedKey, fresh);
-          else counts.delete(storedKey);
+      const currentTime = now();
+      if (options.rateLimiter) {
+        try {
+          if (!(await options.rateLimiter.consume({ key: rateKey, limit: max, windowMs, now: currentTime }))) {
+            return { status: "rate_limited" };
+          }
+        } catch (error) {
+          log?.warn("messaging_rate_limiter_failed", {
+            platform: message.platform,
+            errorType: error instanceof Error ? error.name : "unknown",
+          });
+          return { status: "rate_limited" };
         }
-        if (counts.size >= 10_000) return { status: "rate_limited" };
-      }
-      const recent = (counts.get(rateKey) ?? []).filter((timestamp) => timestamp > cutoff);
-      if (recent.length >= max) {
+      } else {
+        const cutoff = currentTime - windowMs;
+        if (counts.size >= 10_000 && !counts.has(rateKey)) {
+          for (const [storedKey, timestamps] of counts) {
+            const fresh = timestamps.filter((timestamp) => timestamp > cutoff);
+            if (fresh.length) counts.set(storedKey, fresh);
+            else counts.delete(storedKey);
+          }
+          if (counts.size >= 10_000) return { status: "rate_limited" };
+        }
+        const recent = (counts.get(rateKey) ?? []).filter((timestamp) => timestamp > cutoff);
+        if (recent.length >= max) {
+          counts.set(rateKey, recent);
+          return { status: "rate_limited" };
+        }
+        recent.push(currentTime);
         counts.set(rateKey, recent);
-        return { status: "rate_limited" };
       }
-      recent.push(now());
-      counts.set(rateKey, recent);
 
       // The key shape matches the existing chat dispatcher's provider/channel/message scope.
       const dedupeKey = key(message.platform, identity.channelId, message.messageId);
