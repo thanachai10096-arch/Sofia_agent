@@ -25,6 +25,7 @@ export { reviewCodeChange } from "./review/code-review.js";
 export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { BoundedSubagentCoordinator } from "./brain/subagent-coordinator.js";
+export { CoordinatedSubagentRuntime } from "./brain/coordinated-subagent-runtime.js";
 export type { SubagentTask, SubagentBatchItem, SubagentCoordinatorOptions, SubagentRuntimeFactory } from "./brain/subagent-coordinator.js";
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
