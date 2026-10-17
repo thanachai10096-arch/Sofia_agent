@@ -28,6 +28,16 @@ test("registry executes verified handlers and emits trace events", async () => {
   assert.deepEqual(events, ["skill.started", "skill.completed"]);
 });
 
+test("registered policy cannot be weakened by mutating the source definition", async () => {
+  const registry = new AdvancedSkillRegistry();
+  const source = definition({ risk: "privileged", requiresApproval: true });
+  registry.register(source, () => "ran");
+  source.requiresApproval = false;
+  source.risk = "read-only";
+  await assert.rejects(registry.execute("test.skill", null, context()),
+    (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "APPROVAL_REQUIRED");
+});
+
 test("registry requires approval for privileged skills", async () => {
   const registry = new AdvancedSkillRegistry();
   registry.register(definition({ risk: "privileged", requiresApproval: true }), () => "should not run");
