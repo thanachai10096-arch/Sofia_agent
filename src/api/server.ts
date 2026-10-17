@@ -568,8 +568,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
             if (existing) idempotency.delete(idempotencyId);
           }
-          try { usage.consume(auth.keyId); } catch (error) {
-            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+          try { usage.consume(auth.keyId); } catch {
+            return json(res, 429, { error: "quota_exceeded" }, origin, config);
           }
           if (!reserveActive(auth.keyId)) {
             res.setHeader("retry-after", "2");
@@ -608,8 +608,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 202, publicResponse(run), origin, config);
         }
 
-        try { usage.consume(auth.keyId); } catch (error) {
-          return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+        try { usage.consume(auth.keyId); } catch {
+          return json(res, 429, { error: "quota_exceeded" }, origin, config);
         }
         if (!reserveActive(auth.keyId)) {
           res.setHeader("retry-after", "2");
