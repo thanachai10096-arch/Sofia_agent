@@ -808,7 +808,7 @@ test("DurableJobRuntime cross-process cancellation aborts the active lease owner
     } as unknown as SofiaBrain), undefined, namespace);
     assert.equal(await canceller.cancel(jobId), true);
     const finalDeadline = Date.now() + 10_000;
-    while (!output.includes("final:cancelled\\n") && Date.now() < finalDeadline) {
+    while (!output.includes("final:cancelled\n") && Date.now() < finalDeadline) {
       if (child.exitCode !== null) break;
       await new Promise<void>((resolve) => setTimeout(resolve, 25));
     }
