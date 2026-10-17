@@ -3,6 +3,28 @@ import path from "node:path";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 import type { Session } from "./store.js";
 
+function restrictFilePermissions(filePath: string): void {
+  // Windows uses ACLs rather than POSIX mode bits; preserve its inherited ACLs.
+  if (process.platform === "win32") return;
+  try {
+    const currentMode = fs.statSync(filePath).mode & 0o777;
+    // Remove group/other access without granting any owner permissions that were absent.
+    const privateMode = currentMode & 0o600;
+    if (privateMode !== currentMode) fs.chmodSync(filePath, privateMode);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+}
+
+function restrictSqlitePermissions(filePath: string): void {
+  if (filePath === ":memory:" || process.platform === "win32") return;
+  restrictFilePermissions(filePath);
+  // SQLite creates these sidecars lazily; re-apply privacy after transactions too.
+  restrictFilePermissions(`${filePath}-wal`);
+  restrictFilePermissions(`${filePath}-shm`);
+}
+
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
 /**
@@ -13,17 +35,30 @@ type SqliteDatabase = import("node:sqlite").DatabaseSync;
  * Opening this store requires a Node release that provides node:sqlite.
  */
 export class SqliteSessionStore {
-  private constructor(private readonly db: SqliteDatabase) {}
+  private constructor(private readonly db: SqliteDatabase, private readonly filePath: string) {}
 
   static async open(filePath = path.join(sofiaStateDirectory("sessions"), "sessions.sqlite")): Promise<SqliteSessionStore> {
     const absolutePath = filePath === ":memory:" ? filePath : path.resolve(filePath);
-    if (absolutePath !== ":memory:") fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    if (absolutePath !== ":memory:") {
+      // Newly-created directories are private; existing directory modes are left untouched.
+      fs.mkdirSync(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
+      try {
+        const fd = fs.openSync(absolutePath, "wx", 0o600);
+        fs.closeSync(fd);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+      // Existing database files are tightened only; no owner permissions are added.
+      restrictFilePermissions(absolutePath);
+    }
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolutePath);
     try {
       db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
-      const store = new SqliteSessionStore(db);
+      restrictSqlitePermissions(absolutePath);
+      const store = new SqliteSessionStore(db, absolutePath);
       store.migrate();
+      restrictSqlitePermissions(absolutePath);
       return store;
     } catch (error) {
       db.close();
@@ -133,6 +168,7 @@ export class SqliteSessionStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+    restrictSqlitePermissions(this.filePath);
   }
 
   listMessages(id: string, options: { limit?: number; offset?: number } = {}): string[] {
