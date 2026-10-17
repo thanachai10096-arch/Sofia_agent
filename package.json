@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "sofia": "./dist/src/cli/index.js"
+    "sofia": "./dist/cli/index.js"
   },
   "scripts": {
     "license:check": "node scripts/check-license.mjs",
@@ -13,7 +13,11 @@
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-tests.mjs",
     "cli": "tsx src/cli/index.ts",
-    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs"
+    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs",
+    "start:api": "node dist/api/standalone.js",
+    "test:coverage": "node scripts/run-tests.mjs --coverage",
+    "example:mock-api": "tsx examples/mock-api.ts",
+    "benchmark:real-model": "node scripts/benchmark-real-model.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -25,5 +29,20 @@
   },
   "optionalDependencies": {
     "playwright": "^1.55.0"
-  }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "assets/"
+  ]
 }
