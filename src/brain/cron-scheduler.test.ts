@@ -171,15 +171,17 @@ test("file cron store serializes concurrent processes without losing updates", a
     "const store = new FileCronStore('multi-process-lock-test', process.env.CRON_TEST_ROOT);\n" +
     "await store.transact(async state => { await new Promise(resolve => setTimeout(resolve, 40)); " +
     "state.audit.push({ at: new Date().toISOString(), actor: 'test', action: 'lock.test', scheduleId: String(state.audit.length) }); });";
-  const cli = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
   const runChild = () => new Promise<void>((resolve, reject) => {
-    const child = spawn(process.execPath, [cli, "--eval", script], {
+    const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], {
       cwd: process.cwd(),
       env: { ...process.env, CRON_TEST_ROOT: root },
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
     });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", chunk => { stderr += chunk; });
     child.once("error", reject);
-    child.once("exit", code => code === 0 ? resolve() : reject(new Error("cron lock test child exited with code " + code)));
+    child.once("exit", code => code === 0 ? resolve() : reject(new Error("cron lock test child exited with code " + code + ": " + stderr)));
   });
   try {
     await Promise.all([runChild(), runChild(), runChild(), runChild()]);
