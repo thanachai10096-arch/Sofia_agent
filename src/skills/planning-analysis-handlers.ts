@@ -191,7 +191,7 @@ export const scheduledJobPlanner = (input: unknown) => {
   if (!["once", "hourly", "daily", "weekly", "monthly", "cron"].includes(String(recurrence))) throw new TypeError("recurrence is invalid.");
   const requiresApproval = value.requiresApproval;
   if (typeof requiresApproval !== "boolean") throw new TypeError("requiresApproval must be boolean.");
-  return { jobId, schedule, timezone, timezoneValid, recurrence, valid: timezoneValid, approvalRequired: requiresApproval, jobCreated: false };
+  return { jobId, schedule, timezone, timezoneValid, recurrence, scheduleSyntaxValidated: false, approvalRequired: requiresApproval, jobCreated: false };
 };
 
 /** Calculates budget and latency summaries from supplied observations only. */
