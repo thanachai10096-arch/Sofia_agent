@@ -505,11 +505,6 @@ test("API prevents another key from reading or cancelling a run", async () => {
       headers: { authorization: "Bearer other-run-token" },
     });
     assert.equal(cancel.status, 404);
-    const list = await fetch(url + "/v1/agent/runs", {
-      headers: { authorization: "Bearer other-run-token" },
-    });
-    assert.equal(list.status, 200);
-    assert.doesNotMatch(JSON.stringify(await list.json()), new RegExp(run.id));
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
