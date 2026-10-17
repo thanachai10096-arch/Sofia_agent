@@ -456,15 +456,19 @@ test("API emits structured request logs and bounded-cardinality metrics", async 
   assert.match(response.headers.get("x-request-id") ?? "", /^[0-9a-f-]{36}$/i);
   await response.json();
   assert.equal(logs.length, 1);
-  assert.equal(logs[0].event, "http.request");
-  assert.equal(logs[0].route, "/health");
-  assert.equal(logs[0].statusCode, 200);
-  assert.ok(logs[0].durationMs >= 0);
+  const log = logs[0];
+  assert.ok(log);
+  assert.equal(log.event, "http.request");
+  assert.equal(log.route, "/health");
+  assert.equal(log.statusCode, 200);
+  assert.ok(log.durationMs >= 0);
   assert.deepEqual(metrics.map((metric) => metric.name), [
     "sofia_api_requests_total",
     "sofia_api_request_duration_ms",
   ]);
-  assert.equal(metrics[0].labels.route, "/health");
+  const requestMetric = metrics[0];
+  assert.ok(requestMetric);
+  assert.equal(requestMetric.labels.route, "/health");
 });
 
 
