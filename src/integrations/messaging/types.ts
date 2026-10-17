@@ -36,7 +36,7 @@ export interface DeliveryReceipt {
 }
 export interface MessagingAdapter {
   readonly platform: ChatPlatform;
-  start(signal: AbortSignal): Promise<void>;
+  start(signal: AbortSignal, onMessage: (message: InboundMessage) => Promise<void>): Promise<void>;
   send(message: OutboundMessage): Promise<DeliveryReceipt>;
   stop(): Promise<void>;
 }
