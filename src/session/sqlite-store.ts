@@ -1,25 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
-
-export interface Session { id: string; messages: string[]; updatedAt: number; }
-
-export class MemorySessionStore {
-  private sessions = new Map<string, Session>();
-  get(id: string) { return this.sessions.get(id); }
-  getOrCreate(id: string) {
-    const existing = this.sessions.get(id);
-    if (existing) return existing;
-    const created: Session = { id, messages: [], updatedAt: Date.now() };
-    this.sessions.set(id, created);
-    return created;
-  }
-  save(session: Session) {
-    session.updatedAt = Date.now();
-    this.sessions.set(session.id, session);
-  }
-  delete(id: string) { this.sessions.delete(id); }
-}
+import type { Session } from "./store.js";
 
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
