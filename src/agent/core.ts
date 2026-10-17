@@ -10,20 +10,59 @@ import { validateToolInput } from "../tools/types.js";
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
 
+  private readonly sessionTails = new Map<string, Promise<void>>();
+
   async run(request: AgentRequest): Promise<AgentResult> {
+    const sessionId = request.sessionId;
+    if (!sessionId || !this.deps.sessionStore) return this.runUnlocked(request);
+
+    // Serialize turns for one session so concurrent calls cannot overwrite transcripts.
+    const previous = this.sessionTails.get(sessionId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.catch(() => undefined).then(() => gate);
+    this.sessionTails.set(sessionId, tail);
+    await previous.catch(() => undefined);
+    try {
+      return await this.runUnlocked(request);
+    } finally {
+      release();
+      if (this.sessionTails.get(sessionId) === tail) this.sessionTails.delete(sessionId);
+    }
+  }
+
+  private async runUnlocked(request: AgentRequest): Promise<AgentResult> {
     const security = this.deps.securityController;
     const binding = security
       ? security.bindSignal(request.signal ?? new AbortController().signal)
       : undefined;
     const activeRequest = binding ? { ...request, signal: binding.signal } : request;
+    let session: { id: string; messages: string[]; updatedAt: number } | undefined;
     try {
+      if (request.sessionId && this.deps.sessionStore) {
+        session = this.deps.sessionStore.getOrCreate(request.sessionId);
+        session.messages.push(`user: ${request.task}`);
+        this.deps.sessionStore.save(session);
+      }
       // The host kill switch and caller cancellation share one signal for this run.
       security?.assertRunning();
       const shouldUseBrain =
         this.deps.brainFactory !== undefined &&
         request.useBrain !== false;
-      if (shouldUseBrain) return await this.runBrain(activeRequest);
-      return await this.runLegacy(activeRequest);
+      const result = shouldUseBrain
+        ? await this.runBrain(activeRequest)
+        : await this.runLegacy(activeRequest);
+      if (session && this.deps.sessionStore) {
+        session.messages.push(`assistant: ${result.output}`);
+        this.deps.sessionStore.save(session);
+      }
+      return result;
+    } catch (error) {
+      if (session && this.deps.sessionStore) {
+        session.messages.push(`assistant_error: ${error instanceof Error ? error.message : String(error)}`);
+        try { this.deps.sessionStore.save(session); } catch { /* preserve the original run error */ }
+      }
+      throw error;
     } finally {
       binding?.dispose();
     }
