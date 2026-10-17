@@ -32,7 +32,7 @@ function effectList(value: unknown): ToolEffect[] {
 }
 
 /** Evaluates an action using Sofia's existing security guard; this is advisory, not an authorization bypass. */
-export const permissionPolicyEvaluator: AdvancedSkillHandler = (input) => {
+export const permissionPolicyEvaluator = (input: unknown) => {
   const value = record(input);
   const actionInput = value.input;
   if (!actionInput || typeof actionInput !== "object" || Array.isArray(actionInput)) {
@@ -52,7 +52,7 @@ export const permissionPolicyEvaluator: AdvancedSkillHandler = (input) => {
 };
 
 /** Computes the minimum capability set and lists every requested capability that is unavailable. */
-export const leastPrivilegePlanner: AdvancedSkillHandler = (input) => {
+export const leastPrivilegePlanner = (input: unknown) => {
   const value = record(input);
   const required = [...new Set(textList(value.requiredCapabilities, "requiredCapabilities"))];
   const available = new Set(textList(value.availableCapabilities, "availableCapabilities"));
@@ -67,14 +67,14 @@ export const leastPrivilegePlanner: AdvancedSkillHandler = (input) => {
 };
 
 /** Scans untrusted text for instruction-like signals; detection is heuristic, not a safety proof. */
-export const promptInjectionDetector: AdvancedSkillHandler = (input) => {
+export const promptInjectionDetector = (input: unknown) => {
   const value = record(input);
   const content = requiredText(value, "content");
   return { ...scanUntrustedText(content), contentLength: content.length };
 };
 
 /** Wraps tool output in Sofia's established untrusted-data fence and truncation policy. */
-export const untrustedOutputFencer: AdvancedSkillHandler = (input) => {
+export const untrustedOutputFencer = (input: unknown) => {
   const value = record(input);
   const tool = requiredText(value, "tool", 160);
   const output = requiredText(value, "output", 1_000_000);
@@ -86,7 +86,7 @@ export const untrustedOutputFencer: AdvancedSkillHandler = (input) => {
 };
 
 /** Validates lexical path safety only; actual filesystem access must still use WorkspaceRuntime. */
-export const pathTraversalGuard: AdvancedSkillHandler = (input) => {
+export const pathTraversalGuard = (input: unknown) => {
   const value = record(input);
   const path = requiredText(value, "path", 1_000);
   const blockedPaths = value.blockedPaths === undefined ? [] : textList(value.blockedPaths, "blockedPaths");
