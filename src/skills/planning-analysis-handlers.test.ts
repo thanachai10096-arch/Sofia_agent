@@ -20,8 +20,8 @@ test("conversation utilities preserve only supplied intent and explicit task lin
   assert.equal(tasks.executed, false);
 });
 test("preference extraction requests confirmation and does not persist", () => {
-  const result = userPreferenceMemory({ statements: ["I prefer concise answers", "The weather is nice"] }) as any;
-  assert.equal(result.candidates.length, 1);
+  const result = userPreferenceMemory({ statements: ["I prefer concise answers", "ฉันชอบคำตอบสั้น ๆ", "The weather is nice"] }) as any;
+  assert.equal(result.candidates.length, 2);
   assert.equal(result.stored, false);
 });
 test("clarification and handoff are bounded and do not mutate session", () => {
@@ -49,7 +49,8 @@ test("research analysis surfaces conflicts instead of choosing truth", () => {
 });
 test("scheduled jobs are planned, not created; idempotency keys are stable", () => {
   const job = scheduledJobPlanner({ jobId: "j1", schedule: "0 9 * * *", timezone: "Asia/Bangkok", recurrence: "cron", requiresApproval: true }) as any;
-  assert.equal(job.valid, true);
+  assert.equal(job.timezoneValid, true);
+  assert.equal(job.scheduleSyntaxValidated, false);
   assert.equal(job.jobCreated, false);
   const first = (idempotencyGuard({ action: "write", scope: "workspace-a", payload: { x: 1 } }) as any).key;
   const second = (idempotencyGuard({ action: "write", scope: "workspace-a", payload: { x: 1 } }) as any).key;
