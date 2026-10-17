@@ -69,7 +69,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Checkpoint Manager",
     "category": "Runtime & Recovery",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Checkpoint Manager: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -114,7 +114,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Natural Conversation",
     "category": "Conversation & Memory",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Natural Conversation: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -132,7 +132,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "User Preference Memory",
     "category": "Conversation & Memory",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "User Preference Memory: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -159,7 +159,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Conversation-to-Task Parser",
     "category": "Conversation & Memory",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Conversation-to-Task Parser: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -168,7 +168,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Clarifying Question Planner",
     "category": "Conversation & Memory",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Clarifying Question Planner: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -177,7 +177,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Session Handoff",
     "category": "Conversation & Memory",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Session Handoff: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -195,7 +195,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Memory Retention Policy",
     "category": "Conversation & Memory",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Memory Retention Policy: conversation & memory capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -348,7 +348,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Coverage Gap Analyzer",
     "category": "Testing & Quality",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Coverage Gap Analyzer: testing & quality capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -573,7 +573,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Source Credibility Ranker",
     "category": "Research & Knowledge",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Source Credibility Ranker: research & knowledge capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -591,7 +591,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Cross-Source Synthesizer",
     "category": "Research & Knowledge",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Cross-Source Synthesizer: research & knowledge capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -609,7 +609,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Fact Conflict Detector",
     "category": "Research & Knowledge",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Fact Conflict Detector: research & knowledge capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -645,7 +645,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Research Brief Writer",
     "category": "Research & Knowledge",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Research Brief Writer: research & knowledge capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -762,7 +762,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Scheduled Job Planner",
     "category": "Workflow & Productivity",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Scheduled Job Planner: workflow & productivity capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -780,7 +780,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Idempotency Guard",
     "category": "Workflow & Productivity",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Idempotency Guard: workflow & productivity capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -888,7 +888,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Cost and Latency Analyzer",
     "category": "Learning & Optimization",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Cost and Latency Analyzer: learning & optimization capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -897,7 +897,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Offline Evaluation Runner",
     "category": "Learning & Optimization",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Offline Evaluation Runner: learning & optimization capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -915,7 +915,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Skill Rollback Manager",
     "category": "Learning & Optimization",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Skill Rollback Manager: learning & optimization capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   }

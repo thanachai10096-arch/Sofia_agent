@@ -64,3 +64,5 @@ export { MemorySecurityAudit } from "./security/audit.js";
 export { assessAction, containsPromptInjection, redactSecrets, riskFor } from "./security/guard.js";
 export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/guard.js";
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
+
+export { checkpointManager, naturalConversation, userPreferenceMemory, conversationToTaskParser, clarifyingQuestionPlanner, sessionHandoff, memoryRetentionPolicy, coverageGapAnalyzer, sourceCredibilityRanker, crossSourceSynthesizer, factConflictDetector, researchBriefWriter, scheduledJobPlanner, idempotencyGuard, costLatencyAnalyzer, offlineEvaluationRunner, skillRollbackManager, registerVerifiedPlanningAnalysisSkills } from "./skills/planning-analysis-handlers.js";
