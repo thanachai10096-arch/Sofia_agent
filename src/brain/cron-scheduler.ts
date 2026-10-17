@@ -270,20 +270,38 @@ export class CronScheduler {
             .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))[0];
           if (!due) return undefined;
           const scheduledFor = due.nextRunAt;
-          const next = nextCronOccurrence(due.cron, due.timeZone, new Date(scheduledFor));
+          const lateByMs = now.getTime() - Date.parse(scheduledFor);
+          const isMisfire = lateByMs >= 60_000;
+          const next = isMisfire
+            ? nextCronOccurrence(due.cron, due.timeZone, now)
+            : nextCronOccurrence(due.cron, due.timeZone, new Date(scheduledFor));
           due.nextRunAt = next.toISOString();
           due.updatedAt = now.toISOString();
           const previous = state.history.find(h => h.scheduleId === due.id && h.scheduledFor === scheduledFor);
           if (previous) return undefined;
+          if (isMisfire && due.misfirePolicy === "skip") {
+            state.history.push({
+              id: randomUUID(), scheduleId: due.id, scheduledFor, startedAt: now.toISOString(),
+              finishedAt: now.toISOString(), status: "skipped", attempt: 0,
+              error: "Missed occurrence skipped by misfire policy",
+            });
+            await this.recordAudit(state, { at: now.toISOString(), actor: "scheduler", action: "schedule.misfire.skipped", scheduleId: due.id, detail: scheduledFor });
+            return { skipped: true as const };
+          }
           const execution: CronExecution = {
             id: randomUUID(), scheduleId: due.id, scheduledFor, startedAt: now.toISOString(),
             status: "claimed", attempt: 0,
           };
           state.history.push(execution);
-          await this.recordAudit(state, { at: now.toISOString(), actor: "scheduler", action: "schedule.claimed", scheduleId: due.id, detail: scheduledFor });
+          await this.recordAudit(state, {
+            at: now.toISOString(), actor: "scheduler",
+            action: isMisfire ? "schedule.misfire.run_once" : "schedule.claimed",
+            scheduleId: due.id, detail: scheduledFor,
+          });
           return { schedule: { ...due, nextRunAt: scheduledFor }, executionId: execution.id, scheduledFor };
         });
         if (!claim) break;
+        if ("skipped" in claim) continue;
         if (this.active.size >= this.maxConcurrent) break;
         const controller = new AbortController();
         this.active.set(claim.schedule.id, controller);
