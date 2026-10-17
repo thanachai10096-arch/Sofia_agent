@@ -1,6 +1,6 @@
 # Sofia Agent — Advanced Skill Catalog (100)
 
-**Status: partial implementation.** The catalog contains 100 capabilities. Thirty-five runtime/security/memory/quality/research/workflow/evolution skills have implementation and acceptance tests and are marked `verified`; the remaining 65 entries are `planned`. A skill becomes `implemented` only after a handler exists and `verified` only after its acceptance criteria pass. Catalog metadata must never grant permissions by itself.
+**Status: partial implementation.** The catalog contains 100 capabilities. Forty runtime/security/memory/quality/research/workflow/evolution/multi-agent skills have implementation and acceptance tests and are marked `verified`; the remaining 60 entries are `planned`. A skill becomes `implemented` only after a handler exists and `verified` only after its acceptance criteria pass. Catalog metadata must never grant permissions by itself.
 
 ## Shared implementation contract
 
@@ -101,14 +101,14 @@ Every runnable skill must: (1) declare a versioned input/output schema; (2) use 
 
 ### Multi-Agent Coordination
 
-- **agents.01 — Agent Task Delegator** — Risk: `read-only`; approval: **policy-dependent**. Agent Task Delegator: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **agents.02 — Specialist Router** — Risk: `read-only`; approval: **policy-dependent**. Specialist Router: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **agents.01 — Agent Task Delegator** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Agent Task Delegator: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **agents.02 — Specialist Router** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Specialist Router: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **agents.03 — Agent Message Validator** — Risk: `privileged`; approval: **required for sensitive actions**. Agent Message Validator: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **agents.04 — Shared Task Board** — Risk: `read-only`; approval: **policy-dependent**. Shared Task Board: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **agents.05 — Handoff Contract Manager** — Risk: `read-only`; approval: **policy-dependent**. Handoff Contract Manager: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **agents.06 — Parallel Work Coordinator** — Risk: `read-only`; approval: **policy-dependent**. Parallel Work Coordinator: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **agents.05 — Handoff Contract Manager** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Handoff Contract Manager: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **agents.06 — Parallel Work Coordinator** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Parallel Work Coordinator: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **agents.07 — Agent Result Reviewer** — Risk: `privileged`; approval: **required for sensitive actions**. Agent Result Reviewer: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **agents.08 — Disagreement Resolver** — Risk: `read-only`; approval: **policy-dependent**. Disagreement Resolver: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **agents.08 — Disagreement Resolver** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Disagreement Resolver: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **agents.09 — Loop and Deadlock Detector** — Risk: `privileged`; approval: **required for sensitive actions**. Loop and Deadlock Detector: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **agents.10 — Human-Goal Alignment Monitor** — Risk: `read-only`; approval: **policy-dependent**. Human-Goal Alignment Monitor: multi-agent coordination capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 
