@@ -76,7 +76,7 @@ it("shared tool-effect classification marks privileged actions consistently", ()
       "sensitive-key-material",
       "-----END PRIVATE KEY-----",
     ].join("\n");
-    const sanitized = redactSecrets(`tool output before\\n${pem}\\nafter tool output`) as string;
+    const sanitized = redactSecrets(`tool output before\n${pem}\nafter tool output`) as string;
     assert.equal(sanitized.includes("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"), false);
     assert.equal(sanitized.includes("sensitive-key-material"), false);
     assert.equal(sanitized.includes("[REDACTED PRIVATE KEY]"), true);
