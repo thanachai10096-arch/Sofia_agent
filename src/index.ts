@@ -70,3 +70,21 @@ export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpe
 export { createChatCommandHandler } from "./integrations/chat-adapter.js";
 export { FileChatMessageDeduplicator } from "./integrations/file-chat-deduplicator.js";
 export type { ChatPlatform, VerifiedChatCommand, ChatCommandHandlerOptions, ChatDispatchResult, ChatAccessPolicy, ChatMessageDeduplicator, ChatRunStarter } from "./integrations/chat-adapter.js";
+
+export { createMessagingGateway } from "./integrations/messaging/gateway.js";
+export type { MessagingGateway, MessagingGatewayOptions } from "./integrations/messaging/gateway.js";
+export { createTelegramAdapter } from "./integrations/messaging/telegram.js";
+export type { TelegramTransport, TelegramUpdate } from "./integrations/messaging/telegram.js";
+export { createTelegramHttpTransport } from "./integrations/messaging/telegram-http-transport.js";
+export type { TelegramHttpTransportOptions } from "./integrations/messaging/telegram-http-transport.js";
+export { createDiscordAdapter } from "./integrations/messaging/discord.js";
+export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
+export { createDiscordInteractionTransport } from "./integrations/messaging/discord-interaction-transport.js";
+export type { DiscordInteractionTransport, DiscordInteractionTransportOptions, DiscordInteractionRequest, DiscordInteractionResult } from "./integrations/messaging/discord-interaction-transport.js";
+export { handleDiscordInteractionHttpRequest } from "./integrations/messaging/discord-http-route.js";
+export { createMessagingAccessCheck, createSofiaMessagingHandler } from "./integrations/messaging/sofia-handler.js";
+export type { SofiaMessagingHandlerOptions } from "./integrations/messaging/sofia-handler.js";
+export { splitMessage } from "./integrations/messaging/format.js";
+export { messagingSessionKey } from "./integrations/messaging/session-key.js";
+export { verifyDiscordRequest, verifyTelegramWebhookSecret, safeMessageCorrelationId } from "./integrations/messaging/platform-security.js";
+export type { DeliveryState, DeliveryReceipt, InboundMessage, MessagingAdapter, MessagingAttachment, MessagingIdentity, MessagingLogger, OutboundMessage } from "./integrations/messaging/types.js";
