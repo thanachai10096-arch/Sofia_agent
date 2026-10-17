@@ -765,7 +765,7 @@ test("DurableJobRuntime cross-process cancellation aborts the active lease owner
           else signal.addEventListener("abort", resolve, { once: true });
         });
         process.stdout.write("observed-abort\\n");
-        return { completed: false, state: "cancelled", summary: "cancelled by another process" };
+        return { completed: true, state: "completed", summary: "late result must be discarded after cross-process cancellation" };
       },
     };
     const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
@@ -821,7 +821,10 @@ test("DurableJobRuntime cross-process cancellation aborts the active lease owner
       await new Promise<void>((resolve) => child.once("exit", () => resolve()));
     }
     assert.ok(output.includes("observed-abort\n"), "active worker must observe cancellation from another process");
-    assert.ok(output.includes("final:cancelled\n"), "cancelled state must remain terminal");
+    assert.ok(output.includes("final:cancelled\n"), "cancelled state must remain terminal even if the brain returns a late success");
+    const persisted = await canceller.get(jobId);
+    assert.equal(persisted?.status, "cancelled");
+    assert.equal(persisted?.result, undefined, "late success must not overwrite a durable cancellation");
     assert.equal(child.exitCode, 0, errors || output);
   } finally {
     if (child.exitCode === null) {
