@@ -129,3 +129,18 @@ test("async start forwards a validated idempotency key", async () => {
     /control characters/,
   );
 });
+
+test("SDK forwards an optional persistent session ID to run endpoints", async () => {
+  let body: unknown;
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return response(200, { id: "run-session", status: "completed", result: { output: "done", kind: "text", steps: 1 } });
+    },
+  });
+
+  await client.run({ task: "continue our conversation", sessionId: "conversation-42" });
+  assert.deepEqual(body, { task: "continue our conversation", sessionId: "conversation-42" });
+});
