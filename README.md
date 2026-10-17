@@ -190,7 +190,7 @@ const hashSecret = process.env.SOFIA_API_KEY_HASH_SECRET;\nif (!hashSecret || Bu
 
 const server = createSofiaApi(dependencies, {
   apiKeys: {},
-  apiKeyHashes: { [tokenHash]: ["agent:run", "agent:read"] },\n  apiKeyHashSecret: process.env.SOFIA_API_KEY_HASH_SECRET,
+  apiKeyHashes: { [tokenHash]: ["agent:run", "agent:read"] },\n  apiKeyHashSecret: hashSecret,\n  apiKeyHashSecret: process.env.SOFIA_API_KEY_HASH_SECRET,
   usageStore: new FileUsageStore("/var/lib/sofia/usage"),
 });
 ```
