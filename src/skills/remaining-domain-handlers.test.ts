@@ -12,6 +12,8 @@ test("patch proposal is redacted and never applied", () => {
   const result = patchGenerator({ objective: "fix bug", patch: "diff --git a/a b/a", touchedPaths: ["src/a.ts"] }) as any;
   assert.equal(result.applied, false);
   assert.equal(result.eligibleForReview, true);
+  const traversal = patchGenerator({ objective: "bad path", patch: "diff", touchedPaths: ["../outside.ts"] }) as any;
+  assert.equal(traversal.eligibleForReview, false);
 });
 test("Python review and API contracts are planning-only", () => {
   assert.equal((pythonSpecialist({ goal: "review", files: ["app.py", "index.ts"], constraints: [] }) as any).pythonFiles.length, 1);
