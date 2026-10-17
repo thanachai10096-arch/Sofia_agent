@@ -181,3 +181,42 @@ test("SQLite transcript files and WAL sidecars are private on POSIX without loos
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("SQLite session storage rejects a database symlink without changing its target permissions or contents", {
+  skip: process.platform === "win32",
+}, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-symlink-"));
+  const target = path.join(dir, "unrelated.txt");
+  const link = path.join(dir, "sessions.sqlite");
+  try {
+    fs.writeFileSync(target, "leave this file alone", { mode: 0o644 });
+    fs.symlinkSync(target, link);
+    await assert.rejects(
+      SqliteSessionStore.open(link),
+      /regular files, not symbolic links/,
+    );
+    assert.equal(fs.statSync(target).mode & 0o777, 0o644);
+    assert.equal(fs.readFileSync(target, "utf8"), "leave this file alone");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("SQLite session storage rejects a directory as a database path", {
+  skip: process.platform === "win32",
+}, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-directory-path-"));
+  const existingFile = path.join(dir, "keep.txt");
+  try {
+    fs.writeFileSync(existingFile, "leave this file alone", { mode: 0o644 });
+    await assert.rejects(
+      SqliteSessionStore.open(dir),
+      /regular files/,
+    );
+    assert.equal(fs.readFileSync(existingFile, "utf8"), "leave this file alone");
+    assert.equal(fs.statSync(existingFile).mode & 0o777, 0o644);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
