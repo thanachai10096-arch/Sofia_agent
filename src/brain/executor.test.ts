@@ -21,9 +21,10 @@ const plan = {
   ],
 };
 
-function makeReasoner(): BrainReasoner {
+function makeReasoner(onPrepare?: (request: string) => void): BrainReasoner {
   return {
     async prepare(request) {
+      onPrepare?.(request);
       const parsed = JSON.parse(request) as { phase: string };
       const value =
         parsed.phase === "understand"
@@ -616,4 +617,51 @@ test("Brain falls back to listing project memory when relevance search fails", a
 
   assert.equal(report.completed, true, report.summary);
   assert.equal(listCalls, 1);
+});
+
+
+test("Brain preserves the highest-ranked project memories when limiting context", async () => {
+  let selected: Array<{ content: string }> = [];
+  const memories = Array.from({ length: 15 }, (_, index) => ({
+    id: `memory-${index}`,
+    project: "test",
+    kind: "decision" as const,
+    content: `ranked-memory-${index}`,
+    confidence: 0.9,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    uses: 0,
+  }));
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner((request) => {
+        const parsed = JSON.parse(request) as { memory?: { projectMemory?: Array<{ content: string }> } };
+        if (parsed.memory?.projectMemory) selected = parsed.memory.projectMemory;
+      }),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      projectMemory: {
+        async save() {},
+        async list() { return memories; },
+        async find() { return memories; },
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({ task: "Create hello.txt" });
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(selected.length, 12);
+  assert.equal(selected[0]?.content, "ranked-memory-0");
+  assert.equal(selected[11]?.content, "ranked-memory-11");
 });
