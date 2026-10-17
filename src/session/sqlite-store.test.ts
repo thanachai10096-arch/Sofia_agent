@@ -118,3 +118,30 @@ test("failed transcript transaction rolls back without losing the previous trans
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("SQLite transcripts survive closing and reopening Sofia's session store", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-agent-restart-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const firstStore = await SqliteSessionStore.open(file);
+  try {
+    firstStore.save({
+      id: "restart-session",
+      messages: ["user: จำการสนทนานี้ไว้", "assistant: บันทึกแล้ว"],
+      updatedAt: 0,
+    });
+  } finally {
+    firstStore.close();
+  }
+
+  const reopenedStore = await SqliteSessionStore.open(file);
+  try {
+    assert.deepEqual(reopenedStore.get("restart-session")?.messages, [
+      "user: จำการสนทนานี้ไว้",
+      "assistant: บันทึกแล้ว",
+    ]);
+  } finally {
+    reopenedStore.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
