@@ -14,6 +14,11 @@ export interface JobRecord {
   updatedAt: string;
   task: string;
   ownerKeyId?: string;
+  /** Destination used only for post-restart Discord job recovery notices. */
+  notificationChannelId?: string;
+  /** Opaque per-user/per-channel key; never shared across Discord principals. */
+  sessionKey?: string;
+  notificationDelivered?: boolean;
   snapshot?: BrainRunSnapshot;
   result?: Awaited<ReturnType<SofiaBrain["run"]>>;
   error?: string;
@@ -21,11 +26,12 @@ export interface JobRecord {
 function isJobCancelled(record: JobRecord): boolean { return record.status === "cancelled"; }
 
 export interface JobRuntime {
-  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string }): Promise<JobRecord>;
+  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
+  markNotificationDelivered?(id: string): Promise<void>;
 }
 
 class FileJobStateStore {
@@ -95,12 +101,15 @@ export class DurableJobRuntime implements JobRuntime {
     this.state = new FileJobStateStore(namespace);
   }
 
-  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string }): Promise<JobRecord> {
+  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string }): Promise<JobRecord> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const record: JobRecord = {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
+      ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
+      ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
+      notificationDelivered: false,
     };
     this.jobs.set(id, record);
     await this.state.save(record);
@@ -133,6 +142,15 @@ export class DurableJobRuntime implements JobRuntime {
     await this.recoverInterrupted(hydrated);
     this.jobs.set(id, hydrated);
     return { ...hydrated };
+  }
+
+  async markNotificationDelivered(id: string): Promise<void> {
+    const record = this.jobs.get(id) ?? await this.get(id);
+    if (!record) return;
+    const canonical = this.jobs.get(id) ?? record;
+    canonical.notificationDelivered = true;
+    canonical.updatedAt = new Date().toISOString();
+    await this.state.save(canonical);
   }
 
   async list(): Promise<JobRecord[]> {
