@@ -35,6 +35,7 @@ test("FileRunStore serializes concurrent writes across store instances", async (
     assert.ok(loaded);
     assert.match(loaded.checkpointId, /^checkpoint-(?:[0-9]|1[0-9])$/);
     assert.equal(loaded.runId, snapshot.runId);
+    assert.ok(!JSON.stringify(loaded).includes(secret), "persisted snapshots must redact credential-shaped values");
 
     if (process.platform !== "win32") {
       const privateDirectory = path.join(root, createHash("sha256").update("test").digest("hex"));
