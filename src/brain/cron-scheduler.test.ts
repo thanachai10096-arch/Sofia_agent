@@ -190,3 +190,47 @@ test("file cron store serializes concurrent processes without losing updates", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("one-time schedules execute exactly once and disable after claiming", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  const runtime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      submitted++;
+      return { id: "once-job", status: "completed", task: input.task } as JobRecord;
+    },
+    async get() { return { id: "once-job", status: "completed", task: "once task" } as JobRecord; },
+    async cancel() { return true; }, async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const created = await scheduler.create({
+    name: "one-time", task: "once task", runAt: "2026-10-17T00:01:00.000Z",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  await scheduler.tick();
+  await scheduler.tick();
+  for (let i = 0; i < 30 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(submitted, 1);
+  assert.equal(state.schedules[0].id, created.id);
+  assert.equal(state.schedules[0].status, "disabled");
+  assert.equal(state.history.length, 1);
+  assert.equal(state.history[0].status, "completed");
+});
+
+test("one-time schedules reject ambiguous or invalid timing input", async () => {
+  const store: CronStore = { async transact(fn) { return fn({ schedules: [], history: [], audit: [] }); } };
+  const scheduler = new CronScheduler({ async submit() { throw new Error("unused"); } } as unknown as JobRuntime, { store });
+  await assert.rejects(() => scheduler.create({
+    name: "ambiguous", task: "task", cron: "* * * * *", runAt: "2026-10-17T00:01:00.000Z",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice"), /exactly one/i);
+  await assert.rejects(() => scheduler.create({
+    name: "invalid-once", task: "task", runAt: "not-a-date", timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice"), /valid ISO-8601/i);
+});
