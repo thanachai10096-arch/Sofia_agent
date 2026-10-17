@@ -234,3 +234,65 @@ test("one-time schedules reject ambiguous or invalid timing input", async () => 
     name: "invalid-once", task: "task", runAt: "not-a-date", timeZone: "UTC", ownerKeyId: "alice",
   }, "alice"), /valid ISO-8601/i);
 });
+
+
+test("cancelling a running schedule disables it and cancels the runtime job", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  let cancelled = false;
+  let cancelCalls = 0;
+  const runtime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      submitted++;
+      return { id: "cancel-job", status: "queued", task: input.task } as JobRecord;
+    },
+    async get() {
+      return { id: "cancel-job", status: cancelled ? "cancelled" : "queued", task: "cancel task" } as JobRecord;
+    },
+    async cancel() { cancelled = true; cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const created = await scheduler.create({
+    name: "cancel", task: "cancel task", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  await scheduler.tick();
+  for (let i = 0; i < 30 && !state.schedules[0]?.lastJobId; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(submitted, 1);
+  assert.equal(await scheduler.cancel(created.id, "alice"), true);
+  for (let i = 0; i < 30 && state.history[0]?.status !== "cancelled"; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(state.schedules[0].status, "disabled");
+  assert.equal(state.history[0].status, "cancelled");
+  assert.ok(cancelCalls >= 1);
+});
+
+test("execution timeout cancels the runtime job and records failure", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let cancelled = false;
+  const runtime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      return { id: "timeout-job", status: "queued", task: input.task } as JobRecord;
+    },
+    async get() {
+      return { id: "timeout-job", status: cancelled ? "cancelled" : "queued", task: "timeout task" } as JobRecord;
+    },
+    async cancel() { cancelled = true; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  await scheduler.create({
+    name: "timeout", task: "timeout task", cron: "* * * * *", timeZone: "UTC",
+    ownerKeyId: "alice", timeoutMs: 1_000,
+  }, "alice");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  await scheduler.tick();
+  for (let i = 0; i < 150 && state.history[0]?.status !== "failed"; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(cancelled, true);
+  assert.equal(state.history[0].status, "failed");
+  assert.match(state.history[0].error, /timed out/i);
+});
