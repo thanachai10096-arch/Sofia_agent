@@ -42,6 +42,8 @@ export interface SofiaApiConfig {
   apiKeys: Record<string, string[]>;
   /** SHA-256 hex digest of each bearer token mapped to its scopes; allows hash-only API key configuration. */
   apiKeyHashes?: Record<string, string[]>;
+  /** Optional secret used as an HMAC key for hash-only API key authentication. */
+  apiKeyHashSecret?: string;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
