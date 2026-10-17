@@ -48,10 +48,10 @@ test("crash recovery requires review and never resumes automatically", () => {
   assert.equal(unsafe.recommendation, "manual-investigation");
 });
 
-test("runtime recovery handlers stay unavailable until catalog verification", () => {
+test("verified runtime recovery handlers register through the guarded registry", () => {
   const registry = new AdvancedSkillRegistry();
-  assert.deepEqual(registerVerifiedRuntimeRecoverySkills(registry), []);
-  assert.equal(registry.has("runtime.04"), false);
-  assert.equal(registry.has("runtime.05"), false);
-  assert.equal(registry.has("runtime.07"), false);
+  assert.deepEqual(registerVerifiedRuntimeRecoverySkills(registry), ["runtime.04", "runtime.05", "runtime.07"]);
+  assert.equal(registry.has("runtime.04"), true);
+  assert.equal(registry.has("runtime.05"), true);
+  assert.equal(registry.has("runtime.07"), true);
 });
