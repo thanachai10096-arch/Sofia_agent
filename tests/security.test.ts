@@ -28,6 +28,22 @@ describe("Sofia security controls",()=>{
     const value=redactSecrets({apiKey:"super-secret",message:"Bearer abc123"});
     assert.deepEqual(value,{apiKey:"[REDACTED]",message:"Bearer [REDACTED]"});
   });
+  it("redacts common provider tokens even when they are not labelled",()=>{
+    const value=redactSecrets({
+      openai:"sk-live-1234567890abcdef",
+      github:"ghp_abcdefghijklmnopqrstuvwxyz123456",
+      githubFineGrained:"github_pat_abcdefghijklmnopqrstuvwxyz123456",
+      slack:"xoxb-1234567890-abcdef",
+      aws:"AKIA1234567890ABCDEF",
+      message:"leaked token sk-proj-abcdef1234567890 and Bearer eyJhbGciOi.test.signature",
+      privateKey:"not-visible",
+    }) as Record<string, unknown>;
+    const serialized=JSON.stringify(value);
+    for (const secret of ["sk-live-1234567890abcdef","ghp_abcdefghijklmnopqrstuvwxyz123456","github_pat_abcdefghijklmnopqrstuvwxyz123456","xoxb-1234567890-abcdef","AKIA1234567890ABCDEF","eyJhbGciOi.test.signature","not-visible"]) {
+      assert.equal(serialized.includes(secret),false, "secret must be redacted: "+secret);
+    }
+    assert.equal(serialized.includes("[REDACTED]"),true);
+  });
   it("supports an independent process-wide kill switch",()=>{
     const controller=new SecurityController();
     assert.equal(controller.isKilled(),false);
