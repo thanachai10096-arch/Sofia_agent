@@ -13,6 +13,8 @@ export interface SofiaRunInput {
   context?: string | Record<string, unknown>;
   maxSteps?: number;
   acceptanceCriteria?: Array<{ id: string; description: string; probe: { tool: string; input: Record<string, unknown> } }>;
+  /** Optional durable conversation identifier for API run endpoints. */
+  sessionId?: string;
 }
 
 export type SofiaRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
