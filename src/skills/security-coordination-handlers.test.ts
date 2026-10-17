@@ -49,6 +49,7 @@ test("agent validation and result review do not expand authority", () => {
   assert.equal((agentMessageValidator({ messageId: "m", senderId: "a", recipientId: "b", nonce: "n", timestamp: 10, signatureVerified: false, replayDetected: false }) as any).decision, "reject");
   assert.equal((agentResultReviewer({ resultId: "r", criteria: ["correct"], satisfiedCriteria: ["correct"], evidenceIds: ["run"] }) as any).approvalGranted, false);
   assert.equal((humanGoalAlignmentMonitor({ goals: ["fix bug"], proposedAction: "inspect", supportedGoalIds: ["fix bug"], matchesProhibitedAction: false }) as any).executionPerformed, false);
+  assert.equal((humanGoalAlignmentMonitor({ goals: ["fix bug", "preserve API"], proposedAction: "rewrite", supportedGoalIds: ["fix bug"], matchesProhibitedAction: false }) as any).aligned, false);
 });
 test("task board, loop detector, and workflow monitors are read-only", () => {
   assert.equal((sharedTaskBoard({ tasks: [{ id: "a", status: "active" }] }) as any).persisted, false);
