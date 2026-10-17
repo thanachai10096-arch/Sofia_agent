@@ -89,6 +89,46 @@ npm run build
 
 Use the repository's package scripts as the source of truth if a command differs in your environment.
 
+### Run a deterministic mock API
+
+This starts a local API without calling an external model provider. It requires a test token but no model credentials:
+
+```bash
+export SOFIA_API_KEY="replace-with-a-long-random-test-token"
+npm run example:mock-api
+curl -H "Authorization: Bearer $SOFIA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Say hello","async":false}' \
+  http://127.0.0.1:3000/v1/agent/runs
+```
+
+The mock provider always returns a deterministic placeholder response; this is an integration example, not a capability or quality benchmark.
+
+### Run the standalone API in Docker
+
+```bash
+docker build -t sofia-agent .
+docker run --rm -p 3000:3000 \
+  -e SOFIA_API_KEY="$SOFIA_API_KEY" \
+  -e AI_GATEWAY_API_KEY="$AI_GATEWAY_API_KEY" \
+  -e SOFIA_FAST_MODEL="$SOFIA_FAST_MODEL" \
+  -e SOFIA_CODING_MODEL="$SOFIA_CODING_MODEL" \
+  -e SOFIA_REASONING_MODEL="$SOFIA_REASONING_MODEL" \
+  -v "$PWD/workspace:/workspace" \
+  -v sofia-agent-state:/data \
+  sofia-agent
+```
+
+Set a high-entropy `SOFIA_API_KEY` in your deployment secret store. The standalone API stores only its SHA-256 hash in the key map, enables durable local run/usage files, and binds to all interfaces inside the container. The file stores are single-process only; do not scale this container horizontally without a transactional shared store/queue. The image does not install browser binaries; browser automation remains opt-in and needs its own browser-runtime setup.
+
+### API specification
+
+The OpenAPI document is maintained at [openapi/openapi.yaml](openapi/openapi.yaml). A standalone API process exposes `/health` for liveness and `/ready` for readiness.
+
+### Real-model benchmark
+
+After configuring the provider and running `npm run build`, use `npm run benchmark:real-model`. See [docs/REAL-MODEL-BENCHMARK.md](docs/REAL-MODEL-BENCHMARK.md). Real model calls may incur cost; the script reports aggregate measurements and does not publish prompts or model outputs.
+
 ### Persistent local state
 
 By default, local job records, Brain run snapshots, and project memory are stored under the operating system's temporary directory. Temporary storage may be cleared by reboots, cleanup jobs, or container replacement, so it is not sufficient for production recovery. Configure an absolute, persistent directory before starting Sofia:
