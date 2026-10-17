@@ -92,7 +92,7 @@ export class VersionedSkillLifecycle {
       result = { passed: false, checks: [{ name: "evaluator", passed: false, detail: error instanceof Error ? error.message : String(error) }] };
     }
     if (!isRecord(result) || !Array.isArray(result.checks) || result.checks.length === 0 ||
-        !result.checks.every((check) => isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean')) {
+        !result.checks.every((check) => isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
       result = { passed: false, checks: [{ name: "evaluation-result", passed: false, detail: "Evaluator returned malformed or empty evidence" }] };
     }
     const before = clone(this.snapshot);
