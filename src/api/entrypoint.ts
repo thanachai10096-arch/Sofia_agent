@@ -23,14 +23,14 @@ let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | und
 const discordAbort = new AbortController();
 
 if (discordConfigured) {
-  if (!discordPublicKey || !discordBotToken || discordUserIds.length === 0 || discordChannelIds.length === 0) {
-    throw new Error("Discord integration requires DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, DISCORD_ALLOWED_USER_IDS, and DISCORD_ALLOWED_CHANNEL_IDS.");
+  if (!discordPublicKey || !discordBotToken || discordChannelIds.length === 0) {
+    throw new Error("Discord integration requires DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, and DISCORD_ALLOWED_CHANNEL_IDS. DISCORD_ALLOWED_USER_IDS is optional; when omitted, all non-bot users in the allowed channels may use /run.");
   }
   discordTransport = createDiscordInteractionTransport({
     publicKeyHex: discordPublicKey,
     botToken: discordBotToken,
     commandName: process.env.DISCORD_COMMAND_NAME?.trim() || "run",
-    allowedUserIds: discordUserIds,
+    ...(discordUserIds.length ? { allowedUserIds: discordUserIds } : {}),
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
   });
