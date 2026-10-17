@@ -55,8 +55,10 @@ export interface ApiMetric {
 export interface SofiaApiConfig {
   /** Legacy plaintext-token map. Prefer apiKeyHashes for deployments that can store only hashes. */
   apiKeys: Record<string, string[]>;
-  /** SHA-256 hex digest of each bearer token mapped to its scopes; allows hash-only API key configuration. */
+  /** SHA-256 or HMAC-SHA-256 hex digest of each bearer token mapped to its scopes. */
   apiKeyHashes?: Record<string, string[]>;
+  /** Optional independent secret used as the HMAC key for hash-only API key authentication. */
+  apiKeyHashSecret?: string;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
