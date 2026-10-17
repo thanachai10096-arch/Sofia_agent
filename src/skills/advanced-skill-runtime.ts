@@ -1,4 +1,5 @@
 import type { AdvancedSkillDefinition } from "./advanced-skill-catalog.js";
+import type { SecurityController } from "../security/controller.js";
 
 export interface AdvancedSkillExecutionContext {
   readonly principalId: string;
@@ -26,7 +27,7 @@ export interface AdvancedSkillExecutionOptions {
 export class AdvancedSkillPolicyError extends Error {
   constructor(
     message: string,
-    readonly code: "SKILL_NOT_FOUND" | "SKILL_NOT_VERIFIED" | "APPROVAL_REQUIRED" | "ABORTED" | "TIMEOUT",
+    readonly code: "SKILL_NOT_FOUND" | "SKILL_NOT_VERIFIED" | "APPROVAL_REQUIRED" | "ABORTED" | "TIMEOUT" | "SECURITY_STOPPED",
   ) {
     super(message);
     this.name = "AdvancedSkillPolicyError";
@@ -49,16 +50,20 @@ interface RegisteredSkill {
 /**
  * A guarded dispatcher for verified skill handlers. This is intentionally not
  * an authorization system for tools: handlers must still use Sofia's Tool
- * Registry, security controller, and workspace policy for every side effect.
+ * Registry and workspace/tool policy for every side effect.
  */
 export class AdvancedSkillRegistry {
   private readonly skills = new Map<string, RegisteredSkill>();
 
   /**
    * The verifier must consult a trusted Sofia approval store/controller.
-   * With no verifier, approval-required skills fail closed.
+   * With no verifier, approval-required skills fail closed. Supplying Sofia's
+   * SecurityController also makes its global kill switch apply to skill runs.
    */
-  constructor(private readonly verifyApproval: AdvancedSkillApprovalVerifier = () => false) {}
+  constructor(
+    private readonly verifyApproval: AdvancedSkillApprovalVerifier = () => false,
+    private readonly securityController?: SecurityController,
+  ) {}
 
   register(definition: AdvancedSkillDefinition, handler: AdvancedSkillHandler): void {
     if (definition.status !== "verified") {
@@ -136,9 +141,23 @@ export class AdvancedSkillRegistry {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10 * 60_000) {
       throw new RangeError("timeoutMs must be an integer between 1 and 600000");
     }
-    const startedAt = new Date().toISOString();
-    context.emitTrace?.({ type: "skill.started", skillId: id, at: startedAt });
 
+    let securityBinding: ReturnType<SecurityController["bindSignal"]> | undefined;
+    try {
+      securityBinding = this.securityController?.bindSignal(context.signal);
+    } catch {
+      throw new AdvancedSkillPolicyError(
+        `Skill ${id} blocked by Sofia's security controller`,
+        "SECURITY_STOPPED",
+      );
+    }
+    const parentSignal = securityBinding?.signal ?? context.signal;
+    if (parentSignal.aborted) {
+      securityBinding?.dispose();
+      throw new AdvancedSkillPolicyError(`Skill ${id} was aborted before execution`, "ABORTED");
+    }
+
+    context.emitTrace?.({ type: "skill.started", skillId: id, at: new Date().toISOString() });
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let abortListener: (() => void) | undefined;
     const executionController = new AbortController();
@@ -155,7 +174,7 @@ export class AdvancedSkillRegistry {
           `Skill ${id} was aborted during execution`, "ABORTED",
         ));
       };
-      context.signal.addEventListener("abort", abortListener, { once: true });
+      parentSignal.addEventListener("abort", abortListener, { once: true });
     });
 
     const executionContext: AdvancedSkillExecutionContext = {
@@ -176,7 +195,8 @@ export class AdvancedSkillRegistry {
       throw error;
     } finally {
       if (timeout) clearTimeout(timeout);
-      if (abortListener) context.signal.removeEventListener("abort", abortListener);
+      if (abortListener) parentSignal.removeEventListener("abort", abortListener);
+      securityBinding?.dispose();
     }
   }
 }
