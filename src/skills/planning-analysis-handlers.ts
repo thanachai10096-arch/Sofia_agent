@@ -56,7 +56,7 @@ export const naturalConversation = (input: unknown) => {
 export const userPreferenceMemory = (input: unknown) => {
   const value = record(input);
   const statements = strings(value.statements, "statements", 200);
-  const candidates = statements.filter(s => /\b(I prefer|I like|I dislike|I don't like|please always|please never|I want|I need)\b/i.test(s));
+  const candidates = statements.filter(s => /\b(I prefer|I like|I dislike|I don't like|please always|please never|I want|I need)\b|ฉันชอบ|ชอบ|ไม่ชอบ|ต้องการ|อยากให้|ขอให้|อย่าทำ|ห้าม/i.test(s));
   return { candidates: candidates.map(statement => ({ statement: redactSecrets(statement), source: "user-supplied", requiresConfirmation: true })), stored: false, sensitiveInferencePerformed: false };
 };
 
