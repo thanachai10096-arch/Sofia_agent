@@ -75,14 +75,63 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
 
 function collectHttpUrls(value: unknown, output: string[] = []): string[] {
   if (typeof value === "string") {
-    const matches = value.match(/https?:\/\/[^\s"'<>]+/gi) ?? [];
-    for (const match of matches) output.push(match.replace(/[),.;]+$/g, ""));
+    let cursor = 0;
+    while (cursor < value.length) {
+      const http = value.indexOf("http://", cursor);
+      const https = value.indexOf("https://", cursor);
+      if (http < 0 && https < 0) break;
+      const start = http < 0 ? https : https < 0 ? http : Math.min(http, https);
+      let end = start;
+      while (end < value.length) {
+        const code = value.charCodeAt(end);
+        if (code <= 0x20 || code === 34 || code === 39 || code === 60 || code === 62) break;
+        end++;
+      }
+      let url = value.slice(start, end);
+      while (url.length > 0 && "),.;".includes(url[url.length - 1]!)) url = url.slice(0, -1);
+      if (url) output.push(url);
+      cursor = Math.max(end, start + 1);
+    }
   } else if (Array.isArray(value)) {
     for (const item of value) collectHttpUrls(item, output);
   } else if (value && typeof value === "object") {
     for (const item of Object.values(value as Record<string, unknown>)) collectHttpUrls(item, output);
   }
   return output;
+}
+
+function redactPrivateKeyBlocks(value: string): string {
+  const labels = new Set(["PRIVATE", "RSA", "EC", "OPENSSH", "DSA", "ENCRYPTED"]);
+  let result = "";
+  let cursor = 0;
+  while (cursor < value.length) {
+    const begin = value.indexOf("-----BEGIN ", cursor);
+    if (begin < 0) return result + value.slice(cursor);
+    result += value.slice(cursor, begin);
+    const labelStart = begin + "-----BEGIN ".length;
+    const headerEnd = value.indexOf(" PRIVATE KEY-----", labelStart);
+    if (headerEnd < 0) {
+      result += value.slice(begin, labelStart);
+      cursor = labelStart;
+      continue;
+    }
+    const label = value.slice(labelStart, headerEnd);
+    if (!labels.has(label)) {
+      result += value.slice(begin, labelStart);
+      cursor = labelStart;
+      continue;
+    }
+    const endMarker = "-----END " + label + " PRIVATE KEY-----";
+    const end = value.indexOf(endMarker, headerEnd + " PRIVATE KEY-----".length);
+    if (end < 0) {
+      result += value.slice(begin, labelStart);
+      cursor = labelStart;
+      continue;
+    }
+    result += "[REDACTED PRIVATE KEY]";
+    cursor = end + endMarker.length;
+  }
+  return result;
 }
 
 export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">, blockedPaths: readonly string[] = [], allowedHosts: readonly string[] = []): SecurityDecision {
@@ -129,8 +178,7 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
 
 export function redactSecrets(value: unknown): unknown {
   if (typeof value === "string") {
-    return value
-      .replace(/-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----/gi, "[REDACTED PRIVATE KEY]")
+    return redactPrivateKeyBlocks(value)
       .replace(/\b(?:xox[baprs]-[A-Za-z0-9-]{10,})\b/gi, "[REDACTED]")
       .replace(/(?:Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]")
       .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{12,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[0-9A-Z]{16})\b/g, "[REDACTED]")
