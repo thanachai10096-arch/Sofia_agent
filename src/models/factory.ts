@@ -32,6 +32,7 @@ import { CompositeSecurityAudit } from "../security/audit.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import { SqliteSessionStore } from "../session/sqlite-store.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
@@ -78,4 +79,23 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,learningDiagnostics:()=>evolution.getDiagnostics()};
+}
+
+/**
+ * Create Sofia dependencies with durable SQLite-backed session transcripts.
+ * This additive async factory leaves the existing synchronous factory unchanged.
+ * Call closeSessionStore() when the host shuts down.
+ */
+export async function createSofiaAgentDependenciesWithSessions(
+  workspace = process.cwd(),
+  approval?: AgentDependencies["approval"],
+  databasePath?: string,
+): Promise<AgentDependencies & { closeSessionStore: () => void }> {
+  const dependencies = createSofiaAgentDependencies(workspace, approval);
+  const sessionStore = await SqliteSessionStore.open(databasePath);
+  return {
+    ...dependencies,
+    sessionStore,
+    closeSessionStore: () => sessionStore.close(),
+  };
 }
