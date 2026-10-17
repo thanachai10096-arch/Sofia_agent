@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { skillRankingEngine, skillSuccessScorer, tokenBudgetPlanner, registerVerifiedEvolutionSkills } from "./evolution-handlers.js";
+import { promptVariantEvaluator, skillPromotionGate, skillRankingEngine, skillSuccessScorer, tokenBudgetPlanner, registerVerifiedEvolutionSkills } from "./evolution-handlers.js";
 import { AdvancedSkillRegistry } from "./advanced-skill-runtime.js";
 
 test("success scorer adjusts for small samples and never promotes automatically", () => {
@@ -52,4 +52,34 @@ test("verified evolution handlers register through the guarded dispatcher", asyn
     tokenLimit: 1000, estimatedTokens: 500, costLimit: 2, estimatedCost: 1,
   }, { principalId: "test-user", signal: new AbortController().signal }) as { allowedByEstimate: boolean };
   assert.equal(result.allowedByEstimate, true);
+});
+
+test("prompt variant evaluator excludes safety incidents and never deploys", () => {
+  const result = promptVariantEvaluator({ variants: [
+    { id: "safe", sampleSize: 20, passRate: 0.9, safetyIncidents: 0, evidenceId: "eval-1" },
+    { id: "unsafe", sampleSize: 20, passRate: 1, safetyIncidents: 1, evidenceId: "eval-2" },
+  ] }) as { recommendedForHumanReview: { id: string } | null; excludedVariantIds: string[]; deploymentAllowed: boolean };
+  assert.equal(result.recommendedForHumanReview?.id, "safe");
+  assert.deepEqual(result.excludedVariantIds, ["unsafe"]);
+  assert.equal(result.deploymentAllowed, false);
+});
+
+test("skill promotion gate requires sufficient evidence and zero safety incidents", () => {
+  const eligible = skillPromotionGate({ skillId: "demo.skill", attempts: 40, successes: 39, safetyIncidents: 0, evidenceIds: ["ci-1", "eval-2"] }) as { eligibleForReview: boolean; promotionApplied: boolean };
+  const blocked = skillPromotionGate({ skillId: "demo.skill", attempts: 40, successes: 40, safetyIncidents: 1, evidenceIds: ["ci-1"] }) as { eligibleForReview: boolean; promotionApplied: boolean };
+  assert.equal(eligible.eligibleForReview, true);
+  assert.equal(eligible.promotionApplied, false);
+  assert.equal(blocked.eligibleForReview, false);
+});
+
+test("skill promotion gate is approval-protected by the dispatcher", async () => {
+  const registry = new AdvancedSkillRegistry();
+  registerVerifiedEvolutionSkills(registry);
+  await assert.rejects(
+    registry.execute("evolution.09", { skillId: "demo.skill", attempts: 40, successes: 40, safetyIncidents: 0, evidenceIds: ["ci-1"] }, {
+      principalId: "test-user",
+      signal: new AbortController().signal,
+    }),
+    (error: unknown) => error instanceof Error && error.message.includes("Approval required"),
+  );
 });
