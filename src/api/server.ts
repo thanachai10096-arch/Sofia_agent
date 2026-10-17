@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { DesktopCapability } from "../desktop/types.js";
@@ -66,7 +66,9 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   const header = req.headers.authorization ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!token) return null;
-  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const tokenHash = config.apiKeyHashSecret
+    ? createHmac("sha256", config.apiKeyHashSecret).update(token).digest("hex")
+    : createHash("sha256").update(token).digest("hex");
   const hashedKeys = config.apiKeyHashes ?? {};
   // Prefer hash-only configuration; retain the legacy map for backward compatibility.
   const scopes = Object.prototype.hasOwnProperty.call(hashedKeys, tokenHash)
