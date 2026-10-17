@@ -52,3 +52,20 @@ test("invalid transcript writes do not replace stored messages", async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("multiple store connections can persist sessions to the same database", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-concurrent-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const first = await SqliteSessionStore.open(file);
+  const second = await SqliteSessionStore.open(file);
+  try {
+    first.save({ id: "first", messages: ["one"], updatedAt: 0 });
+    second.save({ id: "second", messages: ["two"], updatedAt: 0 });
+    assert.deepEqual(first.get("second")?.messages, ["two"]);
+    assert.deepEqual(second.get("first")?.messages, ["one"]);
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
