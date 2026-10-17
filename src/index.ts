@@ -30,6 +30,7 @@ export type { AdvancedSkillDefinition, SkillRisk, SkillStatus } from "./skills/a
 export { AdvancedSkillRegistry, AdvancedSkillPolicyError } from "./skills/advanced-skill-runtime.js";
 export { intentClarifier, goalDecomposer, planBuilder, retryStrategist, failureClassifier, completionVerifier, registerVerifiedCoreSkills, listImplementedCoreSkillIds } from "./skills/core-handlers.js";
 export { permissionPolicyEvaluator, leastPrivilegePlanner, promptInjectionDetector, untrustedOutputFencer, pathTraversalGuard, registerVerifiedSecuritySkills } from "./skills/security-handlers.js";
+export { contextSummarizer, memoryConflictResolver, longContextCompressor, createProjectMemoryRetrievalHandler, registerVerifiedMemorySkills } from "./skills/memory-handlers.js";
 export type { AdvancedSkillExecutionContext, AdvancedSkillTraceEvent, AdvancedSkillHandler, AdvancedSkillExecutionOptions, AdvancedSkillApprovalRequest, AdvancedSkillApprovalVerifier } from "./skills/advanced-skill-runtime.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
 export { AgentEvaluationRunner } from "./evaluation.js";
