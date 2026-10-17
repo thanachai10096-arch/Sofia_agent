@@ -302,3 +302,33 @@ test("API restores idempotency keys from durable run records after restart", asy
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("API does not acknowledge an async run when durable persistence fails", async (t) => {
+  let providerCalls = 0;
+  const provider: ModelProvider = {
+    async generate() {
+      providerCalls += 1;
+      return { text: "must not run" };
+    },
+  };
+  const runStore = {
+    loadAllSync: () => [],
+    async save() { throw new Error("synthetic store outage"); },
+    async remove() {},
+  };
+  const { server, url } = await startApi(provider, { runStore });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test-token",
+      "content-type": "application/json",
+      "idempotency-key": "durability-failure",
+    },
+    body: JSON.stringify({ task: "must not be accepted", async: true }),
+  });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "run_persistence_unavailable" });
+  assert.equal(providerCalls, 0);
+});
