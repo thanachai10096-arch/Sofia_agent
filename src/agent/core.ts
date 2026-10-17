@@ -42,6 +42,18 @@ export class SofiaAgent {
       ...(request.maxSteps !== undefined ? { maxSteps: request.maxSteps } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
       ...(request.desktopCapabilities?.length ? { desktopCapabilities: request.desktopCapabilities } : {}),
+      // Bridge Brain tool lifecycle events into the stable Agent event stream.
+      // API policy hooks (quotas, audit) must observe tool starts before execution.
+      onEvent: (event) => {
+        const metadata = { stepId: "stepId" in event ? event.stepId : undefined };
+        if (event.type === "brain.tool.started") {
+          emit({ type: "tool.started", message: "Brain tool execution started.", metadata });
+        } else if (event.type === "brain.tool.completed") {
+          emit({ type: "tool.completed", message: "Brain tool execution completed.", metadata });
+        } else if (event.type === "brain.tool.failed") {
+          emit({ type: "tool.failed", message: "Brain tool execution failed.", metadata });
+        }
+      },
     });
 
     emit({ type: "run.started", message: "Sofia Brain run started." });
