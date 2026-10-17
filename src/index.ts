@@ -72,3 +72,5 @@ export { registerVerifiedSecurityCoordinationSkills } from "./skills/security-co
 export { browserWorkflowPlanner, browserStateVerifier } from "./skills/security-coordination-handlers.js";
 
 export { approvalGateManager, securityRegressionTester } from "./skills/security-coordination-handlers.js";
+
+export { integrationTestDesigner, endToEndTestPlanner, flakyTestDetector, releaseReadinessAuditor } from "./skills/security-coordination-handlers.js";
