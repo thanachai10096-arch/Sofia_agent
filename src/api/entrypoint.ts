@@ -34,21 +34,57 @@ if (discordConfigured) {
     publicKeyHex: discordPublicKey,
     botToken: discordBotToken,
     commandName: process.env.DISCORD_COMMAND_NAME?.trim() || "run",
+    additionalCommandNames: ["status", "cancel"],
     allowedUserIds: discordUserIds,
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
   });
   await discordTransport.start(discordAbort.signal, async (message) => {
-    const prefix = "/run";
-    const task = message.content.startsWith(prefix) ? message.content.slice(prefix.length).trim() : "";
-    if (!task) {
-      await discordTransport?.sendMessage(message.channelId, "Please provide a task using /run task:<description>.", undefined, message.id);
-      return;
-    }
     try {
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       const principalId = "discord:" + message.author.id;
+      const command = message.content.trim().split(/\\s+/, 1)[0] ?? "";
+      const argument = message.content.trim().slice(command.length).trim();
+      if (command === "/status" || command === "/cancel") {
+        if (!/^([0-9a-f]{8}-[0-9a-f-]{27,})$/i.test(argument)) {
+          await discordTransport?.sendMessage(
+            message.channelId,
+            "Provide a valid Sofia job ID using /" + command.slice(1) + " job_id:<job-id>.",
+            undefined,
+            message.id,
+          );
+          return;
+        }
+        const job = await deps.jobRuntime.get(argument);
+        if (!job || job.ownerKeyId !== principalId) {
+          await discordTransport?.sendMessage(message.channelId, "Job not found or not accessible to this Discord user.", undefined, message.id);
+          return;
+        }
+        if (command === "/status") {
+          await discordTransport?.sendMessage(
+            message.channelId,
+            "Sofia job status: " + job.status + "\\nJob ID: " + job.id,
+            undefined,
+            message.id,
+          );
+          return;
+        }
+        const cancelled = await deps.jobRuntime.cancel(job.id);
+        await discordTransport?.sendMessage(
+          message.channelId,
+          cancelled ? "Cancellation requested for job " + job.id + "." : "Job " + job.id + " is already terminal or cannot be cancelled.",
+          undefined,
+          message.id,
+        );
+        return;
+      }
+      const prefix = "/run";
+      const task = message.content.startsWith(prefix) ? message.content.slice(prefix.length).trim() : "";
+      if (!task) {
+        await discordTransport?.sendMessage(message.channelId, "Please provide a task using /run task:<description>.", undefined, message.id);
+        return;
+      }
       const handle = await submitDiscordTask(deps.jobRuntime, task, principalId, discordAbort.signal);
       // Acknowledge while the interaction token is valid; final delivery uses the bot API
       // so jobs longer than Discord's interaction-token lifetime still report completion.
