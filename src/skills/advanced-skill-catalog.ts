@@ -9,13 +9,13 @@ export type SkillRisk = "read-only" | "may-write" | "privileged";
 export type SkillStatus = "planned" | "implemented" | "verified" | "quarantined";
 
 export interface AdvancedSkillDefinition {
-  id: string;
-  name: string;
-  category: string;
-  risk: SkillRisk;
-  status: SkillStatus;
-  requiresApproval: boolean;
-  description: string;
+  readonly id: string;
+  readonly name: string;
+  readonly category: string;
+  readonly risk: SkillRisk;
+  readonly status: SkillStatus;
+  readonly requiresApproval: boolean;
+  readonly description: string;
 }
 
 export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
