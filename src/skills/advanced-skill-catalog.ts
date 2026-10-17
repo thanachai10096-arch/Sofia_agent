@@ -240,7 +240,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Patch Generator",
     "category": "Software Engineering",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Patch Generator: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -258,7 +258,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Python Specialist",
     "category": "Software Engineering",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Python Specialist: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -267,7 +267,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "API Contract Designer",
     "category": "Software Engineering",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "API Contract Designer: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -285,7 +285,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Code Review Auditor",
     "category": "Software Engineering",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Code Review Auditor: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -303,7 +303,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Unit Test Generator",
     "category": "Testing & Quality",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Unit Test Generator: testing & quality capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -456,7 +456,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Audit Trail Writer",
     "category": "Security & Permissions",
     "risk": "privileged",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Audit Trail Writer: security & permissions capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -474,7 +474,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Tool Discovery Router",
     "category": "Tools & Automation",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Tool Discovery Router: tools & automation capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -519,7 +519,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Terminal Task Runner",
     "category": "Tools & Automation",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "Terminal Task Runner: tools & automation capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -528,7 +528,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "File Workspace Operator",
     "category": "Tools & Automation",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": true,
     "description": "File Workspace Operator: tools & automation capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -546,7 +546,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "API Connector Orchestrator",
     "category": "Tools & Automation",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "API Connector Orchestrator: tools & automation capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -618,7 +618,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Technical Documentation Reader",
     "category": "Research & Knowledge",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Technical Documentation Reader: research & knowledge capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -636,7 +636,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Market Gap Analyst",
     "category": "Research & Knowledge",
     "risk": "read-only",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Market Gap Analyst: research & knowledge capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -870,7 +870,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Model Router Optimizer",
     "category": "Learning & Optimization",
     "risk": "may-write",
-    "status": "planned",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Model Router Optimizer: learning & optimization capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
