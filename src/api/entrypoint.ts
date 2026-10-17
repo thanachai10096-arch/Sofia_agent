@@ -117,7 +117,7 @@ if (discordConfigured) {
       });
       const sessionContext = await buildDiscordSessionContext(deps.jobRuntime, sessionKey);
       const taskWithMemory = sessionContext
-        ? task + "\\n\\n" + sessionContext
+        ? task + "\n\n" + sessionContext
         : task;
       const handle = await submitDiscordTask(deps.jobRuntime, taskWithMemory, principalId, discordAbort.signal, {
         channelId: message.channelId,
