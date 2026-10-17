@@ -203,8 +203,8 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "id": "coding.01",
     "name": "Repository Mapper",
     "category": "Software Engineering",
-    "risk": "may-write",
-    "status": "planned",
+    "risk": "read-only",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Repository Mapper: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -212,8 +212,8 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "id": "coding.02",
     "name": "Codebase Semantic Search",
     "category": "Software Engineering",
-    "risk": "may-write",
-    "status": "planned",
+    "risk": "read-only",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Codebase Semantic Search: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -231,7 +231,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Implementation Planner",
     "category": "Software Engineering",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Implementation Planner: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -249,7 +249,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "TypeScript Specialist",
     "category": "Software Engineering",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "TypeScript Specialist: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -276,7 +276,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Refactoring Planner",
     "category": "Software Engineering",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Refactoring Planner: software engineering capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
