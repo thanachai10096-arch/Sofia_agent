@@ -110,6 +110,13 @@ test("ContainerSandbox constructs a restrictive Docker command and disables netw
   }
 });
 
+test("ContainerSandbox rejects actual NUL bytes in image, command, and arguments", async () => {
+  assert.throws(() => new ContainerSandbox({ image: "registry.example/sofia@sha256:" + "a".repeat(64) + "\0" }), /pinned by an immutable sha256 digest/);
+  const sandbox = new ContainerSandbox({ image: "registry.example/sofia@sha256:" + "a".repeat(64), runner: async () => ({ stdout: "", stderr: "", code: 0 }) });
+  await assert.rejects(() => sandbox.run("node\0", [], limits()), /valid container command/);
+  await assert.rejects(() => sandbox.run("node", ["bad\0arg"], limits()), /without NUL bytes/);
+});
+
 test("ContainerSandbox requires a digest-pinned image and never silently pulls images", async () => {
   assert.throws(
     () => new ContainerSandbox({ image: "node:24" }),
