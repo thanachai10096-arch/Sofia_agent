@@ -357,9 +357,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try { usage.consume(auth.keyId); } catch {
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
         }
+        if (!reserveActive(auth.keyId)) {
+          res.setHeader("retry-after", "2");
+          return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
+        }
         const runId = randomUUID();
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+        let timedOut = false;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          controller.abort(new Error("Run timed out."));
+        }, requestTimeoutMs);
         const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
         runs.set(runId, run);
         persist(run);
@@ -387,14 +395,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             signal: controller.signal,
             onEvent: (event) => send({ type: "event", runId, event }),
           });
-          if (controller.signal.aborted) throw new Error("Run cancelled.");
+          if (controller.signal.aborted) throw new Error(timedOut ? "Run timed out." : "Run cancelled.");
           run.result = result;
           run.status = "completed";
           send({ type: "result", runId, status: "completed", result: run.result });
         } catch (error) {
-          run.status = controller.signal.aborted ? "cancelled" : "failed";
-          run.error = controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Agent failed";
+          run.status = timedOut ? "failed" : controller.signal.aborted ? "cancelled" : "failed";
+          run.error = timedOut ? "Run timed out." : controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Agent failed";
           send({ type: "error", runId, status: run.status, error: run.error });
+        } finally {
+          releaseActive(auth.keyId);
         }
         send({ type: "done", runId });
         run.updatedAt = Date.now();
@@ -438,13 +448,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
             if (existing) idempotency.delete(idempotencyId);
           }
-          const active = activeByKey.get(auth.keyId) ?? 0;
-          if (active >= maxConcurrentRunsPerKey) {
-            res.setHeader("retry-after", "2");
-            return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
-          }
           try { usage.consume(auth.keyId); } catch (error) {
             return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+          }
+          if (!reserveActive(auth.keyId)) {
+            res.setHeader("retry-after", "2");
+            return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
           }
           const runId = randomUUID();
           const run: ActiveRun = {
@@ -459,7 +468,6 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           runs.set(runId, run);
           persist(run);
           if (idempotencyId) idempotency.set(idempotencyId, { runId, fingerprint: requestFingerprint });
-          activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
             ...input,
             ...(input.context !== undefined
@@ -473,9 +481,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try { usage.consume(auth.keyId); } catch (error) {
           return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
         }
+        if (!reserveActive(auth.keyId)) {
+          res.setHeader("retry-after", "2");
+          return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
+        }
 
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+        const timer = setTimeout(() => controller.abort(new Error("Run timed out.")), requestTimeoutMs);
         const runId = randomUUID();
         try {
           const result = await agent.run({
@@ -499,6 +511,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           }, origin, config);
         } finally {
           clearTimeout(timer);
+          releaseActive(auth.keyId);
         }
       }
 
