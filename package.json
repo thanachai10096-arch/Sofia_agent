@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-tests.mjs",
     "cli": "tsx src/cli/index.ts",
-    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs"
+    "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs",
+    "test:coverage": "node scripts/run-tests.mjs --coverage",
+    "example:mock-api": "tsx examples/mock-api.ts"
   },
   "engines": {
     "node": ">=20"
