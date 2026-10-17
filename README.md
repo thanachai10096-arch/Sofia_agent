@@ -110,6 +110,7 @@ The mock provider always returns a deterministic placeholder response; this is a
 docker build -t sofia-agent .
 docker run --rm -p 3000:3000 \
   -e SOFIA_API_KEY="$SOFIA_API_KEY" \
+  -e SOFIA_API_KEY_HASH_SECRET="$SOFIA_API_KEY_HASH_SECRET" \
   -e AI_GATEWAY_API_KEY="$AI_GATEWAY_API_KEY" \
   -e SOFIA_FAST_MODEL="$SOFIA_FAST_MODEL" \
   -e SOFIA_CODING_MODEL="$SOFIA_CODING_MODEL" \
