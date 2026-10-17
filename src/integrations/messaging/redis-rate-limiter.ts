@@ -37,7 +37,7 @@ export class RedisMessagingRateLimiter implements MessagingRateLimiter {
       throw new Error("Redis messaging rate limiter requires a Redis eval client.");
     }
     const prefix = options.keyPrefix ?? "sofia:messaging:rate";
-    if (!prefix.trim() || prefix.length > 128 || /[\\s{}]/.test(prefix)) {
+    if (!prefix.trim() || prefix.length > 128 || /[\s{}]/.test(prefix)) {
       throw new Error("Invalid Redis messaging rate-limit key prefix.");
     }
     this.client = options.client;
