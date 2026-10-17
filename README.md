@@ -130,6 +130,20 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 
 **Keep the Sofia master API key on the server.** A browser should call your authenticated application backend, which then calls Sofia. Never ship a privileged Sofia API key in frontend JavaScript.
 
+## `> Discord integration (opt-in)`
+
+The Discord interaction adapter supports allowlisted slash commands for durable background work:
+
+- `/run` submits a task and returns a job ID.
+- `/status` and `/cancel` are restricted to jobs owned by the invoking Discord user.
+- `/resume` can continue an eligible job from a saved checkpoint.
+- Recent completed work can provide bounded, session-scoped context for the same user and channel; historical content is treated as untrusted input.
+- Restart recovery can notify the configured channel about interrupted jobs and whether a checkpoint is available.
+
+Discord is disabled unless its server-side configuration is supplied. Configure explicit user and channel ID allowlists, use HTTPS, keep the bot token/API key in a secret store, and use persistent storage for restart recovery. **CI does not replace a live Discord test.**
+
+See [Discord integration setup and smoke-test guide](docs/DISCORD_INTEGRATION_SETUP.md) for required environment variables, command registration, and a private-server acceptance checklist.
+
 ## `> Browser & local runtime`
 
 - Browser automation is opt-in and policy-controlled.
