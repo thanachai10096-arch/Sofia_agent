@@ -17,6 +17,7 @@ test("Discord transport verifies raw signatures and edits deferred interaction r
   const transport = createDiscordInteractionTransport({
     publicKeyHex,
     botToken,
+    additionalCommandNames: ["status", "cancel"],
     fetchImpl: async (input, init) => {
       sent.push({ url: String(input), init });
       return response({ id: "987654321" });
@@ -73,3 +74,23 @@ test("Discord transport rejects invalid configuration", () => {
   assert.throws(() => createDiscordInteractionTransport({ publicKeyHex: "bad", botToken }), /public key/);
   assert.throws(() => createDiscordInteractionTransport({ publicKeyHex, botToken: "bad" }), /token/);
 });
+
+test("Discord transport accepts additional allowlisted slash command names and forwards their job ID", async () => {
+  const transport = createDiscordInteractionTransport({ publicKeyHex, botToken, additionalCommandNames: ["status", "cancel"] });
+  let received = "";
+  await transport.start(new AbortController().signal, async (event) => { received = event.content; });
+  const body = Buffer.from(JSON.stringify({
+    type: 2,
+    id: "222222222223",
+    application_id: "111111111111",
+    token: "interaction-token-abc",
+    channel_id: "123456789",
+    member: { user: { id: "333333333333", username: "tester" } },
+    data: { name: "status", options: [{ name: "job_id", type: 3, value: "job-12345678" }] },
+  }));
+  assert.deepEqual(await transport.handleRequest(signed(body)), { status: 200, body: { type: 5 } });
+  for (let attempt = 0; attempt < 20 && !received; attempt++) await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(received, "/status job-12345678");
+  await transport.stop();
+});
+
