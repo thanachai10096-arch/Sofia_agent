@@ -122,6 +122,7 @@ if (discordConfigured) {
       const handle = await submitDiscordTask(deps.jobRuntime, taskWithMemory, principalId, discordAbort.signal, {
         channelId: message.channelId,
         sessionKey,
+        sessionTask: task,
       });
       // Acknowledge while the interaction token is valid; final delivery uses the bot API
       // so jobs longer than Discord's interaction-token lifetime still report completion.
