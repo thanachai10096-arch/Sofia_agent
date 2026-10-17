@@ -107,9 +107,16 @@ test("completion verifier completes only when every criterion has evidence", () 
   assert.equal(result.completed, true);
 });
 
-test("core skill registration exposes only catalog entries explicitly marked verified", () => {
+test("core skill registry registers only verified handlers and executes them through the guarded dispatcher", async () => {
   const registry = new AdvancedSkillRegistry();
-  assert.deepEqual(registerVerifiedCoreSkills(registry), []);
-  assert.equal(ADVANCED_SKILLS.filter(skill => skill.status === "verified").length, 0);
-  assert.equal(getAdvancedSkill("runtime.01")?.status, "planned");
+  const ids = registerVerifiedCoreSkills(registry);
+  assert.deepEqual(ids, ["runtime.01", "runtime.02", "runtime.03", "runtime.08", "runtime.09", "runtime.10"]);
+  assert.equal(ADVANCED_SKILLS.filter(skill => skill.status === "verified").length, 6);
+  assert.ok(ids.every(id => registry.has(id)));
+
+  const result = await registry.execute("runtime.09", { message: "Type error: value is not assignable" }, {
+    principalId: "test-user",
+    signal: new AbortController().signal,
+  }) as { category: string };
+  assert.equal(result.category, "type_error");
 });
