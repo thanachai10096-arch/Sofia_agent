@@ -833,8 +833,8 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "id": "evolution.01",
     "name": "Skill Success Scorer",
     "category": "Learning & Optimization",
-    "risk": "may-write",
-    "status": "planned",
+    "risk": "read-only",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Skill Success Scorer: learning & optimization capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -852,7 +852,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Skill Ranking Engine",
     "category": "Learning & Optimization",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Skill Ranking Engine: learning & optimization capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -879,7 +879,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Token Budget Planner",
     "category": "Learning & Optimization",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Token Budget Planner: learning & optimization capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
