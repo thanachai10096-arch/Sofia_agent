@@ -44,7 +44,7 @@ if (discordConfigured) {
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       const principalId = "discord:" + message.author.id;
-      const command = message.content.trim().split(/\\s+/, 1)[0] ?? "";
+      const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
       const argument = message.content.trim().slice(command.length).trim();
       if (command === "/status" || command === "/cancel") {
         if (!/^([0-9a-f]{8}-[0-9a-f-]{27,})$/i.test(argument)) {
@@ -64,7 +64,7 @@ if (discordConfigured) {
         if (command === "/status") {
           await discordTransport?.sendMessage(
             message.channelId,
-            "Sofia job status: " + job.status + "\\nJob ID: " + job.id,
+            "Sofia job status: " + job.status + "\nJob ID: " + job.id,
             undefined,
             message.id,
           );
