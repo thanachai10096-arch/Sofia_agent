@@ -173,6 +173,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
+          ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
