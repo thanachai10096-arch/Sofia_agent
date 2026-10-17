@@ -122,3 +122,18 @@ test("workspace runtime fails closed when shell is enabled without Docker isolat
     await rm(f.parent, { recursive: true, force: true });
   }
 });
+
+
+test("workspace runtime blocks Git operations that require unrestricted network access", async () => {
+  const f = await fixture();
+  try {
+    for (const args of [["fetch", "origin"], ["pull"], ["push", "origin", "main"], ["clone", "remote"]]) {
+      await assert.rejects(
+        f.runtime.git(args),
+        /Network-capable Git operations require a dedicated allowlisted network transport/,
+      );
+    }
+  } finally {
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});
