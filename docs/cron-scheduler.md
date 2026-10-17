@@ -6,7 +6,7 @@ This module is additive and submits work through the existing `JobRuntime`; it d
 
 Construct `CronScheduler` with a `JobRuntime`, call `recover()` once during startup, then call `create` and invoke `tick()` from the host's timer/worker loop. `recover()` reconciles persisted runtime job IDs and monitors live jobs; a claimed execution without a persisted job ID is marked indeterminate and is not automatically resubmitted, because the previous process may have submitted it immediately before crashing. The default `FileCronStore` persists schedules, execution history and audit events under Sofia's cron state directory. Set `SOFIA_STATE_DIR` to a durable absolute path in production. For multi-host deployments, inject a `CronStore` backed by a transactional database; filesystem locks only coordinate processes sharing a local filesystem.
 
-Cron syntax supports five fields (minute hour day-of-month month day-of-week), numbers, lists, ranges and steps. Time zones use IANA names such as `Asia/Bangkok`. `maxRetries` controls additional attempts, bounded to ten retries. A timeout requests cancellation of the underlying runtime job, not just the scheduler's polling loop.
+Cron syntax supports five fields (minute hour day-of-month month day-of-week), numbers, lists, ranges and steps. Recurring schedules use IANA time zones such as `Asia/Bangkok`. One-time schedules use `runAt` with an ISO-8601 timestamp that includes `Z` or an explicit UTC offset; provide exactly one of `cron` or `runAt`. `maxRetries` controls additional attempts, bounded to ten retries. A timeout requests cancellation of the underlying runtime job, not just the scheduler's polling loop.
 
 ## Operational limitations
 
