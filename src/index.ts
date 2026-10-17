@@ -1,7 +1,5 @@
-export { McpClient } from "./mcp/client.js";
-export type { McpTransport, McpClientOptions, McpToolDescription, McpResourceDescription } from "./mcp/client.js";
-export { McpStdioTransport, McpHttpTransport } from "./mcp/transports.js";
-export type { McpStdioTransportOptions, McpHttpTransportOptions } from "./mcp/transports.js";
+export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
+export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
 
 export { SofiaAgent } from "./agent/core.js";
 export { classifyTask } from "./agent/classifier.js";
@@ -42,6 +40,10 @@ export type { TrajectoryEvent, TrajectoryRecorderOptions } from "./evaluation/tr
 export { EvolutionEngine } from "./brain/evolution.js";
 export type { SkillPerformance, SkillRanking, EvolutionSnapshot, LearningDiagnostics } from "./brain/evolution.js";
 export type * from "./brain/edit-engine.js";
+export { McpClient } from "./mcp/client.js";
+export type { McpTransport, McpClientOptions, McpToolDescription, McpResourceDescription } from "./mcp/client.js";
+export { McpStdioTransport, McpHttpTransport } from "./mcp/transports.js";
+export type { McpStdioTransportOptions, McpHttpTransportOptions } from "./mcp/transports.js";
 export type * from "./brain/repository-intelligence.js";
 export type * from "./brain/project-memory.js";
 export type * from "./brain/job-runtime.js";
