@@ -53,6 +53,21 @@ describe("Sofia security controls",()=>{
     assert.equal(redactSecrets("ASIA1234567890ABCDEF"), "[REDACTED]");
     assert.equal(redactSecrets("-----BEGIN ENCRYPTED PRIVATE KEY-----\nsecret bytes\n-----END ENCRYPTED PRIVATE KEY-----"), "[REDACTED PRIVATE KEY]");
   });
+  it("redacts multiline PEM private keys embedded in plain text", () => {
+    const pem = [
+      "-----BEGIN PRIVATE KEY-----",
+      "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC...",
+      "sensitive-key-material",
+      "-----END PRIVATE KEY-----",
+    ].join("\n");
+    const sanitized = redactSecrets("tool output before\n" + pem + "\nafter tool output") as string;
+    assert.equal(sanitized.includes("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"), false);
+    assert.equal(sanitized.includes("sensitive-key-material"), false);
+    assert.equal(sanitized.includes("[REDACTED PRIVATE KEY]"), true);
+    assert.equal(sanitized.includes("before"), true);
+    assert.equal(sanitized.includes("after tool output"), true);
+  });
+
   it("supports an independent process-wide kill switch",()=>{
     const controller=new SecurityController();
     assert.equal(controller.isKilled(),false);
