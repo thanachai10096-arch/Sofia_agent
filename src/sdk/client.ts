@@ -145,7 +145,7 @@ export class SofiaClient {
 
   /** Starts a durable async run so a mobile client can reconnect and poll by ID. */
   async start(input: SofiaRunInput, signal?: AbortSignal, options: { idempotencyKey?: string } = {}): Promise<SofiaRunResponse> {
-    const headers = this.headers();
+    const headers: Record<string, string> = this.headers();
     if (options.idempotencyKey) {
       if (options.idempotencyKey.length > 128 || /[\x00-\x1f\x7f]/.test(options.idempotencyKey)) {
         throw new Error("Sofia idempotencyKey must be at most 128 characters and contain no control characters.");
