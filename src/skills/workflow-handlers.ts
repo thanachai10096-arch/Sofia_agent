@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { redactSecrets } from "../security/guard.js";
+import { canonicalJson, redactSecrets } from "../security/guard.js";
 import { getAdvancedSkill } from "./advanced-skill-catalog.js";
 import { AdvancedSkillRegistry, type AdvancedSkillHandler } from "./advanced-skill-runtime.js";
 
@@ -121,13 +121,13 @@ export const workflowReplayTester = (input: unknown) => {
   const value = record(input);
   const expected = objectList(value.expectedSteps, "expectedSteps", 200);
   const actual = objectList(value.actualSteps, "actualSteps", 200);
-  const normalize = (items: InputRecord[], key: string) => items.map((item, index) => {
+  const normalize = (items: InputRecord[]) => items.map((item, index) => {
     const id = requiredText(item, "id", 120);
     const status = requiredText(item, "status", 120);
     return { id, status, index, outputHash: optionalText(item, "outputHash", 200) };
   });
-  const expectedSteps = normalize(expected, "expectedSteps");
-  const actualSteps = normalize(actual, "actualSteps");
+  const expectedSteps = normalize(expected);
+  const actualSteps = normalize(actual);
   const expectedById = new Map(expectedSteps.map(step => [step.id, step]));
   const actualById = new Map(actualSteps.map(step => [step.id, step]));
   const differences: Array<{ id: string; kind: string; expected?: string; actual?: string }> = [];
@@ -135,7 +135,7 @@ export const workflowReplayTester = (input: unknown) => {
     const observed = actualById.get(step.id);
     if (!observed) differences.push({ id: step.id, kind: "missing-step", expected: step.status });
     else if (observed.status !== step.status) differences.push({ id: step.id, kind: "status-mismatch", expected: step.status, actual: observed.status });
-    else if (step.outputHash && observed.outputHash && step.outputHash !== observed.outputHash) {
+    else if (step.outputHash && step.outputHash !== observed.outputHash) {
       differences.push({ id: step.id, kind: "output-mismatch", expected: step.outputHash, actual: observed.outputHash });
     }
   }
@@ -181,5 +181,5 @@ export function registerVerifiedWorkflowSkills(registry: AdvancedSkillRegistry):
 }
 
 export function stableWorkflowFingerprint(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(redactSecrets(value))).digest("hex");
+  return createHash("sha256").update(canonicalJson(redactSecrets(value))).digest("hex");
 }
