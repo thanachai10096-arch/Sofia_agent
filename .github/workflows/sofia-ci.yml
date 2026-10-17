@@ -15,9 +15,13 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate (Ubuntu)
+    name: Validate (Ubuntu, Node.js ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
 
     steps:
       - name: Checkout
@@ -26,7 +30,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: ${{ matrix.node-version }}
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
