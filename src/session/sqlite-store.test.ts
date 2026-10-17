@@ -69,3 +69,52 @@ test("multiple store connections can persist sessions to the same database", asy
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("schema migration initializes version 1 and refuses unknown future schemas", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-migration-"));
+  const file = path.join(dir, "sessions.sqlite");
+  try {
+    const store = await SqliteSessionStore.open(file);
+    store.close();
+    const db = new DatabaseSync(file);
+    try {
+      assert.equal(Number(db.prepare("PRAGMA user_version").get()?.user_version), 1);
+      db.exec("PRAGMA user_version = 999");
+    } finally {
+      db.close();
+    }
+    await assert.rejects(SqliteSessionStore.open(file), /newer than this Sofia Agent supports/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("failed transcript transaction rolls back without losing the previous transcript", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-recovery-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(file);
+  const db = new DatabaseSync(file);
+  try {
+    store.save({ id: "rollback", messages: ["preserve this"], updatedAt: 0 });
+    db.exec(`
+      CREATE TRIGGER reject_test_message
+      BEFORE INSERT ON session_messages
+      WHEN NEW.content = 'force-transaction-error'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced transaction failure');
+      END;
+    `);
+    assert.throws(
+      () => store.save({ id: "rollback", messages: ["replacement", "force-transaction-error"], updatedAt: 0 }),
+      /forced transaction failure/,
+    );
+    assert.deepEqual(store.get("rollback")?.messages, ["preserve this"]);
+  } finally {
+    db.close();
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
