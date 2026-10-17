@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Register/update only Sofia's /run command in one Discord guild.
+ * Register Sofia /run, /status, /cancel, and /resume commands in one Discord guild.
  * Required environment variables: DISCORD_APPLICATION_ID, DISCORD_GUILD_ID,
  * DISCORD_BOT_TOKEN. This deliberately uses the single-command endpoint (POST),
  * never the bulk-overwrite endpoint, so other guild commands are preserved.
@@ -50,6 +50,17 @@ const commands = [
   {
     name: "cancel",
     description: "Cancel a Sofia job you own",
+    options: [{
+      name: "job_id",
+      description: "Sofia job ID",
+      type: 3,
+      required: true,
+      max_length: 64,
+    }],
+  },
+  {
+    name: "resume",
+    description: "Resume a Sofia job from its saved checkpoint",
     options: [{
       name: "job_id",
       description: "Sofia job ID",

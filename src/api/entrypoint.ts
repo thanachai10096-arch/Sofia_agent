@@ -5,7 +5,8 @@ import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
+import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
+import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
@@ -34,7 +35,7 @@ if (discordConfigured) {
     publicKeyHex: discordPublicKey,
     botToken: discordBotToken,
     commandName: process.env.DISCORD_COMMAND_NAME?.trim() || "run",
-    additionalCommandNames: ["status", "cancel"],
+    additionalCommandNames: ["status", "cancel", "resume"],
     allowedUserIds: discordUserIds,
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
@@ -46,7 +47,7 @@ if (discordConfigured) {
       const principalId = "discord:" + message.author.id;
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
       const argument = message.content.trim().slice(command.length).trim();
-      if (command === "/status" || command === "/cancel") {
+      if (command === "/status" || command === "/cancel" || command === "/resume") {
         if (!/^([0-9a-f]{8}-[0-9a-f-]{27,})$/i.test(argument)) {
           await discordTransport?.sendMessage(
             message.channelId,
@@ -70,6 +71,29 @@ if (discordConfigured) {
           );
           return;
         }
+        if (command === "/resume") {
+          if (!job.snapshot || job.status === "completed" || job.status === "cancelled" || job.status === "running") {
+            await discordTransport?.sendMessage(
+              message.channelId,
+              "This job cannot be resumed. It must have a saved checkpoint and not be running, completed, or cancelled.",
+              undefined,
+              message.id,
+            );
+            return;
+          }
+          await discordTransport?.sendMessage(message.channelId, "Resume requested for job " + job.id + ".", undefined, message.id);
+          void deps.jobRuntime.resume(job.id).then(async (resumed) => {
+            const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
+            const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
+            await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
+            await deps.jobRuntime?.markNotificationDelivered?.(resumed.id);
+          }).catch(async () => {
+            try {
+              await discordTransport?.sendMessage(message.channelId, "Sofia could not resume job " + job.id + ". Check the job status and server logs.");
+            } catch { /* durable state remains available for /status */ }
+          });
+          return;
+        }
         const cancelled = await deps.jobRuntime.cancel(job.id);
         await discordTransport?.sendMessage(
           message.channelId,
@@ -85,7 +109,21 @@ if (discordConfigured) {
         await discordTransport?.sendMessage(message.channelId, "Please provide a task using /run task:<description>.", undefined, message.id);
         return;
       }
-      const handle = await submitDiscordTask(deps.jobRuntime, task, principalId, discordAbort.signal);
+      const sessionKey = messagingSessionKey({
+        platform: "discord",
+        userId: message.author.id,
+        channelId: message.channelId,
+        conversationId: message.channelId,
+      });
+      const sessionContext = await buildDiscordSessionContext(deps.jobRuntime, sessionKey);
+      const taskWithMemory = sessionContext
+        ? task + "\n\n" + sessionContext
+        : task;
+      const handle = await submitDiscordTask(deps.jobRuntime, taskWithMemory, principalId, discordAbort.signal, {
+        channelId: message.channelId,
+        sessionKey,
+        sessionTask: task,
+      });
       // Acknowledge while the interaction token is valid; final delivery uses the bot API
       // so jobs longer than Discord's interaction-token lifetime still report completion.
       await discordTransport?.sendMessage(
@@ -99,6 +137,7 @@ if (discordConfigured) {
         const response = prefix + "\nJob ID: " + result.id + "\n" + result.summary;
         const safeResponse = response.length > 1700 ? response.slice(0, 1690) + "… (truncated)" : response;
         await discordTransport?.sendMessage(message.channelId, safeResponse);
+        await deps.jobRuntime?.markNotificationDelivered?.(result.id);
       }).catch(async () => {
         try {
           await discordTransport?.sendMessage(
@@ -109,10 +148,42 @@ if (discordConfigured) {
           // Delivery may be unavailable during shutdown; durable job state remains persisted.
         }
       });
-    } catch {
-      await discordTransport?.sendMessage(message.channelId, "Sofia could not start or complete that task. Check the server logs for a redacted error.", undefined, message.id);
+    } catch (error) {
+      // Log only the error class, never task text, credentials, interaction tokens, or raw provider messages.
+      console.error("Discord command handler failed:", error instanceof Error ? error.name : "UnknownError");
+      try {
+        await discordTransport?.sendMessage(
+          message.channelId,
+          "Sofia could not start or complete that task. Check the server logs for a redacted error.",
+          undefined,
+          message.id,
+        );
+      } catch {
+        console.error("Discord command error reply delivery failed.");
+      }
     }
   });
+
+  // On restart, DurableJobRuntime marks interrupted jobs terminal and preserves
+  // checkpoints. Retry one notification for each terminal Discord job not yet reported.
+  if (deps.jobRuntime) {
+    const recoveredJobs = await deps.jobRuntime.list();
+    for (const job of recoveredJobs) {
+      if (!job.ownerKeyId?.startsWith("discord:") || !job.notificationChannelId ||
+          job.notificationDelivered || job.status === "queued" || job.status === "running") continue;
+      try {
+        const message = job.status === "completed"
+          ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
+          : job.snapshot
+            ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
+            : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
+        await discordTransport.sendMessage(job.notificationChannelId, message);
+        await deps.jobRuntime.markNotificationDelivered?.(job.id);
+      } catch {
+        // Keep the marker unset so a later restart can retry the notification.
+      }
+    }
+  }
 }
 
 const server = createSofiaApi(deps, {
