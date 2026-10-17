@@ -66,6 +66,10 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
     originalResponded: boolean;
   }>();
 
+  function notify(event: "inbound_handler_failed" | "delivery_failed", status?: number): void {
+    try { options.onError?.(event, status); } catch { /* logging must not alter transport behavior */ }
+  }
+
   async function sendInteractionMessage(interactionId: string, text: string): Promise<{ messageId: string }> {
     const pending = pendingInteractions.get(interactionId);
     if (!pending || pending.expiresAt <= Date.now()) {
@@ -84,7 +88,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
         signal: controller.signal,
       });
       if (!response.ok) {
-        options.onError?.("delivery_failed", response.status);
+        notify("delivery_failed", response.status);
         throw new Error("Discord interaction response failed.");
       }
       const result: unknown = await response.json();
@@ -176,7 +180,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
           try {
             await sendInteractionMessage(event.id, "This command did not produce a reply.");
           } catch {
-            options.onError?.("inbound_handler_failed");
+            notify("inbound_handler_failed");
           }
         }
         pendingInteractions.delete(event.id);
@@ -186,11 +190,11 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
           try {
             await sendInteractionMessage(event.id, "Sofia could not process this command.");
           } catch {
-            options.onError?.("inbound_handler_failed");
+            notify("inbound_handler_failed");
           }
         }
         pendingInteractions.delete(event.id);
-        options.onError?.("inbound_handler_failed");
+        notify("inbound_handler_failed");
       });
       return { status: 200, body: { type: 5 } };
     },
@@ -216,7 +220,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
           signal: controller.signal,
         });
         if (!response.ok) {
-          options.onError?.("delivery_failed", response.status);
+          notify("delivery_failed", response.status);
           throw new Error("Discord message delivery failed.");
         }
         const result: unknown = await response.json();
