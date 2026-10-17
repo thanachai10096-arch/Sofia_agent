@@ -5,15 +5,8 @@ export function splitMessage(text: string, maxCharacters: number): string[] {
   }
   if (!text) return [""];
   const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > maxCharacters) {
-    let cut = remaining.lastIndexOf("\n", maxCharacters);
-    if (cut < Math.floor(maxCharacters * 0.5)) cut = remaining.lastIndexOf(" ", maxCharacters);
-    if (cut < Math.floor(maxCharacters * 0.5)) cut = maxCharacters;
-    chunks.push(remaining.slice(0, cut));
-    remaining = remaining.slice(cut);
-    if (remaining.startsWith("\n") || remaining.startsWith(" ")) remaining = remaining.slice(1);
+  for (let offset = 0; offset < text.length; offset += maxCharacters) {
+    chunks.push(text.slice(offset, offset + maxCharacters));
   }
-  if (remaining) chunks.push(remaining);
   return chunks;
 }
