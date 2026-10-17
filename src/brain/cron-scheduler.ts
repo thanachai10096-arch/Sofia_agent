@@ -106,7 +106,7 @@ export class FileCronStore implements CronStore {
           }
         } catch (statError) {
           if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
-          if ((statError as NodeJS.ErrnoException).code !== "SyntaxError") throw statError;
+          if (!(statError instanceof SyntaxError)) throw statError;
           if (Date.now() >= deadline) throw new Error("Cron scheduler state lock owner could not be read");
         }
         if (Date.now() >= deadline) throw new Error("Timed out waiting for cron scheduler state lock");
