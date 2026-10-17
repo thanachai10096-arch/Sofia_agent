@@ -68,3 +68,5 @@ export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js"
 export { checkpointManager, naturalConversation, userPreferenceMemory, conversationToTaskParser, clarifyingQuestionPlanner, sessionHandoff, memoryRetentionPolicy, coverageGapAnalyzer, sourceCredibilityRanker, crossSourceSynthesizer, factConflictDetector, researchBriefWriter, scheduledJobPlanner, idempotencyGuard, costLatencyAnalyzer, offlineEvaluationRunner, skillRollbackManager, registerVerifiedPlanningAnalysisSkills } from "./skills/planning-analysis-handlers.js";
 
 export { registerVerifiedSecurityCoordinationSkills } from "./skills/security-coordination-handlers.js";
+
+export { browserWorkflowPlanner, browserStateVerifier } from "./skills/security-coordination-handlers.js";
