@@ -356,10 +356,21 @@ export class SofiaBrain {
 
     if (!this.projectMemoryLoaded && this.dependencies.projectMemory) {
       this.projectMemoryLoaded = true;
-      // Prefer memories relevant to the current reasoning payload instead of
-      // blindly attaching the last entries written to disk. Keep a bounded
-      // query so memory retrieval cannot grow with a large request payload.
-      const memoryQuery = JSON.stringify(payload).slice(0, 4000);
+      // Search task intent instead of serialized tool catalogs or internal keys.
+      // Keep the query bounded so retrieval remains predictable for large tasks.
+      const memoryQuery = [
+        payload.task,
+        payload.objective,
+        payload.reason,
+        payload.successCriteria,
+        payload.constraints,
+      ].map((value) =>
+        typeof value === "string"
+          ? value
+          : Array.isArray(value)
+            ? value.filter((item) => typeof item === "string").join(" ")
+            : "",
+      ).filter(Boolean).join("\n").slice(0, 4000);
       try {
         this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.find(memoryQuery));
       } catch {
