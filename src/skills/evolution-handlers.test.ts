@@ -46,7 +46,7 @@ test("budget planner rejects negative or non-finite values", () => {
 test("verified evolution handlers register through the guarded dispatcher", async () => {
   const registry = new AdvancedSkillRegistry();
   const ids = registerVerifiedEvolutionSkills(registry);
-  assert.deepEqual(ids, ["evolution.01", "evolution.03", "evolution.06"]);
+  assert.deepEqual(ids, ["evolution.01", "evolution.03", "evolution.04", "evolution.06", "evolution.09"]);
   assert.ok(ids.every(id => registry.has(id)));
   const result = await registry.execute("evolution.06", {
     tokenLimit: 1000, estimatedTokens: 500, costLimit: 2, estimatedCost: 1,
