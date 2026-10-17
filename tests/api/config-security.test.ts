@@ -57,3 +57,20 @@ test("UsageLimiter fails closed if durable usage persistence fails", () => {
   assert.throws(() => limiter.consume("b".repeat(32)), /storage unavailable/);
   assert.equal(limiter.get("b".repeat(32)).runs, 0);
 });
+
+
+test("tool-call quota is reserved before execution and persists across restarts", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "sofia-tool-quota-"));
+  try {
+    const keyId = "c".repeat(32);
+    const usage = new UsageLimiter(10, 1, new FileUsageStore(directory));
+    usage.consume(keyId);
+    assert.equal(usage.recordToolCalls(keyId), true);
+    assert.equal(usage.recordToolCalls(keyId), false);
+    const restarted = new UsageLimiter(10, 1, new FileUsageStore(directory));
+    assert.equal(restarted.get(keyId).toolCalls, 1);
+    assert.equal(restarted.recordToolCalls(keyId), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
