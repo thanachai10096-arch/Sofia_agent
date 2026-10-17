@@ -79,6 +79,24 @@ export class UsageLimiter {
     this.records.set(keyId, current);
   }
 
+  /** Reserve a tool call before execution; false means the configured cap was reached. */
+  recordToolCalls(keyId: string, amount = 1): boolean {
+    if (!Number.isSafeInteger(amount) || amount < 1) throw new Error("Invalid tool call usage amount.");
+    const now = Date.now();
+    const previous = this.records.get(keyId);
+    const current: UsageRecord = previous ? { ...previous } : { keyId, runs: 0, toolCalls: 0, startedAt: now };
+    if (now - current.startedAt >= 86_400_000) {
+      current.runs = 0;
+      current.toolCalls = 0;
+      current.startedAt = now;
+    }
+    if (current.toolCalls + amount > this.maxToolCallsPerKey) return false;
+    current.toolCalls += amount;
+    this.store?.saveSync(current);
+    this.records.set(keyId, current);
+    return true;
+  }
+
   get(keyId: string): UsageRecord {
     const record = this.records.get(keyId);
     return record ? { ...record } : { keyId, runs: 0, toolCalls: 0, startedAt: Date.now() };
