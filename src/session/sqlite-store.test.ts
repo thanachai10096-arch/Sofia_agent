@@ -177,7 +177,7 @@ test("SQLite transcript files and WAL sidecars are private on POSIX without loos
     assert.equal(fs.statSync(privateDir).mode & 0o777, 0o750);
   } finally {
     store?.close();
-    fs.chmodSync(privateDir, 0o700);
+    if (fs.existsSync(privateDir)) fs.chmodSync(privateDir, 0o700);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
