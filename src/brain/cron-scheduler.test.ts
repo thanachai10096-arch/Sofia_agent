@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CronScheduler, nextCronOccurrence, type CronStore } from "./cron-scheduler.js";
+import { spawn } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { CronScheduler, FileCronStore, nextCronOccurrence, type CronStore } from "./cron-scheduler.js";
 import type { JobRecord, JobRuntime } from "./job-runtime.js";
 
 test("cron next occurrence respects timezone offset and weekday", () => {
@@ -156,4 +161,36 @@ test("recovery reconciles persisted jobs and suppresses indeterminate resubmissi
   assert.equal(state.history.find((item: any) => item.id === "lost-claim").status, "failed");
   assert.match(state.history.find((item: any) => item.id === "lost-claim").error, /indeterminate/i);
   assert.equal(state.history.find((item: any) => item.id === "known-job").status, "completed");
+});
+
+
+test("file cron store serializes concurrent processes without losing updates", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "sofia-cron-lock-test-"));
+  const moduleUrl = pathToFileURL(path.join(process.cwd(), "src", "brain", "cron-scheduler.ts")).href;
+  const script = `
+    import { FileCronStore } from ${JSON.stringify(moduleUrl)};
+    const store = new FileCronStore("multi-process-lock-test", process.env.CRON_TEST_ROOT);
+    await store.transact(async state => {
+      await new Promise(resolve => setTimeout(resolve, 40));
+      state.audit.push({ at: new Date().toISOString(), actor: "test", action: "lock.test", scheduleId: String(state.audit.length) });
+    });
+  `;
+  const cli = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+  const runChild = () => new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, [cli, "--eval", script], {
+      cwd: process.cwd(),
+      env: { ...process.env, CRON_TEST_ROOT: root },
+      stdio: "ignore",
+    });
+    child.once("error", reject);
+    child.once("exit", code => code === 0 ? resolve() : reject(new Error("cron lock test child exited with code " + code)));
+  });
+  try {
+    await Promise.all([runChild(), runChild(), runChild(), runChild()]);
+    const store = new FileCronStore("multi-process-lock-test", root);
+    const count = await store.transact(state => state.audit.length);
+    assert.equal(count, 4);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
