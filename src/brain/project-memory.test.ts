@@ -38,3 +38,52 @@ test("project memory files use private permissions on POSIX", async () => {
     assert.equal((await stat(path.join(root, names[0]!))).mode & 0o777, 0o600);
   }
 });
+
+
+test("project memory ranks exact token and phrase matches above substring false positives", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-ranking-"));
+  const store = new FileProjectMemoryStore("ranking-project", root);
+  const now = new Date().toISOString();
+  await store.save({
+    id: "substring", project: "ranking-project", kind: "decision",
+    content: "The latest delivery contains no testing guidance.",
+    confidence: 1, createdAt: now, updatedAt: now, uses: 0,
+  });
+  await store.save({
+    id: "exact", project: "ranking-project", kind: "convention",
+    content: "Run tests before every build; TypeScript strict mode is required.",
+    confidence: 0.9, createdAt: now, updatedAt: now, uses: 0,
+  });
+
+  const results = await store.find("tests before every build");
+  assert.equal(results[0]?.id, "exact");
+  assert.equal(results.some((entry) => entry.id === "substring"), false);
+});
+
+test("project memory returns no results for empty or punctuation-only queries", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-empty-query-"));
+  const store = new FileProjectMemoryStore("empty-query-project", root);
+  await store.save(memoryEntryFromConvention("empty-query-project", "Run tests before build"));
+  assert.deepEqual(await store.find("   "), []);
+  assert.deepEqual(await store.find("!?..."), []);
+});
+
+test("project memory ranks entries matching more query terms ahead of weaker matches", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-multi-term-"));
+  const store = new FileProjectMemoryStore("multi-term-project", root);
+  const now = new Date().toISOString();
+  await store.save({
+    id: "weak", project: "multi-term-project", kind: "decision",
+    content: "Build pipeline notes", confidence: 1,
+    createdAt: now, updatedAt: now, uses: 0,
+  });
+  await store.save({
+    id: "strong", project: "multi-term-project", kind: "convention",
+    content: "Build test typecheck before release", confidence: 0.5,
+    createdAt: now, updatedAt: now, uses: 0,
+  });
+
+  const results = await store.find("build test typecheck");
+  assert.equal(results[0]?.id, "strong");
+  assert.equal(results.some((entry) => entry.id === "weak"), true);
+});
