@@ -747,3 +747,85 @@ test("DurableJobRuntime redacts credential-shaped values from persisted and relo
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("DurableJobRuntime cross-process cancellation aborts the active lease owner", async () => {
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-cross-cancel-"));
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "cross-process-cancel-" + randomUUID();
+  const script = `
+    import { DurableJobRuntime } from "./src/brain/job-runtime.js";
+    const namespace = ${JSON.stringify(namespace)};
+    const brain = {
+      run: async ({ signal }) => {
+        process.stdout.write("started\\n");
+        await new Promise((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener("abort", resolve, { once: true });
+        });
+        process.stdout.write("observed-abort\\n");
+        return { completed: false, state: "cancelled", summary: "cancelled by another process" };
+      },
+    };
+    const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+    const job = await runtime.submit({ task: "cross-process cancellation" });
+    process.stdout.write("job:" + job.id + "\\n");
+    const keepAlive = setInterval(() => {}, 1000);
+    const deadline = Date.now() + 12000;
+    let record;
+    while (Date.now() < deadline) {
+      record = await runtime.get(job.id);
+      if (record && ["cancelled", "completed", "failed"].includes(record.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    clearInterval(keepAlive);
+    process.stdout.write("final:" + (record?.status ?? "missing") + "\\n");
+    process.exitCode = record?.status === "cancelled" ? 0 : 1;
+  `;
+  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+    cwd: process.cwd(),
+    env: { ...process.env, SOFIA_STATE_DIR: root },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  let errors = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => { output += chunk; });
+  child.stderr.on("data", (chunk: string) => { errors += chunk; });
+  try {
+    const startedDeadline = Date.now() + 8_000;
+    while (!output.includes("started\\n") && Date.now() < startedDeadline) {
+      if (child.exitCode !== null) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(output.includes("started\\n"), "child worker must acquire its lease before cancellation");
+    const jobId = /job:([0-9a-f-]+)/i.exec(output)?.[1];
+    assert.ok(jobId, "child worker must report its job ID");
+    const canceller = new DurableJobRuntime(() => ({
+      run: async () => ({ completed: false, state: "failed", summary: "unused" }),
+    } as unknown as SofiaBrain), undefined, namespace);
+    assert.equal(await canceller.cancel(jobId), true);
+    const finalDeadline = Date.now() + 10_000;
+    while (!output.includes("final:cancelled\\n") && Date.now() < finalDeadline) {
+      if (child.exitCode !== null) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    if (child.exitCode === null) {
+      child.kill();
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    }
+    assert.ok(output.includes("observed-abort\\n"), "active worker must observe cancellation from another process");
+    assert.ok(output.includes("final:cancelled\\n"), "cancelled state must remain terminal");
+    assert.equal(child.exitCode, 0, errors || output);
+  } finally {
+    if (child.exitCode === null) {
+      child.kill();
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    }
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+});
