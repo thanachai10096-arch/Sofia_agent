@@ -105,7 +105,7 @@ function collectHttpUrls(value: unknown, output: string[] = []): string[] {
 
 function redactPrivateKeyBlocks(value: string): string {
   const prefixes = new Set(["", "RSA ", "EC ", "OPENSSH ", "DSA ", "ENCRYPTED "]);
-  const header = " PRIVATE KEY-----";
+  const header = "PRIVATE KEY-----";
   let result = "";
   let cursor = 0;
   while (cursor < value.length) {
