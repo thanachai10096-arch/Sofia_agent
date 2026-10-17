@@ -1,6 +1,6 @@
 # Sofia Agent — Advanced Skill Catalog (100)
 
-**Status: catalog/design only.** The 100 entries below are planned capabilities, not a claim that 100 runnable handlers already exist. A skill becomes `implemented` only after a handler is registered; it becomes `verified` only after tests demonstrate its acceptance criteria. Catalog metadata must never grant permissions by itself.
+**Status: partial implementation.** The catalog contains 100 capabilities. Six deterministic runtime skills (`runtime.01`, `.02`, `.03`, `.08`, `.09`, `.10`) have handlers and acceptance tests and are marked `verified`; the remaining 94 entries are still `planned`. A skill becomes `implemented` only after a handler exists and `verified` only after its acceptance criteria pass. Catalog metadata must never grant permissions by itself.
 
 ## Shared implementation contract
 
@@ -10,16 +10,16 @@ Every runnable skill must: (1) declare a versioned input/output schema; (2) use 
 
 ### Runtime & Recovery
 
-- **runtime.01 — Intent Clarifier** — Risk: `read-only`; approval: **policy-dependent**. Intent Clarifier: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **runtime.02 — Goal Decomposer** — Risk: `may-write`; approval: **policy-dependent**. Goal Decomposer: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **runtime.03 — Plan Builder** — Risk: `read-only`; approval: **policy-dependent**. Plan Builder: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **runtime.01 — Intent Clarifier** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Intent Clarifier: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **runtime.02 — Goal Decomposer** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Goal Decomposer: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **runtime.03 — Plan Builder** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Plan Builder: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **runtime.04 — Dependency Scheduler** — Risk: `may-write`; approval: **policy-dependent**. Dependency Scheduler: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **runtime.05 — Execution Trace Analyzer** — Risk: `read-only`; approval: **policy-dependent**. Execution Trace Analyzer: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **runtime.06 — Checkpoint Manager** — Risk: `may-write`; approval: **policy-dependent**. Checkpoint Manager: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 - **runtime.07 — Crash Recovery** — Risk: `read-only`; approval: **policy-dependent**. Crash Recovery: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **runtime.08 — Retry Strategist** — Risk: `read-only`; approval: **policy-dependent**. Retry Strategist: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **runtime.09 — Failure Classifier** — Risk: `read-only`; approval: **policy-dependent**. Failure Classifier: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
-- **runtime.10 — Completion Verifier** — Risk: `may-write`; approval: **policy-dependent**. Completion Verifier: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **runtime.08 — Retry Strategist** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Retry Strategist: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **runtime.09 — Failure Classifier** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Failure Classifier: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
+- **runtime.10 — Completion Verifier** — Risk: `read-only`; status: `verified`; approval: **policy-dependent**. Completion Verifier: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs.
 
 ### Conversation & Memory
 
