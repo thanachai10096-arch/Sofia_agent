@@ -86,7 +86,13 @@ test("gateway enforces one timeout budget across the provider request", async ()
     return new Promise<Response>((_resolve, reject) => {
       const signal = init?.signal;
       if (!signal) return reject(new Error("missing request signal"));
-      const onAbort = () => reject(signal.reason ?? new Error("aborted"));
+      // Keep the test process alive so AbortSignal.timeout() reaches its deadline.
+      const keepAlive = setTimeout(() => undefined, 1_000);
+      const onAbort = () => {
+        clearTimeout(keepAlive);
+        signal.removeEventListener("abort", onAbort);
+        reject(signal.reason ?? new Error("aborted"));
+      };
       if (signal.aborted) onAbort();
       else signal.addEventListener("abort", onAbort, { once: true });
     });
