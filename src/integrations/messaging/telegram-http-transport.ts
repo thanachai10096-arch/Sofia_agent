@@ -88,7 +88,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         if (signal.aborted || stopped) break;
         const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
           ? error.status : undefined;
-        options.onError?.("poll_failed", status);
+        try { options.onError?.("poll_failed", status); } catch { /* logging must not terminate polling */ }
         await wait(backoffMs, signal);
         backoffMs = Math.min(30_000, backoffMs * 2);
       }
@@ -123,7 +123,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         if (!Number.isSafeInteger(result.message_id)) throw new Error("Telegram response omitted message ID.");
         return { messageId: String(result.message_id) };
       } catch {
-        options.onError?.("delivery_failed");
+        try { options.onError?.("delivery_failed"); } catch { /* logging must not mask the delivery error */ }
         throw new Error("Telegram message delivery failed.");
       }
     },
