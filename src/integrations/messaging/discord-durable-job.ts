@@ -98,9 +98,10 @@ export async function buildDiscordSessionContext(runtime: JobRuntime, sessionKey
     .slice(0, limit)
     .reverse();
   const memories = jobs.map((job) => {
+    const task = String(redactSecrets(job.task)).trim().slice(0, 240);
     const summary = String(redactSecrets(job.result?.summary ?? "")).trim().slice(0, 600);
-    if (!summary || containsPromptInjection(summary)) return "";
-    return `Previous task: ${String(redactSecrets(job.task)).slice(0, 240)}\nOutcome: ${summary}`;
+    if (!task || !summary || containsPromptInjection(task) || containsPromptInjection(summary)) return "";
+    return `Previous task: ${task}\nOutcome: ${summary}`;
   }).filter(Boolean);
   if (!memories.length) return "";
   return [
