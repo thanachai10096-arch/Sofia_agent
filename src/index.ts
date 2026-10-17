@@ -11,7 +11,7 @@ export { createNodeWorkspaceRuntime } from "./platform/local-runtime.js";
 export { detectPlatform } from "./platform/runtime.js";
 export { SofiaModelGateway } from "./models/gateway.js";
 export { loadModelConfigFromEnv } from "./models/config.js";
-export { createSofiaAgentDependencies } from "./models/factory.js";
+export { createSofiaAgentDependencies, createSofiaAgentDependenciesWithSessions } from "./models/factory.js";
 export { createToolRegistry } from "./tools/registry.js";
 export { createDesktopTools } from "./desktop/tools.js";
 export { createDesktopAdapterTools } from "./desktop/adapter.js";
@@ -88,3 +88,7 @@ export { splitMessage } from "./integrations/messaging/format.js";
 export { messagingSessionKey } from "./integrations/messaging/session-key.js";
 export { verifyDiscordRequest, verifyTelegramWebhookSecret, safeMessageCorrelationId } from "./integrations/messaging/platform-security.js";
 export type { DeliveryState, DeliveryReceipt, InboundMessage, MessagingAdapter, MessagingAttachment, MessagingIdentity, MessagingLogger, OutboundMessage } from "./integrations/messaging/types.js";
+
+export { MemorySessionStore } from "./session/store.js";
+export { SqliteSessionStore } from "./session/sqlite-store.js";
+export type { Session } from "./session/store.js";
