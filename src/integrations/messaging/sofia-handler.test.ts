@@ -34,7 +34,7 @@ function harness(allowed = true) {
       return { id: "run-123", status: "queued" };
     },
   };
-  return { starts, claims, policyInputs, policy, deduplicator, client };
+  return { starts, claims, policyInputs, accessPolicy: policy, deduplicator, client };
 }
 
 test("only explicit run commands start Sofia work", async () => {
