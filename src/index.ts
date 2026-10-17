@@ -32,6 +32,7 @@ export { ADVANCED_SKILLS, ADVANCED_SKILL_COUNT, getAdvancedSkill, listAdvancedSk
 export type { AdvancedSkillDefinition, SkillRisk, SkillStatus } from "./skills/advanced-skill-catalog.js";
 export { AdvancedSkillRegistry, AdvancedSkillPolicyError } from "./skills/advanced-skill-runtime.js";
 export { intentClarifier, goalDecomposer, planBuilder, retryStrategist, failureClassifier, completionVerifier, registerVerifiedCoreSkills, listImplementedCoreSkillIds } from "./skills/core-handlers.js";
+export { dependencyScheduler, executionTraceAnalyzer, crashRecoveryAdvisor, registerVerifiedRuntimeRecoverySkills } from "./skills/runtime-recovery-handlers.js";
 export { permissionPolicyEvaluator, leastPrivilegePlanner, promptInjectionDetector, untrustedOutputFencer, pathTraversalGuard, registerVerifiedSecuritySkills } from "./skills/security-handlers.js";
 export { contextSummarizer, memoryConflictResolver, longContextCompressor, createProjectMemoryRetrievalHandler, registerVerifiedMemorySkills } from "./skills/memory-handlers.js";
 export { changeImpactAnalyzer, testStrategyBuilder, regressionTestSelector, acceptanceCriteriaVerifier, staticAnalysisCoordinator, registerVerifiedQualitySkills } from "./skills/quality-handlers.js";
