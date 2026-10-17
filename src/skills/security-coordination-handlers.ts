@@ -217,7 +217,9 @@ export const agentResultReviewer = (input: unknown) => {
 /** Finds cycles and repeated states in supplied agent traces; does not cancel agents. */
 export const loopDeadlockDetector = (input: unknown) => {
   const value = rec(input);
-  const states = texts(value.states, "states", 2_000);
+  if (!Array.isArray(value.states) || value.states.length > 2_000 || value.states.some(state => typeof state !== "string" || !state.trim() || state.length > 1_000)) throw new TypeError("states must be a bounded sequence of non-empty strings.");
+  // Preserve ordering and duplicates: repeated states are the signal this detector analyzes.
+  const states = value.states.map(state => (state as string).trim());
   const stateCounts = new Map<string, number>();
   for (const state of states) stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
   const repeatedStates = [...stateCounts.entries()].filter(([, count]) => count > 2).map(([state, count]) => ({ state, count }));
