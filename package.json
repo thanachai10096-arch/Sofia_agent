@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "sofia": "./dist/src/cli/index.js"
+    "sofia": "./dist/cli/index.js"
   },
   "scripts": {
     "license:check": "node scripts/check-license.mjs",
@@ -30,12 +30,12 @@
   "optionalDependencies": {
     "playwright": "^1.55.0"
   },
-  "main": "./dist/src/index.js",
-  "types": "./dist/src/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./dist/src/index.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },
