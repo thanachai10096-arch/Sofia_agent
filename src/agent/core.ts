@@ -16,14 +16,37 @@ export class SofiaAgent {
       ? security.bindSignal(request.signal ?? new AbortController().signal)
       : undefined;
     const activeRequest = binding ? { ...request, signal: binding.signal } : request;
+    let session: ReturnType<NonNullable<AgentDependencies["sessionStore"]>["getOrCreate"]> | undefined;
     try {
+      // Persist the incoming turn before doing work, so a crash during execution
+      // does not silently lose the user's request.
+      if (request.sessionId && this.deps.sessionStore) {
+        session = this.deps.sessionStore.getOrCreate(request.sessionId);
+        session.messages.push(`user: ${request.task}`);
+        this.deps.sessionStore.save(session);
+      }
+
       // The host kill switch and caller cancellation share one signal for this run.
       security?.assertRunning();
       const shouldUseBrain =
         this.deps.brainFactory !== undefined &&
         request.useBrain !== false;
-      if (shouldUseBrain) return await this.runBrain(activeRequest);
-      return await this.runLegacy(activeRequest);
+      const result = shouldUseBrain
+        ? await this.runBrain(activeRequest)
+        : await this.runLegacy(activeRequest);
+
+      if (session && this.deps.sessionStore) {
+        session.messages.push(`assistant: ${result.output}`);
+        this.deps.sessionStore.save(session);
+      }
+      return result;
+    } catch (error) {
+      // Preserve the original failure even if writing the diagnostic transcript fails.
+      if (session && this.deps.sessionStore) {
+        session.messages.push(`assistant_error: ${error instanceof Error ? error.message : String(error)}`);
+        try { this.deps.sessionStore.save(session); } catch { /* keep the run's original error */ }
+      }
+      throw error;
     } finally {
       binding?.dispose();
     }
