@@ -25,6 +25,7 @@ test("ranking engine sorts evidence-backed candidates with transparent weights",
     Math.abs(result.weights.success + result.weights.latency + result.weights.cost - 1) < 1e-12,
     "weights should sum to 1 within floating-point tolerance",
   );
+  assert.ok(Object.values(result.weights).every((weight) => Number.isFinite(weight) && weight >= 0));
   assert.equal(result.mutatesRegistry, false);
 });
 
