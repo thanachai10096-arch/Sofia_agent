@@ -24,7 +24,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Intent Clarifier",
     "category": "Runtime & Recovery",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Intent Clarifier: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -32,8 +32,8 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "id": "runtime.02",
     "name": "Goal Decomposer",
     "category": "Runtime & Recovery",
-    "risk": "may-write",
-    "status": "planned",
+    "risk": "read-only",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Goal Decomposer: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -42,7 +42,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Plan Builder",
     "category": "Runtime & Recovery",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Plan Builder: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -87,7 +87,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Retry Strategist",
     "category": "Runtime & Recovery",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Retry Strategist: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -96,7 +96,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Failure Classifier",
     "category": "Runtime & Recovery",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Failure Classifier: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -104,8 +104,8 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "id": "runtime.10",
     "name": "Completion Verifier",
     "category": "Runtime & Recovery",
-    "risk": "may-write",
-    "status": "planned",
+    "risk": "read-only",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Completion Verifier: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
