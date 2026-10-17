@@ -28,6 +28,8 @@ export { InMemorySkillsPlatform } from "./skills/platform.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
 export { AgentEvaluationRunner } from "./evaluation.js";
 export { EvolutionEngine } from "./brain/evolution.js";
+export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
+export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
 export type { SkillPerformance, SkillRanking, EvolutionSnapshot, LearningDiagnostics } from "./brain/evolution.js";
 export type * from "./brain/edit-engine.js";
 export type * from "./brain/repository-intelligence.js";
