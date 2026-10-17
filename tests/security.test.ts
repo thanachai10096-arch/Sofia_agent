@@ -21,6 +21,24 @@ describe("Sofia security controls",()=>{
     assert.equal(decision.allowed,false);
     assert.equal(decision.risk,"critical");
   });
+  it("enforces host allowlists for URLs outside the url field", () => {
+    const endpoint = assessAction(
+      { runId: "r", toolName: "custom.fetch", input: { endpoint: "https://evil.example/data" }, effects: ["network"] },
+      [],
+      ["trusted.example"],
+    );
+    assert.equal(endpoint.allowed, false);
+    assert.match(endpoint.reason ?? "", /not allowlisted/);
+
+    const command = assessAction(
+      { runId: "r", toolName: "terminal.run", input: { command: "curl https://evil.example/data" }, effects: ["shell", "network"] },
+      [],
+      ["trusted.example"],
+    );
+    assert.equal(command.allowed, false);
+    assert.match(command.reason ?? "", /not allowlisted/);
+  });
+
   it("requires approval for writes and binds a stable action hash",()=>{
     const a=assessAction({runId:"r",toolName:"workspace.write_file",input:{path:"src/a.ts",content:"x"},effects:["write"]});
     const b=assessAction({runId:"r",toolName:"workspace.write_file",input:{path:"src/a.ts",content:"x"},effects:["write"]});
