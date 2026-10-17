@@ -7,7 +7,12 @@ function restrictFilePermissions(filePath: string): void {
   // Windows uses ACLs rather than POSIX mode bits; preserve its inherited ACLs.
   if (process.platform === "win32") return;
   try {
-    const currentMode = fs.statSync(filePath).mode & 0o777;
+    // lstat avoids following a pre-existing symlink before changing permissions.
+    const fileStat = fs.lstatSync(filePath);
+    if (!fileStat.isFile() || fileStat.isSymbolicLink()) {
+      throw new Error("Session storage paths must be regular files, not symbolic links.");
+    }
+    const currentMode = fileStat.mode & 0o777;
     // Remove group/other access without granting any owner permissions that were absent.
     const privateMode = currentMode & 0o600;
     if (privateMode !== currentMode) fs.chmodSync(filePath, privateMode);
