@@ -42,6 +42,8 @@ export type { SkillPerformance, SkillRanking, EvolutionSnapshot, LearningDiagnos
 export type * from "./brain/edit-engine.js";
 export { McpClient } from "./mcp/client.js";
 export { connectManagedMcpServer } from "./mcp/managed-server.js";
+export { connectManagedMcpRegistry } from "./mcp/registry.js";
+export type { ManagedMcpToolRegistry, ManagedMcpServerConfig } from "./mcp/registry.js";
 export type { ManagedMcpServer, ManagedMcpServerOptions } from "./mcp/managed-server.js";
 export type { McpTransport, McpClientOptions, McpToolDescription, McpResourceDescription } from "./mcp/client.js";
 export { McpStdioTransport, McpHttpTransport } from "./mcp/transports.js";
