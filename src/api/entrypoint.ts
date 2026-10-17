@@ -50,8 +50,20 @@ if (discordConfigured) {
       const response = JSON.stringify(result);
       const safeResponse = response.length > 1700 ? response.slice(0, 1690) + "… (truncated)" : response;
       await discordTransport?.sendMessage(message.channelId, safeResponse, undefined, message.id);
-    } catch {
-      await discordTransport?.sendMessage(message.channelId, "Sofia could not complete that task. Check the server logs for a redacted error.", undefined, message.id);
+    } catch (error: unknown) {
+      const errorName = error instanceof Error ? error.name : "UnknownError";
+      const rawMessage = error instanceof Error ? error.message : "Unknown failure";
+      // Keep diagnostics useful while avoiding task text, request headers, and credentials.
+      const safeMessage = rawMessage
+        .replace(/(api[_ -]?key|token|authorization|password|secret)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+        .replace(/https?:\/\/[^\s]+/gi, "[URL_REDACTED]")
+        .slice(0, 240);
+      console.error("Discord agent run failed", { errorName, message: safeMessage });
+      try {
+        await discordTransport?.sendMessage(message.channelId, "Sofia could not complete that task. The server recorded a redacted error for diagnosis.", undefined, message.id);
+      } catch {
+        console.error("Discord error response delivery failed");
+      }
     }
   });
 }
