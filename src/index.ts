@@ -31,6 +31,7 @@ export { AdvancedSkillRegistry, AdvancedSkillPolicyError } from "./skills/advanc
 export { intentClarifier, goalDecomposer, planBuilder, retryStrategist, failureClassifier, completionVerifier, registerVerifiedCoreSkills, listImplementedCoreSkillIds } from "./skills/core-handlers.js";
 export { permissionPolicyEvaluator, leastPrivilegePlanner, promptInjectionDetector, untrustedOutputFencer, pathTraversalGuard, registerVerifiedSecuritySkills } from "./skills/security-handlers.js";
 export { contextSummarizer, memoryConflictResolver, longContextCompressor, createProjectMemoryRetrievalHandler, registerVerifiedMemorySkills } from "./skills/memory-handlers.js";
+export { changeImpactAnalyzer, testStrategyBuilder, regressionTestSelector, acceptanceCriteriaVerifier, staticAnalysisCoordinator, registerVerifiedQualitySkills } from "./skills/quality-handlers.js";
 export type { AdvancedSkillExecutionContext, AdvancedSkillTraceEvent, AdvancedSkillHandler, AdvancedSkillExecutionOptions, AdvancedSkillApprovalRequest, AdvancedSkillApprovalVerifier } from "./skills/advanced-skill-runtime.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
 export { AgentEvaluationRunner } from "./evaluation.js";
