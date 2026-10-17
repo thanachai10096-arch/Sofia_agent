@@ -25,6 +25,7 @@ export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
 export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
 export { InMemorySkillsPlatform } from "./skills/platform.js";
+export { FileSkillsPlatform } from "./skills/file-platform.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
 export { AgentEvaluationRunner } from "./evaluation.js";
 export { EvolutionEngine } from "./brain/evolution.js";
