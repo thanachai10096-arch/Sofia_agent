@@ -97,11 +97,90 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
   return { allowed: true, risk, requireApproval, actionHash: hash };
 }
 
+function redactPrivateKeyBlocks(value: string): string {
+  const prefixes = new Set(["", "RSA ", "EC ", "OPENSSH ", "DSA ", "ENCRYPTED "]);
+  const header = "PRIVATE KEY-----";
+  let result = "";
+  let cursor = 0;
+  while (cursor < value.length) {
+    const begin = value.indexOf("-----BEGIN ", cursor);
+    if (begin < 0) return result + value.slice(cursor);
+    result += value.slice(cursor, begin);
+    const labelStart = begin + "-----BEGIN ".length;
+    const headerEnd = value.indexOf(header, labelStart);
+    if (headerEnd < 0) {
+      result += value.slice(begin, labelStart);
+      cursor = labelStart;
+      continue;
+    }
+    const prefix = value.slice(labelStart, headerEnd);
+    if (!prefixes.has(prefix)) {
+      result += value.slice(begin, labelStart);
+      cursor = labelStart;
+      continue;
+    }
+    const endMarker = "-----END " + prefix + "PRIVATE KEY-----";
+    const end = value.indexOf(endMarker, headerEnd + header.length);
+    if (end < 0) {
+      result += value.slice(begin, labelStart);
+      cursor = labelStart;
+      continue;
+    }
+    result += "[REDACTED PRIVATE KEY]";
+    cursor = end + endMarker.length;
+  }
+  return result;
+}
+
+export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">, blockedPaths: readonly string[] = [], allowedHosts: readonly string[] = []): SecurityDecision {
+  const hash = actionHash(action.runId, action.toolName, action.input, action.principalId);
+  const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;
+  if (action.effects.includes("network") || action.effects.includes("browser")) {
+    const explicitUrl = typeof action.input.url === "string" ? action.input.url : undefined;
+    const discoveredUrls = collectHttpUrls(action.input).filter((url) => url !== explicitUrl);
+    const urls = [...(explicitUrl ? [explicitUrl] : []), ...discoveredUrls];
+    if (urls.length === 0 && !["terminal.run", "git.run"].includes(action.toolName)) {
+      return { allowed:false,risk:"critical",requireApproval:true,reason:"Network actions must expose an explicit HTTP(S) URL for allowlist enforcement.",actionHash:hash };
+    }
+    for (const url of urls) {
+      let host = "";
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("unsupported protocol");
+        host = parsed.hostname.toLowerCase();
+      } catch {
+        return { allowed:false,risk:"critical",requireApproval:true,reason:"Invalid network URL.",actionHash:hash };
+      }
+      if (allowedHosts.length === 0 || !allowedHosts.some(allowed => host === allowed || host.endsWith("." + allowed))) {
+        return { allowed:false,risk:"critical",requireApproval:true,reason:"Network host is not allowlisted.",actionHash:hash };
+      }
+    }
+  }
+  const patchPaths = Array.isArray(action.input.operations)
+    ? action.input.operations.map((op) => (op && typeof op === "object" ? (op as { path?: unknown }).path : undefined)).filter((p): p is string => typeof p === "string")
+    : [];
+  for (const candidate of [...(pathValue ? [pathValue] : []), ...patchPaths]) assertSafePath(candidate, blockedPaths);
+
+  // Treat command/URL/query text as untrusted control input. Content being written is
+  // deliberately excluded so legitimate source code/comments can contain these phrases.
+  const controlFields = ["command", "url", "query", "args"];
+  const controlText = controlFields.map(k => action.input[k]).filter(v => v !== undefined);
+  if (containsPromptInjection(controlText)) {
+    return { allowed: false, risk: "critical", requireApproval: true, reason: "Suspicious instruction pattern in tool parameters.", actionHash: hash };
+  }
+
+  const risk = riskFor(action.effects, action.input);
+  const requireApproval = risk === "medium" || risk === "high" || risk === "critical";
+  return { allowed: true, risk, requireApproval, actionHash: hash };
+}
+
 export function redactSecrets(value: unknown): unknown {
   if (typeof value === "string") {
-    return value
-      .replace(/(?:Bearer\s+)[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
-      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
+    return redactPrivateKeyBlocks(value)
+      .replace(/\b(?:xox[baprs]-[A-Za-z0-9-]{10,})\b/gi, "[REDACTED]")
+      .replace(/(?:Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]")
+      .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{12,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[0-9A-Z]{16})\b/g, "[REDACTED]")
+      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|password|authorization|token|secret[_-]?key|session[_-]?token|aws_secret_access_key)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
   }
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value && typeof value === "object") {
