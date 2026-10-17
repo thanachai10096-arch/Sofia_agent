@@ -147,20 +147,24 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const runs = new Map<string, ActiveRun>();
   const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   const runStore = config.runStore;
+  const recordForRun = (run: ActiveRun): RunRecord => ({
+    id: run.id, status: run.status,
+    ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
+    ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
+    ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+    ...(run.idempotencyKeyHash ? { idempotencyKeyHash: run.idempotencyKeyHash } : {}),
+    ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
+  });
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
-    const record: RunRecord = {
-      id: run.id, status: run.status,
-      ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
-      ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
-      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
-      ...(run.idempotencyKeyHash ? { idempotencyKeyHash: run.idempotencyKeyHash } : {}),
-      ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
-    };
+    const record = recordForRun(run);
     void Promise.resolve().then(() => runStore.save(record)).catch((error: unknown) => {
       // Store failures must be observable without creating an unhandled rejection.
       console.error("[sofia] failed to persist run record", error instanceof Error ? error.message : "unknown error");
     });
+  };
+  const persistDurably = async (run: ActiveRun): Promise<void> => {
+    if (runStore) await runStore.save(recordForRun(run));
   };
   if (runStore) for (const record of runStore.loadAllSync().sort((a, b) => a.createdAt - b.createdAt)) {
     const interrupted = record.status === "queued" || record.status === "running";
@@ -532,8 +536,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(idempotencyId ? { requestFingerprint } : {}),
           };
           runs.set(runId, run);
-          persist(run);
           if (idempotencyId) idempotency.set(idempotencyId, { runId, fingerprint: requestFingerprint });
+          try {
+            // Persist the accepted queued state before returning 202 so a restart cannot lose its idempotency key.
+            await persistDurably(run);
+          } catch {
+            runs.delete(runId);
+            if (idempotencyId) idempotency.delete(idempotencyId);
+            releaseActive(auth.keyId);
+            return json(res, 503, { error: "run_persistence_unavailable" }, origin, config);
+          }
           startRun(run, {
             ...input,
             ...(input.context !== undefined
