@@ -9,6 +9,7 @@ import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
+import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 
 interface ActiveRun {
   id: string;
@@ -130,6 +131,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
+  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
+  let cronTimer: NodeJS.Timeout | undefined;
+  let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
   const persist = (run: ActiveRun) => {
@@ -224,7 +228,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     }
   };
 
-  return createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     const origin = req.headers.origin;
     try {
       if (discordRoute && req.url === discordRoutePath) {
@@ -257,6 +261,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
+
+      const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
+      if (isCronRequest && !deps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
+      if (isCronRequest && req.method === "GET" && !auth.scopes.some(scope => scope === "cron:read" || scope === "cron:manage")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "cron:read" }, origin, config);
+      }
+      if (isCronRequest && req.method !== "GET" && !auth.scopes.includes("cron:manage")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "cron:manage" }, origin, config);
+      }
 
       // Authorization scopes are enforced at the API boundary, not merely used to
       // derive desktop capabilities. Admin scopes do not implicitly grant run access.
@@ -484,6 +498,89 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
+      if (isCronRequest && cronScheduler) {
+        const schedulePath = "/v1/cron/schedules";
+        const historyMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/history$/);
+        const actionMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/(enable|disable)$/);
+        if (req.method === "GET" && requestUrl.pathname === schedulePath) {
+          return json(res, 200, { schedules: await cronScheduler.list(auth.keyId) }, origin, config);
+        }
+        if (req.method === "POST" && requestUrl.pathname === schedulePath) {
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_cron_schedule" }, origin, config);
+          const input = raw as Record<string, unknown>;
+          if (typeof input.name !== "string" || input.name.length > 200 ||
+              typeof input.task !== "string" || input.task.length > 20_000 ||
+              typeof input.timeZone !== "string" || input.timeZone.length > 100) {
+            return json(res, 400, { error: "invalid_cron_schedule", message: "name, task and timeZone are required and must be within limits" }, origin, config);
+          }
+          if (input.cron !== undefined && typeof input.cron !== "string") return json(res, 400, { error: "invalid_cron_schedule", message: "cron must be a string" }, origin, config);
+          if (input.runAt !== undefined && typeof input.runAt !== "string") return json(res, 400, { error: "invalid_cron_schedule", message: "runAt must be a string" }, origin, config);
+          if (input.misfirePolicy !== undefined && input.misfirePolicy !== "skip" && input.misfirePolicy !== "run-once") {
+            return json(res, 400, { error: "invalid_cron_schedule", message: "misfirePolicy must be skip or run-once" }, origin, config);
+          }
+          if (input.maxRetries !== undefined && (!Number.isInteger(input.maxRetries) || Number(input.maxRetries) < 0 || Number(input.maxRetries) > 10)) {
+            return json(res, 400, { error: "invalid_cron_schedule", message: "maxRetries must be an integer from 0 to 10" }, origin, config);
+          }
+          if (input.timeoutMs !== undefined && (!Number.isInteger(input.timeoutMs) || Number(input.timeoutMs) < 1_000 || Number(input.timeoutMs) > 3_600_000)) {
+            return json(res, 400, { error: "invalid_cron_schedule", message: "timeoutMs must be an integer from 1000 to 3600000" }, origin, config);
+          }
+          if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
+            return json(res, 400, { error: "invalid_cron_schedule", message: "enabled must be a boolean" }, origin, config);
+          }
+          const scheduleInput: CronScheduleInput = {
+            name: input.name, task: input.task, timeZone: input.timeZone, ownerKeyId: auth.keyId,
+            ...(typeof input.cron === "string" ? { cron: input.cron } : {}),
+            ...(typeof input.runAt === "string" ? { runAt: input.runAt } : {}),
+            ...(typeof input.enabled === "boolean" ? { enabled: input.enabled } : {}),
+            ...(input.misfirePolicy === "skip" || input.misfirePolicy === "run-once" ? { misfirePolicy: input.misfirePolicy } : {}),
+            ...(typeof input.maxRetries === "number" ? { maxRetries: input.maxRetries } : {}),
+            ...(typeof input.timeoutMs === "number" ? { timeoutMs: input.timeoutMs } : {}),
+          };
+          try {
+            const created = await cronScheduler.create(scheduleInput, auth.keyId);
+            return json(res, 201, created, origin, config);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Invalid cron schedule";
+            return json(res, message.startsWith("Schedule quota exceeded") ? 429 : 400, { error: message.startsWith("Schedule quota exceeded") ? "quota_exceeded" : "invalid_cron_schedule", message }, origin, config);
+          }
+        }
+        if (historyMatch && req.method === "GET") {
+          try {
+            return json(res, 200, { history: await cronScheduler.history(historyMatch[1]!, auth.keyId) }, origin, config);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Cron history unavailable";
+            const status = message === "Unknown cron schedule" ? 404 : message.startsWith("Not authorized") ? 403 : 400;
+            return json(res, status, { error: "cron_history_unavailable", message }, origin, config);
+          }
+        }
+        if (actionMatch && req.method === "POST") {
+          try {
+            const updated = await cronScheduler.setEnabled(actionMatch[1]!, actionMatch[2] === "enable", auth.keyId);
+            return json(res, 200, updated, origin, config);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Cron schedule update failed";
+            const status = message === "Unknown cron schedule" ? 404 : message.startsWith("Not authorized") ? 403 : 400;
+            return json(res, status, { error: "cron_schedule_update_failed", message }, origin, config);
+          }
+        }
+        const cancelMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)$/);
+        if (cancelMatch && req.method === "DELETE") {
+          try {
+            const cancelled = await cronScheduler.cancel(cancelMatch[1]!, auth.keyId);
+            return cancelled
+              ? json(res, 200, { id: cancelMatch[1], status: "disabled" }, origin, config)
+              : json(res, 404, { error: "cron_schedule_not_found" }, origin, config);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Cron schedule cancellation failed";
+            const status = message.startsWith("Not authorized") ? 403 : 400;
+            return json(res, status, { error: "cron_schedule_cancel_failed", message }, origin, config);
+          }
+        }
+        return json(res, 404, { error: "not_found" }, origin, config);
+      }
+
+
       const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
       if (jobMatch && deps.jobRuntime) {
         const jobId = jobMatch[1];
@@ -546,4 +643,25 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       return json(res, 500, { error: "internal_error" }, origin, config);
     }
   });
+  if (cronScheduler) {
+    server.on("listening", () => {
+      void (async () => {
+        try {
+          await cronScheduler.recover();
+          if (cronClosed) return;
+          await cronScheduler.tick();
+          if (cronClosed) return;
+          cronTimer = setInterval(() => { void cronScheduler.tick().catch(() => undefined); }, 1_000);
+        } catch {
+          // Fail closed: do not dispatch scheduled work if recovery could not complete.
+        }
+      })();
+    });
+    server.on("close", () => {
+      cronClosed = true;
+      if (cronTimer) clearInterval(cronTimer);
+      cronTimer = undefined;
+    });
+  }
+  return server;
 }

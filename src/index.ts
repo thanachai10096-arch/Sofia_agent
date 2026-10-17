@@ -25,6 +25,7 @@ export { reviewCodeChange } from "./review/code-review.js";
 export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { BoundedSubagentCoordinator } from "./brain/subagent-coordinator.js";
+export { CoordinatedSubagentRuntime } from "./brain/coordinated-subagent-runtime.js";
 export type { SubagentTask, SubagentBatchItem, SubagentCoordinatorOptions, SubagentRuntimeFactory } from "./brain/subagent-coordinator.js";
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
@@ -41,6 +42,10 @@ export { EvolutionEngine } from "./brain/evolution.js";
 export type { SkillPerformance, SkillRanking, EvolutionSnapshot, LearningDiagnostics } from "./brain/evolution.js";
 export type * from "./brain/edit-engine.js";
 export { McpClient } from "./mcp/client.js";
+export { connectManagedMcpServer } from "./mcp/managed-server.js";
+export { connectManagedMcpRegistry } from "./mcp/registry.js";
+export type { ManagedMcpToolRegistry, ManagedMcpServerConfig } from "./mcp/registry.js";
+export type { ManagedMcpServer, ManagedMcpServerOptions } from "./mcp/managed-server.js";
 export type { McpTransport, McpClientOptions, McpToolDescription, McpResourceDescription } from "./mcp/client.js";
 export { McpStdioTransport, McpHttpTransport } from "./mcp/transports.js";
 export type { McpStdioTransportOptions, McpHttpTransportOptions } from "./mcp/transports.js";
@@ -69,6 +74,8 @@ export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpe
 
 export { createChatCommandHandler } from "./integrations/chat-adapter.js";
 export { FileChatMessageDeduplicator } from "./integrations/file-chat-deduplicator.js";
+export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHAT_DEDUPE_RELEASE_SCRIPT } from "./integrations/redis-chat-deduplicator.js";
+export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export type { ChatPlatform, VerifiedChatCommand, ChatCommandHandlerOptions, ChatDispatchResult, ChatAccessPolicy, ChatMessageDeduplicator, ChatRunStarter } from "./integrations/chat-adapter.js";
 
 export { createMessagingGateway } from "./integrations/messaging/gateway.js";
