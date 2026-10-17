@@ -9,10 +9,11 @@ import { FileRunStore } from "./run-store.js";
 test("FileRunStore serializes concurrent writes across store instances", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-run-store-test-"));
   try {
+    const secret = "ghp_" + "A".repeat(36);
     const snapshot = {
       version: 1 as const,
       runId: "run-test-1",
-      task: "test",
+      task: "task token=" + secret,
       understanding: { objective: "test", constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [], risk: "low" as const, successCriteria: [], ambiguities: [] },
       plan: { strategy: "initial" as const, reason: "test", steps: [] },
       acceptanceCriteria: [],
