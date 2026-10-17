@@ -87,6 +87,46 @@ export SOFIA_STATE_DIR=/var/lib/sofia
 
 Sofia creates separate store directories under that root and restricts local state files/directories on POSIX systems. Keep the directory on a persistent volume with appropriate OS permissions and backups. The file-backed runtime is still intended for a single active process; use a transactional shared store/queue before horizontally scaling workers.
 
+### Persistent conversation transcripts (opt-in)
+
+The synchronous `createSofiaAgentDependencies()` factory remains unchanged and does not enable transcript storage. On Node 22.5 or newer, opt in to SQLite persistence with the additive async factory:
+
+```ts
+import {
+  createSofiaApi,
+  createSofiaAgentDependenciesWithSessions,
+} from "sofia-agent";
+
+const apiKey = process.env.SOFIA_API_KEY;
+if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
+
+const dependencies = await createSofiaAgentDependenciesWithSessions(process.cwd());
+const server = createSofiaApi(dependencies, {
+  apiKeys: { [apiKey]: [] },
+});
+
+server.listen(Number(process.env.PORT ?? 3000), "127.0.0.1");
+
+const shutdown = () => {
+  server.close(() => dependencies.closeSessionStore());
+};
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
+```
+
+Pass a stable `sessionId` with SDK run requests to append the user request and Sofia's result to the durable transcript:
+
+```ts
+await client.start({
+  task: "Continue the previous task",
+  sessionId: "chat-123",
+});
+```
+
+The API namespaces session IDs by the authenticated API key so two clients choosing the same ID do not share a transcript. SQLite files are stored below `SOFIA_STATE_DIR` (or Sofia's default state directory) unless an explicit database path is supplied to the factory. Keep the state directory private and persistent.
+
+**Scope note:** this feature persists and searches transcripts through the store API; it does not yet automatically replay previous turns into the model context or expose transcript retrieval endpoints over HTTP. The existing in-memory and synchronous factories remain available and unchanged.
+
 ### Enable browser automation
 
 Browser access is disabled by default. To opt in:
