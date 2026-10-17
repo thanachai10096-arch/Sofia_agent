@@ -111,7 +111,7 @@ test("core skill registry registers only verified handlers and executes them thr
   const registry = new AdvancedSkillRegistry();
   const ids = registerVerifiedCoreSkills(registry);
   assert.deepEqual(ids, ["runtime.01", "runtime.02", "runtime.03", "runtime.08", "runtime.09", "runtime.10"]);
-  assert.equal(ADVANCED_SKILLS.filter(skill => skill.status === "verified").length, 6);
+  assert.equal(ADVANCED_SKILLS.filter(skill => skill.status === "verified").length, 11);
   assert.ok(ids.every(id => registry.has(id)));
 
   const result = await registry.execute("runtime.09", { message: "Type error: value is not assignable" }, {
