@@ -62,9 +62,13 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
     throw new Error("Workspace path escapes the configured root.");
   }
   if (SECRET_PATH.test(normalized)) throw new Error("Access to credential/secret files is blocked.");
-  const segments = normalized.split(/[\\\\/]+/);
-  if (blockedPaths.some(pattern => normalized === pattern || normalized.startsWith(pattern.endsWith("/") ? pattern : pattern + path.sep) ||
-      (!pattern.includes("/") && segments.includes(pattern)))) {
+  const policyPath = normalized.replace(/\\/g, "/").toLowerCase();
+  const segments = policyPath.split("/");
+  if (blockedPaths.some((pattern) => {
+    const policyPattern = pattern.replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase();
+    return policyPath === policyPattern || policyPath.startsWith(policyPattern + "/") ||
+      (!policyPattern.includes("/") && segments.includes(policyPattern));
+  })) {
     throw new Error("Workspace path is blocked by security policy.");
   }
 }
@@ -100,8 +104,10 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
 export function redactSecrets(value: unknown): unknown {
   if (typeof value === "string") {
     return value
+      .replace(/-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/gi, "[REDACTED PRIVATE KEY]")
       .replace(/(?:Bearer\s+)[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
-      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
+      .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{12,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b/g, "[REDACTED]")
+      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization|aws_secret_access_key)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
   }
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value && typeof value === "object") {
