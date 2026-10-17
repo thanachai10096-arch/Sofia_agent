@@ -20,6 +20,8 @@ interface ActiveRun {
   updatedAt: number;
   ownerKeyId: string;
   desktopCapabilities: DesktopCapability[];
+  idempotencyKeyHash?: string;
+  requestFingerprint?: string;
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -137,6 +139,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
   const runs = new Map<string, ActiveRun>();
+  const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   const runStore = config.runStore;
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
@@ -145,13 +148,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
       ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
       ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+      ...(run.idempotencyKeyHash ? { idempotencyKeyHash: run.idempotencyKeyHash } : {}),
+      ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
     void runStore.save(record).catch((error: unknown) => {
       // Store failures must be observable without creating an unhandled rejection.
       console.error("[sofia] failed to persist run record", error instanceof Error ? error.message : "unknown error");
     });
   };
-  if (runStore) for (const record of runStore.loadAllSync()) {
+  if (runStore) for (const record of runStore.loadAllSync().sort((a, b) => a.createdAt - b.createdAt)) {
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
@@ -165,10 +170,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       controller: new AbortController(), createdAt: record.createdAt,
       updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
       desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+      ...(record.idempotencyKeyHash ? { idempotencyKeyHash: record.idempotencyKeyHash } : {}),
+      ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
     };
-    runs.set(run.id, run); if (interrupted) persist(run);
+    runs.set(run.id, run);
+    if (run.idempotencyKeyHash && run.requestFingerprint) {
+      idempotency.set(run.ownerKeyId + ":" + run.idempotencyKeyHash, { runId: run.id, fingerprint: run.requestFingerprint });
+    }
+    if (interrupted) persist(run);
   }
-  const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   const activeByKey = new Map<string, number>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
@@ -460,7 +470,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (idempotencyKey && (idempotencyKey.length > 128 || /[\x00-\x1f\x7f]/.test(idempotencyKey))) {
             return json(res, 400, { error: "invalid_idempotency_key" }, origin, config);
           }
-          const idempotencyId = idempotencyKey ? `${auth.keyId}:${idempotencyKey}` : undefined;
+          const idempotencyKeyHash = idempotencyKey ? createHash("sha256").update(idempotencyKey).digest("hex") : undefined;
+          const idempotencyId = idempotencyKeyHash ? auth.keyId + ":" + idempotencyKeyHash : undefined;
           const requestFingerprint = idempotencyFingerprint({
             task: input.task,
             ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
@@ -494,6 +505,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             updatedAt: Date.now(),
             ownerKeyId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            ...(idempotencyKeyHash ? { idempotencyKeyHash } : {}),
+            ...(idempotencyId ? { requestFingerprint } : {}),
           };
           runs.set(runId, run);
           persist(run);
