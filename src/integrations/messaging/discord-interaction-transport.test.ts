@@ -26,6 +26,7 @@ test("Discord transport verifies raw signatures and edits deferred interaction r
   const eventPromise = new Promise<{ content: string; id: string }>((resolve) => { resolveEvent = resolve; });
   await transport.start(new AbortController().signal, async (event) => {
     await transport.sendMessage(event.channelId, "Sofia accepted", undefined, event.id);
+    await transport.sendMessage(event.channelId, "Additional result chunk", undefined, event.id);
     resolveEvent({ content: event.content, id: event.id });
   });
 
@@ -51,6 +52,9 @@ test("Discord transport verifies raw signatures and edits deferred interaction r
   assert.equal(sent[0]?.url, "https://discord.com/api/v10/webhooks/111111111111/interaction-token-abc/messages/@original");
   assert.equal(sent[0]?.init?.method, "PATCH");
   assert.equal(JSON.parse(String(sent[0]?.init?.body)).content, "Sofia accepted");
+  assert.equal(sent[1]?.url, "https://discord.com/api/v10/webhooks/111111111111/interaction-token-abc");
+  assert.equal(sent[1]?.init?.method, "POST");
+  assert.equal(JSON.parse(String(sent[1]?.init?.body)).content, "Additional result chunk");
   await transport.stop();
 });
 
