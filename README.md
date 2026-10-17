@@ -208,3 +208,20 @@ node bench/run.mjs --agent reference
 ```
 
 The no-op and reference modes validate the benchmark harness; they are not Sofia capability scores. A real Sofia evaluation requires a configured disposable workspace and API credentials. See [the benchmark guide](bench/README.md) for adapter setup and limitations.
+
+### Persistent conversation transcripts (opt-in)
+
+The existing synchronous `createSofiaAgentDependencies()` factory remains unchanged. On Node 22.5 or newer, opt in to SQLite-backed transcript storage with the additive async factory:
+
+```ts
+import { createSofiaAgentDependenciesWithSessions } from "sofia-agent";
+
+const dependencies = await createSofiaAgentDependenciesWithSessions(process.cwd());
+try {
+  // Pass dependencies to your agent/API host.
+} finally {
+  dependencies.closeSessionStore();
+}
+```
+
+Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Session transcript persistence does not automatically replay prior turns into the model context and does not add transcript retrieval endpoints. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
