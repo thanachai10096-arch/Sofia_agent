@@ -93,6 +93,10 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
   };
 
   const run: WorkspaceRuntime["run"] = async (command, args = [], options = {}) => {
+    const shellEnabled = /^(?:true|1|yes|on)$/i.test((process.env.SOFIA_ALLOW_SHELL ?? "").trim());
+    if (shellEnabled && process.env.SOFIA_SANDBOX_MODE !== "docker") {
+      throw new Error("SOFIA_ALLOW_SHELL requires SOFIA_SANDBOX_MODE=docker so shell execution is isolated.");
+    }
     const cwd = await contained(options.cwd ?? ".");
     const timeout = options.timeoutMs ?? 60_000;
     try {
