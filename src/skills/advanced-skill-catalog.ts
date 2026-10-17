@@ -861,7 +861,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Prompt Variant Evaluator",
     "category": "Learning & Optimization",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": false,
     "description": "Prompt Variant Evaluator: learning & optimization capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -906,7 +906,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Skill Promotion Gate",
     "category": "Learning & Optimization",
     "risk": "read-only",
-    "status": "planned",
+    "status": "verified",
     "requiresApproval": true,
     "description": "Skill Promotion Gate: learning & optimization capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
