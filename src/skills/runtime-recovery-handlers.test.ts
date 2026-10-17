@@ -48,9 +48,12 @@ test("crash recovery requires review and never resumes automatically", () => {
   assert.equal(unsafe.recommendation, "manual-investigation");
 });
 
-test("verified runtime recovery skills register only after catalog promotion", async () => {
+test("verified runtime recovery skills register through the guarded dispatcher", async () => {
   const registry = new AdvancedSkillRegistry();
-  assert.deepEqual(registerVerifiedRuntimeRecoverySkills(registry), []);
-  const result = crashRecoveryAdvisor({ state: "completed", hasCheckpoint: false, idempotent: true, sideEffectsStarted: false }) as { recommendation: string };
-  assert.equal(result.recommendation, "no-action");
+  assert.deepEqual(registerVerifiedRuntimeRecoverySkills(registry), ["runtime.04", "runtime.05", "runtime.07"]);
+  const result = await registry.execute("runtime.05", { events: [
+    { id: "start", status: "started", timestamp: 1 },
+    { id: "done", status: "completed", timestamp: 2 },
+  ] }, { principalId: "test-user", signal: new AbortController().signal }) as { eventCount: number };
+  assert.equal(result.eventCount, 2);
 });
