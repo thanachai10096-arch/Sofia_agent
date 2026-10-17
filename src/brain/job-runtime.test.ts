@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash, randomUUID } from "node:crypto";
-import { rm, stat } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -454,4 +454,39 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
   const result = JSON.parse(resumed.stdout) as { status?: string; checkpointId?: string };
   assert.equal(result.status, "completed");
   assert.equal(result.checkpointId, "restart-checkpoint");
+});
+
+
+test("DurableJobRuntime redacts credential-shaped values from persisted and reloaded jobs", async () => {
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-redaction-"));
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "job-redaction-" + randomUUID();
+  const secret = "ghp_" + "B".repeat(36);
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "result token=" + secret }),
+  } as unknown as SofiaBrain;
+  try {
+    const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+    const submitted = await runtime.submit({ task: "task token=" + secret });
+    let record = await runtime.get(submitted.id);
+    for (let attempt = 0; attempt < 50 && record?.status !== "completed"; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      record = await runtime.get(submitted.id);
+    }
+    assert.equal(record?.status, "completed");
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    const file = path.join(root, "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+    const persisted = await readFile(file, "utf8");
+    assert.ok(!persisted.includes(secret), "persisted job file must not contain credential-shaped values");
+
+    const restarted = new DurableJobRuntime(() => brain, undefined, namespace);
+    const loaded = await restarted.get(submitted.id);
+    assert.ok(loaded);
+    assert.ok(!JSON.stringify(loaded).includes(secret), "reloaded job data must remain redacted");
+  } finally {
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
 });
