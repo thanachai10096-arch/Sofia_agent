@@ -50,6 +50,8 @@ describe("Sofia security controls",()=>{
     assert.deepEqual(value,{apiKey:"[REDACTED]",message:"Bearer [REDACTED]"});
     assert.equal(redactSecrets("token=sk-12345678901234567890 ghp_1234567890123456789012345 AKIA1234567890ABCDEF"), "token=[REDACTED] [REDACTED] [REDACTED]");
     assert.equal(redactSecrets("-----BEGIN PRIVATE KEY-----\nprivate material\n-----END PRIVATE KEY-----"), "[REDACTED PRIVATE KEY]");
+    assert.equal(redactSecrets("ASIA1234567890ABCDEF"), "[REDACTED]");
+    assert.equal(redactSecrets("-----BEGIN ENCRYPTED PRIVATE KEY-----\\nsecret bytes\\n-----END ENCRYPTED PRIVATE KEY-----"), "[REDACTED PRIVATE KEY]");
   });
   it("supports an independent process-wide kill switch",()=>{
     const controller=new SecurityController();
