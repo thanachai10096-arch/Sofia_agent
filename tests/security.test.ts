@@ -95,7 +95,7 @@ it("shared tool-effect classification marks privileged actions consistently", ()
 });
 
 
-test("execution policy accepts common true values without silently disabling capabilities", async () => {
+it("execution policy accepts common true values without silently disabling capabilities", async () => {
   const { loadExecutionPolicyFromEnv } = await import("../src/security/policy.js");
   const names = ["SOFIA_ALLOW_BROWSER", "SOFIA_ALLOW_SHELL"] as const;
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
