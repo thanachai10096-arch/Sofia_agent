@@ -606,6 +606,9 @@ export class SofiaBrain {
       stepId: step.id,
     });
 
+    // Policy observers may abort the shared signal to enforce quotas before execution.
+    this.signal.throwIfAborted();
+
     let result: ToolResult;
 
     try {
@@ -826,8 +829,8 @@ export class SofiaBrain {
     this.signal = requestedSignal;
 
     const timeoutController = new AbortController();
-    const onAbort = () => timeoutController.abort(this.signal.reason);
-    this.signal.addEventListener("abort", onAbort, { once: true });
+    const onAbort = () => timeoutController.abort(requestedSignal.reason);
+    requestedSignal.addEventListener("abort", onAbort, { once: true });
 
     const timer = setTimeout(
       () => timeoutController.abort(new Error("Brain execution timed out")),
@@ -1235,7 +1238,7 @@ export class SofiaBrain {
       );
     } finally {
       clearTimeout(timer);
-      this.signal.removeEventListener("abort", onAbort);
+      requestedSignal.removeEventListener("abort", onAbort);
       this.signal = originalSignal;
     }
   }
