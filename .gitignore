@@ -12,5 +12,11 @@ coverage/
 !.env.example
 !.env.*.example
 
+# Private keys and local certificates
+*.pem
+*.key
+*.p12
+*.pfx
+
 # Sofia local state, audit logs, and credentials
 .sofia/
