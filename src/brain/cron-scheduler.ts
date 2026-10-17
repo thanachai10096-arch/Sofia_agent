@@ -240,15 +240,17 @@ export class CronScheduler {
     if (!await this.authorize(actor, "create")) throw new Error("Not authorized to create cron schedule");
     if (input.ownerKeyId !== actor) throw new Error("Schedule owner must match the authenticated API key");
     if (!input.name.trim() || !input.task.trim() || !input.ownerKeyId.trim()) throw new Error("name, task and ownerKeyId are required");
-    if (!!input.cron === !!input.runAt) throw new Error("Provide exactly one of cron or runAt");
-    const initialRun = input.cron
-      ? nextCronOccurrence(input.cron, input.timeZone, this.now())
+    const hasCron = input.cron !== undefined;
+    const hasRunAt = input.runAt !== undefined;
+    if (hasCron === hasRunAt) throw new Error("Provide exactly one of cron or runAt");
+    const initialRun = hasCron
+      ? nextCronOccurrence(input.cron!, input.timeZone, this.now())
       : new Date(input.runAt!);
     const isoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
-    if (!input.cron && (!input.runAt || !isoTimestamp.test(input.runAt) || !Number.isFinite(initialRun.getTime()))) {
+    if (hasRunAt && (!input.runAt || !isoTimestamp.test(input.runAt) || !Number.isFinite(initialRun.getTime()))) {
       throw new Error("runAt must be a valid ISO-8601 timestamp with a timezone");
     }
-    if (!input.cron) new Intl.DateTimeFormat("en-US", { timeZone: input.timeZone }).format(initialRun);
+    if (hasRunAt) new Intl.DateTimeFormat("en-US", { timeZone: input.timeZone }).format(initialRun);
     const now = this.now().toISOString();
     const schedule: CronSchedule = {
       ...input, enabled: undefined, misfirePolicy: input.misfirePolicy ?? "skip",
