@@ -61,3 +61,20 @@ test("Discord durable job adapter rejects empty tasks before submitting", async 
     /task is required/i,
   );
 });
+test("Discord can acknowledge a durable job before its result is available", async () => {
+  const records: JobRecord[] = [];
+  const runtime = runtimeFor(records);
+  const { submitDiscordTask, waitForDiscordTask } = await import("./discord-durable-job.js");
+  const handle = await submitDiscordTask(runtime, "long running task", "discord:123");
+  assert.equal(handle.id, "discord-job-12345678");
+  assert.equal(records[0]!.status, "queued");
+  const waiting = waitForDiscordTask(handle, { pollIntervalMs: 0 });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  records[0]!.status = "completed";
+  records[0]!.result = { summary: "Finished later", completed: true } as JobRecord["result"];
+  assert.deepEqual(await waiting, {
+    id: "discord-job-12345678",
+    status: "completed",
+    summary: "Finished later",
+  });
+});
