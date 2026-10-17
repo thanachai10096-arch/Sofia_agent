@@ -118,3 +118,48 @@ test("failed transcript transaction rolls back without losing the previous trans
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("new SQLite session storage uses private directory and database permissions", { skip: process.platform === "win32" }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-permissions-"));
+  const privateDir = path.join(dir, "private");
+  const file = path.join(privateDir, "sessions.sqlite");
+  try {
+    const store = await SqliteSessionStore.open(file);
+    store.close();
+    assert.equal(fs.statSync(privateDir).mode & 0o077, 0);
+    assert.equal(fs.statSync(file).mode & 0o077, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("SQLite session storage refuses an existing directory accessible by group or others", { skip: process.platform === "win32" }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-insecure-dir-"));
+  const file = path.join(dir, "sessions.sqlite");
+  try {
+    fs.chmodSync(dir, 0o755);
+    await assert.rejects(
+      SqliteSessionStore.open(file),
+      /Session storage directory must not be accessible by group or others/,
+    );
+  } finally {
+    fs.chmodSync(dir, 0o700);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("SQLite session storage refuses an existing database file accessible by group or others", { skip: process.platform === "win32" }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-insecure-file-"));
+  const file = path.join(dir, "sessions.sqlite");
+  try {
+    fs.writeFileSync(file, "not modified by the store", { mode: 0o644 });
+    await assert.rejects(
+      SqliteSessionStore.open(file),
+      /Session database file must not be accessible by group or others/,
+    );
+    assert.equal(fs.readFileSync(file, "utf8"), "not modified by the store");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
