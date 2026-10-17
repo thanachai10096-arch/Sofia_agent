@@ -56,6 +56,15 @@ export class AdvancedSkillRegistry {
     if (!definition.id.trim() || typeof handler !== "function") {
       throw new TypeError("A non-empty skill ID and handler are required");
     }
+    if (
+      typeof definition.name !== "string" || !definition.name.trim() ||
+      typeof definition.category !== "string" || !definition.category.trim() ||
+      typeof definition.description !== "string" ||
+      !["read-only", "may-write", "privileged"].includes(definition.risk) ||
+      typeof definition.requiresApproval !== "boolean"
+    ) {
+      throw new TypeError("Skill policy metadata is invalid");
+    }
     if (this.skills.has(definition.id)) {
       throw new Error(`Skill handler already registered: ${definition.id}`);
     }
