@@ -36,6 +36,8 @@ test("tool routing and terminal requests remain inside runtime enforcement", () 
 });
 test("workspace operator rejects traversal and connector orchestrator rejects unknown connector", () => {
   assert.equal((fileWorkspaceOperator({ operation: "write", relativePath: "../secret" }) as any).pathRejected, true);
+  assert.equal((fileWorkspaceOperator({ operation: "write", relativePath: "config/.GIT/config" }) as any).pathRejected, true);
+  assert.equal((fileWorkspaceOperator({ operation: "read", relativePath: "config/.ENV" }) as any).pathRejected, true);
   assert.equal((apiConnectorOrchestrator({ purpose: "read", connectorId: "mail", registeredConnectorIds: [], operation: "list", approvalRequired: true }) as any).decision, "deny-unregistered-connector");
 });
 test("documentation and market analysis do not claim external verification", () => {
