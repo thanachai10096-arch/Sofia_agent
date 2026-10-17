@@ -1,11 +1,11 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { SofiaAgent } from "../agent/core.js";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
+import { runDiscordTaskAsDurableJob } from "../integrations/messaging/discord-durable-job.js";
 
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
@@ -13,7 +13,6 @@ if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
 const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
 const deps = createSofiaAgentDependencies(workspace);
-const agent = new SofiaAgent(deps);
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -47,16 +46,18 @@ if (discordConfigured) {
       return;
     }
     try {
-      const result = await agent.run({
-        principalId: "discord:" + message.author.id,
-        task,
+      deps.securityController?.assertRunning();
+      if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
+      const principalId = "discord:" + message.author.id;
+      const result = await runDiscordTaskAsDurableJob(deps.jobRuntime, task, principalId, {
         signal: discordAbort.signal,
       });
-      const response = JSON.stringify(result);
+      const prefix = result.status === "completed" ? "Sofia completed the task." : "Sofia job " + result.status + ".";
+      const response = prefix + "\\nJob ID: " + result.id + "\\n" + result.summary;
       const safeResponse = response.length > 1700 ? response.slice(0, 1690) + "… (truncated)" : response;
       await discordTransport?.sendMessage(message.channelId, safeResponse, undefined, message.id);
     } catch {
-      await discordTransport?.sendMessage(message.channelId, "Sofia could not complete that task. Check the server logs for a redacted error.", undefined, message.id);
+      await discordTransport?.sendMessage(message.channelId, "Sofia could not start or complete that task. Check the server logs for a redacted error.", undefined, message.id);
     }
   });
 }
