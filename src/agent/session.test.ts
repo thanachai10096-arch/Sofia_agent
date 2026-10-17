@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { SofiaAgent } from "./core.js";
 import { MemorySessionStore } from "../session/store.js";
+import type { ModelRoute } from "../models/types.js";
 
-const route = {
+const route: ModelRoute = {
   id: "test-route",
-  capabilities: ["fast" as const],
+  capabilities: ["fast"],
   costWeight: 1,
   latencyWeight: 1,
   qualityWeight: 1,
