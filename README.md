@@ -97,7 +97,7 @@ By default, local job records, Brain run snapshots, and project memory are store
 export SOFIA_STATE_DIR=/var/lib/sofia
 ```
 
-Sofia creates separate store directories under that root and restricts local state files/directories on POSIX systems. Keep the directory on a persistent volume with appropriate OS permissions and backups. The file-backed runtime is still intended for a single active process; use a transactional shared store/queue before horizontally scaling workers.
+Sofia creates separate store directories under that root and restricts local state files/directories on POSIX systems. The durable job file store uses local filesystem locks, atomic replacement, owner lease tokens, expiry, heartbeats, and stale-worker fencing so multiple processes on the same trusted local filesystem can coordinate job claims. This is not a distributed lock service: keep the state directory on a reliable shared local filesystem, and use a transactional shared store/queue with atomic claims before running workers across multiple hosts or replicas. Back up persistent state and do not manually remove active lock files.
 
 ### Enable browser automation
 

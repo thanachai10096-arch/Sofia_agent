@@ -27,6 +27,7 @@ describe("Sofia security controls",()=>{
   it("redacts secrets before audit/display",()=>{
     const value=redactSecrets({apiKey:"super-secret",message:"Bearer abc123"});
     assert.deepEqual(value,{apiKey:"[REDACTED]",message:"Bearer [REDACTED]"});
+    assert.equal((redactSecrets("task token=ghp_" + "B".repeat(36)) as string).includes("ghp_"), false);
   });
   it("supports an independent process-wide kill switch",()=>{
     const controller=new SecurityController();
