@@ -43,7 +43,7 @@ test("only explicit run commands start Sofia work", async () => {
   assert.equal(await handle(inbound("hello Sofia")), undefined);
   assert.equal(await handle(inbound("/run build the project")), "Sofia accepted the task (run run-123, status: queued).");
   assert.deepEqual(h.starts.map((entry) => entry.task), ["build the project"]);
-  assert.ok(h.starts[0].options?.idempotencyKey?.startsWith("chat_"));
+  assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
 });
 
 test("command prefix can be configured for a bot mention", async () => {
