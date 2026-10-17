@@ -43,7 +43,7 @@ test("registry executes verified handlers and emits trace events", async () => {
 
 test("registered policy cannot be weakened by mutating the source definition", async () => {
   const registry = new AdvancedSkillRegistry();
-  const source = definition({ risk: "privileged", requiresApproval: true });
+  const source = { ...definition({ risk: "privileged", requiresApproval: true }) };
   registry.register(source, () => "ran");
   source.requiresApproval = false;
   source.risk = "read-only";
