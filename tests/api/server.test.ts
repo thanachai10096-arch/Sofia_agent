@@ -466,3 +466,47 @@ test("API emits structured request logs and bounded-cardinality metrics", async 
   ]);
   assert.equal(metrics[0].labels.route, "/health");
 });
+
+
+test("API prevents another key from reading or cancelling a run", async () => {
+  const provider: ModelProvider = { async generate() { return { text: "owner result" }; } };
+  const server = createSofiaApi(dependencies(provider), {
+    apiKeys: {
+      "owner-run-token": ["agent:run", "agent:read"],
+      "other-run-token": ["agent:run", "agent:read"],
+    },
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const url = "http://127.0.0.1:" + address.port;
+  try {
+    const created = await fetch(url + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer owner-run-token", "content-type": "application/json" },
+      body: JSON.stringify({ task: "private run", async: true }),
+    });
+    assert.equal(created.status, 202);
+    const run = await created.json() as { id: string };
+
+    const read = await fetch(url + "/v1/agent/runs/" + run.id, {
+      headers: { authorization: "Bearer other-run-token" },
+    });
+    assert.equal(read.status, 404);
+    const cancel = await fetch(url + "/v1/agent/runs/" + run.id, {
+      method: "DELETE",
+      headers: { authorization: "Bearer other-run-token" },
+    });
+    assert.equal(cancel.status, 404);
+    const list = await fetch(url + "/v1/agent/runs", {
+      headers: { authorization: "Bearer other-run-token" },
+    });
+    assert.equal(list.status, 200);
+    assert.doesNotMatch(JSON.stringify(await list.json()), new RegExp(run.id));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
