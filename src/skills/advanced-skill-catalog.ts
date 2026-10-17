@@ -51,7 +51,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Dependency Scheduler",
     "category": "Runtime & Recovery",
     "risk": "may-write",
-    "status": "verified",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Dependency Scheduler: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -60,7 +60,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Execution Trace Analyzer",
     "category": "Runtime & Recovery",
     "risk": "read-only",
-    "status": "verified",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Execution Trace Analyzer: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
@@ -78,7 +78,7 @@ export const ADVANCED_SKILLS: readonly AdvancedSkillDefinition[] = [
     "name": "Crash Recovery",
     "category": "Runtime & Recovery",
     "risk": "read-only",
-    "status": "verified",
+    "status": "implemented",
     "requiresApproval": false,
     "description": "Crash Recovery: runtime & recovery capability. Must use registered tools, scoped permissions, structured inputs, bounded execution, trace events, and verifiable outputs."
   },
