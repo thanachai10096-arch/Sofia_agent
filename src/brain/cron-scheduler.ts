@@ -319,6 +319,149 @@ export class CronScheduler {
       }
     } finally { this.ticking = false; }
   }
+  /**
+   * Reconcile executions left in a non-terminal state by a previous scheduler process.
+   * Claims without a persisted runtime job ID are marked indeterminate and are never
+   * automatically resubmitted, because submit may have succeeded before the crash.
+   */
+  async recover(): Promise<{ reconciled: number; monitoring: number; indeterminate: number }> {
+    const pending = await this.store.transact(state => state.history
+      .filter(item => item.status === "claimed" || item.status === "running")
+      .map(item => ({ ...item })));
+    let reconciled = 0;
+    let monitoring = 0;
+    let indeterminate = 0;
+
+    for (const execution of pending) {
+      const schedule = await this.store.transact(state => {
+        const found = state.schedules.find(item => item.id === execution.scheduleId);
+        return found ? { ...found } : undefined;
+      });
+      if (!schedule) continue;
+
+      if (!execution.jobId) {
+        await this.store.transact(async state => {
+          const current = state.history.find(item => item.id === execution.id);
+          if (!current || (current.status !== "claimed" && current.status !== "running")) return;
+          current.status = "failed";
+          current.finishedAt = this.now().toISOString();
+          current.error = "Dispatch outcome is indeterminate after restart; automatic resubmission suppressed to prevent duplicate work.";
+          const latest = state.schedules.find(item => item.id === execution.scheduleId);
+          if (latest) {
+            latest.lastRunAt = current.finishedAt;
+            latest.consecutiveFailures += 1;
+          }
+          await this.recordAudit(state, {
+            at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.indeterminate",
+            scheduleId: execution.scheduleId, detail: execution.id,
+          });
+        });
+        indeterminate++;
+        reconciled++;
+        continue;
+      }
+
+      let job: JobRecord | undefined;
+      try {
+        job = await this.runtime.get(execution.jobId);
+      } catch {
+        job = undefined;
+      }
+      if (!job) {
+        await this.store.transact(async state => {
+          const current = state.history.find(item => item.id === execution.id);
+          if (!current || (current.status !== "claimed" && current.status !== "running")) return;
+          current.status = "failed";
+          current.finishedAt = this.now().toISOString();
+          current.error = "Runtime job was not found during scheduler recovery.";
+          const latest = state.schedules.find(item => item.id === execution.scheduleId);
+          if (latest) {
+            latest.lastRunAt = current.finishedAt;
+            latest.consecutiveFailures += 1;
+          }
+          await this.recordAudit(state, {
+            at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.job_missing",
+            scheduleId: execution.scheduleId, detail: execution.jobId,
+          });
+        });
+        reconciled++;
+        continue;
+      }
+
+      if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+        await this.store.transact(async state => {
+          const current = state.history.find(item => item.id === execution.id);
+          if (!current || (current.status !== "claimed" && current.status !== "running")) return;
+          current.status = job!.status;
+          current.finishedAt = this.now().toISOString();
+          if (job!.error) current.error = job!.error;
+          const latest = state.schedules.find(item => item.id === execution.scheduleId);
+          if (latest) {
+            latest.lastRunAt = current.finishedAt;
+            latest.lastJobId = job!.id;
+            latest.consecutiveFailures = job!.status === "completed" ? 0 : job!.status === "cancelled"
+              ? latest.consecutiveFailures : latest.consecutiveFailures + 1;
+          }
+          await this.recordAudit(state, {
+            at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.reconciled",
+            scheduleId: execution.scheduleId, detail: job!.status,
+          });
+        });
+        reconciled++;
+        continue;
+      }
+
+      if (!this.active.has(schedule.id)) {
+        const controller = new AbortController();
+        this.active.set(schedule.id, controller);
+        void this.monitorRecovered(schedule, execution.id, execution.jobId, controller);
+        monitoring++;
+      }
+    }
+    return { reconciled, monitoring, indeterminate };
+  }
+
+  private async monitorRecovered(schedule: CronSchedule, executionId: string, jobId: string, controller: AbortController): Promise<void> {
+    let status: CronExecution["status"] = "failed";
+    let errorText: string | undefined;
+    const timeout = new AbortController();
+    const timeoutId = setTimeout(() => timeout.abort(new Error("Recovered scheduled task timed out")), schedule.timeoutMs);
+    const onAbort = () => timeout.abort(controller.signal.reason ?? new Error("Recovered scheduled execution cancelled"));
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      const job = await this.waitForJob(jobId, timeout.signal);
+      status = job.status === "completed" ? "completed" : job.status === "cancelled" ? "cancelled" : "failed";
+      errorText = status === "failed" ? job.error ?? "Recovered runtime job failed" : undefined;
+    } catch (error) {
+      await this.runtime.cancel(jobId).catch(() => false);
+      status = controller.signal.aborted ? "cancelled" : "failed";
+      errorText = error instanceof Error ? error.message : String(error);
+    } finally {
+      clearTimeout(timeoutId);
+      controller.signal.removeEventListener("abort", onAbort);
+    }
+    await this.store.transact(async state => {
+      const execution = state.history.find(item => item.id === executionId);
+      const current = state.schedules.find(item => item.id === schedule.id);
+      if (execution && (execution.status === "claimed" || execution.status === "running")) {
+        execution.status = status;
+        execution.finishedAt = this.now().toISOString();
+        if (errorText) execution.error = errorText;
+      }
+      if (current) {
+        current.lastRunAt = this.now().toISOString();
+        current.lastJobId = jobId;
+        current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled"
+          ? current.consecutiveFailures : current.consecutiveFailures + 1;
+      }
+      await this.recordAudit(state, {
+        at: this.now().toISOString(), actor: "scheduler", action: "schedule.recovery.finished",
+        scheduleId: schedule.id, detail: status,
+      });
+    }).catch(() => undefined);
+    this.active.delete(schedule.id);
+  }
+
   private async executeClaim(schedule: CronSchedule, executionId: string, scheduledFor: string, controller: AbortController): Promise<void> {
     let job: JobRecord | undefined;
     let errorText: string | undefined;
