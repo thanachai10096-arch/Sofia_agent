@@ -390,22 +390,25 @@ export class CronScheduler {
       }
 
       if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+        const recoveredStatus: CronExecution["status"] = job.status;
+        const recoveredJobId = job.id;
+        const recoveredError = job.error;
         await this.store.transact(async state => {
           const current = state.history.find(item => item.id === execution.id);
           if (!current || (current.status !== "claimed" && current.status !== "running")) return;
-          current.status = job!.status;
+          current.status = recoveredStatus;
           current.finishedAt = this.now().toISOString();
-          if (job!.error) current.error = job!.error;
+          if (recoveredError) current.error = recoveredError;
           const latest = state.schedules.find(item => item.id === execution.scheduleId);
           if (latest) {
             latest.lastRunAt = current.finishedAt;
-            latest.lastJobId = job!.id;
-            latest.consecutiveFailures = job!.status === "completed" ? 0 : job!.status === "cancelled"
+            latest.lastJobId = recoveredJobId;
+            latest.consecutiveFailures = recoveredStatus === "completed" ? 0 : recoveredStatus === "cancelled"
               ? latest.consecutiveFailures : latest.consecutiveFailures + 1;
           }
           await this.recordAudit(state, {
             at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.reconciled",
-            scheduleId: execution.scheduleId, detail: job!.status,
+            scheduleId: execution.scheduleId, detail: recoveredStatus,
           });
         });
         reconciled++;
