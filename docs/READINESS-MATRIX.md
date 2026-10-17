@@ -1,7 +1,7 @@
 # Sofia Agent Readiness Matrix
 
 **Snapshot:** 2026-10-17  
-**Default branch observed during this audit:** `main` at `3de1cc21509dcac9e3581f397860e314054451ad`  
+**Default branch observed during this audit:** `main` at `1ef56342262dd880c3bead0b72af285e6f4e029d`  
 **Purpose:** distinguish code present in the default branch from isolated pull requests, tested behavior, and production readiness. This is an evidence snapshot, not a promise that every feature is production-ready.
 
 ## Status definitions
