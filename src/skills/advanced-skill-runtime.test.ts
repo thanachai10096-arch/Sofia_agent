@@ -19,6 +19,19 @@ test("registry refuses planned skills", () => {
     (error: unknown) => error instanceof AdvancedSkillPolicyError && error.code === "SKILL_NOT_VERIFIED");
 });
 
+test("registry rejects malformed runtime policy metadata", () => {
+  const registry = new AdvancedSkillRegistry();
+  const malformed = definition({ risk: "read-only" }) as AdvancedSkillDefinition;
+  (malformed as { risk: string }).risk = "unknown-risk";
+  assert.throws(() => registry.register(malformed, () => "nope"), TypeError);
+});
+
+test("registry rejects duplicate handlers", () => {
+  const registry = new AdvancedSkillRegistry();
+  registry.register(definition(), () => "first");
+  assert.throws(() => registry.register(definition(), () => "second"), /already registered/);
+});
+
 test("registry executes verified handlers and emits trace events", async () => {
   const registry = new AdvancedSkillRegistry();
   const events: string[] = [];
