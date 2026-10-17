@@ -200,7 +200,7 @@ export const sharedTaskBoard = (input: unknown) => {
     if (!["queued", "active", "blocked", "done", "failed", "cancelled"].includes(status)) throw new TypeError("task status is invalid.");
     return { id, owner: item.owner === undefined ? "unassigned" : str(item.owner, "owner", 200), status, dependencyIds: texts(item.dependencyIds, "dependencyIds", 100) };
   });
-  return { tasks, counts: Object.fromEntries(["queued", "active", "blocked", "done", "failed", "cancelled"].map(status => [status, tasks.filter(task => task.status === status).length])), persisted: false };
+  return { tasks, counts: Object.fromEntries(["queued", "active", "blocked", "done", "failed", "cancelled"].map(status => [status, tasks.filter(task => task.status === status).length] as const)), persisted: false };
 };
 
 /** Reviews an agent result against supplied criteria and evidence without granting authority. */
