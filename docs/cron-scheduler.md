@@ -11,3 +11,15 @@ Cron syntax supports five fields (minute hour day-of-month month day-of-week), n
 ## Operational limitations
 
 This is an additive module and is not yet wired into the API/server lifecycle. The host must call `tick()` periodically. A crash between persisting a claim and persisting the runtime job ID remains inherently indeterminate: recovery records the uncertainty and suppresses automatic resubmission to avoid duplicate side effects. Exactly-once execution across that window requires idempotency support in the runtime or an atomic outbox/transactional dispatch integration. Misfires at least one minute late follow the configured policy: `skip` records a skipped occurrence; `run-once` dispatches one coalesced execution and advances the next run beyond the current time. Deterministic tests cover both paths. Validate real file-lock behavior and recovery before unattended production use. For multi-host use, provide a transactional database-backed store. Configure explicit authorization for deployments with admin/operator roles.
+
+## API integration
+
+When `createSofiaApi` receives `deps.jobRuntime`, the API automatically runs startup recovery and starts a one-second scheduler tick loop after the server begins listening. The loop is stopped when the server closes. Cron endpoints remain unavailable if no job runtime is configured.
+
+- `POST /v1/cron/schedules` — create a recurring schedule with `cron` or a one-time schedule with `runAt`.
+- `GET /v1/cron/schedules` — list schedules owned by the authenticated API key.
+- `GET /v1/cron/schedules/:id/history` — read execution history.
+- `POST /v1/cron/schedules/:id/enable` and `/disable` — toggle a schedule.
+- `DELETE /v1/cron/schedules/:id` — disable the schedule and cancel its active runtime job if present.
+
+Grant `cron:read` to list schedules/history and `cron:manage` to create, enable, disable or cancel schedules. Ownership is derived from the authenticated API key; clients cannot choose another owner's `ownerKeyId`.
