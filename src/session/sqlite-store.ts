@@ -17,7 +17,38 @@ export class SqliteSessionStore {
 
   static async open(filePath = path.join(sofiaStateDirectory("sessions"), "sessions.sqlite")): Promise<SqliteSessionStore> {
     const absolutePath = filePath === ":memory:" ? filePath : path.resolve(filePath);
-    if (absolutePath !== ":memory:") fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    if (absolutePath !== ":memory:") {
+      const directory = path.dirname(absolutePath);
+      // Session transcripts are private data. Create new storage paths with
+      // restrictive permissions, and fail closed rather than changing the
+      // permissions of existing user-owned paths.
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+      if (process.platform !== "win32") {
+        const directoryMode = fs.statSync(directory).mode;
+        if ((directoryMode & 0o077) !== 0) {
+          throw new Error("Session storage directory must not be accessible by group or others.");
+        }
+      }
+
+      // Pre-create new database files with private permissions before SQLite
+      // opens them. Existing files are never chmod'ed or otherwise rewritten
+      // here; unsafe permissions must be corrected by the operator.
+      try {
+        const descriptor = fs.openSync(absolutePath, "wx", 0o600);
+        fs.closeSync(descriptor);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+      if (process.platform !== "win32") {
+        const fileStat = fs.lstatSync(absolutePath);
+        if (!fileStat.isFile() || fileStat.isSymbolicLink()) {
+          throw new Error("Session database path must be a regular file, not a symbolic link.");
+        }
+        if ((fileStat.mode & 0o077) !== 0) {
+          throw new Error("Session database file must not be accessible by group or others.");
+        }
+      }
+    }
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolutePath);
     try {
