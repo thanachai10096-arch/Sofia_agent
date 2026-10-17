@@ -548,8 +548,10 @@ test("Brain aborts immediately after a tool-start policy event before executing 
     },
   });
 
-  await assert.rejects(
-    () => brain.run({ task: "Create hello.txt", signal: controller.signal }),
-  );
+  const report = await brain.run({
+    task: "Create hello.txt",
+    signal: controller.signal,
+  });
+  assert.equal(report.completed, false);
   assert.equal(executions, 0, "tool execution must not begin after policy abort");
 });
