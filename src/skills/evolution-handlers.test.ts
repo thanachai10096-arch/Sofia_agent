@@ -43,8 +43,13 @@ test("budget planner rejects negative or non-finite values", () => {
   assert.throws(() => tokenBudgetPlanner({ tokenLimit: 100, estimatedTokens: 1, costLimit: 2, estimatedCost: 1, reserveRatio: 0.9 }), /reserveRatio/);
 });
 
-test("evolution handlers only register after catalog promotion to verified", () => {
+test("verified evolution handlers register through the guarded dispatcher", async () => {
   const registry = new AdvancedSkillRegistry();
-  assert.deepEqual(registerVerifiedEvolutionSkills(registry), []);
-  assert.equal(registry.has("evolution.01"), false);
+  const ids = registerVerifiedEvolutionSkills(registry);
+  assert.deepEqual(ids, ["evolution.01", "evolution.03", "evolution.06"]);
+  assert.ok(ids.every(id => registry.has(id)));
+  const result = await registry.execute("evolution.06", {
+    tokenLimit: 1000, estimatedTokens: 500, costLimit: 2, estimatedCost: 1,
+  }, { principalId: "test-user", signal: new AbortController().signal }) as { allowedByEstimate: boolean };
+  assert.equal(result.allowedByEstimate, true);
 });
