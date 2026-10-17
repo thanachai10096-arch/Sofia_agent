@@ -371,7 +371,7 @@ test("tool gateway redacts secrets from tool output, errors, and audit records",
     notifyApproval() {},
   };
 
-  const success = await gateway.execute({ tool: "custom.read", input: {} }, context);
+  const success = await gateway.execute({ tool: "custom.read", input: { apiKey: "sk-input-secret-value" } }, context);
   assert.equal(success.ok, true);
   const serialized = JSON.stringify(success.data);
   assert.equal(serialized.includes("sk-live-secret-value"), false);
@@ -385,6 +385,7 @@ test("tool gateway redacts secrets from tool output, errors, and audit records",
 
   const auditText = JSON.stringify(audit.list());
   assert.equal(auditText.includes("sk-live-secret-value"), false);
+  assert.equal(auditText.includes("sk-input-secret-value"), false);
   assert.equal(auditText.includes("sk-error-secret-value"), false);
   assert.equal(auditText.includes("hunter2"), false);
 });
