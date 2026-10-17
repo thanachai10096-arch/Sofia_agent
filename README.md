@@ -186,11 +186,14 @@ import { createSofiaApi, FileUsageStore } from "sofia-agent";
 
 const token = process.env.SOFIA_API_KEY;
 if (!token) throw new Error("SOFIA_API_KEY is required");
-const hashSecret = process.env.SOFIA_API_KEY_HASH_SECRET;\nif (!hashSecret || Buffer.byteLength(hashSecret, "utf8") < 32) throw new Error("SOFIA_API_KEY_HASH_SECRET must be at least 32 bytes");\nconst tokenHash = createHmac("sha256", hashSecret).update(token).digest("hex");
+const hashSecret = process.env.SOFIA_API_KEY_HASH_SECRET;
+if (!hashSecret || Buffer.byteLength(hashSecret, "utf8") < 32) throw new Error("SOFIA_API_KEY_HASH_SECRET must be at least 32 bytes");
+const tokenHash = createHmac("sha256", hashSecret).update(token).digest("hex");
 
 const server = createSofiaApi(dependencies, {
   apiKeys: {},
-  apiKeyHashes: { [tokenHash]: ["agent:run", "agent:read"] },\n  apiKeyHashSecret: hashSecret,\n  apiKeyHashSecret: process.env.SOFIA_API_KEY_HASH_SECRET,
+  apiKeyHashes: { [tokenHash]: ["agent:run", "agent:read"] },
+  apiKeyHashSecret: hashSecret,
   usageStore: new FileUsageStore("/var/lib/sofia/usage"),
 });
 ```
