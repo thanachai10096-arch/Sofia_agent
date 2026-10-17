@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createSofiaApi } from "../../src/api/server.js";
 import type { AgentDependencies } from "../../src/agent/types.js";
+import type { SofiaApiConfig } from "../../src/api/types.js";
 import type { ModelProvider, ModelRoute } from "../../src/models/types.js";
 
 const route: ModelRoute = {
@@ -21,11 +22,12 @@ function dependencies(provider: ModelProvider): AgentDependencies {
   };
 }
 
-async function startApi(provider: ModelProvider) {
+async function startApi(provider: ModelProvider, overrides: Partial<SofiaApiConfig> = {}) {
   const server = createSofiaApi(dependencies(provider), {
     apiKeys: { "test-token": ["agent:run"] },
     allowedOrigins: ["https://app.example"],
     requestTimeoutMs: 5_000,
+    ...overrides,
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -166,4 +168,53 @@ test("job API enforces owner isolation for reads, resume, cancel, and list", asy
   assert.deepEqual((await listed.json() as { jobs: unknown[] }).jobs, []);
   assert.equal(job.resumeCalls, 0, "unauthorized caller must not invoke resume");
   assert.equal(job.cancelCalls, 0, "unauthorized caller must not invoke cancel");
+});
+
+
+test("API routes match pathname when query parameters are present", async (t) => {
+  const provider: ModelProvider = { async generate() { return { text: "unused" }; } };
+  const { server, url } = await startApi(provider);
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const response = await fetch(url + "/v1/usage?view=summary", {
+    headers: { authorization: "Bearer test-token" },
+  });
+  assert.equal(response.status, 200);
+});
+
+test("API concurrency limit applies to async, sync, and SSE run modes", async (t) => {
+  let markStarted!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const provider: ModelProvider = {
+    async generate() {
+      markStarted();
+      await blocked;
+      return { text: "done" };
+    },
+  };
+  const { server, url } = await startApi(provider, { maxConcurrentRunsPerKey: 1 });
+  t.after(async () => {
+    release();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+  const headers = { authorization: "Bearer test-token", "content-type": "application/json" };
+  const first = await fetch(url + "/v1/agent/runs", {
+    method: "POST", headers, body: JSON.stringify({ task: "first run", async: true }),
+  });
+  assert.equal(first.status, 202);
+  await started;
+
+  const sync = await fetch(url + "/v1/agent/runs", {
+    method: "POST", headers, body: JSON.stringify({ task: "second run" }),
+  });
+  assert.equal(sync.status, 429);
+  assert.deepEqual(await sync.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+
+  const stream = await fetch(url + "/v1/agent/runs/stream", {
+    method: "POST", headers, body: JSON.stringify({ task: "third run" }),
+  });
+  assert.equal(stream.status, 429);
+  assert.deepEqual(await stream.json(), { error: "concurrency_limit", retryAfterMs: 2000 });
+  release();
 });
