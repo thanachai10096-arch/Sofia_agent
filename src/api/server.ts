@@ -123,6 +123,11 @@ function pathId(url: string): string | null {
   return match?.[1] ?? null;
 }
 
+/** Keep provider/tool exception details out of client responses and persisted run records. */
+function publicAgentError(): string {
+  return "Agent execution failed.";
+}
+
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
@@ -242,7 +247,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.error = timedOut ? "Run timed out." : "Run cancelled.";
         } else {
           run.status = "failed";
-          run.error = error instanceof Error ? error.message : "Agent failed";
+          run.error = publicAgentError();
         }
       } finally {
         clearTimeout(timer);
@@ -445,7 +450,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           send({ type: "result", runId, status: "completed", result: run.result });
         } catch (error) {
           run.status = timedOut ? "failed" : controller.signal.aborted ? "cancelled" : "failed";
-          run.error = timedOut ? "Run timed out." : controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Agent failed";
+          run.error = timedOut ? "Run timed out." : controller.signal.aborted ? "Run cancelled." : publicAgentError();
           send({ type: "error", runId, status: run.status, error: run.error });
         } finally {
           releaseActive(auth.keyId);
@@ -554,7 +559,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 502, {
             id: runId,
             status: "failed",
-            error: controller.signal.aborted ? "Request timed out or was cancelled." : error instanceof Error ? error.message : "Agent failed",
+            error: controller.signal.aborted ? "Request timed out or was cancelled." : publicAgentError(),
           }, origin, config);
         } finally {
           clearTimeout(timer);
