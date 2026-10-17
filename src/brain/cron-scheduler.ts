@@ -162,23 +162,24 @@ function parseCron(expression: string): ParsedCron {
     weekday: parseField(fields[4] ?? "", 0, 7), dayWildcard: fields[2] === "*", weekdayWildcard: fields[4] === "*",
   };
 }
-function localParts(date: Date, timeZone: string): { minute: number; hour: number; day: number; month: number; weekday: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone, minute: "numeric", hour: "numeric", day: "numeric", month: "numeric",
-    weekday: "short", hourCycle: "h23",
-  }).formatToParts(date);
+function localParts(date: Date, formatter: Intl.DateTimeFormat): { minute: number; hour: number; day: number; month: number; weekday: number } {
+  const parts = formatter.formatToParts(date);
   const get = (type: string) => parts.find(p => p.type === type)?.value ?? "";
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday"));
   return { minute: Number(get("minute")), hour: Number(get("hour")), day: Number(get("day")), month: Number(get("month")), weekday };
 }
 export function nextCronOccurrence(expression: string, timeZone: string, after: Date): Date {
   const cron = parseCron(expression);
-  // Validate the zone explicitly before searching.
-  new Intl.DateTimeFormat("en-US", { timeZone }).format(after);
+  // Reuse one formatter during the search; constructing one per minute is prohibitively expensive.
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone, minute: "numeric", hour: "numeric", day: "numeric", month: "numeric",
+    weekday: "short", hourCycle: "h23",
+  });
+  formatter.format(after); // Validate the IANA zone explicitly before searching.
   const cursor = Math.floor(after.getTime() / 60_000) * 60_000 + 60_000;
   const limit = cursor + 366 * 24 * 60 * 60_000 * 2;
   for (let instant = cursor; instant <= limit; instant += 60_000) {
-    const p = localParts(new Date(instant), timeZone);
+    const p = localParts(new Date(instant), formatter);
     const dayMatch = cron.day.has(p.day);
     const weekdayMatch = cron.weekday.has(p.weekday) || (p.weekday === 0 && cron.weekday.has(7));
     const calendarMatch = cron.dayWildcard && cron.weekdayWildcard
