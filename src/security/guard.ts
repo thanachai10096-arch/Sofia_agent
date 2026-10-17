@@ -73,14 +73,40 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
   }
 }
 
+function collectHttpUrls(value: unknown, output: string[] = []): string[] {
+  if (typeof value === "string") {
+    const matches = value.match(/https?:\\/\\/[^\\s"'<>]+/gi) ?? [];
+    for (const match of matches) output.push(match.replace(/[),.;]+$/g, ""));
+  } else if (Array.isArray(value)) {
+    for (const item of value) collectHttpUrls(item, output);
+  } else if (value && typeof value === "object") {
+    for (const item of Object.values(value as Record<string, unknown>)) collectHttpUrls(item, output);
+  }
+  return output;
+}
+
 export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">, blockedPaths: readonly string[] = [], allowedHosts: readonly string[] = []): SecurityDecision {
   const hash = actionHash(action.runId, action.toolName, action.input, action.principalId);
   const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;
   if (action.effects.includes("network") || action.effects.includes("browser")) {
-    const url = typeof action.input.url === "string" ? action.input.url : undefined;
-    if (url) {
-      let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch { return { allowed:false,risk:"critical",requireApproval:true,reason:"Invalid network URL.",actionHash:hash }; }
-      if (allowedHosts.length === 0 || !allowedHosts.some(allowed => host === allowed || host.endsWith("." + allowed))) return { allowed:false,risk:"critical",requireApproval:true,reason:"Network host is not allowlisted.",actionHash:hash };
+    const explicitUrl = typeof action.input.url === "string" ? action.input.url : undefined;
+    const discoveredUrls = collectHttpUrls(action.input).filter((url) => url !== explicitUrl);
+    const urls = [...(explicitUrl ? [explicitUrl] : []), ...discoveredUrls];
+    if (urls.length === 0 && !["terminal.run", "git.run"].includes(action.toolName)) {
+      return { allowed:false,risk:"critical",requireApproval:true,reason:"Network actions must expose an explicit HTTP(S) URL for allowlist enforcement.",actionHash:hash };
+    }
+    for (const url of urls) {
+      let host = "";
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("unsupported protocol");
+        host = parsed.hostname.toLowerCase();
+      } catch {
+        return { allowed:false,risk:"critical",requireApproval:true,reason:"Invalid network URL.",actionHash:hash };
+      }
+      if (allowedHosts.length === 0 || !allowedHosts.some(allowed => host === allowed || host.endsWith("." + allowed))) {
+        return { allowed:false,risk:"critical",requireApproval:true,reason:"Network host is not allowlisted.",actionHash:hash };
+      }
     }
   }
   const patchPaths = Array.isArray(action.input.operations)
