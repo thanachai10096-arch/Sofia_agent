@@ -13,7 +13,7 @@ const message = (overrides: Partial<InboundMessage> = {}): InboundMessage => ({
 });
 function adapter(sent: string[] = [], platform: "telegram" | "discord" = "telegram"): MessagingAdapter {
   return {
-    platform, async start() {}, async stop() {},
+    platform, async start(_signal, _onMessage) {}, async stop() {},
     async send(input) { sent.push(input.text); return { state: "sent" }; },
   };
 }
