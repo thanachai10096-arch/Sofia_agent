@@ -68,9 +68,9 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 
 ## `> Advanced skill catalog`
 
-The repository includes a **100-item advanced skill catalog** across runtime/recovery, conversation/memory, software engineering, testing, security, tools, research, multi-agent coordination, workflows, and learning/optimization. Forty-eight handlers are `verified` with implementation and acceptance tests; 52 catalog entries remain `planned`. The latest CI run passed on Ubuntu, Windows, and macOS, plus browser-egress and container-sandbox integration. See [the full catalog and rollout plan](docs/advanced-skill-catalog-100.md).
+The repository includes a **100-item advanced skill catalog** across runtime/recovery, conversation/memory, software engineering, testing, security, tools, research, multi-agent coordination, workflows, and learning/optimization. Forty-five handlers are `verified`; three new runtime-recovery handlers are `implemented` and awaiting CI verification; 52 catalog entries remain `planned`. The preceding CI run passed on Ubuntu, Windows, and macOS, plus browser-egress and container-sandbox integration. See [the full catalog and rollout plan](docs/advanced-skill-catalog-100.md).
 
-**Important status distinction:** the catalog is not 100 implemented skills. Forty-eight handlers are `verified` with acceptance tests; 52 catalog entries remain `planned`. The guarded dispatcher registers only verified definitions. Handlers that perform side effects must still use Sofia's existing Tool Registry and runtime security controls. Catalog metadata alone never grants access.
+**Important status distinction:** the catalog is not 100 implemented skills. Forty-five handlers are `verified`; three runtime-recovery handlers are `implemented` pending CI verification; 52 catalog entries remain `planned`. The guarded dispatcher registers only verified definitions. Handlers that perform side effects must still use Sofia's existing Tool Registry and runtime security controls. Catalog metadata alone never grants access.
 
 ## `> Quick start`
 
