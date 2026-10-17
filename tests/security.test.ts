@@ -53,6 +53,21 @@ describe("Sofia security controls",()=>{
     assert.equal(redactSecrets("ASIA1234567890ABCDEF"), "[REDACTED]");
     assert.equal(redactSecrets("-----BEGIN ENCRYPTED PRIVATE KEY-----\nsecret bytes\n-----END ENCRYPTED PRIVATE KEY-----"), "[REDACTED PRIVATE KEY]");
   });
+  it("handles adversarial PEM-like and URL-heavy input without backtracking regexes", () => {
+    const noisyPem = ("-----BEGIN DSA PRIVATE KEY-----".repeat(5000));
+    const sanitized = redactSecrets(noisyPem) as string;
+    assert.equal(sanitized.length > 0, true);
+    assert.equal(sanitized.includes("-----BEGIN DSA PRIVATE KEY-----"), true);
+
+    const urlNoise = ("https://" + "/".repeat(1000) + " ".repeat(1)).repeat(100);
+    const decision = assessAction(
+      { runId: "r", toolName: "custom.fetch", input: { endpoint: urlNoise }, effects: ["network"] },
+      [],
+      ["trusted.example"],
+    );
+    assert.equal(decision.allowed, false);
+  });
+
   it("redacts multiline PEM private keys embedded in plain text", () => {
     const pem = [
       "-----BEGIN PRIVATE KEY-----",
