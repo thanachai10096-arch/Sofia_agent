@@ -119,11 +119,11 @@ docker run --rm -p 3000:3000 \
   sofia-agent
 ```
 
-Set a high-entropy `SOFIA_API_KEY` in your deployment secret store. The standalone API stores only its SHA-256 hash in the key map, enables durable local run/usage files, and binds to all interfaces inside the container. The file stores are single-process only; do not scale this container horizontally without a transactional shared store/queue. The image does not install browser binaries; browser automation remains opt-in and needs its own browser-runtime setup.
+Set a high-entropy `SOFIA_API_KEY` and an independent random `SOFIA_API_KEY_HASH_SECRET` (at least 32 bytes) in your deployment secret store. The standalone API stores only an HMAC-SHA-256 digest in the key map, enables durable local run/usage files, and binds to all interfaces inside the container. The file stores are single-process only; do not scale this container horizontally without a transactional shared store/queue. The image does not install browser binaries; browser automation remains opt-in and needs its own browser-runtime setup.
 
 ### API key storage and quotas
 
-The standalone server accepts a high-entropy `SOFIA_API_KEY` from the deployment secret store, computes its SHA-256 digest, and configures the API using `apiKeyHashes` rather than storing the bearer token as an object key. The API also supports the legacy plaintext `apiKeys` configuration for compatibility; new deployments should prefer hashes. Authentication failures are throttled per client address.
+The standalone server accepts a high-entropy `SOFIA_API_KEY` and independent `SOFIA_API_KEY_HASH_SECRET` (at least 32 bytes) from the deployment secret store, computes an HMAC-SHA-256 digest, and configures the API using `apiKeyHashes` rather than storing the bearer token as an object key. The API also supports the legacy plaintext `apiKeys` configuration for compatibility; new deployments should prefer hashes. Authentication failures are throttled per client address.
 
 Run and tool-call quota counters can persist across restarts through `FileUsageStore`. This file-backed store is single-process only; use a transactional shared store/queue before running multiple API workers or relying on quotas for billing. Keep the state directory on a persistent volume with restrictive permissions.
 
@@ -181,16 +181,16 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 For deployments that should not keep bearer tokens in an in-memory configuration object, configure SHA-256 token hashes. The hash is the lowercase hexadecimal digest of the full, high-entropy bearer token; do not use a human password as an API key.
 
 ```ts
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { createSofiaApi, FileUsageStore } from "sofia-agent";
 
 const token = process.env.SOFIA_API_KEY;
 if (!token) throw new Error("SOFIA_API_KEY is required");
-const tokenHash = createHash("sha256").update(token).digest("hex");
+const hashSecret = process.env.SOFIA_API_KEY_HASH_SECRET;\nif (!hashSecret || Buffer.byteLength(hashSecret, "utf8") < 32) throw new Error("SOFIA_API_KEY_HASH_SECRET must be at least 32 bytes");\nconst tokenHash = createHmac("sha256", hashSecret).update(token).digest("hex");
 
 const server = createSofiaApi(dependencies, {
   apiKeys: {},
-  apiKeyHashes: { [tokenHash]: ["agent:run", "agent:read"] },
+  apiKeyHashes: { [tokenHash]: ["agent:run", "agent:read"] },\n  apiKeyHashSecret: process.env.SOFIA_API_KEY_HASH_SECRET,
   usageStore: new FileUsageStore("/var/lib/sofia/usage"),
 });
 ```
