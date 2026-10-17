@@ -1,0 +1,146 @@
+openapi: 3.1.0
+info:
+  title: Sofia Agent API
+  version: 1.0.0
+  description: |
+    HTTP API for starting, monitoring, cancelling, and streaming Sofia Agent runs.
+    Keep bearer tokens on trusted servers. Async runs and quota state are durable only
+    when configured with persistent stores; local file stores are single-process only.
+servers:
+  - url: http://127.0.0.1:3000
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      security: []
+      summary: Liveness probe
+      responses:
+        "200":
+          description: API process is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  service: { type: string }
+                  version: { type: string }
+  /ready:
+    get:
+      security: []
+      summary: Readiness probe
+      responses:
+        "200": { description: API is ready }
+        "503": { description: API is not ready }
+  /v1/usage:
+    get:
+      summary: Read the authenticated key's current usage counters
+      responses:
+        "200":
+          description: Usage counters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs: { type: integer }
+                  toolCalls: { type: integer }
+                  startedAt: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/agent/runs:
+    post:
+      summary: Run a task synchronously or enqueue an async run
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunRequest"
+      responses:
+        "200": { description: Synchronous run completed }
+        "202": { description: Async run accepted; poll the returned run ID }
+        "400": { description: Invalid request }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "502": { description: Agent execution failed }
+        "504": { description: Synchronous run timed out }
+    get:
+      summary: List recent runs for the authenticated key
+      responses:
+        "200": { description: Recent runs }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/agent/runs/stream:
+    post:
+      summary: Stream run events using Server-Sent Events
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunRequest"
+      responses:
+        "200":
+          description: Event stream; each event is sent as a data JSON line
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /v1/agent/runs/{runId}:
+    parameters:
+      - in: path
+        name: runId
+        required: true
+        schema: { type: string }
+    get:
+      summary: Get a run's status and result
+      responses:
+        "200": { description: Run status }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: Run not found }
+    delete:
+      summary: Cancel a running task
+      responses:
+        "200": { description: Cancellation accepted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: Run not found }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API key
+  schemas:
+    RunRequest:
+      type: object
+      required: [task]
+      properties:
+        task: { type: string, minLength: 1, maxLength: 200000 }
+        context: { type: string }
+        maxSteps: { type: integer, minimum: 1 }
+        async: { type: boolean, default: false }
+        acceptanceCriteria:
+          type: array
+          items:
+            type: object
+            required: [id, description, probe]
+            properties:
+              id: { type: string }
+              description: { type: string }
+              probe:
+                type: object
+                required: [tool, input]
+                properties:
+                  tool: { type: string }
+                  input: { type: object }
+    Unauthorized:
+      description: Missing or invalid bearer token
+    RateLimited:
+      description: Quota, concurrency, or authentication rate limit reached
