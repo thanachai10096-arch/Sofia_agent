@@ -399,7 +399,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (idempotencyId) {
             const existing = idempotency.get(idempotencyId);
             const existingRun = existing ? runs.get(existing.runId) : undefined;
-            if (existingRun && existing.fingerprint !== requestFingerprint) {
+            if (existing && existingRun && existing.fingerprint !== requestFingerprint) {
               return json(res, 409, { error: "idempotency_key_reused", message: "This idempotency key was already used with a different request." }, origin, config);
             }
             if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
