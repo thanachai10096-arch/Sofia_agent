@@ -166,6 +166,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const activeByKey = new Map<string, number>();
   const requestTimeoutMs = integerSetting("requestTimeoutMs", config.requestTimeoutMs, 120_000, 1, 2_147_483_647);
   const maxConcurrentRunsPerKey = integerSetting("maxConcurrentRunsPerKey", config.maxConcurrentRunsPerKey, 4, 0, 256);
+  const reserveActive = (keyId: string): boolean => {
+    const active = activeByKey.get(keyId) ?? 0;
+    if (active >= maxConcurrentRunsPerKey) return false;
+    activeByKey.set(keyId, active + 1);
+    return true;
+  };
+  const releaseActive = (keyId: string): void => {
+    const current = activeByKey.get(keyId) ?? 0;
+    if (current <= 1) activeByKey.delete(keyId);
+    else activeByKey.set(keyId, current - 1);
+  };
   const retention = integerSetting("runRetentionMs", config.runRetentionMs, 24 * 60 * 60 * 1000, 0, 365 * 24 * 60 * 60 * 1000);
   let lastPruneAt = 0;
 
@@ -181,7 +192,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       run.status = "running";
       run.updatedAt = Date.now();
       persist(run);
-      const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        run.controller.abort(new Error("Run timed out."));
+      }, requestTimeoutMs);
       try {
         const result = await agent.run({
           principalId: run.ownerKeyId,
@@ -193,16 +208,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           signal: run.controller.signal,
         });
         if (run.controller.signal.aborted) {
-          run.status = "cancelled";
-          run.error ??= "Run cancelled.";
+          run.status = timedOut ? "failed" : "cancelled";
+          run.error ??= timedOut ? "Run timed out." : "Run cancelled.";
         } else {
           run.result = result;
           run.status = "completed";
         }
       } catch (error) {
         if (run.controller.signal.aborted) {
-          run.status = "cancelled";
-          run.error = "Run cancelled.";
+          run.status = timedOut ? "failed" : "cancelled";
+          run.error = timedOut ? "Run timed out." : "Run cancelled.";
         } else {
           run.status = "failed";
           run.error = error instanceof Error ? error.message : "Agent failed";
@@ -211,8 +226,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         clearTimeout(timer);
         run.updatedAt = Date.now();
         persist(run);
-        const current = activeByKey.get(run.ownerKeyId) ?? 1;
-        if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
+        releaseActive(run.ownerKeyId);
       }
     })();
   };
