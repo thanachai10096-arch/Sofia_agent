@@ -183,6 +183,10 @@ Sofia Agent is distributed under the **MIT License**. See [`LICENSE`](LICENSE) f
 
 SPDX identifier: `MIT`.
 
+## `> API security`
+
+Before exposing Sofia to external clients, follow the [API Security and Deployment Guide](docs/API_SECURITY.md) and verify the current security issue checklist.
+
 ## `> Integration principle`
 
 Clients should use Sofia Agent's stable API/SDK and let Sofia apply internal model routing and execution policy. Keep model selection and privileged capabilities out of the end-user interface.
