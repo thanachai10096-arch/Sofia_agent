@@ -114,7 +114,11 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
         if (reply?.trim()) {
           const adapter = adapters.get(message.platform);
           if (adapter) {
-            const receipt = await adapter.send({ conversationId: identity.conversationId, text: reply });
+            const receipt = await adapter.send({
+              conversationId: identity.conversationId,
+              text: reply,
+              ...(message.platform === "discord" ? { interactionId: message.messageId } : {}),
+            });
             if (receipt.state !== "sent") log?.warn("messaging_reply_delivery_failed", { platform: message.platform });
           }
         }
