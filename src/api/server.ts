@@ -137,7 +137,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
-  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
+  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStore);
   const runs = new Map<string, ActiveRun>();
   const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   const runStore = config.runStore;
