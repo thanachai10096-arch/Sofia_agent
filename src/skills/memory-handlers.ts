@@ -1,6 +1,7 @@
 import type { ProjectMemoryEntry, ProjectMemoryStore } from "../brain/project-memory.js";
 import { AdvancedSkillRegistry, type AdvancedSkillHandler } from "./advanced-skill-runtime.js";
 import { getAdvancedSkill } from "./advanced-skill-catalog.js";
+import { containsPromptInjection, redactSecrets } from "../security/guard.js";
 
 type InputRecord = Record<string, unknown>;
 function record(input: unknown): InputRecord {
@@ -105,23 +106,24 @@ export const longContextCompressor = (input: unknown) => {
   return { context: context.length <= budget ? context : context.slice(0, budget), originalMessageCount: messages.length, retainedMessageCount: Math.min(2, messages.length), omittedMessageCount: Math.max(0, messages.length - 2), truncated: true };
 };
 
-export function createProjectMemoryRetrievalHandler(store: ProjectMemoryStore): AdvancedSkillHandler {
+export function createProjectMemoryRetrievalHandler(store: ProjectMemoryStore): (input: unknown) => Promise<unknown> {
   return async (input) => {
     const value = record(input);
     const query = text(value, "query", 2_000);
     const entries: ProjectMemoryEntry[] = await store.find(query);
+    const safeEntries = entries.filter(entry => !containsPromptInjection(entry.content)).slice(0, 12);
     return {
       query,
-      entries: entries.slice(0, 12).map(entry => ({
+      entries: safeEntries.map(entry => ({
         id: entry.id,
         project: entry.project,
         kind: entry.kind,
-        content: entry.content.slice(0, 4_000),
+        content: String(redactSecrets(entry.content)).slice(0, 4_000),
         confidence: entry.confidence,
         updatedAt: entry.updatedAt,
         uses: entry.uses,
       })),
-      count: Math.min(entries.length, 12),
+      count: safeEntries.length,
     };
   };
 }
