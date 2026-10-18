@@ -6,6 +6,7 @@ import { createToolRegistry } from "../tools/registry.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { defaultPolicy } from "../security/policy.js";
 import { SecurityController } from "../security/controller.js";
+import type { SecurityAuditEvent, SecurityAuditSink } from "../security/audit.js";
 import { MapToolRegistry } from "../tools/types.js";
 
 function runtime(): WorkspaceRuntime {
@@ -324,4 +325,80 @@ test("Brain tool gateway rejects invalid schema input before approval or executi
   assert.match(result.error?.message ?? "", /missing required property "content"/i);
   assert.equal(approvalCalls, 0, "malformed input must be rejected before prompting for approval");
   assert.equal(executions, 0, "malformed input must never reach the tool implementation");
+});
+
+
+test("tool gateway redacts provider tokens, private keys, tool outputs, errors, and arbitrary audit sinks", async () => {
+  const events: SecurityAuditEvent[] = [];
+  const audit: SecurityAuditSink = { record(event) { events.push(event); } };
+  const registry = new MapToolRegistry([
+    {
+      name: "custom.read",
+      description: "Return secret-shaped test data",
+      inputSchema: { type: "object" },
+      effects: ["read"] as const,
+      async execute() {
+        return {
+          apiKey: "sk-live-secret-value",
+          message: "Authorization: Bearer abcdef123456",
+          freeText: "unlabelled key sk-12345678901234567890",
+          githubToken: "ghp_1234567890123456789012345",
+          awsKey: "AKIA1234567890ABCDEF",
+          privateKey: "-----BEGIN PRIVATE KEY-----\\nprivate material\\n-----END PRIVATE KEY-----",
+          nested: { password: "hunter2" },
+        };
+      },
+    },
+    {
+      name: "custom.fail",
+      description: "Throw a fixture containing secret-shaped values",
+      inputSchema: { type: "object" },
+      effects: ["read"] as const,
+      async execute() { throw new Error("api_key=sk-error-secret-value"); },
+    },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    undefined,
+    undefined,
+    undefined,
+    audit,
+  );
+  const context = {
+    runId: "redaction-test",
+    principalId: "test-principal",
+    signal: new AbortController().signal,
+    requireApproval: false,
+    notifyApproval() {},
+  };
+
+  const success = await gateway.execute(
+    { tool: "custom.read", input: { apiKey: "sk-input-secret-value" } },
+    context,
+  );
+  assert.equal(success.ok, true);
+  const serialized = JSON.stringify(success.data);
+  for (const secret of [
+    "sk-live-secret-value",
+    "sk-12345678901234567890",
+    "ghp_1234567890123456789012345",
+    "AKIA1234567890ABCDEF",
+    "abcdef123456",
+    "private material",
+    "hunter2",
+    "sk-input-secret-value",
+  ]) {
+    assert.equal(serialized.includes(secret), false, "tool result must not expose " + secret);
+  }
+  assert.equal(serialized.includes("[REDACTED PRIVATE KEY]"), true);
+
+  const failure = await gateway.execute({ tool: "custom.fail", input: {} }, context);
+  assert.equal(failure.ok, false);
+  assert.equal(failure.error?.message.includes("sk-error-secret-value"), false);
+
+  const auditText = JSON.stringify(events);
+  for (const secret of ["sk-live-secret-value", "sk-input-secret-value", "sk-error-secret-value", "hunter2", "private material"]) {
+    assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
+  }
 });
