@@ -191,7 +191,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     ...(run.error ? { error: run.error } : {}),
   });
 
-  const startRun = (run: ActiveRun, input: AgentRunInput) => {
+  const startRun = (run: ActiveRun, input: AgentRunInput, includeUserMemory = false) => {
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
@@ -202,6 +202,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
+          includeUserMemory,
           ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -443,6 +444,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+            includeUserMemory: auth.scopes.includes("memory:read"),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -534,7 +536,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) }
               : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
-          });
+          }, auth.scopes.includes("memory:read"));
           return json(res, 202, publicResponse(run), origin, config);
         }
 
