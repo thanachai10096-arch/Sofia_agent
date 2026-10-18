@@ -41,3 +41,43 @@ test("restores dirty tracked files and removes files created after checkpoint", 
   assert.equal("generated.ts" in files, false);
   assert.ok(result.restoredFiles.includes("src/app.ts"));
 });
+
+
+test("creates and rolls back a conservative filesystem checkpoint when Git metadata is unavailable", async () => {
+  const files: Record<string, string> = {
+    "README.md": "before",
+    "src/app.ts": "original",
+  };
+  const directories: Record<string, string[]> = {
+    ".": ["README.md", "src", ".git", "node_modules", ".env"],
+    "src": ["app.ts"],
+  };
+  const runtime = {
+    platform: "linux" as const,
+    cwd: async () => "/workspace",
+    readFile: async (path: string) => {
+      if (!(path in files)) throw new Error("missing");
+      return files[path]!;
+    },
+    writeFile: async (path: string, content: string) => { files[path] = content; },
+    listFiles: async (path = ".") => {
+      if (directories[path]) return directories[path]!;
+      throw new Error("not a directory");
+    },
+    search: async () => [],
+    run: async () => ({ stdout: "", stderr: "", code: 0 }),
+    git: async () => ({ stdout: "", stderr: "not a git repository", code: 128 }),
+  };
+
+  const manager = new RuntimeCheckpointManager(runtime);
+  const checkpoint = await manager.create(new AbortController().signal);
+  assert.equal(checkpoint.gitAvailable, false);
+  assert.deepEqual(Object.keys(checkpoint.files).sort(), ["README.md", "src/app.ts"]);
+
+  files["README.md"] = "changed";
+  files["src/app.ts"] = "changed";
+  const result = await manager.rollback(checkpoint.id, new AbortController().signal);
+  assert.equal(files["README.md"], "before");
+  assert.equal(files["src/app.ts"], "original");
+  assert.deepEqual(result.restoredFiles.sort(), ["README.md", "src/app.ts"]);
+});
