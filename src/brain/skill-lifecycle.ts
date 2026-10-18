@@ -120,6 +120,11 @@ export class VersionedSkillLifecycle {
     const before = clone(this.snapshot);
     const previousPackage = this.platform.get(candidate.skillId);
     const previousId = this.snapshot.activeBySkill[candidate.skillId];
+    // Do not overwrite a skill this lifecycle does not own: there is no
+    // managed prior version to restore if promotion or rollback later fails.
+    if (!previousId && previousPackage) {
+      throw new Error("Cannot promote over an unmanaged skill; adopt it explicitly first");
+    }
     const now = new Date().toISOString();
     if (previousId) {
       const previous = this.requireRecord(previousId);
