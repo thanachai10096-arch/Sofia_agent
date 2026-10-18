@@ -110,6 +110,7 @@ test("Gemini can be explicitly selected and uses Gemini-only credentials and end
   process.env.OPENROUTER_API_KEY = "openrouter-must-not-be-used";
   process.env.GEMINI_MODEL = "gemini-test-model";
   process.env.GEMINI_CODING_MODEL = "gemini-coding-test-model";
+  process.env.SOFIA_CODING_MODEL = "openrouter-model-must-not-be-used";
   const config = loadModelConfigFromEnv();
   assert.equal(config.routes.length, 4);
   for (const route of config.routes) {
@@ -120,6 +121,7 @@ test("Gemini can be explicitly selected and uses Gemini-only credentials and end
   }
   assert.equal(config.providers.fast?.model, "gemini-test-model");
   assert.equal(config.providers.coding?.model, "gemini-coding-test-model");
+  assert.notEqual(config.providers.coding?.model, "openrouter-model-must-not-be-used");
 });
 
 test("Gemini selection fails closed without a Gemini key instead of using OpenRouter", () => {
