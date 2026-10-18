@@ -36,8 +36,22 @@ function texts(value: unknown): string[] {
   return value.map(text);
 }
 
-export function parseUnderstanding(value: unknown): TaskUnderstanding {
+function understandingTexts(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error("Expected a string array");
+  // Model-generated descriptive lists may contain blank entries. Drop those
+  // entries, but keep plan/tool-call validation strict in parsePlan.
+  return value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()));
+}
+
+export function parseUnderstanding(value: unknown, fallbackObjective?: string): TaskUnderstanding {
   const input = object(value);
+  const objective = typeof input.objective === "string" && input.objective.trim()
+    ? input.objective
+    : typeof fallbackObjective === "string" && fallbackObjective.trim()
+      ? fallbackObjective
+      : undefined;
+  if (!objective) throw new Error("Understanding omitted its objective and no task fallback was provided");
 
   // Model responses can vary in casing or include whitespace around enum values.
   // Normalize known values and conservatively classify unknown values as high risk
@@ -49,14 +63,14 @@ export function parseUnderstanding(value: unknown): TaskUnderstanding {
       : "high";
 
   return {
-    objective: text(input.objective),
-    constraints: texts(input.constraints),
-    assumptions: texts(input.assumptions),
-    requiredCapabilities: texts(input.requiredCapabilities),
-    requiredTools: texts(input.requiredTools),
+    objective,
+    constraints: understandingTexts(input.constraints),
+    assumptions: understandingTexts(input.assumptions),
+    requiredCapabilities: understandingTexts(input.requiredCapabilities),
+    requiredTools: understandingTexts(input.requiredTools),
     risk,
-    successCriteria: texts(input.successCriteria),
-    ambiguities: texts(input.ambiguities),
+    successCriteria: understandingTexts(input.successCriteria),
+    ambiguities: understandingTexts(input.ambiguities),
   };
 }
 
