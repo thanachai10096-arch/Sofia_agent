@@ -115,6 +115,7 @@ function classifyProviderFailure(error: unknown): string {
       }
       return "provider_http_404_endpoint_or_model";
     }
+    if (code === 402) return "provider_http_402_payment_or_credit_required";
     if (code === 429) return "provider_http_429_rate_or_quota_limit";
     if (code >= 500) return `provider_http_${code}_server_error`;
     return `provider_http_${code}_request_rejected`;
