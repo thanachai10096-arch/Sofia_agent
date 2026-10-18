@@ -161,6 +161,8 @@ export class SofiaModelGateway implements ModelProvider {
     };
 
     const providerId = route.providerId ?? route.id;
+    // Safe operational telemetry: report the selected provider/route/model, never credentials or prompt content.
+    console.info("Sofia model request selected", { provider: providerId, route: route.id, model: config.model });
     const timeoutMs = config.requestTimeoutMs ?? 45_000;
     const requestSignal = options.signal
       ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
