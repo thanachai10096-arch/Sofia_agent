@@ -15,6 +15,8 @@ export interface SofiaMessagingHandlerOptions {
   /** Exact command prefix, e.g. /run or /run@SofiaBot. Defaults to /run. */
   commandPrefix?: string;
   maxTaskCharacters?: number;
+  /** Called after the API accepts a run; implementations should schedule completion reporting without blocking polling. */
+  onAccepted?: (input: { runId: string; runStatus: string; message: InboundMessage }) => void;
 }
 
 /** Maps the gateway identity to Sofia's existing chat authorization contract. */
@@ -59,6 +61,11 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
     });
     switch (result.status) {
       case "accepted":
+        try {
+          options.onAccepted?.({ runId: result.runId, runStatus: result.runStatus, message });
+        } catch {
+          // Completion notifications must never prevent the normal acceptance acknowledgement.
+        }
         return `Sofia accepted the task (run ${result.runId}, status: ${result.runStatus}).`;
       case "forbidden":
         return "Access denied.";
