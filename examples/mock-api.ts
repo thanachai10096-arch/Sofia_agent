@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { createSofiaApi } from "../src/api/server.js";
@@ -36,10 +35,8 @@ const dependencies: AgentDependencies = {
 };
 
 const stateDirectory = path.resolve(process.env.SOFIA_STATE_DIR || path.join(os.tmpdir(), "sofia-mock-api-state"));
-const tokenHash = createHash("sha256").update(token).digest("hex");
 const server = createSofiaApi(dependencies, {
-  apiKeys: {},
-  apiKeyHashes: { [tokenHash]: ["agent:run", "agent:read"] },
+  apiKeys: { [token]: ["agent:run", "agent:read"] },
   allowedOrigins: [],
   runStore: new FileRunRecordStore(path.join(stateDirectory, "runs")),
   usageStore: new FileUsageStore(path.join(stateDirectory, "usage")),
