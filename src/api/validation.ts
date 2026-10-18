@@ -19,8 +19,14 @@ export function validateAgentRunInput(value: unknown): { valid: true; input: Age
   if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || input.sessionId.length > 256)) return { valid: false, error: "invalid_session_id" };
   if (input.acceptanceCriteria !== undefined) {
     if (!Array.isArray(input.acceptanceCriteria) || input.acceptanceCriteria.length > 50) return { valid: false, error: "invalid_acceptance_criteria" };
+    const criterionIds = new Set<string>();
     for (const item of input.acceptanceCriteria) {
       if (item === null || typeof item !== "object" || Array.isArray(item)) return { valid: false, error: "invalid_acceptance_criteria" };
+      const id = (item as Record<string, unknown>).id;
+      if (typeof id === "string") {
+        if (criterionIds.has(id)) return { valid: false, error: "duplicate_acceptance_criterion_id" };
+        criterionIds.add(id);
+      }
       const criterion = item as Record<string, unknown>;
       if (typeof criterion.id !== "string" || !criterion.id.trim() || criterion.id.length > 128 ||
           typeof criterion.description !== "string" || !criterion.description.trim() || criterion.description.length > 2_000 ||
