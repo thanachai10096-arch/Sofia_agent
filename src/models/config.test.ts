@@ -59,6 +59,7 @@ test("OpenRouter is the only provider and defaults to OpenRouter Auto Router", (
     assert.equal(provider?.baseUrl, "https://openrouter.ai/api/v1");
     assert.equal(provider?.apiKey, "openrouter-test-key");
     assert.equal(provider?.model, "openrouter/auto");
+    assert.equal(provider?.fallbackModel, undefined);
   }
 });
 
@@ -70,7 +71,9 @@ test("existing OPENROUTER secret is supported and route-specific model overrides
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.apiKey, "openrouter-existing-test-key");
   assert.equal(config.providers.fast?.model, "openai/gpt-4.1-mini");
+  assert.equal(config.providers.fast?.fallbackModel, "openrouter/auto");
   assert.equal(config.providers.coding?.model, "qwen/qwen3-coder:free");
+  assert.equal(config.providers.coding?.fallbackModel, "openrouter/auto");
 });
 
 test("other provider credentials and custom endpoint cannot override OpenRouter", () => {
