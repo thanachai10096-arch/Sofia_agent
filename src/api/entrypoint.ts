@@ -8,6 +8,7 @@ import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allow
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 
+const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
@@ -164,13 +165,18 @@ if (discordConfigured) {
     }
   });
 
-  // On restart, DurableJobRuntime marks interrupted jobs terminal and preserves
-  // checkpoints. Retry one notification for each terminal Discord job not yet reported.
-  if (deps.jobRuntime) {
+  // Retry recovery notifications while the process is alive. A crashed worker may
+  // still have an unexpired lease at startup; periodic list() calls let the runtime
+  // mark it interrupted once that lease expires, then notify the user without a new restart.
+  const notificationInFlight = new Set<string>();
+  const notifyRecoveredJobs = async (): Promise<void> => {
+    if (!deps.jobRuntime || !discordTransport || discordAbort.signal.aborted) return;
     const recoveredJobs = await deps.jobRuntime.list();
     for (const job of recoveredJobs) {
       if (!job.ownerKeyId?.startsWith("discord:") || !job.notificationChannelId ||
-          job.notificationDelivered || job.status === "queued" || job.status === "running") continue;
+          job.notificationDelivered || job.status === "queued" || job.status === "running" ||
+          Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
+      notificationInFlight.add(job.id);
       try {
         const message = job.status === "completed"
           ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
@@ -180,10 +186,17 @@ if (discordConfigured) {
         await discordTransport.sendMessage(job.notificationChannelId, message);
         await deps.jobRuntime.markNotificationDelivered?.(job.id);
       } catch {
-        // Keep the marker unset so a later restart can retry the notification.
+        // Keep the marker unset so the next retry can attempt delivery again.
+      } finally {
+        notificationInFlight.delete(job.id);
       }
     }
-  }
+  };
+  await notifyRecoveredJobs();
+  const discordRecoveryTimer = setInterval(() => {
+    void notifyRecoveredJobs().catch(() => undefined);
+  }, 5_000);
+  discordRecoveryTimer.unref?.();
 }
 
 const server = createSofiaApi(deps, {
@@ -198,6 +211,7 @@ server.listen(port, "0.0.0.0", () => console.log("Sofia Agent API listening on p
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     discordAbort.abort();
+    if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
     server.close();
   });
