@@ -119,7 +119,9 @@ function safeProviderFailureReason(error: unknown): string {
   }
   if (/timed? ?out|timeout|aborted/i.test(message)) return "provider_timeout";
   if (/fetch failed|network|econnreset|enotfound|eai_again/i.test(message)) return "provider_network_error";
-  if (/invalid json|no message|empty response|non-json/i.test(message)) return "provider_invalid_response";
+  const missingMessage = message.match(/Model gateway returned no message \\[shape=([a-zA-Z0-9_,:-]{1,180})\\]/i);
+  if (missingMessage) return "provider_response_missing_message:" + missingMessage[1];
+  if (/invalid json|empty response|non-json/i.test(message)) return "provider_invalid_response";
   return "provider_error";
 }
 
