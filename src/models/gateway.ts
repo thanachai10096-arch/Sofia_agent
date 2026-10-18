@@ -34,6 +34,24 @@ interface ChatResponse {
   };
 }
 
+function responseShapeSummary(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "root=non_object";
+  const root = value as Record<string, unknown>;
+  const choices = root.choices;
+  if (!Array.isArray(choices)) return "root=object,choices=missing_or_non_array";
+  if (choices.length === 0) return "root=object,choices=empty";
+  const first = choices[0];
+  if (!first || typeof first !== "object" || Array.isArray(first)) return "root=object,choices=present,first_choice=non_object";
+  const choice = first as Record<string, unknown>;
+  if (!("message" in choice) || !choice.message) {
+    const keys = Object.keys(choice).filter((key) => /^[a-zA-Z0-9_-]{1,40}$/.test(key)).slice(0, 8).join(",");
+    return "root=object,choices=present,message=missing,choice_keys=" + (keys || "none");
+  }
+  if (typeof choice.message !== "object" || Array.isArray(choice.message)) return "root=object,choices=present,message=non_object";
+  const message = choice.message as Record<string, unknown>;
+  const keys = Object.keys(message).filter((key) => /^[a-zA-Z0-9_-]{1,40}$/.test(key)).slice(0, 8).join(",");
+  return "root=object,choices=present,message=object,message_keys=" + (keys || "none");
+}
 interface GateWaiter {
   resolve: () => void;
   reject: (reason: unknown) => void;
@@ -266,7 +284,8 @@ export class SofiaModelGateway implements ModelProvider {
     const message = data.choices?.[0]?.message;
 
     if (!message) {
-      return failResponse("Model gateway returned no message.");
+      // Report response structure only: never log response bodies, prompts, or credentials.
+      return failResponse("Model gateway returned no message [shape=" + responseShapeSummary(data) + "].");
     }
 
     const calls = (message.tool_calls ?? []).map((call, index) => {
