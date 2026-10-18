@@ -10,21 +10,20 @@ function numberEnv(name: string, fallback: number) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
 
 export function loadModelConfigFromEnv(): SofiaModelConfig {
-  // OpenRouter is the only supported provider. OPENROUTER is retained as a
-  // deployment-compatible alias for existing secret stores. No other provider
-  // credentials or endpoints are used as fallbacks.
+  // Sofia uses Google's Gemini API through its OpenAI-compatible endpoint.
+  // Support the existing deployment variable name without exposing its value.
   const apiKey =
-    process.env.OPENROUTER_API_KEY?.trim() ||
-    process.env.OPENROUTER?.trim() ||
+    process.env.GEMINI_API_KEY?.trim() ||
+    process.env.Gemini_API_Key?.trim() ||
     "";
   if (!apiKey) {
-    throw new Error("Set OPENROUTER_API_KEY (or the legacy OpenRouter-only OPENROUTER variable) to use Sofia.");
+    throw new Error("Set GEMINI_API_KEY (or the existing Gemini_API_Key variable) to use Sofia.");
   }
 
-  const defaultModel = process.env.OPENROUTER_MODEL?.trim() || "openrouter/auto";
+  const defaultModel = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
   const definitions = [
     ["fast", ["fast"], 1, 1, 5],
     ["coding", ["coding", "tool-use", "reasoning"], 2, 2, 8],
@@ -36,7 +35,10 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
   const providers: SofiaModelConfig["providers"] = {};
 
   for (const [id, capabilities, cost, latency, quality] of definitions) {
-    const model = process.env[`OPENROUTER_${id.toUpperCase()}_MODEL`]?.trim() || defaultModel;
+    const model =
+      process.env[`GEMINI_${id.toUpperCase()}_MODEL`]?.trim() ||
+      process.env[`GEMINI_${id.toUpperCase()}_MODEL`]?.trim() ||
+      defaultModel;
 
     routes.push({
       id,
@@ -47,7 +49,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       qualityWeight: numberEnv(`SOFIA_${id.toUpperCase()}_QUALITY`, quality),
       healthy: true,
     });
-    providers[id] = { baseUrl: OPENROUTER_BASE_URL, apiKey, model };
+    providers[id] = { baseUrl: GEMINI_OPENAI_BASE_URL, apiKey, model };
   }
 
   return { routes, providers };
