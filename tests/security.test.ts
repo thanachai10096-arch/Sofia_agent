@@ -54,6 +54,23 @@ describe("Sofia security controls",()=>{
     assert.equal(allowed.allowed, true);
   });
 
+  it("fails closed for Git network operations with opaque configured remotes", () => {
+    const fetch = assessAction(
+      { runId: "r", toolName: "git.run", input: { command: "git fetch origin" }, effects: ["read", "write", "shell", "network"] },
+      [],
+      ["trusted.example"],
+    );
+    assert.equal(fetch.allowed, false);
+    assert.match(fetch.reason ?? "", /must expose an explicit HTTP\(S\) URL/);
+
+    const status = assessAction(
+      { runId: "r", toolName: "git.run", input: { command: "git status" }, effects: ["read", "write", "shell", "network"] },
+      [],
+      ["trusted.example"],
+    );
+    assert.equal(status.allowed, true);
+  });
+
   it("fails closed for network tools that omit an inspectable URL", () => {
     const decision = assessAction(
       { runId: "r", toolName: "custom.fetch", input: { resourceId: "123" }, effects: ["network"] },
