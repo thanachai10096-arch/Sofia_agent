@@ -82,7 +82,7 @@ export function decideComputeBackend(input: ComputeRoutingInput): ComputeRouting
     return { backend: "local", reason: "local-first policy prefers available local compute", localFallbackAllowed: true };
   }
   if (remoteFailure) {
-    return { backend: "local", reason: "no eligible remote backend (" + remoteFailure + "); local selected as safe default", localFallbackAllowed: true };
+    return { backend: "unavailable", reason: "no eligible compute backend (" + remoteFailure + ")", localFallbackAllowed: false };
   }
   return { backend: "remote", reason: "local compute unavailable; eligible remote backend selected", localFallbackAllowed: false };
 }
