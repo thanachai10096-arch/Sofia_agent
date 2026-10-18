@@ -46,7 +46,12 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       qualityWeight: numberEnv(`SOFIA_${id.toUpperCase()}_QUALITY`, quality),
       healthy: true,
     });
-    providers[id] = { baseUrl: OPENROUTER_BASE_URL, apiKey, model };
+    providers[id] = {
+      baseUrl: OPENROUTER_BASE_URL,
+      apiKey,
+      model,
+      ...(model !== "openrouter/auto" ? { fallbackModel: "openrouter/auto" } : {}),
+    };
   }
 
   return { routes, providers };
