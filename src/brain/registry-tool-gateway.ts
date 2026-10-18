@@ -50,7 +50,7 @@ export class RegistryToolGateway implements ToolGateway {
     try {
       validateToolInput(registeredTool.inputSchema, input);
     } catch (error) {
-      const detail=error instanceof Error?error.message:"Invalid tool input";
+      const detail=String(redactSecrets(error instanceof Error?error.message:"Invalid tool input"));
       return{ok:false,data:null,evidenceId,error:{category:"tool_error",message:`Invalid input for ${call.tool}: ${detail}`}};
     }
     if(!this.policy.allowTools)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution is disabled by policy."}};
