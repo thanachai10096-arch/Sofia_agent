@@ -17,8 +17,8 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
   // deployment-compatible alias for existing secret stores. No other provider
   // credentials or endpoints are used as fallbacks.
   const apiKey =
-    process.env.OPENROUTER_API_KEY?.trim() ??
-    process.env.OPENROUTER?.trim() ??
+    process.env.OPENROUTER_API_KEY?.trim() ||
+    process.env.OPENROUTER?.trim() ||
     "";
   if (!apiKey) {
     throw new Error("Set OPENROUTER_API_KEY (or the legacy OpenRouter-only OPENROUTER variable) to use Sofia.");
