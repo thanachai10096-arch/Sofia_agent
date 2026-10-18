@@ -55,14 +55,20 @@ export function containsPromptInjection(value: unknown): boolean {
   return false;
 }
 
+function indexOfHttpPrefix(value: string, from: number): number {
+  for (let i = from; i < value.length; i++) {
+    const prefix = value.slice(i, i + 8).toLowerCase();
+    if (prefix.startsWith("https://") || prefix.startsWith("http://")) return i;
+  }
+  return -1;
+}
+
 function collectHttpUrls(value: unknown, output: string[] = [], seen = new WeakSet<object>()): string[] {
   if (typeof value === "string") {
     let cursor = 0;
     while (cursor < value.length) {
-      const http = value.indexOf("http://", cursor);
-      const https = value.indexOf("https://", cursor);
-      if (http < 0 && https < 0) break;
-      const start = http < 0 ? https : https < 0 ? http : Math.min(http, https);
+      const start = indexOfHttpPrefix(value, cursor);
+      if (start < 0) break;
       let end = start;
       while (end < value.length) {
         const code = value.charCodeAt(end);
