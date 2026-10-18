@@ -121,6 +121,8 @@ export class BoundedSubagentCoordinator {
           parentSignal.throwIfAborted();
           await this.acquireSlot(parentSignal);
           acquired = true;
+          // Cancellation may race with the await even when a slot was immediately available.
+          parentSignal.throwIfAborted();
           const context = cloneBoundedContext(task.context, this.maxContextBytes);
           const controller = new AbortController();
           const abortParent = () => controller.abort(parentSignal.reason);
