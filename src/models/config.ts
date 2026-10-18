@@ -35,7 +35,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
   const providers: SofiaModelConfig["providers"] = {};
 
   for (const [id, capabilities, cost, latency, quality] of definitions) {
-    const model = process.env[`OPENROUTER_${id.toUpperCase()}_MODEL`]?.trim() || defaultModel;
+    // Preserve existing OpenRouter-specific overrides while honoring the SOFIA_*_MODEL\n    // names already used by deployed Railway environments.\n    const model =\n      process.env[`OPENROUTER_${id.toUpperCase()}_MODEL`]?.trim() ||\n      process.env[`SOFIA_${id.toUpperCase()}_MODEL`]?.trim() ||\n      defaultModel;
 
     routes.push({
       id,
