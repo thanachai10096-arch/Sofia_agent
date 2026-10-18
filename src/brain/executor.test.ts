@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createSofiaBrain } from "./executor.js";
+import { InMemorySkillLedger } from "./learning.js";
 import type { BrainReasoner, ToolGateway, ToolResult } from "./types.js";
 import type { SubagentRuntime } from "./subagents.js";
 
@@ -484,8 +485,10 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
     },
   };
 
+  const skillLedger = new InMemorySkillLedger();
   const brain = createSofiaBrain({
-    dependencies: { reasoner, tools, allowShell: false, allowNetwork: false },
+    // No onSkillCandidate callback: learned-skill persistence must fail closed.
+    dependencies: { reasoner, tools, allowShell: false, allowNetwork: false, skillLedger },
     limits: {
       maxSteps: 6,
       maxToolCalls: 20,
@@ -512,6 +515,7 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
   assert.equal(failureCalls, 1);
   assert.equal(replannedActionCalls, 1, "changed action must not be skipped due to a reused step ID");
   assert.equal(report.completed, true, report.summary);
+  assert.deepEqual(skillLedger.list(), [], "without an explicit approval callback, learned skills must not be recorded");
 });
 
 test("Brain retrieves project memory using the current task and avoids listing unrelated entries", async () => {
