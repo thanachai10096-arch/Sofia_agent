@@ -86,3 +86,29 @@ test("skill lifecycle refuses to overwrite an unmanaged platform skill", async (
     assert.equal(lifecycle.active("repair-skill"), undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("skill lifecycle refuses to restore persisted active state over a conflicting platform skill", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "lifecycle.json");
+    const originalPlatform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(originalPlatform, passing, { file });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair",
+      evidenceIds: ["restore-collision"],
+      confidence: 0.95,
+    });
+    await lifecycle.evaluate(candidate.id);
+    lifecycle.promote(candidate.id);
+
+    const conflictingPlatform = new InMemorySkillsPlatform();
+    conflictingPlatform.register({ ...pkg("0.9.0"), source: "custom" });
+    assert.throws(
+      () => new VersionedSkillLifecycle(conflictingPlatform, passing, { file }),
+      /Cannot restore active lifecycle skill over a different platform skill/,
+    );
+    assert.equal(conflictingPlatform.get("repair-skill")?.version, "0.9.0");
+    assert.equal(conflictingPlatform.get("repair-skill")?.source, "custom");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
