@@ -39,9 +39,14 @@ function texts(value: unknown): string[] {
 export function parseUnderstanding(value: unknown): TaskUnderstanding {
   const input = object(value);
 
-  if (input.risk !== "low" && input.risk !== "medium" && input.risk !== "high") {
-    throw new Error("Invalid task risk");
-  }
+  // Model responses can vary in casing or include whitespace around enum values.
+  // Normalize known values and conservatively classify unknown values as high risk
+  // rather than failing the entire Discord task or accidentally lowering safeguards.
+  const rawRisk = typeof input.risk === "string" ? input.risk.trim().toLowerCase() : "";
+  const risk: TaskUnderstanding["risk"] =
+    rawRisk === "low" || rawRisk === "medium" || rawRisk === "high"
+      ? rawRisk
+      : "high";
 
   return {
     objective: text(input.objective),
@@ -49,7 +54,7 @@ export function parseUnderstanding(value: unknown): TaskUnderstanding {
     assumptions: texts(input.assumptions),
     requiredCapabilities: texts(input.requiredCapabilities),
     requiredTools: texts(input.requiredTools),
-    risk: input.risk,
+    risk,
     successCriteria: texts(input.successCriteria),
     ambiguities: texts(input.ambiguities),
   };
