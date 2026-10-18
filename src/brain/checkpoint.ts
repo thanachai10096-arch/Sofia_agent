@@ -7,6 +7,8 @@ export interface Checkpoint {
   files: Record<string, string | null>;
   trackedFiles: string[];
   untrackedFiles: string[];
+  /** False when the workspace is not a usable Git checkout. */
+  gitAvailable?: boolean;
 }
 
 export interface CheckpointManager {
@@ -23,39 +25,51 @@ export class RuntimeCheckpointManager implements CheckpointManager {
     signal.throwIfAborted();
 
     const trackedResult = await this.runtime.git(["ls-files"]);
-    if (trackedResult.code !== 0) throw new Error(trackedResult.stderr || "Unable to list tracked files");
+    const statusResult = trackedResult.code === 0
+      ? await this.runtime.git(["status", "--porcelain", "--untracked-files=all"])
+      : { stdout: "", stderr: trackedResult.stderr, code: trackedResult.code };
+    const gitAvailable = trackedResult.code === 0 && statusResult.code === 0;
 
-    const statusResult = await this.runtime.git([
-      "status",
-      "--porcelain",
-      "--untracked-files=all",
-    ]);
-    if (statusResult.code !== 0) throw new Error(statusResult.stderr || "Unable to inspect workspace");
+    let trackedFiles: string[] = [];
+    let untrackedFiles: string[] = [];
+    let files: Record<string, string | null> = {};
 
-    const trackedFiles = trackedResult.stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-    const statusLines = statusResult.stdout.split(/\r?\n/).filter(Boolean);
-    const untrackedFiles = statusLines
-      .filter((line) => line.startsWith("?? "))
-      .map((line) => line.slice(3).trim())
-      .filter(Boolean);
-
-    const dirtyTracked = new Set(
-      statusLines
-        .filter((line) => !line.startsWith("?? "))
-        .map((line) => line.slice(3).trim())
-        .filter(Boolean),
-    );
-
-    const files: Record<string, string | null> = {};
-    for (const file of [...dirtyTracked, ...untrackedFiles]) {
-      try {
-        files[file] = await this.runtime.readFile(file);
-      } catch {
-        files[file] = null;
+    if (gitAvailable) {
+      trackedFiles = trackedResult.stdout.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+      const statusLines = statusResult.stdout.split(/\r?\n/).filter(Boolean);
+      untrackedFiles = statusLines.filter((line) => line.startsWith("?? "))
+        .map((line) => line.slice(3).trim()).filter(Boolean);
+      const dirtyTracked = new Set(statusLines.filter((line) => !line.startsWith("?? "))
+        .map((line) => line.slice(3).trim()).filter(Boolean));
+      for (const file of [...dirtyTracked, ...untrackedFiles]) {
+        try { files[file] = await this.runtime.readFile(file); }
+        catch { files[file] = null; }
       }
+    } else {
+      // Railway/container deployments may omit .git. Snapshot readable workspace
+      // files so a missing Git checkout does not prevent the agent from starting.
+      const ignored = new Set([".git", "node_modules", "dist", ".next", "coverage"]);
+      const secret = /^(?:\.env(?:\..*)?|id_(?:rsa|ed25519)|credentials(?:\.json)?|secrets?(?:\.json|\.ya?ml)?|.*\.(?:pem|key|p12|pfx))$/i;
+      const walk = async (directory: string, prefix = ""): Promise<void> => {
+        let entries: string[];
+        try { entries = await this.runtime.listFiles(directory); } catch { return; }
+        for (const entry of entries) {
+          if (ignored.has(entry) || secret.test(entry)) continue;
+          const relative = prefix ? prefix + "/" + entry : entry;
+          let isDirectory = false;
+          try { await this.runtime.listFiles(relative); isDirectory = true; } catch { /* likely a file */ }
+          if (isDirectory) await walk(relative, relative);
+          else {
+            try { files[relative] = await this.runtime.readFile(relative); }
+            catch { /* skip unreadable/binary files */ }
+          }
+        }
+      };
+      await walk(".");
+      trackedFiles = Object.keys(files).sort();
     }
 
-    const head = await this.runtime.git(["rev-parse", "HEAD"]);
+    const head = gitAvailable ? await this.runtime.git(["rev-parse", "HEAD"]) : { stdout: "", stderr: "", code: 1 };
     const revision = head.code === 0 ? head.stdout.trim() : "no-git-head";
     const checkpoint: Checkpoint = {
       id: randomUUID(),
@@ -63,6 +77,7 @@ export class RuntimeCheckpointManager implements CheckpointManager {
       files,
       trackedFiles,
       untrackedFiles,
+      gitAvailable,
     };
 
     this.checkpoints.set(checkpoint.id, checkpoint);
@@ -77,6 +92,20 @@ export class RuntimeCheckpointManager implements CheckpointManager {
     signal.throwIfAborted();
     const checkpoint = this.checkpoints.get(checkpointId);
     if (!checkpoint) throw new Error("Unknown checkpoint");
+
+    if (checkpoint.gitAvailable === false) {
+      const restoredFiles: string[] = [];
+      for (const [file, content] of Object.entries(checkpoint.files)) {
+        signal.throwIfAborted();
+        if (content !== null) {
+          await this.runtime.writeFile(file, content);
+          restoredFiles.push(file);
+        }
+      }
+      // Without Git there is no safe, portable delete operation on WorkspaceRuntime;
+      // restore snapshotted contents but never attempt broad filesystem cleanup.
+      return { restoredFiles };
+    }
 
     const status = await this.runtime.git(["status", "--porcelain", "--untracked-files=all"]);
     if (status.code !== 0) throw new Error(status.stderr || "Unable to inspect workspace");
