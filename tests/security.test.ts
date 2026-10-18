@@ -38,6 +38,14 @@ describe("Sofia security controls",()=>{
     assert.equal(command.allowed, false);
     assert.match(command.reason ?? "", /not allowlisted/);
 
+    const uppercaseScheme = assessAction(
+      { runId: "r", toolName: "terminal.run", input: { command: "curl HTTPS://evil.example/data" }, effects: ["shell", "network"] },
+      [],
+      ["trusted.example"],
+    );
+    assert.equal(uppercaseScheme.allowed, false);
+    assert.match(uppercaseScheme.reason ?? "", /not allowlisted/);
+
     const allowed = assessAction(
       { runId: "r", toolName: "custom.fetch", input: { endpoint: "https://api.trusted.example/data" }, effects: ["network"] },
       [],
