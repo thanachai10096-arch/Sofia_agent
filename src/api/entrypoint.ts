@@ -60,7 +60,10 @@ if (discordConfigured) {
         .slice(0, 240);
       console.error("Discord agent run failed", { errorName, message: safeMessage });
       try {
-        await discordTransport?.sendMessage(message.channelId, "Sofia could not complete that task. The server recorded a redacted error for diagnosis.", undefined, message.id);
+        const userMessage = /provider_http_402_payment_or_credit_required/i.test(safeMessage)
+          ? "Sofia reached OpenRouter, but the model request was rejected with HTTP 402. This usually indicates a billing, credit, or account/model usage restriction. Check the OpenRouter account and model availability; Sofia did not switch to a potentially paid fallback."
+          : "Sofia could not complete that task. The server recorded a redacted error for diagnosis.";
+        await discordTransport?.sendMessage(message.channelId, userMessage, undefined, message.id);
       } catch {
         console.error("Discord error response delivery failed");
       }
