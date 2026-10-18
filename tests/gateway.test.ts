@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SofiaModelGateway } from "../src/models/gateway.js";
+import { classifyProviderFailure } from "../src/brain/token-aware-gateway.js";
 import type { ModelRequest, ModelRoute } from "../src/models/types.js";
 
 const request: ModelRequest = { task: "hello", kind: "general", step: 1 };
@@ -139,4 +140,16 @@ test("gateway rejects unsafe concurrency and timeout configuration", () => {
   assert.throws(() => new SofiaModelGateway({
     "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model", requestTimeoutMs: -1 },
   }), /Invalid requestTimeoutMs/);
+});
+
+
+test("provider diagnostics distinguish OpenRouter HTTP 402 from rate limits", () => {
+  assert.equal(
+    classifyProviderFailure(new Error("Model gateway request failed (402): rejected")),
+    "provider_http_402_payment_or_credit_required",
+  );
+  assert.equal(
+    classifyProviderFailure(new Error("Model gateway request failed (429): rejected")),
+    "provider_http_429_rate_or_quota_limit",
+  );
 });
