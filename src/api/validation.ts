@@ -16,7 +16,7 @@ export function validateAgentRunInput(value: unknown): { valid: true; input: Age
   if (input.async !== undefined && typeof input.async !== "boolean") return { valid: false, error: "invalid_async" };
   if (input.stream !== undefined && typeof input.stream !== "boolean") return { valid: false, error: "invalid_stream" };
   if (input.priority !== undefined && input.priority !== "normal" && input.priority !== "high") return { valid: false, error: "invalid_priority" };
-  if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || input.sessionId.length > 256)) return { valid: false, error: "invalid_session_id" };
+  if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || !input.sessionId.trim() || input.sessionId.length > 256)) return { valid: false, error: "invalid_session_id" };
   if (input.acceptanceCriteria !== undefined) {
     if (!Array.isArray(input.acceptanceCriteria) || input.acceptanceCriteria.length > 50) return { valid: false, error: "invalid_acceptance_criteria" };
     const criterionIds = new Set<string>();
