@@ -35,13 +35,23 @@ function parsePhase(prompt: PackedPrompt): string {
 
 function parseStructured(value: unknown): unknown {
   if (typeof value !== "string") return value;
-  const text = value.trim();
+  let text = value.trim();
+
+  const fenced = text.match(/^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i);
+  if (fenced) text = (fenced[1] ?? "").trim();
 
   try {
-    return JSON.parse(text);
+    let parsed: unknown = JSON.parse(text);
+    // Some OpenAI-compatible providers return JSON encoded as a JSON string.
+    // Decode that extra wrapper without coercing primitives or arbitrary text.
+    if (typeof parsed === "string") {
+      const inner = parsed.trim();
+      if (inner.startsWith("{") || inner.startsWith("[")) {
+        parsed = JSON.parse(inner);
+      }
+    }
+    return parsed;
   } catch {
-    const fenced = text.match(/^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i);
-    if (fenced) return JSON.parse(fenced[1] ?? "");
     throw new Error("Model returned non-JSON Brain output");
   }
 }
