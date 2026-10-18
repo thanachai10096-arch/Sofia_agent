@@ -50,6 +50,8 @@ jobs:
 
       - name: Smoke-test mock API example
         run: node scripts/mock-api-smoke.mjs
+      - name: Smoke-test standalone API key authentication without a hash secret
+        run: node scripts/standalone-api-smoke.mjs
 
       - name: Build
         run: npm run build
