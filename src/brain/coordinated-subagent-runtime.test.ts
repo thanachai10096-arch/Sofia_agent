@@ -53,3 +53,59 @@ test("coordinated runtime rejects oversized context before execution", async () 
   );
   assert.equal(called, false);
 });
+
+
+test("coordinator enforces one shared concurrency limit across concurrent run calls", async () => {
+  let active = 0;
+  let peak = 0;
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const runtime: SubagentRuntime = {
+    async run(request) {
+      active += 1;
+      peak = Math.max(peak, active);
+      try {
+        if (request.task === "first") await firstGate;
+        return { role: request.role, summary: request.task, output: null };
+      } finally {
+        active -= 1;
+      }
+    },
+  };
+  const bounded = new CoordinatedSubagentRuntime(runtime, { maxConcurrency: 1, timeoutMs: 2000 });
+  const signal = () => new AbortController().signal;
+  const first = bounded.run({ role: "explorer", task: "first", signal: signal() });
+  const second = bounded.run({ role: "explorer", task: "second", signal: signal() });
+  const third = bounded.run({ role: "explorer", task: "third", signal: signal() });
+
+  // Let all calls enter the coordinator before releasing the first slot.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(active, 1);
+  releaseFirst();
+  const results = await Promise.all([first, second, third]);
+  assert.deepEqual(results.map((item) => item.summary), ["first", "second", "third"]);
+  assert.equal(peak, 1, "concurrent runMany calls must share the same configured limit");
+});
+
+test("a queued subagent can be cancelled without consuming a concurrency slot", async () => {
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const executed: string[] = [];
+  const runtime: SubagentRuntime = {
+    async run(request) {
+      executed.push(request.task);
+      if (request.task === "first") await firstGate;
+      return { role: request.role, summary: request.task, output: null };
+    },
+  };
+  const bounded = new CoordinatedSubagentRuntime(runtime, { maxConcurrency: 1, timeoutMs: 2000 });
+  const first = bounded.run({ role: "explorer", task: "first", signal: new AbortController().signal });
+  const queuedController = new AbortController();
+  const queued = bounded.run({ role: "explorer", task: "cancelled-while-queued", signal: queuedController.signal });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  queuedController.abort(new Error("cancel queued task"));
+  await assert.rejects(queued, /cancel queued task/);
+  releaseFirst();
+  await first;
+  assert.deepEqual(executed, ["first"]);
+});
