@@ -243,3 +243,7 @@ try {
 ```
 
 Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Session transcript persistence does not automatically replay history into model context or add transcript retrieval endpoints. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
+
+## User memory
+
+See [User Memory](docs/USER_MEMORY.md) for explicit, user-scoped memory API routes, scopes, retention limits, and privacy boundaries.
