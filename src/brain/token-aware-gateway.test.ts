@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { TokenBudget } from "./token-budget.js";
 import {
+  classifyProviderFailure,
   GatewayError,
   TokenAwareGateway,
   type InferenceRequest,
@@ -185,4 +186,64 @@ test("gateway fails closed when no route satisfies the requested capabilities", 
   await assert.rejects(gateway.generate(request()), (error: unknown) =>
     error instanceof GatewayError && error.code === "no_eligible_route");
   assert.equal(budget.snapshot().calls, 0);
+});
+
+test("classifyProviderFailure distinguishes previously generic provider errors", () => {
+  assert.equal(
+    classifyProviderFailure(new Error("Model returned non-JSON Brain output: x")),
+    "provider_non_json_output",
+  );
+  assert.equal(
+    classifyProviderFailure(new Error("Provider did not return token usage")),
+    "provider_usage_missing",
+  );
+  assert.equal(
+    classifyProviderFailure(new Error("invalid arguments for tool call read_file.")),
+    "provider_invalid_tool_arguments",
+  );
+  assert.equal(
+    classifyProviderFailure(new Error("Model provider gemini temporarily unavailable.")),
+    "provider_circuit_open",
+  );
+  assert.equal(
+    classifyProviderFailure(new Error("something unexpected")),
+    "provider_error",
+  );
+  assert.equal(
+    classifyProviderFailure(new Error("Model gateway request failed (400): bad request")),
+    "provider_http_400_request_rejected",
+  );
+});
+
+test("gateway logs a redacted provider failure preview without secrets", async () => {
+  const key = "AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+  const logged: unknown[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    logged.push(...args);
+  };
+
+  try {
+    const gateway = new TokenAwareGateway(makeBudget(), [
+      route(async () => {
+        throw new Error(`Model gateway request failed (400): key ${key}`);
+      }),
+    ]);
+
+    await assert.rejects(
+      gateway.generate(request()),
+      (error: unknown) =>
+        error instanceof GatewayError && error.code === "model_call_failed",
+    );
+  } finally {
+    console.error = original;
+  }
+
+  assert.equal(logged.length, 1);
+  const line = String(logged[0]);
+  assert.ok(!line.includes(key));
+  const entry = JSON.parse(line) as Record<string, unknown>;
+  assert.equal(entry.event, "model_provider_failure");
+  assert.equal(entry.classification, "provider_http_400_request_rejected");
+  assert.equal(entry.upstreamStatus, "400");
 });
