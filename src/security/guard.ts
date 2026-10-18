@@ -110,6 +110,16 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
   }
 }
 
+function isGitNetworkCommand(input: Record<string, unknown>): boolean {
+  const commandText = [input.command, input.args]
+    .filter((value) => value !== undefined)
+    .map((value) => Array.isArray(value) ? value.map(String).join(" ") : String(value))
+    .join(" ")
+    .toLowerCase();
+  const words = commandText.split(/[^a-z-]+/).filter(Boolean);
+  return words.some((word) => ["clone", "fetch", "pull", "push", "ls-remote", "submodule"].includes(word));
+}
+
 export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">, blockedPaths: readonly string[] = [], allowedHosts: readonly string[] = []): SecurityDecision {
   const hash = actionHash(action.runId, action.toolName, action.input, action.principalId);
   const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;
@@ -117,7 +127,8 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
     const explicitUrl = typeof action.input.url === "string" ? action.input.url : undefined;
     const discoveredUrls = collectHttpUrls(action.input).filter((url) => url !== explicitUrl);
     const urls = [...(explicitUrl ? [explicitUrl] : []), ...discoveredUrls];
-    if (urls.length === 0 && !["terminal.run", "git.run"].includes(action.toolName)) {
+    const opaqueGitNetworkOperation = action.toolName === "git.run" && isGitNetworkCommand(action.input);
+    if (urls.length === 0 && action.toolName !== "terminal.run" && !(action.toolName === "git.run" && !opaqueGitNetworkOperation)) {
       return { allowed: false, risk: "critical", requireApproval: true, reason: "Network actions must expose an explicit HTTP(S) URL for allowlist enforcement.", actionHash: hash };
     }
     for (const url of urls) {
