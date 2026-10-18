@@ -64,3 +64,25 @@ test("skill lifecycle preserves prior version and can roll back", async () => {
     assert.equal(reloaded.active("repair-skill")?.package.version, "1.0.0");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("skill lifecycle refuses to overwrite an unmanaged platform skill", async () => {
+  const root = dir();
+  try {
+    const platform = new InMemorySkillsPlatform();
+    const existing = { ...pkg("0.9.0"), source: "custom" as const };
+    platform.register(existing);
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file: path.join(root, "lifecycle.json") });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair",
+      evidenceIds: ["unmanaged-collision"],
+      confidence: 0.95,
+    });
+    await lifecycle.evaluate(candidate.id);
+
+    assert.throws(() => lifecycle.promote(candidate.id), /Cannot promote over an unmanaged skill/);
+    assert.equal(platform.get("repair-skill")?.version, "0.9.0");
+    assert.equal(platform.get("repair-skill")?.source, "custom");
+    assert.equal(lifecycle.active("repair-skill"), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
