@@ -44,6 +44,8 @@ export interface AgentDependencies {
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;
  /** Optional transcript store; used only when sessionId is provided. */
+ /** Optional explicit user-scoped memory store; writes require an explicit API action. */
+ userMemoryStore?: import("../brain/user-memory.js").UserMemoryStore;
  sessionStore?: { getOrCreate(id: string): { id: string; messages: string[]; updatedAt: number }; save(session: { id: string; messages: string[]; updatedAt: number }): void };
  learningDiagnostics?: () => unknown;
 }
