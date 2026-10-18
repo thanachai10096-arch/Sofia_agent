@@ -161,7 +161,9 @@ export class SofiaModelGateway implements ModelProvider {
       ...(tools ? { tools, tool_choice: "auto" } : {}),
       ...(options.maxOutputTokens
         ? { max_tokens: options.maxOutputTokens }
-        : {}),
+        : request.responseFormat === "json_object" ? { max_tokens: 2_048 } : {}),
+      ...(request.responseFormat ? { response_format: { type: request.responseFormat } } : {}),
+      ...(request.reasoningEffort ? { reasoning_effort: request.reasoningEffort } : {}),
     };
 
     const providerId = route.providerId ?? route.id;

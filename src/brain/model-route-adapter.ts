@@ -36,14 +36,20 @@ function parsePhase(prompt: PackedPrompt): string {
 function parseStructured(value: unknown): unknown {
   if (typeof value !== "string") return value;
   const text = value.trim();
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    const fenced = text.match(/^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i);
-    if (fenced) return JSON.parse(fenced[1] ?? "");
-    throw new Error("Model returned non-JSON Brain output: " + text.slice(0, 300));
+  const candidates: string[] = [text];
+  const fence = String.fromCharCode(96).repeat(3);
+  const fenced = text.match(new RegExp(fence + "(?:json)?\\s*([\\s\\S]*?)\\s*" + fence, "i"));
+  if (fenced?.[1]) candidates.push(fenced[1].trim());
+  const firstObject = text.indexOf("{");
+  const lastObject = text.lastIndexOf("}");
+  if (firstObject >= 0 && lastObject > firstObject) candidates.push(text.slice(firstObject, lastObject + 1));
+  const firstArray = text.indexOf("[");
+  const lastArray = text.lastIndexOf("]");
+  if (firstArray >= 0 && lastArray > firstArray) candidates.push(text.slice(firstArray, lastArray + 1));
+  for (const candidate of candidates) {
+    try { return JSON.parse(candidate) as unknown; } catch { /* Try the next candidate. */ }
   }
+  throw new Error("Model returned non-JSON Brain output: " + text.slice(0, 300));
 }
 
 export interface InternalRouteAdapterOptions {
@@ -63,7 +69,7 @@ export function createInternalRoute(
     qualityTier: Math.max(1, Math.round(route.qualityWeight)),
     capabilities: route.capabilities,
     contextWindow: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_CONTEXT"] ?? 32_000),
-    maxOutputTokens: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT"] ?? 4_096),
+    maxOutputTokens: Math.max(2_048, Number(process.env["SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT"] ?? 4_096)),
     hardOutputCap: true,
 
     prepare(prompt: PackedPrompt): PreparedCall {
@@ -81,6 +87,8 @@ export function createInternalRoute(
           evidence: prompt.evidence,
         }),
         tools: prompt.core.toolSchemas as ModelRequest["tools"],
+        responseFormat: "json_object",
+        reasoningEffort: "low",
       };
 
       return {
