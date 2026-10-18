@@ -52,11 +52,18 @@ export class VersionedSkillLifecycle {
     this.minimumConfidence = options.minimumConfidence ?? 0.7;
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
     this.load();
+    const activeRecords: Array<{ skillId: string; record: SkillLifecycleRecord }> = [];
     for (const [skillId, recordId] of Object.entries(this.snapshot.activeBySkill)) {
       const record = this.snapshot.records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
       if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
-      this.platform.register(clone(record.package));
+      const existing = this.platform.get(skillId);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(record.package)) {
+        throw new Error("Cannot restore active lifecycle skill over a different platform skill: " + skillId);
+      }
+      activeRecords.push({ skillId, record });
     }
+    // Validate the entire restore set before mutating the supplied platform.
+    for (const { record } of activeRecords) this.platform.register(clone(record.package));
   }
 
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
@@ -120,6 +127,11 @@ export class VersionedSkillLifecycle {
     const before = clone(this.snapshot);
     const previousPackage = this.platform.get(candidate.skillId);
     const previousId = this.snapshot.activeBySkill[candidate.skillId];
+    // Do not overwrite a skill this lifecycle does not own: there is no
+    // managed prior version to restore if promotion or rollback later fails.
+    if (!previousId && previousPackage) {
+      throw new Error("Cannot promote over an unmanaged skill; adopt it explicitly first");
+    }
     const now = new Date().toISOString();
     if (previousId) {
       const previous = this.requireRecord(previousId);
