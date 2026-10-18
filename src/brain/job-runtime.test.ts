@@ -836,3 +836,39 @@ test("DurableJobRuntime cross-process cancellation aborts the active lease owner
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("DurableJobRuntime never reclaims an old lock owned by another host", async () => {
+  const root = path.join(os.tmpdir(), "sofia-job-foreign-lock-" + randomUUID());
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "job-runtime-foreign-host-lock-" + randomUUID();
+  const stateDirectory = path.join(root, "sofia-agents-jobs");
+  const stateFile = path.join(stateDirectory, createHash("sha256").update(namespace).digest("hex") + ".json");
+  const lockFile = stateFile + ".lock";
+  await mkdir(stateDirectory, { recursive: true });
+
+  try {
+    await writeFile(lockFile, JSON.stringify({
+      token: "remote-owner-token",
+      pid: 12345,
+      hostname: "another-host-that-may-still-be-running",
+      createdAt: Date.now() - 180_000,
+    }), { encoding: "utf8", mode: 0o600 });
+
+    const runtime = new DurableJobRuntime(() => ({
+      run: async () => { throw new Error("the job must not start while a foreign lock exists"); },
+    } as unknown as SofiaBrain), undefined, namespace);
+
+    await assert.rejects(
+      runtime.submit({ task: "must fail closed on foreign-host lock" }),
+      /belongs to another host/,
+    );
+    const lock = JSON.parse(await readFile(lockFile, "utf8")) as { token?: string };
+    assert.equal(lock.token, "remote-owner-token", "foreign lock must not be deleted based on age");
+  } finally {
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+});
