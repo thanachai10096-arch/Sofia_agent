@@ -726,6 +726,8 @@ test("DurableJobRuntime redacts credential-shaped values from persisted and relo
   try {
     const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
     const submitted = await runtime.submit({ task: "task token=" + secret });
+    assert.ok(!JSON.stringify(submitted).includes(secret), "submit response must redact credential-shaped task content");
+    assert.equal(submitted.leaseOwnerToken, undefined, "submit response must not expose lease ownership");
     let record = await runtime.get(submitted.id);
     for (let attempt = 0; attempt < 50 && record?.status !== "completed"; attempt += 1) {
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
@@ -917,9 +919,15 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
       record = await runtime.get(submitted.id);
     }
     assert.equal(record?.status, "failed");
+    assert.ok(record);
+    assert.ok(!JSON.stringify(record).includes(secret), "public job reads must redact credential-shaped content");
+    assert.equal(record.leaseOwnerToken, undefined, "public job reads must not expose lease ownership");
     assert.ok(savedSnapshot);
     assert.ok(!JSON.stringify(savedSnapshot).includes(secret), "separate checkpoint store must receive redacted data");
-    assert.ok(!JSON.stringify(record?.snapshot).includes(secret), "job record must not retain the unredacted checkpoint");
+    assert.ok(!JSON.stringify(record.snapshot).includes(secret), "job record must not retain the unredacted checkpoint");
+    const listed = await runtime.list();
+    assert.ok(!JSON.stringify(listed).includes(secret), "job listings must redact credential-shaped content");
+    assert.ok(listed.every((job) => job.leaseOwnerToken === undefined), "job listings must not expose lease ownership");
   } finally {
     if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
     else process.env.SOFIA_STATE_DIR = previousRoot;
