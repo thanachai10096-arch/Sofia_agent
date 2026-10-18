@@ -424,9 +424,12 @@ export class DurableJobRuntime implements JobRuntime {
 
     const stored = await this.state.get(id);
     if (!stored) return existing ? { ...existing } : undefined;
-    const snapshot = stored.snapshot?.runId && this.runStore
+    const loadedSnapshot = stored.snapshot?.runId && this.runStore
       ? await this.runStore.load(stored.snapshot.runId)
       : undefined;
+    // Older versions may have persisted snapshots before job-level redaction was
+    // added. Sanitize on read too, before returning or resuming historical state.
+    const snapshot = loadedSnapshot ? redactSecrets(loadedSnapshot) as BrainRunSnapshot : undefined;
     const hydrated = { ...stored, ...(snapshot ? { snapshot } : {}) };
     await this.recoverInterrupted(hydrated);
     this.jobs.set(id, hydrated);
@@ -437,9 +440,11 @@ export class DurableJobRuntime implements JobRuntime {
     const stored = await this.state.list();
     for (const persisted of stored) {
       if (this.controllers.has(persisted.id) || this.starting.has(persisted.id)) continue;
-      const snapshot = persisted.snapshot?.runId && this.runStore
+      const loadedSnapshot = persisted.snapshot?.runId && this.runStore
         ? await this.runStore.load(persisted.snapshot.runId)
         : undefined;
+      // Keep legacy snapshots from bypassing redaction when listing persisted jobs.
+      const snapshot = loadedSnapshot ? redactSecrets(loadedSnapshot) as BrainRunSnapshot : undefined;
       const hydrated = { ...persisted, ...(snapshot ? { snapshot } : {}) };
       await this.recoverInterrupted(hydrated);
       this.jobs.set(hydrated.id, hydrated);
