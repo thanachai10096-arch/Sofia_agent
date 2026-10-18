@@ -47,13 +47,21 @@ function isJobCancelled(record: JobRecord): boolean { return record.status === "
 function redactJobRecord(record: JobRecord): JobRecord {
   return {
     ...record,
-    // Preserve leaseOwnerToken and lease timestamps: these are runtime fencing
-    // metadata, not user content, and redacting them would break worker claims.
+    // Preserve leaseOwnerToken and lease timestamps in storage: these are runtime
+    // fencing metadata, not user content, and redacting them would break worker claims.
     task: String(redactSecrets(record.task)),
     ...(record.snapshot ? { snapshot: redactSecrets(record.snapshot) as BrainRunSnapshot } : {}),
     ...(record.result ? { result: redactSecrets(record.result) as JobRecord["result"] } : {}),
     ...(record.error ? { error: String(redactSecrets(record.error)) } : {}),
   };
+}
+
+function publicJobRecord(record: JobRecord): JobRecord {
+  const safe = redactJobRecord(record);
+  // Lease ownership is an internal concurrency capability and must never be returned
+  // to API/Discord clients, even though it remains in the durable store.
+  delete safe.leaseOwnerToken;
+  return safe;
 }
 
 
@@ -402,7 +410,7 @@ export class DurableJobRuntime implements JobRuntime {
     this.jobs.set(id, record);
     await this.state.save(record);
     void this.execute(record, input);
-    return { ...record };
+    return publicJobRecord(record);
   }
 
   private async recoverInterrupted(record: JobRecord): Promise<JobRecord> {
@@ -420,10 +428,10 @@ export class DurableJobRuntime implements JobRuntime {
     const existing = this.jobs.get(id);
     // Keep the canonical record stable while a local worker is atomically claiming it.
     // After startup, non-local reads refresh from disk to observe cancellation/expiry.
-    if (existing && (this.controllers.has(id) || this.starting.has(id))) return { ...existing };
+    if (existing && (this.controllers.has(id) || this.starting.has(id))) return publicJobRecord(existing);
 
     const stored = await this.state.get(id);
-    if (!stored) return existing ? { ...existing } : undefined;
+    if (!stored) return existing ? publicJobRecord(existing) : undefined;
     const loadedSnapshot = stored.snapshot?.runId && this.runStore
       ? await this.runStore.load(stored.snapshot.runId)
       : undefined;
@@ -433,7 +441,7 @@ export class DurableJobRuntime implements JobRuntime {
     const hydrated = { ...stored, ...(snapshot ? { snapshot } : {}) };
     await this.recoverInterrupted(hydrated);
     this.jobs.set(id, hydrated);
-    return { ...hydrated };
+    return publicJobRecord(hydrated);
   }
 
   async list(): Promise<JobRecord[]> {
@@ -449,7 +457,7 @@ export class DurableJobRuntime implements JobRuntime {
       await this.recoverInterrupted(hydrated);
       this.jobs.set(hydrated.id, hydrated);
     }
-    return [...this.jobs.values()].map((record) => ({ ...record }));
+    return [...this.jobs.values()].map(publicJobRecord);
   }
 
   async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
@@ -462,14 +470,14 @@ export class DurableJobRuntime implements JobRuntime {
       if (!fetched) throw new Error("Unknown job");
       // get() returns a defensive copy; mutations must target the canonical live record.
       const record = this.jobs.get(id) ?? fetched;
-      if (record.status === "completed") return { ...record };
+      if (record.status === "completed") return publicJobRecord(record);
       if (record.status === "cancelled") throw new Error("Cancelled jobs cannot be resumed");
       if (!record.snapshot) throw new Error("Job has no resumable snapshot");
       // A terminal status may be persisted just before the previous worker's finally block
       // removes its controller. Only the canonical status determines whether resume is blocked.
       if (record.status === "running") throw new Error("Job is already running");
       await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
-      return { ...record };
+      return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);
     }
