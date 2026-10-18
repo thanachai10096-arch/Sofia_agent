@@ -6,7 +6,7 @@
  * satisfies the authentication, isolation, and durable-job contract.
  */
 export type ComputePreference = "auto" | "local" | "remote";
-export type ComputeBackendKind = "local" | "remote";
+export type ComputeBackendKind = "local" | "remote" | "unavailable";
 
 export interface ComputeTaskRequirements {
   /** Tasks containing credentials or secret material must stay local by default. */
@@ -73,7 +73,7 @@ export function decideComputeBackend(input: ComputeRoutingInput): ComputeRouting
   if (preference === "remote") {
     if (remoteFailure) {
       // Fail closed: never silently move an explicitly remote request to local.
-      return { backend: "local", reason: "remote request rejected: " + remoteFailure, localFallbackAllowed: false };
+      return { backend: "unavailable", reason: "remote request rejected: " + remoteFailure, localFallbackAllowed: false };
     }
     return { backend: "remote", reason: "remote backend passed readiness and task-policy checks", localFallbackAllowed: false };
   }
