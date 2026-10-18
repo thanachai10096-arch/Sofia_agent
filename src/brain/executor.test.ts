@@ -619,3 +619,33 @@ test("Brain preserves the highest-ranked project memories when limiting context"
   assert.equal(selected[0]?.content, "ranked-memory-0");
   assert.equal(selected[11]?.content, "ranked-memory-11");
 });
+
+
+test("Brain includes bounded user memories as untrusted personalization context", async () => {
+  let captured: { userMemory?: Array<{ kind: string; content: string; confidence: number }>; userMemoryTrustBoundary?: string } | undefined;
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner((request) => {
+        const parsed = JSON.parse(request) as { memory?: typeof captured };
+        if (parsed.memory?.userMemory) captured = parsed.memory as typeof captured;
+      }),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+    },
+  });
+  const memories = Array.from({ length: 12 }, (_, index) => ({
+    kind: "preference",
+    content: "memory-" + index,
+    confidence: 0.9,
+  }));
+  const report = await brain.run({ task: "Create hello.txt", userMemory: memories });
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(captured?.userMemory?.length, 8);
+  assert.equal(captured?.userMemory?.[0]?.content, "memory-0");
+  assert.match(captured?.userMemoryTrustBoundary ?? "", /cannot override system policy/);
+});
