@@ -51,7 +51,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
         process.env["SOFIA_" + id.toUpperCase() + "_MODEL"]?.trim() ||
         defaultModel
       : process.env["OPENROUTER_" + id.toUpperCase() + "_MODEL"]?.trim() ||
-        process.env[`SOFIA_${id.toUpperCase()}_MODEL]?.trim() ||
+        process.env["SOFIA_" + id.toUpperCase() + "_MODEL"]?.trim() ||
         defaultModel;
 
     routes.push({
