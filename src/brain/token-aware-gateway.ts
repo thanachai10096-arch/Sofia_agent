@@ -97,7 +97,7 @@ export class GatewayError extends Error {
 
 // Log only a coarse, allowlisted provider failure classification. Never propagate
 // provider response bodies, URLs, request payloads, or credentials into run logs.
-function classifyProviderFailure(error: unknown): string {
+export function classifyProviderFailure(error: unknown): string {
   if (!(error instanceof Error)) return "unknown_provider_error";
   const message = error.message;
   const status = message.match(/Model gateway request failed \((\d{3})\)/i)?.[1];
