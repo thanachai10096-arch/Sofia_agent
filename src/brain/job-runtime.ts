@@ -498,6 +498,11 @@ export class DurableJobRuntime implements JobRuntime {
       // A terminal status may be persisted just before the previous worker's finally block
       // removes its controller. Only the canonical status determines whether resume is blocked.
       if (record.status === "running") throw new Error("Job is already running");
+      // A resumed job needs a fresh completion notice; do not inherit the prior
+      // attempt's delivery marker if this attempt later finishes after a restart.
+      record.notificationDelivered = false;
+      const saved = await this.state.save(record);
+      if (!saved) throw new Error("Job state changed before resume could be scheduled");
       await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
       return publicJobRecord(record);
     } finally {
