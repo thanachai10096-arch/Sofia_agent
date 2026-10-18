@@ -245,7 +245,7 @@ export class SofiaModelGateway implements ModelProvider {
         // Do not let them poison the circuit and replace the useful HTTP status
         // with a later generic "temporarily unavailable" error.
         const status = error instanceof Error
-          ? Number(error.message.match(/^Model gateway request failed \\((\\d{3})\\):/)?.[1])
+          ? Number(error.message.match(/^Model gateway request failed \((\d{3})\):/)?.[1])
           : NaN;
         const permanentClientRejection =
           Number.isInteger(status) && status >= 400 && status < 500 && status !== 408 && status !== 429;
