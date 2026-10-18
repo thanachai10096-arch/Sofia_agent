@@ -13,11 +13,15 @@ function numberEnv(name: string, fallback: number) {
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 export function loadModelConfigFromEnv(): SofiaModelConfig {
-  // OpenRouter is the only supported provider. Deliberately do not fall back to
-  // Gemini, Vercel AI Gateway, or any other endpoint when configuration fails.
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim() ?? "";
+  // OpenRouter is the only supported provider. OPENROUTER is retained as a
+  // deployment-compatible alias for existing secret stores. No other provider
+  // credentials or endpoints are used as fallbacks.
+  const apiKey =
+    process.env.OPENROUTER_API_KEY?.trim() ??
+    process.env.OPENROUTER?.trim() ??
+    "";
   if (!apiKey) {
-    throw new Error("Set OPENROUTER_API_KEY to use Sofia's OpenRouter model provider.");
+    throw new Error("Set OPENROUTER_API_KEY (or the legacy OpenRouter-only OPENROUTER variable) to use Sofia.");
   }
 
   const defaultModel = process.env.OPENROUTER_MODEL?.trim() || "openrouter/auto";
