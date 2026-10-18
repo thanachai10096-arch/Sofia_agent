@@ -2,7 +2,7 @@
 
 **Snapshot:** 2026-10-18  
 **Main commit audited:** 771836910305917f73b1c6071c04f5a773c313d9  
-**Main CI:** [run 39092077515](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/39092077515) — rerun for this exact main commit; status was pending when this matrix was refreshed.
+**Main CI:** [run 39092077515](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/39092077515) — all six jobs passed on this exact main commit.
 
 This matrix distinguishes integrated code and CI evidence from deployment validation. It is not a claim that Sofia Agent is production-ready.
 
