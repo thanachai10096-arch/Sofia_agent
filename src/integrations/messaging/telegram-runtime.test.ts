@@ -96,5 +96,6 @@ test("Telegram run completion reports failed runs without exposing internal erro
     },
   });
   assert.match(sent[0]?.text ?? "", /task failed/i);
+  assert.match(sent[0]?.text ?? "", /Reason: private internal stack trace/);
   assert.doesNotMatch(sent[0]?.text ?? "", /private internal stack trace/);
 });
