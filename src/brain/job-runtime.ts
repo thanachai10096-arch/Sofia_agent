@@ -381,15 +381,6 @@ class FileJobStateStore {
     return operation;
   }
 
-  async markNotificationDelivered(id: string): Promise<void> {
-    const record = this.jobs.get(id) ?? await this.get(id);
-    if (!record) return;
-    const canonical = this.jobs.get(id) ?? record;
-    canonical.notificationDelivered = true;
-    canonical.updatedAt = new Date().toISOString();
-    await this.state.save(canonical);
-  }
-
   async list(): Promise<JobRecord[]> {
     return this.read();
   }
@@ -464,6 +455,15 @@ export class DurableJobRuntime implements JobRuntime {
     await this.recoverInterrupted(hydrated);
     this.jobs.set(id, hydrated);
     return publicJobRecord(hydrated);
+  }
+
+  async markNotificationDelivered(id: string): Promise<void> {
+    const record = this.jobs.get(id) ?? await this.get(id);
+    if (!record) return;
+    const canonical = this.jobs.get(id) ?? record;
+    canonical.notificationDelivered = true;
+    canonical.updatedAt = new Date().toISOString();
+    await this.state.save(canonical);
   }
 
   async list(): Promise<JobRecord[]> {
