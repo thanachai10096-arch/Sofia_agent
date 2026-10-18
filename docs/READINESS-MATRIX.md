@@ -1,8 +1,8 @@
 # Sofia Agent Readiness Matrix
 
 **Snapshot:** 2026-10-18  
-**Main commit audited:** 771836910305917f73b1c6071c04f5a773c313d9  
-**Main CI:** [run 39092077515](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/39092077515) — all six jobs passed on this exact main commit.
+**Main commit audited:** f1e41e00c032ca607e81c7273239ed704cb1e33b  
+**Main CI:** [run 39092443459](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/39092443459) — all six jobs passed on this exact main commit.
 
 This matrix distinguishes integrated code and CI evidence from deployment validation. It is not a claim that Sofia Agent is production-ready.
 
@@ -14,7 +14,7 @@ This matrix distinguishes integrated code and CI evidence from deployment valida
 
 | Gate | Status | Evidence / remaining work |
 |---|---|---|
-| Cross-platform validation, typecheck, tests, build and license | **Pass** | Latest main CI run 39091932727 passed Ubuntu validation, Ubuntu, Windows, macOS, Docker sandbox and browser egress jobs |
+| Cross-platform validation, typecheck, tests, build and license | **Pass** | Latest main CI run 39092443459 passed Ubuntu validation, Ubuntu, Windows, macOS, Docker sandbox and browser egress jobs |
 | API idempotency survives restart | **Integrated** | PR #202 merged; raw idempotency keys are hashed before persistence; replay state is rehydrated; mismatch returns 409 |
 | Durable job claims, leases, heartbeats and worker fencing | **Integrated** | PR #198 merged; cross-process coordination is for a trusted shared local filesystem only |
 | Tool-output and trace secret redaction | **Integrated** | PR #197 merged; tool outputs, errors and audit payloads are redacted |
