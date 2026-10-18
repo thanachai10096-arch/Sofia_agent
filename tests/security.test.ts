@@ -52,6 +52,13 @@ describe("Sofia security controls",()=>{
       ["trusted.example"],
     );
     assert.equal(allowed.allowed, true);
+
+    const trailingDot = assessAction(
+      { runId: "r", toolName: "custom.fetch", input: { endpoint: "https://trusted.example/data" }, effects: ["network"] },
+      [],
+      ["trusted.example."],
+    );
+    assert.equal(trailingDot.allowed, true);
   });
 
   it("fails closed for Git network operations with opaque configured remotes", () => {
