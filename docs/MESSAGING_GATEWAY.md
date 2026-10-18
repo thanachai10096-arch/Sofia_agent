@@ -15,7 +15,7 @@ Status: opt-in gateway, command bridge, Telegram Bot API long polling transport,
 - Discord slash commands are deferred immediately. The transport edits the deferred original response and uses interaction webhooks for extra message chunks, clearing the Discord loading state. Register the matching application command (default `/run` with a string option named `task`) in Discord.
 - The standalone API entrypoint requires both `DISCORD_ALLOWED_USER_IDS` and `DISCORD_ALLOWED_CHANNEL_IDS` whenever Discord is enabled. Both must be comma-separated numeric Discord IDs; empty, malformed, or duplicate entries fail startup. Do not omit the user allowlist: channel membership alone must not grant permission to execute Sofia tasks.
 - Treat attachment URLs as untrusted; do not download or open them without a separately secured downloader that blocks private/loopback/link-local destinations, re-checks redirects and DNS, caps response size/time, and avoids forwarding credentials.
-- The default gateway rate limiter is in-memory and per process. For shared deployments, `RedisMessagingRateLimiter` provides an atomic fixed-window implementation using a node-redis v4-compatible `eval(script, { keys, arguments })` client; inject it as `rateLimiter: new RedisMessagingRateLimiter({ client })`. The Lua counter operation is atomic across workers, raw scope identifiers are SHA-256 hashed before being used as Redis keys, and Redis errors fail closed (the message is rate-limited). A concrete durable deduplication store is still required for cross-host replay protection.
+- The default gateway rate limiter is in-memory and per process. For shared deployments, `RedisMessagingRateLimiter` provides an atomic fixed-window implementation using a node-redis v4-compatible `eval(script, { keys, arguments })` client; inject it as `rateLimiter: new RedisMessagingRateLimiter({ client })`. The Lua counter operation is atomic across workers, raw scope identifiers are SHA-256 hashed before being used as Redis keys, and Redis errors fail closed (the message is rate-limited). For cross-worker message deduplication, `RedisChatMessageDeduplicator` provides atomic `SET NX PX` claims and ownership-checked release; inject it into the command handler, not twice in both layers.
 
 ## Composition contract
 
@@ -51,7 +51,7 @@ The code outline above is not a claim that the repository's API server is alread
 - [ ] API keys and bot tokens never appear in logs, client assets, test snapshots, or error messages.
 - [ ] Graceful shutdown stops polling and rejects new dispatches.
 - [ ] Enable `discordInteractionRoute` only when a Discord transport is configured; expose it over HTTPS and keep the raw-body size limit enabled.
-- [ ] Multi-instance production deployment configures Redis connectivity, injects `RedisMessagingRateLimiter`, and configures durable deduplication; verify behavior under concurrent requests and store outages.
+- [ ] Multi-instance production deployment configures Redis connectivity, injects `RedisMessagingRateLimiter`, and injects `RedisChatMessageDeduplicator` for cross-worker replay protection; verify behavior under concurrent requests and store outages.
 - [ ] Attachment downloading stays disabled until a separately reviewed SSRF-safe downloader exists.
 
 ## Current limitations
