@@ -58,7 +58,7 @@ export function containsPromptInjection(value: unknown): boolean {
 function collectHttpUrls(value: unknown, output: string[] = [], seen = new WeakSet<object>()): string[] {
   if (typeof value === "string") {
     let cursor = 0;
-    while (cursor < value.length && output.length < 100) {
+    while (cursor < value.length) {
       const http = value.indexOf("http://", cursor);
       const https = value.indexOf("https://", cursor);
       if (http < 0 && https < 0) break;
@@ -89,13 +89,14 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
     throw new Error("Workspace path escapes the configured root.");
   }
   if (SECRET_PATH.test(normalized)) throw new Error("Access to credential/secret files is blocked.");
-  const policyPath = normalized.replace(/\\\\/g, "/").toLowerCase();
+  const policyPath = normalized.replace(/\\/g, "/").toLowerCase();
   const segments = policyPath.split("/");
   if (blockedPaths.some((pattern) => {
-    const normalizedPattern = pattern.replace(/\\\\/g, "/");
+    const normalizedPattern = pattern.replace(/\\/g, "/");
     let patternEnd = normalizedPattern.length;
     while (patternEnd > 0 && normalizedPattern[patternEnd - 1] === "/") patternEnd--;
     const policyPattern = normalizedPattern.slice(0, patternEnd).toLowerCase();
+    if (!policyPattern) return false;
     return policyPath === policyPattern || policyPath.startsWith(policyPattern + "/") ||
       (!policyPattern.includes("/") && segments.includes(policyPattern));
   })) {
