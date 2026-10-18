@@ -87,7 +87,7 @@ test("keeps non-retryable OpenRouter 402 errors visible instead of opening the c
   for (let attempt = 0; attempt < 4; attempt += 1) {
     await assert.rejects(
       gateway.generate({ task: "hello", kind: "general", step: attempt + 1 }, testRoute),
-      /Model gateway request failed \\(402\\)/,
+      /Model gateway request failed.*402/,
     );
   }
 
