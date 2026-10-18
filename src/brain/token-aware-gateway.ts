@@ -142,6 +142,7 @@ function packContext(
   if (prepared.inputTokensUpperBound > inputLimit) throw new ContextTooLarge();
 
   const seen = new Set<string>();
+  const seenText = new Set<string>();
   const candidates = request.evidence
     .filter(
       (chunk) =>
@@ -149,14 +150,27 @@ function packContext(
         Number.isFinite(chunk.relevance) &&
         chunk.relevance > 0 &&
         chunk.relevance <= 1 &&
+        chunk.text.trim().length > 0 &&
         chunk.text.length <= 12_000,
     )
-    .sort((a, b) => b.relevance - a.relevance)
+    // Prefer evidence with a stronger relevance-to-size trade-off. The logarithmic
+    // size penalty nudges the packer toward compact evidence without letting a tiny,
+    // weakly relevant chunk automatically outrank a much more relevant one.
+    .sort((a, b) => {
+      const aScore = a.relevance / Math.log2(a.text.length + 2);
+      const bScore = b.relevance / Math.log2(b.text.length + 2);
+      return bScore - aScore || b.relevance - a.relevance || a.text.length - b.text.length;
+    })
     .slice(0, 64);
 
   for (const chunk of candidates) {
     if (seen.has(chunk.id)) continue;
     seen.add(chunk.id);
+    // Different evidence IDs can still carry the same text. Avoid paying for the
+    // same evidence twice; keep exact-text comparison to avoid normalizing code.
+    const textKey = chunk.text.trim();
+    if (seenText.has(textKey)) continue;
+    seenText.add(textKey);
     const candidate = prepare([...selected, chunk]);
     if (candidate.inputTokensUpperBound <= inputLimit) {
       selected.push(chunk);
