@@ -60,7 +60,16 @@ if (discordConfigured) {
         .slice(0, 240);
       console.error("Discord agent run failed", { errorName, message: safeMessage });
       try {
-        await discordTransport?.sendMessage(message.channelId, "Sofia could not complete that task. The server recorded a redacted error for diagnosis.", undefined, message.id);
+        const userMessage = /provider_http_402_free_model_daily_limit/i.test(safeMessage)
+          ? "Sofia reached OpenRouter, but the free-model daily request allowance appears to be exhausted. Check the OpenRouter key's free-model usage limits or wait for the allowance to reset."
+          : /provider_http_402_in_flight_budget/i.test(safeMessage)
+            ? "Sofia reached OpenRouter, but its temporary in-flight spending budget rejected the request. Wait for recent requests to settle, then retry."
+            : /provider_http_402_insufficient_credits/i.test(safeMessage)
+              ? "Sofia reached OpenRouter, but the API key/account reports insufficient credits or a credit limit. Check OpenRouter account balance and the key's credit limit."
+              : /provider_http_402_payment_or_credit_required/i.test(safeMessage)
+                ? "Sofia reached OpenRouter, but the model request was rejected with HTTP 402. This indicates a billing, credit, or account/model usage restriction; the server log has only a safe classification, not enough provider detail to distinguish the cause."
+                : "Sofia could not complete that task. The server recorded a redacted error for diagnosis.";
+        await discordTransport?.sendMessage(message.channelId, userMessage, undefined, message.id);
       } catch {
         console.error("Discord error response delivery failed");
       }

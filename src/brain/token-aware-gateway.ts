@@ -97,7 +97,7 @@ export class GatewayError extends Error {
 
 // Log only a coarse, allowlisted provider failure classification. Never propagate
 // provider response bodies, URLs, request payloads, or credentials into run logs.
-function classifyProviderFailure(error: unknown): string {
+export function classifyProviderFailure(error: unknown): string {
   if (!(error instanceof Error)) return "unknown_provider_error";
   const message = error.message;
   const status = message.match(/Model gateway request failed \((\d{3})\)/i)?.[1];
@@ -114,6 +114,18 @@ function classifyProviderFailure(error: unknown): string {
         return "provider_http_404_endpoint_not_found";
       }
       return "provider_http_404_endpoint_or_model";
+    }
+    if (code === 402) {
+      if (/free[-_ ]models?[-_ ]per[-_ ]day|free[-_ ]model.*daily|daily.*free[-_ ]model/i.test(message)) {
+        return "provider_http_402_free_model_daily_limit";
+      }
+      if (/in_flight_budget_exhausted|in.flight.{0,40}budget/i.test(message)) {
+        return "provider_http_402_in_flight_budget";
+      }
+      if (/negative balance|insufficient credits|limit_source.{0,80}openrouter_credits|credit.{0,80}(exhaust|insufficient|limit)/i.test(message)) {
+        return "provider_http_402_insufficient_credits";
+      }
+      return "provider_http_402_payment_or_credit_required";
     }
     if (code === 429) return "provider_http_429_rate_or_quota_limit";
     if (code >= 500) return `provider_http_${code}_server_error`;
