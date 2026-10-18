@@ -48,7 +48,7 @@ test("Gemini key selects direct Google Gemini API by default", () => {
     const provider = config.providers[route.id];
     assert.equal(provider?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai/");
     assert.equal(provider?.apiKey, "gemini-test-key");
-    assert.equal(provider?.model, "gemini-3.8-flash");
+    assert.equal(provider?.model, "gemini-2.5-flash");
   }
 });
 
@@ -83,7 +83,7 @@ test("OpenRouter and legacy gateway credentials cannot override Gemini", () => {
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.apiKey, "gemini-test-key");
   assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai/");
-  assert.equal(config.providers.fast?.model, "gemini-3.8-flash");
+  assert.equal(config.providers.fast?.model, "gemini-2.5-flash");
 });
 
 test("fails closed when no Gemini API key is configured", () => {

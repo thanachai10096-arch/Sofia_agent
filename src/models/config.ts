@@ -25,7 +25,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     throw new Error("Set GEMINI_API_KEY (or the existing Gemini_API_Key variable) to use Sofia.");
   }
 
-  const defaultModel = process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash";
+  const defaultModel = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
   const definitions = [
     ["fast", ["fast"], 1, 1, 5],
     ["coding", ["coding", "tool-use", "reasoning"], 2, 2, 8],
