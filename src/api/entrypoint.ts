@@ -23,6 +23,7 @@ const rawDiscordChannelIds = process.env.DISCORD_ALLOWED_CHANNEL_IDS;
 const discordConfigured = Boolean(discordPublicKey || discordBotToken || rawDiscordUserIds?.trim() || rawDiscordChannelIds?.trim());
 let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
 const discordAbort = new AbortController();
+let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
 
 if (discordConfigured) {
   if (!discordPublicKey || !discordBotToken) {
@@ -193,7 +194,7 @@ if (discordConfigured) {
     }
   };
   await notifyRecoveredJobs();
-  const discordRecoveryTimer = setInterval(() => {
+  discordRecoveryTimer = setInterval(() => {
     void notifyRecoveredJobs().catch(() => undefined);
   }, 5_000);
   discordRecoveryTimer.unref?.();
