@@ -1168,9 +1168,8 @@ export class SofiaBrain {
           verification: verification.map((item) => item.criterionId),
           evidenceIds,
         };
-        // Managed production learning must be approved before entering the active ledger.
-        // A missing handler preserves legacy behavior for standalone Brain embeddings.
-        let mayActivate = !this.dependencies.onSkillCandidate;
+        // Learning is opt-in: absence of an explicit host approval callback must fail closed.
+        let mayActivate = false;
         if (this.dependencies.onSkillCandidate) {
           try {
             mayActivate = await this.dependencies.onSkillCandidate(learnedCandidate, this.runId, input.principalId);
