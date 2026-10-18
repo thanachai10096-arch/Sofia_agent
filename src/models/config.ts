@@ -10,32 +10,17 @@ function numberEnv(name: string, fallback: number) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-export function loadModelConfigFromEnv(): SofiaModelConfig {
-  // Prefer Gemini when configured. Keep legacy gateway support for backward compatibility.
-  const geminiKey =
-    process.env.GEMINI_API_KEY?.trim() ??
-    process.env.Gemini_API_Key?.trim() ??
-    "";
-  const legacyApiKey =
-    process.env.SOFIA_AI_GATEWAY_API_KEY?.trim() ??
-    process.env.AI_GATEWAY_API_KEY?.trim() ??
-    "";
-  const useGemini = geminiKey.length > 0;
-  const apiKey = useGemini ? geminiKey : legacyApiKey;
-  const baseUrl = useGemini
-    ? (process.env.GEMINI_API_BASE_URL?.trim() ||
-       "https://generativelanguage.googleapis.com/v1beta/openai")
-    : (process.env.SOFIA_AI_GATEWAY_URL?.trim() ||
-       "https://ai-gateway.vercel.sh/v1");
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
+export function loadModelConfigFromEnv(): SofiaModelConfig {
+  // OpenRouter is the only supported provider. Deliberately do not fall back to
+  // Gemini, Vercel AI Gateway, or any other endpoint when configuration fails.
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim() ?? "";
   if (!apiKey) {
-    throw new Error(
-      "Set GEMINI_API_KEY to use Gemini, or SOFIA_AI_GATEWAY_API_KEY for the legacy gateway.",
-    );
+    throw new Error("Set OPENROUTER_API_KEY to use Sofia's OpenRouter model provider.");
   }
 
-  const geminiModel =
-    process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+  const defaultModel = process.env.OPENROUTER_MODEL?.trim() || "openrouter/auto";
   const definitions = [
     ["fast", ["fast"], 1, 1, 5],
     ["coding", ["coding", "tool-use", "reasoning"], 2, 2, 8],
@@ -47,12 +32,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
   const providers: SofiaModelConfig["providers"] = {};
 
   for (const [id, capabilities, cost, latency, quality] of definitions) {
-    const configuredModel = process.env[`SOFIA_${id.toUpperCase()}_MODEL`]?.trim();
-    const model = useGemini
-      ? (process.env[`GEMINI_${id.toUpperCase()}_MODEL`]?.trim() || geminiModel)
-      : configuredModel;
-
-    if (!model) continue;
+    const model = process.env[`OPENROUTER_${id.toUpperCase()}_MODEL`]?.trim() || defaultModel;
 
     routes.push({
       id,
@@ -63,15 +43,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       qualityWeight: numberEnv(`SOFIA_${id.toUpperCase()}_QUALITY`, quality),
       healthy: true,
     });
-    providers[id] = { baseUrl, apiKey, model };
-  }
-
-  if (!routes.length) {
-    throw new Error(
-      useGemini
-        ? "Gemini is configured, but no Gemini model route could be created."
-        : "Configure at least one SOFIA_*_MODEL environment variable.",
-    );
+    providers[id] = { baseUrl: OPENROUTER_BASE_URL, apiKey, model };
   }
 
   return { routes, providers };
