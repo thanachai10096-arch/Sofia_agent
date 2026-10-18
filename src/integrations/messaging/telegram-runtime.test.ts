@@ -89,12 +89,13 @@ test("Telegram run completion reports failed runs without exposing internal erro
   await reportTelegramRunCompletion({
     runId: "run-789",
     conversationId: "chat-456",
-    waitForRun: async (id) => ({ id, status: "failed", error: "private internal stack trace" }),
+    waitForRun: async (id) => ({ id, status: "failed", error: "provider_http_402_insufficient_credits" }),
     send: async (message) => {
       sent.push({ conversationId: message.conversationId, text: message.text });
       return true;
     },
   });
   assert.match(sent[0]?.text ?? "", /task failed/i);
-  assert.doesNotMatch(sent[0]?.text ?? "", /private internal stack trace/);
+  assert.match(sent[0]?.text ?? "", /Reason: provider_http_402_insufficient_credits/);
+  assert.doesNotMatch(sent[0]?.text ?? "", /Bearer secret-token/);
 });
