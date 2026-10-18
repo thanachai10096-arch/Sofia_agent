@@ -1,3 +1,4 @@
+import { FileUserMemoryStore } from "../brain/user-memory.js";
 import { SqliteSessionStore } from "../session/sqlite-store.js";
 import { TokenBudget, type BudgetLimit } from "../brain/token-budget.js";
 import { TokenAwareGateway } from "../brain/token-aware-gateway.js";
@@ -97,7 +98,8 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,learningDiagnostics:()=>evolution.getDiagnostics()};
+  const userMemoryStore = new FileUserMemoryStore();
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
