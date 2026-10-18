@@ -113,3 +113,7 @@ export { browserWorkflowPlanner, browserStateVerifier, approvalGateManager, secu
 export { patchGenerator, pythonSpecialist, apiContractDesigner, codeReviewAuditor, unitTestGenerator, auditTrailWriter, toolDiscoveryRouter, terminalTaskRunner, fileWorkspaceOperator, apiConnectorOrchestrator, technicalDocumentationReader, marketGapAnalyst, modelRouterOptimizer, registerVerifiedRemainingDomainSkills } from "./skills/remaining-domain-handlers.js";
 export { createAdvancedSkillRegistry, listUnregisteredVerifiedSkills } from "./skills/advanced-skill-registry.js";
 export type { AdvancedSkillRegistryOptions } from "./skills/advanced-skill-registry.js";
+export { MemorySessionStore } from "./session/store.js";
+export { SqliteSessionStore } from "./session/sqlite-store.js";
+export type { Session } from "./session/store.js";
+export { createSofiaAgentDependenciesWithSessions } from "./models/factory.js";
