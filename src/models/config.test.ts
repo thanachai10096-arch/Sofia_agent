@@ -83,11 +83,23 @@ test("other provider credentials and custom endpoint cannot override OpenRouter"
   process.env.Kimi_key = "kimi-test-key";
   process.env.GEMINI_API_KEY = "gemini-test-key";
   process.env.SOFIA_AI_GATEWAY_API_KEY = "gateway-test-key";
-  process.env.SOFIA_FAST_MODEL = "gateway-fast-model";
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.apiKey, "openrouter-test-key");
   assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
   assert.equal(config.providers.fast?.model, "openrouter/auto");
+});
+
+test("SOFIA route-specific model aliases are honored while OPENROUTER overrides win", () => {
+  clear();
+  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+  process.env.OPENROUTER_MODEL = "openai/gpt-4.1-mini";
+  process.env.SOFIA_FAST_MODEL = "google/gemini-2.5-flash";
+  process.env.SOFIA_CODING_MODEL = "qwen/qwen3-coder:free";
+  process.env.OPENROUTER_CODING_MODEL = "openai/gpt-4.1";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.model, "google/gemini-2.5-flash");
+  assert.equal(config.providers.coding?.model, "openai/gpt-4.1");
+  assert.equal(config.providers.reasoning?.model, "openai/gpt-4.1-mini");
 });
 
 test("fails closed when no OpenRouter credential exists", () => {
