@@ -872,3 +872,57 @@ test("DurableJobRuntime never reclaims an old lock owned by another host", async
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("DurableJobRuntime redacts secrets before writing snapshots to the separate RunStore", async () => {
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-runstore-redaction-"));
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "job-runstore-redaction-" + randomUUID();
+  const secret = "ghp_" + "C".repeat(36);
+  let savedSnapshot: import("./run-state.js").BrainRunSnapshot | undefined;
+  const runStore = {
+    save: async (snapshot: import("./run-state.js").BrainRunSnapshot) => { savedSnapshot = snapshot; },
+    load: async () => savedSnapshot,
+    delete: async () => undefined,
+  };
+  const snapshot = {
+    version: 1,
+    runId: "redaction-run-" + randomUUID(),
+    task: "task token=" + secret,
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "checkpoint-redaction",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const brain = {
+    run: async ({ onRunSnapshot }: { onRunSnapshot?: (value: import("./run-state.js").BrainRunSnapshot) => void | Promise<void> }) => {
+      await onRunSnapshot?.(snapshot);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain;
+  try {
+    const runtime = new DurableJobRuntime(() => brain, runStore, namespace);
+    const submitted = await runtime.submit({ task: "task token=" + secret });
+    let record = await runtime.get(submitted.id);
+    for (let attempt = 0; attempt < 100 && record?.status !== "failed"; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      record = await runtime.get(submitted.id);
+    }
+    assert.equal(record?.status, "failed");
+    assert.ok(savedSnapshot);
+    assert.ok(!JSON.stringify(savedSnapshot).includes(secret), "separate checkpoint store must receive redacted data");
+    assert.ok(!JSON.stringify(record?.snapshot).includes(secret), "job record must not retain the unredacted checkpoint");
+  } finally {
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+});
