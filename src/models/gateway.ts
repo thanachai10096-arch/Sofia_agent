@@ -11,6 +11,10 @@ export interface GatewayProviderConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** Used only when the configured model returns HTTP 404 (unknown/unavailable model). */
+  fallbackModel?: string;
+  /** Injectable fetch implementation for deterministic gateway tests. */
+  fetchImpl?: typeof fetch;
   headers?: Record<string, string>;
   maxConcurrent?: number;
   /** One deadline for queue wait, provider attempts, and retry delays. Defaults to 45 seconds. */
@@ -178,13 +182,13 @@ export class SofiaModelGateway implements ModelProvider {
       circuit.probeInFlight = true;
     }
 
-    const execute = async () => {
+    const execute = async (model = config.model): Promise<Response> => {
       const maxAttempts = 3;
       let lastError: unknown;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         let retryableFailure = false;
         try {
-          const response = await fetch(
+          const response = await (config.fetchImpl ?? fetch)(
             config.baseUrl.replace(/\/$/, "") + "/chat/completions",
             {
               method: "POST",
@@ -193,7 +197,7 @@ export class SofiaModelGateway implements ModelProvider {
                 authorization: "Bearer " + config.apiKey,
                 "content-type": "application/json",
               },
-              body: JSON.stringify(body),
+              body: JSON.stringify({ ...body, model }),
               signal: requestSignal,
             },
           );
@@ -205,6 +209,12 @@ export class SofiaModelGateway implements ModelProvider {
           retryableFailure = retryable;
           const detail = await response.text();
           lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
+          // A stale or unsupported model ID should not make Discord completely unusable
+          // when OpenRouter's Auto Router is available. Retry once with the configured
+          // safe fallback; never mask authentication, quota, or network errors.
+          if (response.status === 404 && model === config.model && config.fallbackModel && config.fallbackModel !== config.model) {
+            return execute(config.fallbackModel);
+          }
           if (!retryable || attempt === maxAttempts || options.signal?.aborted) throw lastError;
           const retryAfter = Number(response.headers.get("retry-after") ?? "");
           const delay = Number.isFinite(retryAfter) && retryAfter > 0
