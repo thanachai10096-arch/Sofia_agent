@@ -1,14 +1,14 @@
 # Sofia Agent Readiness Matrix
 
 **Snapshot:** 2026-10-18  
-**Main commit audited:** eeb775fd75aab072f4768b7985a7025c160f26e0  
-**Main CI:** [run 39091932727](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/39091932727) — all six jobs passed.
+**Main commit audited:** 771836910305917f73b1c6071c04f5a773c313d9  
+**Main CI:** [run 39092077515](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/39092077515) — rerun for this exact main commit; status was pending when this matrix was refreshed.
 
 This matrix distinguishes integrated code and CI evidence from deployment validation. It is not a claim that Sofia Agent is production-ready.
 
 ## Readiness estimate
 
-**7 of 12 engineering integration gates are present on main (58%).** This is a simple, equally weighted integration checklist, not a quality score or production-readiness percentage. A gate being integrated does not imply every deployment scenario has been validated.
+**8 of 12 engineering integration gates are present on main (67%).** This is a simple, equally weighted integration checklist, not a quality score or production-readiness percentage. A gate being integrated does not imply every deployment scenario has been validated.
 
 ### Gate status
 
@@ -21,7 +21,7 @@ This matrix distinguishes integrated code and CI evidence from deployment valida
 | Learned-skill activation approval | **Integrated** | PR #199 plus security correction #201 merged; missing/declined/throwing approval fails closed |
 | Discord user/channel allowlists | **Integrated** | PR #195 merged; both explicit allowlists are required when Discord is configured |
 | Discord durable /run, /status, /cancel, /resume and session-scoped context | **Integrated; live validation pending** | PR #200 merged and CI passed; still needs a private Discord app, HTTPS endpoint, persistent storage and a real end-to-end smoke test |
-| Strict validation of persisted skill lifecycle state | **Pending** | PR #203 is open; require CI to pass on its latest head before merging |
+| Strict validation of persisted skill lifecycle state | **Integrated** | PR #203 merged; CI run 39091984457 passed all six jobs, including cross-platform validation and sandbox/browser integration |
 | Durable shared quota / billing counters across replicas | **Pending** | Verify a shared atomic store and reservation/release behavior before claiming account-wide limits |
 | Multi-host job coordination | **Pending** | File locks are not a distributed lock; use a transactional shared queue/store for multiple hosts |
 | CodeQL high-severity alerts | **Blocker** | PR #175's CodeQL check reported two new high-severity alerts; identify and resolve the alerts before merging that PR or claiming the audit is clean |
@@ -38,12 +38,13 @@ This matrix distinguishes integrated code and CI evidence from deployment valida
 - **PR #200:** Discord durable jobs and bounded, user/channel-scoped historical context.
 - **PR #201:** fail-closed learned-skill activation when approval is absent.
 - **PR #202:** hashed, restart-safe API idempotency.
+- **PR #203:** strict validation of persisted skill packages, provenance, evaluation evidence and active pointers.
 
 All listed PRs were merged after their own relevant CI checks passed. Main CI was also rerun after integration; use the main CI link at the top as the current combined-head evidence.
 
 ## Release gates still required
 
-1. Resolve PR #203 and verify persisted skill records cannot bypass evaluation, confidence or active-pointer validation.
+1. Recheck the persisted skill lifecycle validation on the final release candidate and retain the regression tests for tampered records.
 2. Resolve the two high-severity CodeQL alerts reported on PR #175.
 3. Perform a live Discord smoke test with a private guild, valid signature verification, strict allowlists, HTTPS and persistent storage.
 4. Validate cancellation, resume, restart recovery and duplicate-request behavior in an integrated end-to-end run.
