@@ -55,6 +55,10 @@ export class VersionedSkillLifecycle {
     for (const [skillId, recordId] of Object.entries(this.snapshot.activeBySkill)) {
       const record = this.snapshot.records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
       if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
+      const existing = this.platform.get(skillId);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(record.package)) {
+        throw new Error("Cannot restore active lifecycle skill over a different platform skill: " + skillId);
+      }
       this.platform.register(clone(record.package));
     }
   }
