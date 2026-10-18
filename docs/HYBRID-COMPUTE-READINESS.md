@@ -4,7 +4,8 @@
 
 - `src/platform/cloud-execution.ts` defines the backend contract and the existing `LocalJobBackend` adapter.
 - `src/platform/compute-policy.ts` adds a pure, local-first routing decision function. It is a policy foundation only; it does not dispatch jobs and does not make a remote worker available.
-- `tests/compute-policy.test.ts` covers default routing and fail-closed policy checks.
+- `src/platform/compute-capacity.ts` validates concurrency, queue, runtime, memory, and optional disk admission estimates. It is a policy helper, not a hard OS/container resource limit, and is not yet wired into JobRuntime.
+- `tests/compute-policy.test.ts` and `tests/compute-capacity.test.ts` cover routing and capacity policy checks.
 
 The local backend remains the production default. Do not advertise remote/cloud execution as available until a real remote backend is implemented and tested.
 
