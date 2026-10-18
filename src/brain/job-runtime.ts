@@ -522,10 +522,14 @@ export class DurableJobRuntime implements JobRuntime {
     }
 
     const onSnapshot = async (snapshot: BrainRunSnapshot): Promise<void> => {
-      record.snapshot = snapshot;
+      // The separate RunStore persists snapshots independently of the redacted job
+      // record. Sanitize before either persistence path so credentials cannot bypass
+      // redaction through the checkpoint store and reappear after a restart.
+      const safeSnapshot = redactSecrets(snapshot) as BrainRunSnapshot;
+      record.snapshot = safeSnapshot;
       record.updatedAt = new Date().toISOString();
       try {
-        await this.runStore?.save(snapshot);
+        await this.runStore?.save(safeSnapshot);
       } catch {
         // The job record also embeds its snapshot. Persist that fallback even when
         // the dedicated snapshot store is temporarily unavailable.
