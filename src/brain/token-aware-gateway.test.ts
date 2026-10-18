@@ -186,3 +186,39 @@ test("gateway fails closed when no route satisfies the requested capabilities", 
     error instanceof GatewayError && error.code === "no_eligible_route");
   assert.equal(budget.snapshot().calls, 0);
 });
+
+
+test("gateway preserves a safe provider status category without leaking response details", async () => {
+  const budget = makeBudget();
+  const gateway = new TokenAwareGateway(
+    budget,
+    [route(async () => {
+      throw new Error("Model gateway request failed (402): private response with api_key=secret-value");
+    })],
+  );
+
+  await assert.rejects(gateway.generate(request()), (error: unknown) => {
+    assert.ok(error instanceof GatewayError);
+    assert.equal(error.code, "model_call_failed");
+    assert.equal(error.message, "model_call_failed: provider_http_402_billing_or_credits");
+    assert.doesNotMatch(error.message, /secret-value|private response/);
+    return true;
+  });
+});
+
+test("gateway classifies unknown provider errors without exposing their messages", async () => {
+  const budget = makeBudget();
+  const gateway = new TokenAwareGateway(
+    budget,
+    [route(async () => {
+      throw new Error("Authorization header contained private-token");
+    })],
+  );
+
+  await assert.rejects(gateway.generate(request()), (error: unknown) => {
+    assert.ok(error instanceof GatewayError);
+    assert.equal(error.message, "model_call_failed: provider_error");
+    assert.doesNotMatch(error.message, /private-token/);
+    return true;
+  });
+});

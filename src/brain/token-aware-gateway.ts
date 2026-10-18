@@ -88,10 +88,39 @@ export class GatewayError extends Error {
       | "provider_cap_exceeded"
       | "incomplete_output"
       | "model_call_failed",
+    readonly reason?: string,
   ) {
-    super(code);
+    super(reason ? `${code}: ${reason}` : code);
     this.name = "GatewayError";
   }
+}
+
+function safeProviderFailureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  const status = message.match(/Model gateway request failed \((\d{3})\)/i)?.[1];
+  if (status) {
+    const reasons: Record<string, string> = {
+      "400": "provider_http_400_bad_request",
+      "401": "provider_http_401_authentication_failed",
+      "402": "provider_http_402_billing_or_credits",
+      "403": "provider_http_403_access_denied",
+      "404": "provider_http_404_model_or_endpoint_not_found",
+      "408": "provider_http_408_request_timeout",
+      "409": "provider_http_409_conflict",
+      "413": "provider_http_413_request_too_large",
+      "422": "provider_http_422_invalid_request",
+      "429": "provider_http_429_rate_or_quota_limit",
+      "500": "provider_http_500_server_error",
+      "502": "provider_http_502_bad_gateway",
+      "503": "provider_http_503_unavailable",
+      "504": "provider_http_504_gateway_timeout",
+    };
+    return reasons[status] ?? `provider_http_${status}`;
+  }
+  if (/timed? ?out|timeout|aborted/i.test(message)) return "provider_timeout";
+  if (/fetch failed|network|econnreset|enotfound|eai_again/i.test(message)) return "provider_network_error";
+  if (/invalid json|no message|empty response|non-json/i.test(message)) return "provider_invalid_response";
+  return "provider_error";
 }
 
 class ContextTooLarge extends Error {}
@@ -344,7 +373,9 @@ export class TokenAwareGateway {
         }
 
         if (error instanceof GatewayError) throw error;
-        throw new GatewayError("model_call_failed");
+        // Preserve only a bounded, allowlisted diagnostic category. Never forward
+        // provider response bodies because they can contain secrets or user data.
+        throw new GatewayError("model_call_failed", safeProviderFailureReason(error));
       }
     })();
 
