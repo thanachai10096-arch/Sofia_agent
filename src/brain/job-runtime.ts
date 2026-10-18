@@ -125,7 +125,7 @@ class FileJobStateStore {
           } else if (age > 120_000) {
             stale = true;
           }
-          if (!observedToken && age > 120_000) stale = true;
+          if (!observedToken && age > 120_000 && !foreignHost) stale = true;
         } catch (readError) {
           if ((readError as NodeJS.ErrnoException).code === "ENOENT") continue;
           // A newly-created lock can be observed before its JSON payload is fully
@@ -194,7 +194,7 @@ class FileJobStateStore {
               } else if (latestAge > 120_000) {
                 latestStale = true;
               }
-              if (!latestToken && latestAge > 120_000) latestStale = true;
+              if (!latestToken && latestAge > 120_000 && !(typeof latest.hostname === "string" && latest.hostname !== os.hostname())) latestStale = true;
               if (latestStale && latestToken === observedToken) {
                 await fs.rm(this.lockFile, { force: true });
               }
