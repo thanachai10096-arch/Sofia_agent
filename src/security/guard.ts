@@ -55,6 +55,33 @@ export function containsPromptInjection(value: unknown): boolean {
   return false;
 }
 
+function collectHttpUrls(value: unknown, output: string[] = [], seen = new WeakSet<object>()): string[] {
+  if (typeof value === "string") {
+    let cursor = 0;
+    while (cursor < value.length && output.length < 100) {
+      const http = value.indexOf("http://", cursor);
+      const https = value.indexOf("https://", cursor);
+      if (http < 0 && https < 0) break;
+      const start = http < 0 ? https : https < 0 ? http : Math.min(http, https);
+      let end = start;
+      while (end < value.length) {
+        const code = value.charCodeAt(end);
+        if (code <= 0x20 || code === 34 || code === 39 || code === 60 || code === 62) break;
+        end++;
+      }
+      let url = value.slice(start, end);
+      while (url.length > 0 && "),.;".includes(url[url.length - 1]!)) url = url.slice(0, -1);
+      if (url) output.push(url);
+      cursor = Math.max(end, start + 1);
+    }
+  } else if (value && typeof value === "object" && !seen.has(value)) {
+    seen.add(value);
+    const items = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
+    for (const item of items) collectHttpUrls(item, output, seen);
+  }
+  return output;
+}
+
 export function assertSafePath(inputPath: string, blockedPaths: readonly string[] = []): void {
   if (!inputPath || path.isAbsolute(inputPath) || inputPath.includes("\0")) throw new Error("Unsafe workspace path.");
   const normalized = path.normalize(inputPath);
@@ -62,9 +89,16 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
     throw new Error("Workspace path escapes the configured root.");
   }
   if (SECRET_PATH.test(normalized)) throw new Error("Access to credential/secret files is blocked.");
-  const segments = normalized.split(/[\\\\/]+/);
-  if (blockedPaths.some(pattern => normalized === pattern || normalized.startsWith(pattern.endsWith("/") ? pattern : pattern + path.sep) ||
-      (!pattern.includes("/") && segments.includes(pattern)))) {
+  const policyPath = normalized.replace(/\\\\/g, "/").toLowerCase();
+  const segments = policyPath.split("/");
+  if (blockedPaths.some((pattern) => {
+    const normalizedPattern = pattern.replace(/\\\\/g, "/");
+    let patternEnd = normalizedPattern.length;
+    while (patternEnd > 0 && normalizedPattern[patternEnd - 1] === "/") patternEnd--;
+    const policyPattern = normalizedPattern.slice(0, patternEnd).toLowerCase();
+    return policyPath === policyPattern || policyPath.startsWith(policyPattern + "/") ||
+      (!policyPattern.includes("/") && segments.includes(policyPattern));
+  })) {
     throw new Error("Workspace path is blocked by security policy.");
   }
 }
@@ -73,10 +107,27 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
   const hash = actionHash(action.runId, action.toolName, action.input, action.principalId);
   const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;
   if (action.effects.includes("network") || action.effects.includes("browser")) {
-    const url = typeof action.input.url === "string" ? action.input.url : undefined;
-    if (url) {
-      let host = ""; try { host = new URL(url).hostname.toLowerCase(); } catch { return { allowed:false,risk:"critical",requireApproval:true,reason:"Invalid network URL.",actionHash:hash }; }
-      if (allowedHosts.length === 0 || !allowedHosts.some(allowed => host === allowed || host.endsWith("." + allowed))) return { allowed:false,risk:"critical",requireApproval:true,reason:"Network host is not allowlisted.",actionHash:hash };
+    const explicitUrl = typeof action.input.url === "string" ? action.input.url : undefined;
+    const discoveredUrls = collectHttpUrls(action.input).filter((url) => url !== explicitUrl);
+    const urls = [...(explicitUrl ? [explicitUrl] : []), ...discoveredUrls];
+    if (urls.length === 0 && !["terminal.run", "git.run"].includes(action.toolName)) {
+      return { allowed: false, risk: "critical", requireApproval: true, reason: "Network actions must expose an explicit HTTP(S) URL for allowlist enforcement.", actionHash: hash };
+    }
+    for (const url of urls) {
+      let host = "";
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("unsupported protocol");
+        host = parsed.hostname.toLowerCase();
+      } catch {
+        return { allowed: false, risk: "critical", requireApproval: true, reason: "Invalid network URL.", actionHash: hash };
+      }
+      if (allowedHosts.length === 0 || !allowedHosts.some((allowed) => {
+        const normalizedAllowed = allowed.toLowerCase().replace(/\\.$/, "");
+        return host === normalizedAllowed || host.endsWith("." + normalizedAllowed);
+      })) {
+        return { allowed: false, risk: "critical", requireApproval: true, reason: "Network host is not allowlisted.", actionHash: hash };
+      }
     }
   }
   const patchPaths = Array.isArray(action.input.operations)
