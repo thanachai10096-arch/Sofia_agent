@@ -881,6 +881,9 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
   const previousRoot = process.env.SOFIA_STATE_DIR;
   process.env.SOFIA_STATE_DIR = root;
   const namespace = "job-runstore-redaction-" + randomUUID();
+  const stateDirectory = path.join(root, "sofia-agents-jobs");
+  const stateFile = path.join(stateDirectory, createHash("sha256").update(namespace).digest("hex") + ".json");
+  const lockFile = stateFile + ".lock";
   const secret = "ghp_" + "C".repeat(36);
   let savedSnapshot: import("./run-state.js").BrainRunSnapshot | undefined;
   const runStore = {
@@ -928,6 +931,26 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
     const listed = await runtime.list();
     assert.ok(!JSON.stringify(listed).includes(secret), "job listings must redact credential-shaped content");
     assert.ok(listed.every((job) => job.leaseOwnerToken === undefined), "job listings must not expose lease ownership");
+
+    // get() may observe the in-memory terminal status just before the final
+    // atomic state write and lock cleanup finish. Wait for the durable terminal
+    // record and lock release before removing the temporary state directory.
+    const cleanupDeadline = Date.now() + 5_000;
+    let durableTerminal = false;
+    let lockReleased = false;
+    while (Date.now() < cleanupDeadline) {
+      try {
+        const persisted = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; status: string }>;
+        durableTerminal = persisted.some((job) => job.id === submitted.id && job.status === "failed");
+      } catch { /* wait for the first durable state file */ }
+      if (durableTerminal) {
+        try { await stat(lockFile); lockReleased = false; }
+        catch (error) { lockReleased = (error as NodeJS.ErrnoException).code === "ENOENT"; }
+        if (lockReleased) break;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(durableTerminal && lockReleased, "job state write and lock cleanup must finish before test cleanup");
   } finally {
     if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
     else process.env.SOFIA_STATE_DIR = previousRoot;
