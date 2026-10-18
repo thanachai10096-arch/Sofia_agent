@@ -199,14 +199,17 @@ test("context packing prefers compact relevant evidence when the token budget is
     })),
     contextWindow: 90,
     prepare(prompt) {
-      packedIds = prompt.evidence.map((chunk) => chunk.id);
+      const evidenceIds = prompt.evidence.map((chunk) => chunk.id);
       return {
         inputTokensUpperBound: 10 + prompt.evidence.reduce((sum, chunk) => sum + chunk.text.length, 0),
-        invoke: async () => ({
-          value: { ok: true },
-          usage: { inputTokens: 10, outputTokens: 1 },
-          finishReason: "complete",
-        }),
+        invoke: async () => {
+          packedIds = evidenceIds;
+          return {
+            value: { ok: true },
+            usage: { inputTokens: 10, outputTokens: 1 },
+            finishReason: "complete",
+          };
+        },
       };
     },
   };
@@ -232,14 +235,17 @@ test("context packing deduplicates identical evidence text across different IDs"
       finishReason: "complete",
     })),
     prepare(prompt) {
-      packedIds = prompt.evidence.map((chunk) => chunk.id);
+      const evidenceIds = prompt.evidence.map((chunk) => chunk.id);
       return {
         inputTokensUpperBound: 10 + prompt.evidence.reduce((sum, chunk) => sum + chunk.text.length, 0),
-        invoke: async () => ({
-          value: { ok: true },
-          usage: { inputTokens: 10, outputTokens: 1 },
-          finishReason: "complete",
-        }),
+        invoke: async () => {
+          packedIds = evidenceIds;
+          return {
+            value: { ok: true },
+            usage: { inputTokens: 10, outputTokens: 1 },
+            finishReason: "complete",
+          };
+        },
       };
     },
   };
