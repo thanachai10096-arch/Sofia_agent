@@ -13,6 +13,8 @@ export interface AgentRequest {
   task: string;
   context?: string;
   sessionId?: string;
+  /** Set by the trusted API host only when the caller has memory:read scope. */
+  includeUserMemory?: boolean;
   principalId?: string;
   /** Desktop capabilities are derived by the trusted host from authenticated scopes. */
   desktopCapabilities?: DesktopCapability[];
