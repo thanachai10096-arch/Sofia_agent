@@ -16,6 +16,13 @@ export interface JobRecord {
   updatedAt: string;
   task: string;
   ownerKeyId?: string;
+  /** Destination used only for post-restart Discord job recovery notices. */
+  notificationChannelId?: string;
+  /** Opaque per-user/per-channel key; never shared across Discord principals. */
+  sessionKey?: string;
+  /** Original user task before historical session context is appended. */
+  sessionTask?: string;
+  notificationDelivered?: boolean;
   leaseOwnerToken?: string;
   leaseExpiresAt?: string;
   heartbeatAt?: string;
@@ -50,6 +57,7 @@ function redactJobRecord(record: JobRecord): JobRecord {
     // Preserve leaseOwnerToken and lease timestamps in storage: these are runtime
     // fencing metadata, not user content, and redacting them would break worker claims.
     task: String(redactSecrets(record.task)),
+    ...(record.sessionTask ? { sessionTask: String(redactSecrets(record.sessionTask)) } : {}),
     ...(record.snapshot ? { snapshot: redactSecrets(record.snapshot) as BrainRunSnapshot } : {}),
     ...(record.result ? { result: redactSecrets(record.result) as JobRecord["result"] } : {}),
     ...(record.error ? { error: String(redactSecrets(record.error)) } : {}),
@@ -66,11 +74,12 @@ function publicJobRecord(record: JobRecord): JobRecord {
 
 
 export interface JobRuntime {
-  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string }): Promise<JobRecord>;
+  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
+  markNotificationDelivered?(id: string): Promise<void>;
 }
 
 class FileJobStateStore {
@@ -372,6 +381,15 @@ class FileJobStateStore {
     return operation;
   }
 
+  async markNotificationDelivered(id: string): Promise<void> {
+    const record = this.jobs.get(id) ?? await this.get(id);
+    if (!record) return;
+    const canonical = this.jobs.get(id) ?? record;
+    canonical.notificationDelivered = true;
+    canonical.updatedAt = new Date().toISOString();
+    await this.state.save(canonical);
+  }
+
   async list(): Promise<JobRecord[]> {
     return this.read();
   }
@@ -400,12 +418,16 @@ export class DurableJobRuntime implements JobRuntime {
     this.state = new FileJobStateStore(namespace);
   }
 
-  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string }): Promise<JobRecord> {
+  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const record: JobRecord = {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
+      ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
+      ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
+      ...(input.sessionTask ? { sessionTask: input.sessionTask } : {}),
+      notificationDelivered: false,
     };
     this.jobs.set(id, record);
     await this.state.save(record);
