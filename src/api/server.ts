@@ -10,6 +10,7 @@ import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/d
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
+import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 
 interface ActiveRun {
   id: string;
@@ -277,6 +278,57 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
+      if (isMemoryRequest) {
+        if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
+        if (req.method === "GET") {
+          if (!auth.scopes.includes("memory:read")) return json(res, 403, { error: "forbidden", requiredScope: "memory:read" }, origin, config);
+          const query = requestUrl.searchParams.get("q")?.trim() ?? "";
+          if (query.length > 1000) return json(res, 400, { error: "memory_query_too_long" }, origin, config);
+          const rawLimit = Number(requestUrl.searchParams.get("limit") ?? "8");
+          const limit = Number.isSafeInteger(rawLimit) ? Math.max(1, Math.min(20, rawLimit)) : 8;
+          const memories = query
+            ? await deps.userMemoryStore.find(auth.keyId, query, limit)
+            : (await deps.userMemoryStore.list(auth.keyId)).slice(0, 200);
+          return json(res, 200, { memories }, origin, config);
+        }
+        if (req.method === "POST" && requestUrl.pathname === "/v1/memory") {
+          if (!auth.scopes.includes("memory:write")) return json(res, 403, { error: "forbidden", requiredScope: "memory:write" }, origin, config);
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_memory_entry" }, origin, config);
+          const input = raw as Record<string, unknown>;
+          const kinds = ["preference", "fact", "goal", "instruction"];
+          if (typeof input.kind !== "string" || !kinds.includes(input.kind) ||
+              typeof input.content !== "string" || input.content.trim().length < 3 || input.content.length > 1200) {
+            return json(res, 400, { error: "invalid_memory_entry" }, origin, config);
+          }
+          try {
+            const entry = createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
+            await deps.userMemoryStore.save(auth.keyId, entry);
+            const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
+            if (!saved) return json(res, 500, { error: "memory_write_failed" }, origin, config);
+            return json(res, 201, { memory: saved }, origin, config);
+          } catch {
+            return json(res, 400, { error: "memory_entry_rejected" }, origin, config);
+          }
+        }
+        if (req.method === "DELETE" && requestUrl.pathname === "/v1/memory") {
+          if (!auth.scopes.includes("memory:write")) return json(res, 403, { error: "forbidden", requiredScope: "memory:write" }, origin, config);
+          await deps.userMemoryStore.clear(auth.keyId);
+          return json(res, 200, { cleared: true }, origin, config);
+        }
+        const memoryIdMatch = requestUrl.pathname.match(/^\/v1\/memory\/([^/]+)$/);
+        if (req.method === "DELETE" && memoryIdMatch) {
+          if (!auth.scopes.includes("memory:write")) return json(res, 403, { error: "forbidden", requiredScope: "memory:write" }, origin, config);
+          let memoryId: string;
+          try { memoryId = decodeURIComponent(memoryIdMatch[1]!); } catch { return json(res, 400, { error: "invalid_memory_id" }, origin, config); }
+          if (!memoryId || memoryId.length > 256) return json(res, 400, { error: "invalid_memory_id" }, origin, config);
+          const deleted = await deps.userMemoryStore.delete(auth.keyId, memoryId);
+          return deleted ? json(res, 200, { deleted: true }, origin, config) : json(res, 404, { error: "memory_not_found" }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
+      }
+
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
       if (isCronRequest && !deps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
       if (isCronRequest && req.method === "GET" && !auth.scopes.some(scope => scope === "cron:read" || scope === "cron:manage")) {
