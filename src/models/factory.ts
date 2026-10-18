@@ -1,3 +1,4 @@
+import { SqliteSessionStore } from "../session/sqlite-store.js";
 import { TokenBudget, type BudgetLimit } from "../brain/token-budget.js";
 import { TokenAwareGateway } from "../brain/token-aware-gateway.js";
 import { TokenAwareBrainReasoner } from "../brain/token-aware-reasoner.js";
@@ -90,4 +91,15 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,learningDiagnostics:()=>evolution.getDiagnostics()};
+}
+
+/** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
+export async function createSofiaAgentDependenciesWithSessions(
+  workspace = process.cwd(),
+  approval?: AgentDependencies["approval"],
+  databasePath?: string,
+): Promise<AgentDependencies & { closeSessionStore: () => void }> {
+  const dependencies = createSofiaAgentDependencies(workspace, approval);
+  const sessionStore = await SqliteSessionStore.open(databasePath);
+  return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
 }
