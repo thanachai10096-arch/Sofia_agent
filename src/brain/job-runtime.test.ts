@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash, randomUUID } from "node:crypto";
-import { rm, stat } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
 
@@ -17,14 +17,27 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
   const firstRuntime = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
   const submitted = await firstRuntime.submit({ task: "recover after process restart" });
 
-  // Allow the fire-and-forget execution to persist its running state.
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  // Wait until the worker has atomically claimed the job, then simulate a crashed
+  // worker by expiring its lease in the persisted record.
+  let active = await firstRuntime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && active?.status !== "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    active = await firstRuntime.get(submitted.id);
+  }
+  assert.equal(active?.status, "running");
+  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
+  const saved = records.find((item) => item.id === submitted.id);
+  assert.ok(saved);
+  saved.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
 
   const restartedRuntime = new DurableJobRuntime(() => hangingBrain, undefined, namespace);
   const recovered = await restartedRuntime.get(submitted.id);
 
   assert.equal(recovered?.status, "failed");
-  assert.match(recovered?.error ?? "", /interrupted/i);
+  assert.match(recovered?.error ?? "", /interrupted|lease expired/i);
 });
 
 
@@ -69,7 +82,7 @@ test("DurableJobRuntime rejects resume when a job has no saved checkpoint", asyn
   // submit() starts execution asynchronously; wait until the run has settled before
   // asserting that resume rejects for a missing checkpoint rather than a live run.
   let current = await runtime.get(submitted.id);
-  for (let attempt = 0; attempt < 100 && current?.status === "running"; attempt++) {
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt++) {
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
     current = await runtime.get(submitted.id);
   }
@@ -317,7 +330,7 @@ test("DurableJobRuntime preserves a resumable embedded checkpoint when the snaps
 });
 
 
-test("DurableJobRuntime recovers a persisted running job across an actual Node.js process restart", () => {
+test("DurableJobRuntime recovers a persisted running job across an actual Node.js process restart", async () => {
   const namespace = "job-runtime-real-process-restart-" + randomUUID();
   const startScript = `
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
@@ -344,6 +357,14 @@ test("DurableJobRuntime recovers a persisted running job across an actual Node.j
   const jobId = start.stdout.trim();
   assert.ok(jobId, "first worker should print the persisted job ID");
 
+  const recoveryStateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const recoveryRecords = JSON.parse(await readFile(recoveryStateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
+  const interrupted = recoveryRecords.find((item) => item.id === jobId);
+  assert.ok(interrupted);
+  interrupted.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(recoveryStateFile + ".test-tmp", JSON.stringify(recoveryRecords, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(recoveryStateFile + ".test-tmp", recoveryStateFile);
+
   const recoverScript = `
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
     const runtime = new DurableJobRuntime(() => ({
@@ -360,7 +381,7 @@ test("DurableJobRuntime recovers a persisted running job across an actual Node.j
   assert.equal(recovered.status, 0, recovered.stderr || "recovery worker should exit cleanly");
   const record = JSON.parse(recovered.stdout) as { status?: string; error?: string };
   assert.equal(record.status, "failed");
-  assert.match(record.error ?? "", /interrupted/i);
+  assert.match(record.error ?? "", /interrupted|lease expired/i);
 });
 
 
@@ -387,7 +408,7 @@ test("DurableJobRuntime stores job state with owner-only file permissions on POS
 });
 
 
-test("DurableJobRuntime resumes a saved checkpoint after a real process restart", () => {
+test("DurableJobRuntime resumes a saved checkpoint after a real process restart", async () => {
   const namespace = "job-runtime-resume-real-restart-" + randomUUID();
   const startScript = `
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
@@ -433,6 +454,14 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
   const jobId = started.stdout.trim();
   assert.ok(jobId, "checkpoint worker should print its job ID");
 
+  const resumeStateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const resumeRecords = JSON.parse(await readFile(resumeStateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
+  const resumable = resumeRecords.find((item) => item.id === jobId);
+  assert.ok(resumable);
+  resumable.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(resumeStateFile + ".test-tmp", JSON.stringify(resumeRecords, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(resumeStateFile + ".test-tmp", resumeStateFile);
+
   const resumeScript = `
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
     const runtime = new DurableJobRuntime(() => ({
@@ -454,4 +483,392 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
   const result = JSON.parse(resumed.stdout) as { status?: string; checkpointId?: string };
   assert.equal(result.status, "completed");
   assert.equal(result.checkpointId, "restart-checkpoint");
+});
+
+
+test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
+  const namespace = "job-runtime-concurrent-workers-" + randomUUID();
+  const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain), undefined, namespace));
+
+  const submitted = await Promise.all(runtimes.map((runtime, index) =>
+    runtime.submit({ task: "concurrent worker submission " + index }),
+  ));
+  const reader = new DurableJobRuntime(() => ({
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain), undefined, namespace);
+  const persisted = await reader.list();
+  const persistedIds = new Set(persisted.map((record) => record.id));
+
+  assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
+  for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
+
+  const file = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  await rm(file, { force: true });
+  await rm(file + ".lock", { force: true });
+});
+
+
+test("DurableJobRuntime preserves submissions from separate Node.js processes", async () => {
+  const namespace = "job-runtime-process-concurrency-" + randomUUID();
+  const workerCount = 4;
+  const jobsPerWorker = 4;
+  const workerScript = `
+    import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
+    const namespace = ${JSON.stringify(namespace)};
+    const runtime = new DurableJobRuntime(() => ({
+      run: async () => new Promise(() => undefined),
+    }), undefined, namespace);
+    const jobs = await Promise.all(Array.from({ length: ${jobsPerWorker} }, (_, index) =>
+      runtime.submit({ task: "process worker " + process.pid + " job " + index }),
+    ));
+    process.stdout.write(JSON.stringify(jobs.map((job) => job.id)));
+  `;
+
+  const runWorker = () => new Promise<string>((resolve, reject) => {
+    const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", workerScript], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 15_000);
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) {
+        reject(new Error(stderr || `worker exited with code ${code}`));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+
+  const workerOutputs = await Promise.all(Array.from({ length: workerCount }, runWorker));
+  const submittedIds = workerOutputs.flatMap((output) => JSON.parse(output) as string[]);
+  const reader = new DurableJobRuntime(() => ({
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain), undefined, namespace);
+  const persisted = await reader.list();
+  const persistedIds = new Set(persisted.map((record) => record.id));
+
+  assert.equal(submittedIds.length, workerCount * jobsPerWorker);
+  assert.equal(persisted.length, submittedIds.length, "cross-process writes must not lose job records");
+  for (const id of submittedIds) assert.ok(persistedIds.has(id), "missing job submitted by child process " + id);
+
+  const file = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  await rm(file, { force: true });
+  await rm(file + ".lock", { force: true });
+});
+
+
+test("DurableJobRuntime admits only one resumed execution across separate processes", async () => {
+  const namespace = "job-runtime-single-claim-" + randomUUID();
+  const markerFile = path.join(os.tmpdir(), namespace + ".started");
+  const snapshot = {
+    version: 1,
+    runId: "lease-test-" + randomUUID(),
+    task: "prove single worker claim",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "lease-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const seedRuntime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async () => {
+      await onRunSnapshot?.(snapshot);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+  const seeded = await seedRuntime.submit({ task: "prove single worker claim" });
+  let seedRecord = await seedRuntime.get(seeded.id);
+  for (let attempt = 0; attempt < 100 && seedRecord?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    seedRecord = await seedRuntime.get(seeded.id);
+  }
+  assert.equal(seedRecord?.status, "failed");
+  assert.equal(seedRecord?.snapshot?.checkpointId, snapshot.checkpointId);
+
+  const workerScript = `
+    import { appendFile } from "node:fs/promises";
+    import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
+    const runtime = new DurableJobRuntime(() => ({
+      run: async (input) => {
+        if (!input.resume) throw new Error("expected a resume checkpoint");
+        await appendFile(${JSON.stringify(markerFile)}, process.pid + "\\n");
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return { completed: true, state: "completed" };
+      },
+    }), undefined, ${JSON.stringify(namespace)});
+    try {
+      const result = await runtime.resume(${JSON.stringify(seeded.id)});
+      process.stdout.write(JSON.stringify({ status: result.status }));
+    } catch (error) {
+      process.stdout.write(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    }
+  `;
+
+  const runWorker = () => new Promise<string>((resolve, reject) => {
+    const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", workerScript], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 15_000);
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) reject(new Error(stderr || `worker exited with code ${code}`));
+      else resolve(stdout);
+    });
+  });
+
+  try {
+    const results = await Promise.all([runWorker(), runWorker()]);
+    const started = (await readFile(markerFile, "utf8")).trim().split("\n").filter(Boolean);
+    assert.equal(started.length, 1, "only one process may execute the same checkpoint");
+    assert.equal(results.filter((result) => JSON.parse(result).status === "completed").length, 1);
+    assert.equal(results.filter((result) => JSON.parse(result).status !== "completed").length, 1);
+  } finally {
+    const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+    await rm(stateFile, { force: true });
+    await rm(stateFile + ".lock", { force: true });
+    await rm(markerFile, { force: true });
+  }
+});
+
+
+test("DurableJobRuntime serializes competing stale-lock reclamation without losing jobs", async () => {
+  const namespace = "job-runtime-stale-lock-reclaim-" + randomUUID();
+  const stateDirectory = path.join(os.tmpdir(), "sofia-agents-jobs");
+  const stateFile = path.join(stateDirectory, createHash("sha256").update(namespace).digest("hex") + ".json");
+  const lockFile = stateFile + ".lock";
+  const reclaimFile = lockFile + ".reclaim";
+  await mkdir(stateDirectory, { recursive: true });
+  await Promise.all([
+    rm(stateFile, { force: true }),
+    rm(lockFile, { force: true }),
+    rm(reclaimFile, { force: true }),
+  ]);
+  await writeFile(lockFile, JSON.stringify({
+    token: "stale-test-owner",
+    pid: 0,
+    hostname: os.hostname(),
+    createdAt: Date.now() - 180_000,
+  }), { encoding: "utf8", mode: 0o600 });
+
+  const runtimes = Array.from({ length: 8 }, () => new DurableJobRuntime(() => ({
+    run: async () => { throw new Error("expected test worker failure"); },
+  } as unknown as SofiaBrain), undefined, namespace));
+
+  try {
+    const submitted = await Promise.all(runtimes.map((runtime, index) =>
+      runtime.submit({ task: "stale-lock reclaim submission " + index }),
+    ));
+    assert.equal(submitted.length, 8);
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const states = await Promise.all(submitted.map((job, index) => runtimes[index]!.get(job.id)));
+      if (states.every((state) => state?.status === "failed" || state?.status === "completed")) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+
+    const persisted = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string }>;
+    assert.equal(persisted.length, submitted.length, "concurrent reclaimers must not lose job records");
+    assert.deepEqual(new Set(persisted.map((record) => record.id)), new Set(submitted.map((job) => job.id)));
+  } finally {
+    await Promise.all([
+      rm(stateFile, { force: true }),
+      rm(lockFile, { force: true }),
+      rm(reclaimFile, { force: true }),
+    ]);
+  }
+});
+
+
+test("DurableJobRuntime redacts credential-shaped values from persisted and reloaded jobs", async () => {
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-redaction-"));
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "job-redaction-" + randomUUID();
+  const secret = "ghp_" + "B".repeat(36);
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "result token=" + secret }),
+  } as unknown as SofiaBrain;
+  try {
+    const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+    const submitted = await runtime.submit({ task: "task token=" + secret });
+    let record = await runtime.get(submitted.id);
+    for (let attempt = 0; attempt < 50 && record?.status !== "completed"; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      record = await runtime.get(submitted.id);
+    }
+    assert.equal(record?.status, "completed");
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    const file = path.join(root, "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+    const persisted = await readFile(file, "utf8");
+    assert.ok(!persisted.includes(secret), "persisted job file must not contain credential-shaped values");
+
+    const restarted = new DurableJobRuntime(() => brain, undefined, namespace);
+    const loaded = await restarted.get(submitted.id);
+    assert.ok(loaded);
+    assert.ok(!JSON.stringify(loaded).includes(secret), "reloaded job data must remain redacted");
+  } finally {
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("DurableJobRuntime cross-process cancellation aborts the active lease owner", async () => {
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-cross-cancel-"));
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "cross-process-cancel-" + randomUUID();
+  const script = `
+    import { DurableJobRuntime } from "./src/brain/job-runtime.js";
+    const namespace = ${JSON.stringify(namespace)};
+    const brain = {
+      run: async ({ signal }) => {
+        process.stdout.write("started\\n");
+        await new Promise((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener("abort", resolve, { once: true });
+        });
+        process.stdout.write("observed-abort\\n");
+        return { completed: true, state: "completed", summary: "late result must be discarded after cross-process cancellation" };
+      },
+    };
+    const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+    const job = await runtime.submit({ task: "cross-process cancellation" });
+    process.stdout.write("job:" + job.id + "\\n");
+    const keepAlive = setInterval(() => {}, 1000);
+    const deadline = Date.now() + 12000;
+    let record;
+    while (Date.now() < deadline) {
+      record = await runtime.get(job.id);
+      if (record && ["cancelled", "completed", "failed"].includes(record.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    clearInterval(keepAlive);
+    process.stdout.write("final:" + (record?.status ?? "missing") + "\\n");
+    process.exitCode = record?.status === "cancelled" ? 0 : 1;
+  `;
+  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+    cwd: process.cwd(),
+    env: { ...process.env, SOFIA_STATE_DIR: root },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  let errors = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => { output += chunk; });
+  child.stderr.on("data", (chunk: string) => { errors += chunk; });
+  try {
+    const startedDeadline = Date.now() + 8_000;
+    while (!(output.includes("started\n") && /job:([0-9a-f-]+)/i.test(output)) && Date.now() < startedDeadline) {
+      if (child.exitCode !== null) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(output.includes("started\n"), "child worker must acquire its lease before cancellation: " + errors + " stdout=" + output);
+    const jobId = /job:([0-9a-f-]+)/i.exec(output)?.[1];
+    assert.ok(jobId, "child worker must report its job ID");
+    const canceller = new DurableJobRuntime(() => ({
+      run: async () => ({ completed: false, state: "failed", summary: "unused" }),
+    } as unknown as SofiaBrain), undefined, namespace);
+    assert.equal(await canceller.cancel(jobId), true);
+    const finalDeadline = Date.now() + 10_000;
+    while (!output.includes("final:cancelled\n") && Date.now() < finalDeadline) {
+      if (child.exitCode !== null) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    const exitDeadline = Date.now() + 2_000;
+    while (child.exitCode === null && Date.now() < exitDeadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+    if (child.exitCode === null) {
+      child.kill();
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    }
+    assert.ok(output.includes("observed-abort\n"), "active worker must observe cancellation from another process");
+    assert.ok(output.includes("final:cancelled\n"), "cancelled state must remain terminal even if the brain returns a late success");
+    const persisted = await canceller.get(jobId);
+    assert.equal(persisted?.status, "cancelled");
+    assert.equal(persisted?.result, undefined, "late success must not overwrite a durable cancellation");
+    assert.equal(child.exitCode, 0, errors || output);
+  } finally {
+    if (child.exitCode === null) {
+      child.kill();
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    }
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("DurableJobRuntime never reclaims an old lock owned by another host", async () => {
+  const root = path.join(os.tmpdir(), "sofia-job-foreign-lock-" + randomUUID());
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "job-runtime-foreign-host-lock-" + randomUUID();
+  const stateDirectory = path.join(root, "sofia-agents-jobs");
+  const stateFile = path.join(stateDirectory, createHash("sha256").update(namespace).digest("hex") + ".json");
+  const lockFile = stateFile + ".lock";
+  await mkdir(stateDirectory, { recursive: true });
+
+  try {
+    await writeFile(lockFile, JSON.stringify({
+      token: "remote-owner-token",
+      pid: 12345,
+      hostname: "another-host-that-may-still-be-running",
+      createdAt: Date.now() - 180_000,
+    }), { encoding: "utf8", mode: 0o600 });
+
+    const runtime = new DurableJobRuntime(() => ({
+      run: async () => { throw new Error("the job must not start while a foreign lock exists"); },
+    } as unknown as SofiaBrain), undefined, namespace);
+
+    await assert.rejects(
+      runtime.submit({ task: "must fail closed on foreign-host lock" }),
+      /belongs to another host/,
+    );
+    const lock = JSON.parse(await readFile(lockFile, "utf8")) as { token?: string };
+    assert.equal(lock.token, "remote-owner-token", "foreign lock must not be deleted based on age");
+  } finally {
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
 });
