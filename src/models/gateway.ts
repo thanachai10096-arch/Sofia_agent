@@ -160,7 +160,7 @@ export class SofiaModelGateway implements ModelProvider {
       messages,
       ...(tools ? { tools, tool_choice: "auto" } : {}),
       ...(options.maxOutputTokens
-        ? { max_tokens: request.responseFormat === "json_object" ? Math.max(2_048, options.maxOutputTokens) : options.maxOutputTokens }
+        ? { max_tokens: options.maxOutputTokens }
         : request.responseFormat === "json_object" ? { max_tokens: 2_048 } : {}),
       ...(request.responseFormat ? { response_format: { type: request.responseFormat } } : {}),
       ...(request.reasoningEffort ? { reasoning_effort: request.reasoningEffort } : {}),
