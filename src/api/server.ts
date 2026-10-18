@@ -416,8 +416,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
-        try { await usage.consume(auth.keyId); } catch {
-          return json(res, 429, { error: "quota_exceeded" }, origin, config);
+        try { await usage.consume(auth.keyId); } catch (error) {
+          const exceeded = error instanceof Error && /quota exceeded/i.test(error.message);
+          return json(res, exceeded ? 429 : 503, { error: exceeded ? "quota_exceeded" : "usage_store_unavailable", message: exceeded ? error.message : "Usage accounting is unavailable; request rejected safely." }, origin, config);
         }
         const runId = randomUUID();
         const controller = new AbortController();
@@ -511,7 +512,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
           }
           try { await usage.consume(auth.keyId); } catch (error) {
-            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+            const exceeded = error instanceof Error && /quota exceeded/i.test(error.message);
+            return json(res, exceeded ? 429 : 503, { error: exceeded ? "quota_exceeded" : "usage_store_unavailable", message: exceeded ? error.message : "Usage accounting is unavailable; request rejected safely." }, origin, config);
           }
           const runId = randomUUID();
           const run: ActiveRun = {
@@ -539,7 +541,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
 
         try { await usage.consume(auth.keyId); } catch (error) {
-          return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+          const exceeded = error instanceof Error && /quota exceeded/i.test(error.message);
+          return json(res, exceeded ? 429 : 503, { error: exceeded ? "quota_exceeded" : "usage_store_unavailable", message: exceeded ? error.message : "Usage accounting is unavailable; request rejected safely." }, origin, config);
         }
 
         const controller = new AbortController();
@@ -688,7 +691,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
-        try { await usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
+        try { await usage.consume(auth.keyId); } catch (error) {
+          const exceeded = error instanceof Error && /quota exceeded/i.test(error.message);
+          return json(res, exceeded ? 429 : 503, { error: exceeded ? "quota_exceeded" : "usage_store_unavailable", message: exceeded ? error.message : "Usage accounting is unavailable; request rejected safely." }, origin, config);
+        }
         try {
           const job = await deps.jobRuntime.submit({
             task: input.task,
