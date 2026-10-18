@@ -903,14 +903,13 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
     recoveryRounds: 0,
     trace: [],
   } as unknown as import("./run-state.js").BrainRunSnapshot;
-  const brain = {
-    run: async ({ onRunSnapshot }: { onRunSnapshot?: (value: import("./run-state.js").BrainRunSnapshot) => void | Promise<void> }) => {
-      await onRunSnapshot?.(snapshot);
-      return { completed: false, state: "failed" };
-    },
-  } as unknown as SofiaBrain;
   try {
-    const runtime = new DurableJobRuntime(() => brain, runStore, namespace);
+    const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+      run: async () => {
+        await onRunSnapshot?.(snapshot);
+        return { completed: false, state: "failed" };
+      },
+    } as unknown as SofiaBrain), runStore, namespace);
     const submitted = await runtime.submit({ task: "task token=" + secret });
     let record = await runtime.get(submitted.id);
     for (let attempt = 0; attempt < 100 && record?.status !== "failed"; attempt += 1) {
