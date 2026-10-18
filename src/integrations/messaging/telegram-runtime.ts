@@ -103,10 +103,18 @@ export function createTelegramMessagingRuntime(
       start: () => gateway.start(),
       stop: () => gateway.stop(),
     };
-  } catch {
-    // Do not log configuration values or provider error text; malformed optional
-    // Telegram configuration must not prevent the existing API from starting.
-    onWarning("Telegram integration disabled: configuration validation failed.");
+  } catch (error) {
+    // Report only the static validation message from our own constructors. Never log
+    // environment values, bot tokens, API keys, or provider response bodies.
+    const safeMessage = error instanceof Error && [
+      "TELEGRAM_ALLOWED_USER_IDS must be a comma-separated list of valid numeric IDs.",
+      "TELEGRAM_ALLOWED_CHAT_IDS must be a comma-separated list of valid numeric IDs.",
+      "TELEGRAM_ALLOWED_USER_IDS must not contain duplicate IDs.",
+      "TELEGRAM_ALLOWED_CHAT_IDS must not contain duplicate IDs.",
+      "Telegram bot token has an invalid format.",
+      "Telegram poll timeout must be an integer between 1 and 50 seconds.",
+    ].includes(error.message) ? error.message : "Telegram configuration validation failed; check required variable values and API URL format.";
+    onWarning("Telegram integration disabled: " + safeMessage);
     return undefined;
   }
 }
