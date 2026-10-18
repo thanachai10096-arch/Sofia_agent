@@ -24,21 +24,21 @@ test("auto mode uses remote only when local is unavailable and remote passes eve
 });
 
 test("auto mode does not use an unauthenticated or unisolated remote backend", () => {
-  const unauthenticated = decideComputeBackend({ ...readyRemote, remoteAuthenticated: false });
+  const unauthenticated = decideComputeBackend({ ...readyRemote, localAvailable: true, remoteAuthenticated: false });
   assert.equal(unauthenticated.backend, "local");
   assert.match(unauthenticated.reason, /authentication/);
 
-  const unisolated = decideComputeBackend({ ...readyRemote, remoteIsolated: false });
+  const unisolated = decideComputeBackend({ ...readyRemote, localAvailable: true, remoteIsolated: false });
   assert.equal(unisolated.backend, "local");
   assert.match(unisolated.reason, /isolation/);
 });
 
 test("remote tasks containing secrets or requiring local resources are not routed remotely", () => {
-  const secretTask = decideComputeBackend({ ...readyRemote, task: { containsSecrets: true } });
+  const secretTask = decideComputeBackend({ ...readyRemote, localAvailable: true, task: { containsSecrets: true } });
   assert.equal(secretTask.backend, "local");
   assert.match(secretTask.reason, /contains secrets/);
 
-  const localTask = decideComputeBackend({ ...readyRemote, task: { requiresLocalResources: true } });
+  const localTask = decideComputeBackend({ ...readyRemote, localAvailable: true, task: { requiresLocalResources: true } });
   assert.equal(localTask.backend, "local");
   assert.match(localTask.reason, /local-only/);
 });
@@ -46,6 +46,7 @@ test("remote tasks containing secrets or requiring local resources are not route
 test("remote network and memory requirements are checked explicitly", () => {
   const network = decideComputeBackend({
     ...readyRemote,
+    localAvailable: true,
     task: { requiresNetwork: true },
     remoteNetworkAllowed: false,
   });
@@ -54,6 +55,7 @@ test("remote network and memory requirements are checked explicitly", () => {
 
   const memory = decideComputeBackend({
     ...readyRemote,
+    localAvailable: true,
     task: { estimatedMemoryMb: 2048 },
     maxRemoteMemoryMb: 1024,
   });
