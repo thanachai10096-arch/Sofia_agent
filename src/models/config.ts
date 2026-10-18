@@ -2,7 +2,7 @@ import type { ModelRoute } from "./types.js";
 
 export interface SofiaModelConfig {
   routes: ModelRoute[];
-  providers: Record<string, { baseUrl: string; apiKey: string; model: string }>;
+  providers: Record<string, { baseUrl: string; apiKey: string; model: string; fallbackModel?: string }>;
 }
 
 function numberEnv(name: string, fallback: number) {
@@ -46,7 +46,12 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       qualityWeight: numberEnv(`SOFIA_${id.toUpperCase()}_QUALITY`, quality),
       healthy: true,
     });
-    providers[id] = { baseUrl: OPENROUTER_BASE_URL, apiKey, model };
+    providers[id] = {
+      baseUrl: OPENROUTER_BASE_URL,
+      apiKey,
+      model,
+      ...(model !== "openrouter/auto" ? { fallbackModel: "openrouter/auto" } : {}),
+    };
   }
 
   return { routes, providers };
