@@ -134,7 +134,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
-  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
+  const usage = config.usageStore ?? new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
   const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
@@ -416,7 +416,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
-        try { usage.consume(auth.keyId); } catch {
+        try { await usage.consume(auth.keyId); } catch {
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
         }
         const runId = randomUUID();
@@ -510,7 +510,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             res.setHeader("retry-after", "2");
             return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
           }
-          try { usage.consume(auth.keyId); } catch (error) {
+          try { await usage.consume(auth.keyId); } catch (error) {
             return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
           }
           const runId = randomUUID();
@@ -538,7 +538,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 202, publicResponse(run), origin, config);
         }
 
-        try { usage.consume(auth.keyId); } catch (error) {
+        try { await usage.consume(auth.keyId); } catch (error) {
           return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
         }
 
@@ -688,7 +688,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
-        try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
+        try { await usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
           const job = await deps.jobRuntime.submit({
             task: input.task,
