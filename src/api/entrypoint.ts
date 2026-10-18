@@ -5,6 +5,7 @@ import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
@@ -16,21 +17,25 @@ const agent = new SofiaAgent(deps);
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
-const discordUserIds = (process.env.DISCORD_ALLOWED_USER_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-const discordChannelIds = (process.env.DISCORD_ALLOWED_CHANNEL_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-const discordConfigured = Boolean(discordPublicKey || discordBotToken || discordUserIds.length || discordChannelIds.length);
+const rawDiscordUserIds = process.env.DISCORD_ALLOWED_USER_IDS;
+const rawDiscordChannelIds = process.env.DISCORD_ALLOWED_CHANNEL_IDS;
+const discordConfigured = Boolean(discordPublicKey || discordBotToken || rawDiscordUserIds?.trim() || rawDiscordChannelIds?.trim());
 let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
 const discordAbort = new AbortController();
 
 if (discordConfigured) {
-  if (!discordPublicKey || !discordBotToken || discordChannelIds.length === 0) {
-    throw new Error("Discord integration requires DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, and DISCORD_ALLOWED_CHANNEL_IDS. DISCORD_ALLOWED_USER_IDS is optional; when omitted, all non-bot users in the allowed channels may use /run.");
+  if (!discordPublicKey || !discordBotToken) {
+    throw new Error("Discord integration requires DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, DISCORD_ALLOWED_USER_IDS, and DISCORD_ALLOWED_CHANNEL_IDS.");
   }
+  // Both allowlists are mandatory. An omitted user allowlist must never mean
+  // that every non-bot user in an allowed channel can execute agent tasks.
+  const discordUserIds = parseDiscordIdAllowlist(rawDiscordUserIds, "DISCORD_ALLOWED_USER_IDS");
+  const discordChannelIds = parseDiscordIdAllowlist(rawDiscordChannelIds, "DISCORD_ALLOWED_CHANNEL_IDS");
   discordTransport = createDiscordInteractionTransport({
     publicKeyHex: discordPublicKey,
     botToken: discordBotToken,
     commandName: process.env.DISCORD_COMMAND_NAME?.trim() || "run",
-    ...(discordUserIds.length ? { allowedUserIds: discordUserIds } : {}),
+    allowedUserIds: discordUserIds,
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
   });
