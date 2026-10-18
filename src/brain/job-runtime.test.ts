@@ -695,15 +695,31 @@ test("DurableJobRuntime serializes competing stale-lock reclamation without losi
     ));
     assert.equal(submitted.length, 8);
 
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const states = await Promise.all(submitted.map((job, index) => runtimes[index]!.get(job.id)));
-      if (states.every((state) => state?.status === "failed" || state?.status === "completed")) break;
+    let persisted: Array<{ id: string; status: string }> = [];
+    let locksReleased = false;
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      try {
+        persisted = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; status: string }>;
+      } catch { /* wait for the first atomic state write */ }
+      const allDurable = submitted.every((job) =>
+        persisted.some((record) => record.id === job.id && ["failed", "completed", "cancelled"].includes(record.status)),
+      );
+      if (allDurable) {
+        let lockExists = false;
+        let reclaimExists = false;
+        try { await stat(lockFile); lockExists = true; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        try { await stat(reclaimFile); reclaimExists = true; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        locksReleased = !lockExists && !reclaimExists;
+        if (locksReleased) break;
+      }
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
 
-    const persisted = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string }>;
     assert.equal(persisted.length, submitted.length, "concurrent reclaimers must not lose job records");
     assert.deepEqual(new Set(persisted.map((record) => record.id)), new Set(submitted.map((job) => job.id)));
+    assert.ok(locksReleased, "all state writes and stale-lock reclamation must finish before cleanup");
   } finally {
     await Promise.all([
       rm(stateFile, { force: true }),

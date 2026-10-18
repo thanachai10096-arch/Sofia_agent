@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -68,4 +68,78 @@ test("skill workflow keeps verified candidates inactive when approval is decline
     assert.equal(result.candidate.status, "verified");
     assert.equal(f.platform.get("workflow-test-skill"), undefined);
   } finally { rmSync(f.directory, { recursive: true, force: true }); }
+});
+
+
+test("skill lifecycle rejects tampered persisted active records before restoring them", () => {
+  const scenarios = [
+    {
+      name: "missing evaluation",
+      mutate: (record: Record<string, unknown>) => { delete record.evaluation; },
+      activeBySkill: { "persisted-skill": "record-1" },
+    },
+    {
+      name: "failed evaluation",
+      mutate: (record: Record<string, unknown>) => {
+        record.evaluation = { passed: false, checks: [{ name: "metadata", passed: false }] };
+      },
+      activeBySkill: { "persisted-skill": "record-1" },
+    },
+    {
+      name: "low confidence",
+      mutate: (record: Record<string, unknown>) => {
+        record.provenance = { source: "test", evidenceIds: ["evidence-1"], confidence: 0.1 };
+      },
+      activeBySkill: { "persisted-skill": "record-1" },
+    },
+    {
+      name: "inconsistent active pointer",
+      mutate: (_record: Record<string, unknown>) => {},
+      activeBySkill: { "persisted-skill": "missing-record" },
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-store-tamper-"));
+    try {
+      const record: Record<string, unknown> = {
+        id: "record-1",
+        skillId: "persisted-skill",
+        package: {
+          skill: {
+            id: "persisted-skill",
+            name: "Persisted test skill",
+            description: "Test-only persisted skill",
+            triggers: ["test trigger"],
+            categories: ["tool_error"],
+            strategy: "inspect-evidence",
+            procedure: ["inspect evidence", "verify outcome"],
+            verification: ["test"],
+          },
+          source: "learned",
+          version: "1.0.0",
+        },
+        status: "active",
+        provenance: { source: "test", evidenceIds: ["evidence-1"], confidence: 0.95 },
+        evaluation: { passed: true, checks: [{ name: "metadata", passed: true }] },
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      };
+      scenario.mutate(record);
+      writeFileSync(path.join(directory, "lifecycle.json"), JSON.stringify({
+        schemaVersion: 1,
+        records: [record],
+        activeBySkill: scenario.activeBySkill,
+      }));
+      const platform = new InMemorySkillsPlatform();
+      assert.throws(() => new VersionedSkillLifecycle(
+        platform,
+        async () => ({ passed: true, checks: [{ name: "unused", passed: true }] }),
+        { file: path.join(directory, "lifecycle.json") },
+      ), /Active skill lifecycle|inconsistent/);
+      assert.equal(platform.get("persisted-skill"), undefined, scenario.name);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
 });
