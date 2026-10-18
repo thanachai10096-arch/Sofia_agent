@@ -20,7 +20,13 @@ const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
 const rawDiscordUserIds = process.env.DISCORD_ALLOWED_USER_IDS;
 const rawDiscordChannelIds = process.env.DISCORD_ALLOWED_CHANNEL_IDS;
-const discordConfigured = Boolean(discordPublicKey || discordBotToken || rawDiscordUserIds?.trim() || rawDiscordChannelIds?.trim());
+const discordRequested = Boolean(discordPublicKey || discordBotToken || rawDiscordUserIds?.trim() || rawDiscordChannelIds?.trim());
+// Keep the API available when optional Discord configuration is incomplete. Discord remains
+// disabled unless every required credential and both explicit allowlists are configured.
+const discordConfigured = Boolean(discordPublicKey && discordBotToken && rawDiscordUserIds?.trim() && rawDiscordChannelIds?.trim());
+if (discordRequested && !discordConfigured) {
+  console.error("Discord integration disabled: required configuration is incomplete; API will continue without Discord.");
+}
 let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
 const discordAbort = new AbortController();
 let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
