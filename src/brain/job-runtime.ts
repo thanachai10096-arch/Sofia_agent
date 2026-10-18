@@ -104,6 +104,7 @@ class FileJobStateStore {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 
         let stale = false;
+        let foreignHost = false;
         let observedToken: string | undefined;
         try {
           const lock = JSON.parse(await fs.readFile(this.lockFile, "utf8")) as {
@@ -117,9 +118,11 @@ class FileJobStateStore {
             } catch (probeError) {
               stale = (probeError as NodeJS.ErrnoException).code === "ESRCH";
             }
+          } else if (typeof lock.hostname === "string" && lock.hostname !== os.hostname()) {
+            // Age cannot prove that a worker on another host is dead. Fail closed;
+            // use a transactional shared store for multi-host coordination.
+            foreignHost = true;
           } else if (age > 120_000) {
-            // Cross-host stale-lock recovery is best-effort; this file store is not a
-            // distributed lock service and must not be used as one across machines.
             stale = true;
           }
           if (!observedToken && age > 120_000) stale = true;
@@ -134,6 +137,10 @@ class FileJobStateStore {
             if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
             throw statError;
           }
+        }
+
+        if (foreignHost) {
+          throw new Error("File-backed job state lock belongs to another host; use a transactional shared store for multi-host workers");
         }
 
         if (stale) {
@@ -181,6 +188,9 @@ class FileJobStateStore {
                 } catch (probeError) {
                   latestStale = (probeError as NodeJS.ErrnoException).code === "ESRCH";
                 }
+              } else if (typeof latest.hostname === "string" && latest.hostname !== os.hostname()) {
+                // Never reclaim a lock owned by a different host based on age alone.
+                latestStale = false;
               } else if (latestAge > 120_000) {
                 latestStale = true;
               }
