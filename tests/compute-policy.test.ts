@@ -26,21 +26,33 @@ test("auto mode uses remote only when local is unavailable and remote passes eve
 test("auto mode does not use an unauthenticated or unisolated remote backend", () => {
   const unauthenticated = decideComputeBackend({ ...readyRemote, localAvailable: true, remoteAuthenticated: false });
   assert.equal(unauthenticated.backend, "local");
-  assert.match(unauthenticated.reason, /authentication/);
+  assert.match(unauthenticated.reason, /local-first/);
+  const noFallback = decideComputeBackend({ ...readyRemote, remoteAuthenticated: false });
+  assert.equal(noFallback.backend, "unavailable");
+  assert.match(noFallback.reason, /authentication/);
 
   const unisolated = decideComputeBackend({ ...readyRemote, localAvailable: true, remoteIsolated: false });
   assert.equal(unisolated.backend, "local");
-  assert.match(unisolated.reason, /isolation/);
+  assert.match(unisolated.reason, /local-first/);
+  const noIsolatedWorker = decideComputeBackend({ ...readyRemote, remoteIsolated: false });
+  assert.equal(noIsolatedWorker.backend, "unavailable");
+  assert.match(noIsolatedWorker.reason, /isolation/);
 });
 
 test("remote tasks containing secrets or requiring local resources are not routed remotely", () => {
   const secretTask = decideComputeBackend({ ...readyRemote, localAvailable: true, task: { containsSecrets: true } });
   assert.equal(secretTask.backend, "local");
-  assert.match(secretTask.reason, /contains secrets/);
+  assert.match(secretTask.reason, /local-first/);
+  const noSecretRemote = decideComputeBackend({ ...readyRemote, task: { containsSecrets: true } });
+  assert.equal(noSecretRemote.backend, "unavailable");
+  assert.match(noSecretRemote.reason, /contains secrets/);
 
   const localTask = decideComputeBackend({ ...readyRemote, localAvailable: true, task: { requiresLocalResources: true } });
   assert.equal(localTask.backend, "local");
-  assert.match(localTask.reason, /local-only/);
+  assert.match(localTask.reason, /local-first/);
+  const noLocalResourcesRemote = decideComputeBackend({ ...readyRemote, task: { requiresLocalResources: true } });
+  assert.equal(noLocalResourcesRemote.backend, "unavailable");
+  assert.match(noLocalResourcesRemote.reason, /local-only/);
 });
 
 test("remote network and memory requirements are checked explicitly", () => {
@@ -51,7 +63,10 @@ test("remote network and memory requirements are checked explicitly", () => {
     remoteNetworkAllowed: false,
   });
   assert.equal(network.backend, "local");
-  assert.match(network.reason, /network access/);
+  assert.match(network.reason, /local-first/);
+  const noNetworkRemote = decideComputeBackend({ ...readyRemote, task: { requiresNetwork: true }, remoteNetworkAllowed: false });
+  assert.equal(noNetworkRemote.backend, "unavailable");
+  assert.match(noNetworkRemote.reason, /network access/);
 
   const memory = decideComputeBackend({
     ...readyRemote,
@@ -60,7 +75,10 @@ test("remote network and memory requirements are checked explicitly", () => {
     maxRemoteMemoryMb: 1024,
   });
   assert.equal(memory.backend, "local");
-  assert.match(memory.reason, /memory/);
+  assert.match(memory.reason, /local-first/);
+  const noMemoryRemote = decideComputeBackend({ ...readyRemote, task: { estimatedMemoryMb: 2048 }, maxRemoteMemoryMb: 1024 });
+  assert.equal(noMemoryRemote.backend, "unavailable");
+  assert.match(noMemoryRemote.reason, /memory/);
 });
 
 test("explicit local preference stays local even when remote is ready", () => {
