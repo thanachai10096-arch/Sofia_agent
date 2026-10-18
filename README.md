@@ -178,7 +178,7 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 
 ### API key storage and quota persistence
 
-For deployments that should not keep bearer tokens in an in-memory configuration object, configure HMAC-SHA-256 token digests using an independent random `SOFIA_API_KEY_HASH_SECRET` of at least 32 bytes. Do not reuse the bearer token as the HMAC secret or use a human password as an API key.
+For deployments that should not keep bearer tokens in an in-memory configuration object, configure HMAC-SHA-256 token digests using an independent random `SOFIA_API_KEY_HASH_SECRET` of at least 32 bytes. Do not reuse the bearer token as the HMAC secret or use a human password as an API key. The packaged standalone entrypoint does not require this secret; this is an optional pattern for custom host applications that specifically need digest-only configuration.
 
 ```ts
 import { createHmac } from "node:crypto";
