@@ -69,7 +69,7 @@ export function createInternalRoute(
     qualityTier: Math.max(1, Math.round(route.qualityWeight)),
     capabilities: route.capabilities,
     contextWindow: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_CONTEXT"] ?? 32_000),
-    maxOutputTokens: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT"] ?? 4_096),
+    maxOutputTokens: Math.max(2_048, Number(process.env["SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT"] ?? 4_096)),
     hardOutputCap: true,
 
     prepare(prompt: PackedPrompt): PreparedCall {
