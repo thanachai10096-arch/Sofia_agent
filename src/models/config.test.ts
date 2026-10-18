@@ -3,6 +3,13 @@ import { afterEach, test } from "node:test";
 import { loadModelConfigFromEnv } from "./config.js";
 
 const names = [
+  "OPENROUTER_API_KEY",
+  "OPENROUTER_MODEL",
+  "OPENROUTER_FAST_MODEL",
+  "OPENROUTER_CODING_MODEL",
+  "OPENROUTER_REASONING_MODEL",
+  "OPENROUTER_VISION_MODEL",
+  // Legacy credentials must not influence provider selection.
   "GEMINI_API_KEY",
   "Gemini_API_Key",
   "GEMINI_API_BASE_URL",
@@ -33,43 +40,46 @@ afterEach(() => {
   }
 });
 
-test("Gemini key selects Gemini OpenAI-compatible endpoint and default model", () => {
+test("OpenRouter key selects only OpenRouter and defaults to its auto router", () => {
   clear();
-  process.env.GEMINI_API_KEY = "test-key";
+  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
   const config = loadModelConfigFromEnv();
   assert.equal(config.routes.length, 4);
-  assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
-  assert.equal(config.providers.fast?.model, "gemini-2.5-flash");
-  assert.equal(config.providers.coding?.model, "gemini-2.5-flash");
+  for (const route of config.routes) {
+    const provider = config.providers[route.id];
+    assert.equal(provider?.baseUrl, "https://openrouter.ai/api/v1");
+    assert.equal(provider?.apiKey, "openrouter-test-key");
+    assert.equal(provider?.model, "openrouter/auto");
+  }
 });
 
-test("Gemini key takes precedence over legacy gateway key", () => {
+test("OpenRouter route-specific model overrides the shared OpenRouter model", () => {
+  clear();
+  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+  process.env.OPENROUTER_MODEL = "openai/gpt-4.1-mini";
+  process.env.OPENROUTER_CODING_MODEL = "anthropic/claude-sonnet-4";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.model, "openai/gpt-4.1-mini");
+  assert.equal(config.providers.coding?.model, "anthropic/claude-sonnet-4");
+  assert.equal(config.providers.reasoning?.model, "openai/gpt-4.1-mini");
+});
+
+test("legacy Gemini credentials cannot override OpenRouter", () => {
+  clear();
+  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.GEMINI_MODEL = "gemini-test-model";
+  process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
+  process.env.SOFIA_FAST_MODEL = "legacy-fast-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "openrouter-test-key");
+  assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(config.providers.fast?.model, "openrouter/auto");
+});
+
+test("fails closed when the OpenRouter API key is missing", () => {
   clear();
   process.env.GEMINI_API_KEY = "gemini-test-key";
   process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
-  process.env.GEMINI_MODEL = "gemini-test-model";
-  const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.fast?.apiKey, "gemini-test-key");
-  assert.equal(config.providers.fast?.model, "gemini-test-model");
-});
-
-test("Gemini-specific route model overrides shared Gemini model", () => {
-  clear();
-  process.env.Gemini_API_Key = "test-key";
-  process.env.GEMINI_MODEL = "gemini-shared";
-  process.env.GEMINI_CODING_MODEL = "gemini-coding";
-  const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.coding?.model, "gemini-coding");
-  assert.equal(config.providers.fast?.model, "gemini-shared");
-});
-
-test("legacy gateway configuration remains supported when Gemini is absent", () => {
-  clear();
-  process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
-  process.env.SOFIA_AI_GATEWAY_URL = "https://gateway.example/v1";
-  process.env.SOFIA_FAST_MODEL = "legacy-fast";
-  const config = loadModelConfigFromEnv();
-  assert.equal(config.routes.length, 1);
-  assert.equal(config.providers.fast?.baseUrl, "https://gateway.example/v1");
-  assert.equal(config.providers.fast?.model, "legacy-fast");
+  assert.throws(loadModelConfigFromEnv, /OPENROUTER_API_KEY/);
 });
