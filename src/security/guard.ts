@@ -97,11 +97,48 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
   return { allowed: true, risk, requireApproval, actionHash: hash };
 }
 
+function redactPrivateKeyBlocks(value: string): string {
+  const prefixes = new Set(["", "RSA ", "EC ", "OPENSSH ", "DSA ", "ENCRYPTED "]);
+  const header = "PRIVATE KEY-----";
+  let result = "";
+  let cursor = 0;
+  while (cursor < value.length) {
+    const begin = value.indexOf("-----BEGIN ", cursor);
+    if (begin < 0) return result + value.slice(cursor);
+    result += value.slice(cursor, begin);
+    const labelStart = begin + "-----BEGIN ".length;
+    const headerEnd = value.indexOf(header, labelStart);
+    if (headerEnd < 0) {
+      result += value.slice(begin, labelStart);
+      cursor = labelStart;
+      continue;
+    }
+    const prefix = value.slice(labelStart, headerEnd);
+    if (!prefixes.has(prefix)) {
+      result += value.slice(begin, labelStart);
+      cursor = labelStart;
+      continue;
+    }
+    const endMarker = "-----END " + prefix + "PRIVATE KEY-----";
+    const end = value.indexOf(endMarker, headerEnd + header.length);
+    if (end < 0) {
+      result += value.slice(begin, labelStart);
+      cursor = labelStart;
+      continue;
+    }
+    result += "[REDACTED PRIVATE KEY]";
+    cursor = end + endMarker.length;
+  }
+  return result;
+}
+
 export function redactSecrets(value: unknown): unknown {
   if (typeof value === "string") {
-    return value
-      .replace(/(?:Bearer\s+)[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
-      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
+    return redactPrivateKeyBlocks(value)
+      .replace(/\b(?:xox[baprs]-[A-Za-z0-9-]{10,})\b/gi, "[REDACTED]")
+      .replace(/(?:Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]")
+      .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{12,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[0-9A-Z]{16})\b/g, "[REDACTED]")
+      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|password|authorization|token|secret[_-]?key|session[_-]?token|aws_secret_access_key)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
   }
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value && typeof value === "object") {
