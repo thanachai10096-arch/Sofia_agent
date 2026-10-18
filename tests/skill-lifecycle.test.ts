@@ -112,3 +112,34 @@ test("skill lifecycle refuses to restore persisted active state over a conflicti
     assert.equal(conflictingPlatform.get("repair-skill")?.source, "custom");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("skill lifecycle validates all persisted active skills before mutating the platform", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "lifecycle.json");
+    const originalPlatform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(originalPlatform, passing, { file });
+    const first = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["first"], confidence: 0.95,
+    });
+    await lifecycle.evaluate(first.id);
+    lifecycle.promote(first.id);
+
+    const secondPackage = { ...pkg("1.0.0"), skill: { ...pkg("1.0.0").skill, id: "second-skill" } };
+    const second = lifecycle.propose(secondPackage, {
+      source: "repair", evidenceIds: ["second"], confidence: 0.95,
+    });
+    await lifecycle.evaluate(second.id);
+    lifecycle.promote(second.id);
+
+    const conflictingPlatform = new InMemorySkillsPlatform();
+    conflictingPlatform.register({ ...pkg("0.9.0"), source: "custom", skill: { ...pkg("0.9.0").skill, id: "second-skill" } });
+    assert.throws(
+      () => new VersionedSkillLifecycle(conflictingPlatform, passing, { file }),
+      /Cannot restore active lifecycle skill over a different platform skill/,
+    );
+    assert.equal(conflictingPlatform.get("repair-skill"), undefined, "failed restore must not partially register earlier active skills");
+    assert.equal(conflictingPlatform.get("second-skill")?.version, "0.9.0");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
