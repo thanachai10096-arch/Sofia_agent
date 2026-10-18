@@ -82,6 +82,22 @@ export interface JobRuntime {
   markNotificationDelivered?(id: string): Promise<void>;
 }
 
+async function isExclusiveFileCollision(error: unknown, file: string): Promise<boolean> {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "EEXIST") return true;
+  // Windows may report ERROR_ACCESS_DENIED as EPERM for open(..., "wx")
+  // when another process already created the path. Confirm the path exists
+  // before treating this as lock contention; genuine permission errors fail closed.
+  if (code !== "EPERM" || process.platform !== "win32") return false;
+  try {
+    await fs.stat(file);
+    return true;
+  } catch (statError) {
+    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw statError;
+  }
+}
+
 class FileJobStateStore {
   private readonly file: string;
   private readonly lockFile: string;
@@ -118,7 +134,7 @@ class FileJobStateStore {
           await fs.rm(this.lockFile, { force: true }).catch(() => undefined);
           throw error;
         }
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        if (!(await isExclusiveFileCollision(error, this.lockFile))) throw error;
 
         let stale = false;
         let foreignHost = false;
@@ -181,7 +197,7 @@ class FileJobStateStore {
             const createdReclaimFile = reclaimHandle !== undefined;
             await reclaimHandle?.close().catch(() => undefined);
             if (createdReclaimFile) await fs.rm(reclaimFile, { force: true }).catch(() => undefined);
-            if ((reclaimError as NodeJS.ErrnoException).code === "EEXIST") {
+            if (await isExclusiveFileCollision(reclaimError, reclaimFile)) {
               if (Date.now() >= deadline) throw new Error("Timed out waiting for durable job-state stale-lock reclamation");
               await new Promise<void>((resolve) => setTimeout(resolve, 20));
               continue;
