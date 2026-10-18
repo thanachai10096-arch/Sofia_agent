@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createTelegramMessagingRuntime,
+  reportTelegramRunCompletion,
   parseTelegramChatAllowlist,
   parseTelegramUserAllowlist,
 } from "./telegram-runtime.js";
@@ -55,4 +56,45 @@ test("complete Telegram configuration constructs a runtime without starting netw
   assert.ok(runtime);
   await runtime.stop();
   assert.deepEqual(warnings, []);
+});
+
+
+test("Telegram run completion sends the real completed output to the originating chat", async () => {
+  const sent: Array<{ conversationId: string; text: string }> = [];
+  const warnings: string[] = [];
+  await reportTelegramRunCompletion({
+    runId: "run-123",
+    conversationId: "chat-456",
+    waitForRun: async (id, options) => {
+      assert.equal(id, "run-123");
+      assert.equal(options.timeoutMs, 30 * 60 * 1_000);
+      assert.equal(options.intervalMs, 1_000);
+      return { id, status: "completed", result: { output: "สวัสดีจาก Sofia" } };
+    },
+    send: async (message) => {
+      sent.push({ conversationId: message.conversationId, text: message.text });
+      return true;
+    },
+    onWarning: (event) => warnings.push(event),
+  });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.conversationId, "chat-456");
+  assert.match(sent[0]?.text ?? "", /Sofia completed the task/);
+  assert.match(sent[0]?.text ?? "", /สวัสดีจาก Sofia/);
+  assert.deepEqual(warnings, []);
+});
+
+test("Telegram run completion reports failed runs without exposing internal error details", async () => {
+  const sent: Array<{ conversationId: string; text: string }> = [];
+  await reportTelegramRunCompletion({
+    runId: "run-789",
+    conversationId: "chat-456",
+    waitForRun: async (id) => ({ id, status: "failed", error: "private internal stack trace" }),
+    send: async (message) => {
+      sent.push({ conversationId: message.conversationId, text: message.text });
+      return true;
+    },
+  });
+  assert.match(sent[0]?.text ?? "", /task failed/i);
+  assert.doesNotMatch(sent[0]?.text ?? "", /private internal stack trace/);
 });
