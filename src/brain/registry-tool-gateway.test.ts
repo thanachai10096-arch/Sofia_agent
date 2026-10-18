@@ -344,7 +344,7 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
           freeText: "unlabelled key sk-12345678901234567890",
           githubToken: "ghp_1234567890123456789012345",
           awsKey: "AKIA1234567890ABCDEF",
-          privateKey: "-----BEGIN PRIVATE KEY-----\\nprivate material\\n-----END PRIVATE KEY-----",
+          snippet: "-----BEGIN PRIVATE KEY-----\\nprivate material\\n-----END PRIVATE KEY-----",
           nested: { password: "hunter2" },
         };
       },
