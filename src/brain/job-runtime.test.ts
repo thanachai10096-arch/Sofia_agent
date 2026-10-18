@@ -883,7 +883,8 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
   let savedSnapshot: import("./run-state.js").BrainRunSnapshot | undefined;
   const runStore = {
     save: async (snapshot: import("./run-state.js").BrainRunSnapshot) => { savedSnapshot = snapshot; },
-    load: async () => savedSnapshot,
+    // Simulate a legacy RunStore file written before snapshot redaction existed.
+    load: async () => snapshot,
     delete: async () => undefined,
   };
   const snapshot = {
