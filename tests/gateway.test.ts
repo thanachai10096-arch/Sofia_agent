@@ -32,6 +32,30 @@ test("gateway returns a validated assistant response and token usage", async () 
   }
 });
 
+test("gateway reports safe response shape when an OpenAI-compatible response has no message", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ finish_reason: "stop", content_filter_results: { secret: "must-not-leak" } }],
+    prompt: "private prompt must not leak",
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test-secret", model: "test-model" },
+    });
+    await assert.rejects(
+      gateway.generate(request, makeRoute()),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /message=missing/);
+        assert.match(error.message, /choice_keys=finish_reason,content_filter_results/);
+        assert.doesNotMatch(error.message, /must-not-leak|private prompt|test-secret/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("gateway retries transient provider status and then succeeds", async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
