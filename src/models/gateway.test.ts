@@ -65,3 +65,32 @@ test("does not mask authentication errors with model fallback", async () => {
   );
   assert.equal(calls, 1);
 });
+
+
+test("keeps non-retryable OpenRouter 402 errors visible instead of opening the circuit", async () => {
+  let calls = 0;
+  const testRoute = { ...route, healthy: true };
+  const gateway = new SofiaModelGateway({
+    test: {
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKey: "test-key",
+      model: "openrouter/free",
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({
+          error: { message: "Payment required" },
+        }), { status: 402, headers: { "content-type": "application/json" } });
+      },
+    },
+  });
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await assert.rejects(
+      gateway.generate({ task: "hello", kind: "general", step: attempt + 1 }, testRoute),
+      /Model gateway request failed.*402/,
+    );
+  }
+
+  assert.equal(calls, 4);
+  assert.equal(testRoute.healthy, true);
+});
