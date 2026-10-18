@@ -32,7 +32,7 @@ Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `ma
 
 - Terminate TLS at a trusted ingress/reverse proxy and restrict direct access to the application port.
 - Store provider credentials and API keys in the deployment secret manager. Rotate keys by issuing a replacement, updating clients, verifying usage, then removing the old key from server configuration.
-- For standalone hash-only API-key auth, configure `SOFIA_API_KEY_HASH_SECRET` as an independent random secret of at least 32 bytes. The standalone server uses HMAC-SHA-256; do not reuse the bearer token as the HMAC key. Rotate the API key and hash secret together when appropriate, then restart the service.
+- The standalone server reads a high-entropy `SOFIA_API_KEY` from the deployment secret store and keeps it only in its in-memory key-to-scope map; it does not persist or log the raw token. Rotate the key by replacing the secret and restarting the service. Host applications may use the optional `apiKeyHashes` configuration with a keyed digest when hash-only configuration is required.
 - Keep `SOFIA_CAPABILITY_SECRET` and `SOFIA_AUDIT_SECRET` high-entropy and stable across instances that must verify the same capabilities or read the same encrypted audit data. Never reuse provider keys as these secrets.
 - Restrict access to `SOFIA_STATE_DIR` and backups; run/job snapshots and memory may contain project context.
 - Use an immutable, digest-pinned Docker image for sandbox execution. Process mode is not OS-level isolation. Do not expose shell, write, network, desktop, or destructive tools until permissions and approval paths have been verified.
@@ -52,4 +52,4 @@ Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `ma
 
 ## Current limitations
 
-API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities until a dedicated implementation is merged. Hash-only standalone configuration requires the independent `SOFIA_API_KEY_HASH_SECRET` described above. Approval behavior depends on the configured approval handler and tool gateway. Audit the exact composition used by your deployment rather than assuming every adapter has identical controls.
+API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities until a dedicated implementation is merged. The standalone entrypoint uses an in-memory key-to-scope map; host applications can opt into `apiKeyHashes` when needed. Approval behavior depends on the configured approval handler and tool gateway. Audit the exact composition used by your deployment rather than assuming every adapter has identical controls.
