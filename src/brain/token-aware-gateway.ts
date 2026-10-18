@@ -178,14 +178,14 @@ interface PhaseCap {
 }
 
 const PHASE_CAPS: Record<BrainPhase, PhaseCap> = {
-  understand: { input: 5_000, output: 700 },
-  plan: { input: 8_000, output: 1_400 },
-  replan: { input: 9_000, output: 1_800 },
+  understand: { input: 5_000, output: 2_048 },
+  plan: { input: 8_000, output: 2_048 },
+  replan: { input: 9_000, output: 2_048 },
   implement: { input: 14_000, output: 4_000 },
-  diagnose: { input: 7_000, output: 900 },
-  review: { input: 10_000, output: 1_100 },
-  finalize: { input: 4_000, output: 600 },
-  subagent: { input: 12_000, output: 1_200 },
+  diagnose: { input: 7_000, output: 2_048 },
+  review: { input: 10_000, output: 2_048 },
+  finalize: { input: 4_000, output: 2_048 },
+  subagent: { input: 12_000, output: 2_048 },
 };
 
 function validateCount(prepared: PreparedCall): PreparedCall {
