@@ -2,8 +2,29 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createSofiaBrain } from "./executor.js";
+import { parseUnderstanding } from "./planner.js";
 import type { BrainReasoner, ToolGateway, ToolResult } from "./types.js";
 import type { SubagentRuntime } from "./subagents.js";
+
+test("understanding parser recovers from blank model fields without lowering risk", () => {
+  const parsed = parseUnderstanding({
+    objective: "   ",
+    constraints: ["", "  "],
+    assumptions: [],
+    requiredCapabilities: ["general"],
+    requiredTools: [""],
+    risk: "unrecognized",
+    successCriteria: [""],
+    ambiguities: null,
+  }, "Answer the user");
+
+  assert.equal(parsed.objective, "Answer the user");
+  assert.deepEqual(parsed.constraints, []);
+  assert.deepEqual(parsed.requiredTools, []);
+  assert.deepEqual(parsed.successCriteria, []);
+  assert.deepEqual(parsed.ambiguities, []);
+  assert.equal(parsed.risk, "high");
+});
 
 const plan = {
   strategy: "initial",

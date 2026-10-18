@@ -493,7 +493,7 @@ export class SofiaBrain {
 
   private async understand(input: BrainRunInput): Promise<TaskUnderstanding> {
     if (input.understanding !== undefined) {
-      return parseUnderstanding(input.understanding);
+      return parseUnderstanding(input.understanding, input.task);
     }
 
     const value = await this.infer("understand", {
@@ -502,7 +502,7 @@ export class SofiaBrain {
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
 
-    return parseUnderstanding(value);
+    return parseUnderstanding(value, input.task);
   }
 
   private async delegateSubagent(
