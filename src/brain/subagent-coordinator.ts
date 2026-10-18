@@ -40,6 +40,55 @@ export class BoundedSubagentCoordinator {
   private readonly maxTasks: number;
   private readonly timeoutMs: number;
   private readonly maxContextBytes: number;
+  // Shared by every runMany() call on this coordinator, not reset per batch.
+  private activeTasks = 0;
+  private readonly slotWaiters: Array<{
+    signal: AbortSignal;
+    resolve: () => void;
+    reject: (reason: unknown) => void;
+    onAbort: () => void;
+  }> = [];
+
+  private async acquireSlot(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (this.activeTasks < this.maxConcurrency) {
+      this.activeTasks += 1;
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const waiter = {
+        signal,
+        resolve,
+        reject,
+        onAbort: () => {
+          const index = this.slotWaiters.indexOf(waiter);
+          if (index >= 0) this.slotWaiters.splice(index, 1);
+          reject(signal.reason instanceof Error ? signal.reason : new Error("Subagent task aborted"));
+        },
+      };
+      this.slotWaiters.push(waiter);
+      signal.addEventListener("abort", waiter.onAbort, { once: true });
+      // Close the race where cancellation occurs between the initial check and
+      // registration of the abort listener.
+      if (signal.aborted) waiter.onAbort();
+    });
+  }
+
+  private releaseSlot(): void {
+    while (this.slotWaiters.length > 0) {
+      const waiter = this.slotWaiters.shift()!;
+      waiter.signal.removeEventListener("abort", waiter.onAbort);
+      if (waiter.signal.aborted) {
+        waiter.reject(waiter.signal.reason instanceof Error ? waiter.signal.reason : new Error("Subagent task aborted"));
+        continue;
+      }
+      // Transfer the occupied slot directly to the next waiter.
+      waiter.resolve();
+      return;
+    }
+    this.activeTasks = Math.max(0, this.activeTasks - 1);
+  }
 
   constructor(private readonly createRuntime: SubagentRuntimeFactory, options: SubagentCoordinatorOptions = {}) {
     this.maxConcurrency = options.maxConcurrency ?? 3;
@@ -67,8 +116,11 @@ export class BoundedSubagentCoordinator {
         const index = next++;
         if (index >= tasks.length) return;
         const task = tasks[index]!;
+        let acquired = false;
         try {
           parentSignal.throwIfAborted();
+          await this.acquireSlot(parentSignal);
+          acquired = true;
           const context = cloneBoundedContext(task.context, this.maxContextBytes);
           const controller = new AbortController();
           const abortParent = () => controller.abort(parentSignal.reason);
@@ -92,6 +144,8 @@ export class BoundedSubagentCoordinator {
           }
         } catch (error) {
           results[index] = { taskId: task.id, error: error instanceof Error ? error.message : String(error) };
+        } finally {
+          if (acquired) this.releaseSlot();
         }
       }
     };
