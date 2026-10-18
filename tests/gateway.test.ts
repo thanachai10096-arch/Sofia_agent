@@ -143,7 +143,19 @@ test("gateway rejects unsafe concurrency and timeout configuration", () => {
 });
 
 
-test("provider diagnostics distinguish OpenRouter HTTP 402 from rate limits", () => {
+test("provider diagnostics distinguish OpenRouter HTTP 402 causes from rate limits", () => {
+  assert.equal(
+    classifyProviderFailure(new Error("Model gateway request failed (402): insufficient credits")),
+    "provider_http_402_insufficient_credits",
+  );
+  assert.equal(
+    classifyProviderFailure(new Error("Model gateway request failed (402): free-models-per-day limit exceeded")),
+    "provider_http_402_free_model_daily_limit",
+  );
+  assert.equal(
+    classifyProviderFailure(new Error("Model gateway request failed (402): in_flight_budget_exhausted")),
+    "provider_http_402_in_flight_budget",
+  );
   assert.equal(
     classifyProviderFailure(new Error("Model gateway request failed (402): rejected")),
     "provider_http_402_payment_or_credit_required",
