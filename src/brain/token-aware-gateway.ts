@@ -135,7 +135,39 @@ export function classifyProviderFailure(error: unknown): string {
   if (/fetch failed|network|econn|enotfound|eai_again/i.test(message)) return "provider_network_error";
   if (/invalid json/i.test(message)) return "provider_invalid_json";
   if (/no message|empty response/i.test(message)) return "provider_empty_response";
+  if (/non-JSON Brain output/i.test(message)) return "provider_non_json_output";
+  if (/did not return token usage/i.test(message)) return "provider_usage_missing";
+  if (/invalid arguments for tool call/i.test(message)) return "provider_invalid_tool_arguments";
+  if (/temporarily unavailable|recovery probe/i.test(message)) return "provider_circuit_open";
   return "provider_error";
+}
+
+const SECRET_PATTERNS: RegExp[] = [
+  /AIza[0-9A-Za-z_-]{20,}/g,
+  /sk-[A-Za-z0-9_-]{16,}/g,
+  /Bearer\s+[^\s"']+/gi,
+  /(api[_-]?key|token|secret|authorization)["'=:\s]+[^\s"',&]+/gi,
+];
+
+function redact(text: string): string {
+  return SECRET_PATTERNS.reduce((t, p) => t.replace(p, "[redacted]"), text);
+}
+
+// Operator diagnostics: classification, upstream HTTP status, and a redacted,
+// truncated body preview. Never log the raw error object.
+function logProviderFailure(classification: string, error: unknown): void {
+  const raw = error instanceof Error ? error.message : String(error);
+  const upstreamStatus = raw.match(/Model gateway request failed \((\d{3})\)/i)?.[1] ?? null;
+  const bodyPreview = redact(raw.replace(/^Model gateway request failed \(\d{3}\):\s*/i, ""))
+    .replace(/\s+/g, " ")
+    .slice(0, 300);
+  console.error(JSON.stringify({
+    event: "model_provider_failure",
+    classification,
+    upstreamStatus,
+    errorName: error instanceof Error ? error.name : typeof error,
+    bodyPreview,
+  }));
 }
 
 class ContextTooLarge extends Error {}
@@ -388,7 +420,9 @@ export class TokenAwareGateway {
         }
 
         if (error instanceof GatewayError) throw error;
-        throw new GatewayError("model_call_failed", classifyProviderFailure(error));
+        const classification = classifyProviderFailure(error);
+        logProviderFailure(classification, error);
+        throw new GatewayError("model_call_failed", classification);
       }
     })();
 
