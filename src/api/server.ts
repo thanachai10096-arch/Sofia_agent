@@ -426,6 +426,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria !== undefined ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
             ...(input.priority !== undefined ? { priority: input.priority } : {}),
+            ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
           });
           if (idempotencyId) {
             const existing = idempotency.get(idempotencyId);
