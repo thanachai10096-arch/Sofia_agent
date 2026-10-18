@@ -86,8 +86,12 @@ export class SofiaAgent {
       metadata: { kind },
     });
 
+    const userMemory = request.includeUserMemory && request.principalId && this.deps.userMemoryStore
+      ? await this.deps.userMemoryStore.find(request.principalId, request.task, 8).catch(() => [])
+      : [];
     const report = await brain.run({
       task: request.task,
+      ...(userMemory.length ? { userMemory: userMemory.map(({ kind, content, confidence }) => ({ kind, content, confidence })) } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
       ...(request.acceptanceCriteria
         ? { acceptanceCriteria: request.acceptanceCriteria }
