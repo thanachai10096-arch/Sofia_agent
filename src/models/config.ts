@@ -47,10 +47,10 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
 
   for (const [id, capabilities, cost, latency, quality] of definitions) {
     const model = isGemini
-      ? process.env[`GEMINI_${id.toUpperCase()}_MODEL]?.trim() ||
-        process.env[`SOFIA_${id.toUpperCase()}_MODEL]?.trim() ||
+      ? process.env["GEMINI_" + id.toUpperCase() + "_MODEL"]?.trim() ||
+        process.env["SOFIA_" + id.toUpperCase() + "_MODEL"]?.trim() ||
         defaultModel
-      : process.env[`OPENROUTER_${id.toUpperCase()}_MODEL]?.trim() ||
+      : process.env["OPENROUTER_" + id.toUpperCase() + "_MODEL"]?.trim() ||
         process.env[`SOFIA_${id.toUpperCase()}_MODEL]?.trim() ||
         defaultModel;
 
