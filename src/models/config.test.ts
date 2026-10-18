@@ -49,99 +49,48 @@ afterEach(() => {
   }
 });
 
-test("OpenRouter key selects OpenRouter endpoint and defaults to free model router", () => {
+test("OpenRouter is the only provider and defaults to OpenRouter Auto Router", () => {
   clear();
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
   const config = loadModelConfigFromEnv();
   assert.equal(config.routes.length, 4);
-  assert.equal(config.providers.fast?.apiKey, "openrouter-test-key");
-  assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
-  assert.equal(config.providers.fast?.model, "openrouter/free");
-  assert.equal(config.providers.coding?.model, "openrouter/free");
+  for (const route of config.routes) {
+    const provider = config.providers[route.id];
+    assert.equal(provider?.baseUrl, "https://openrouter.ai/api/v1");
+    assert.equal(provider?.apiKey, "openrouter-test-key");
+    assert.equal(provider?.model, "openrouter/auto");
+  }
 });
 
-test("existing OPENROUTER variable is accepted and provider-specific models can override default", () => {
+test("existing OPENROUTER secret is supported and route-specific model overrides work", () => {
   clear();
-  process.env.OPENROUTER = "openrouter-test-key";
+  process.env.OPENROUTER = "openrouter-existing-test-key";
+  process.env.OPENROUTER_MODEL = "openai/gpt-4.1-mini";
   process.env.OPENROUTER_CODING_MODEL = "qwen/qwen3-coder:free";
   const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.fast?.apiKey, "openrouter-test-key");
+  assert.equal(config.providers.fast?.apiKey, "openrouter-existing-test-key");
+  assert.equal(config.providers.fast?.model, "openai/gpt-4.1-mini");
   assert.equal(config.providers.coding?.model, "qwen/qwen3-coder:free");
 });
 
-test("OpenRouter key takes precedence over other configured provider keys", () => {
+test("other provider credentials and custom endpoint cannot override OpenRouter", () => {
   clear();
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+  process.env.OPENROUTER_BASE_URL = "https://not-openrouter.example/v1";
   process.env.Kimi_key = "kimi-test-key";
+  process.env.GEMINI_API_KEY = "gemini-test-key";
   process.env.SOFIA_AI_GATEWAY_API_KEY = "gateway-test-key";
+  process.env.SOFIA_FAST_MODEL = "gateway-fast-model";
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.apiKey, "openrouter-test-key");
   assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(config.providers.fast?.model, "openrouter/auto");
 });
 
-test("Gemini key selects Gemini OpenAI-compatible endpoint and default model", () => {
-  clear();
-  process.env.GEMINI_API_KEY = "test-key";
-  const config = loadModelConfigFromEnv();
-  assert.equal(config.routes.length, 4);
-  assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
-  assert.equal(config.providers.fast?.model, "gemini-2.5-flash");
-  assert.equal(config.providers.coding?.model, "gemini-2.5-flash");
-});
-
-test("explicit Sofia gateway key takes precedence when Gemini and gateway keys are present", () => {
+test("fails closed when no OpenRouter credential exists", () => {
   clear();
   process.env.GEMINI_API_KEY = "gemini-test-key";
-  process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
-  process.env.SOFIA_FAST_MODEL = "gateway-fast";
-  process.env.SOFIA_CODING_MODEL = "gateway-coding";
-  const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.fast?.apiKey, "legacy-test-key");
-  assert.equal(config.providers.fast?.baseUrl, "https://ai-gateway.vercel.sh/v1");
-  assert.equal(config.providers.fast?.model, "gateway-fast");
-  assert.equal(config.providers.coding?.model, "gateway-coding");
-});
-
-test("Gemini-specific route model overrides shared Gemini model", () => {
-  clear();
-  process.env.Gemini_API_Key = "test-key";
-  process.env.GEMINI_MODEL = "gemini-shared";
-  process.env.GEMINI_CODING_MODEL = "gemini-coding";
-  const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.coding?.model, "gemini-coding");
-  assert.equal(config.providers.fast?.model, "gemini-shared");
-});
-
-test("legacy gateway configuration remains supported when Gemini is absent", () => {
-  clear();
-  process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
-  process.env.SOFIA_AI_GATEWAY_URL = "https://gateway.example/v1";
-  process.env.SOFIA_FAST_MODEL = "legacy-fast";
-  const config = loadModelConfigFromEnv();
-  assert.equal(config.routes.length, 1);
-  assert.equal(config.providers.fast?.baseUrl, "https://gateway.example/v1");
-  assert.equal(config.providers.fast?.model, "legacy-fast");
-});
-
-test("Kimi key takes precedence when OpenRouter is absent and selects Moonshot endpoint", () => {
-  clear();
   process.env.Kimi_key = "kimi-test-key";
   process.env.SOFIA_AI_GATEWAY_API_KEY = "gateway-test-key";
-  process.env.SOFIA_FAST_MODEL = "configured-fast";
-  process.env.KIMI_MODEL = "kimi-test-model";
-  const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.fast?.apiKey, "kimi-test-key");
-  assert.equal(config.providers.fast?.baseUrl, "https://api.moonshot.ai/v1");
-  assert.equal(config.providers.fast?.model, "kimi-test-model");
-  assert.equal(config.providers.coding?.model, "kimi-test-model");
-});
-
-test("Kimi route-specific model overrides shared Kimi model", () => {
-  clear();
-  process.env.KIMI_API_KEY = "kimi-test-key";
-  process.env.KIMI_MODEL = "kimi-shared";
-  process.env.KIMI_CODING_MODEL = "kimi-coding";
-  const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.coding?.model, "kimi-coding");
-  assert.equal(config.providers.fast?.model, "kimi-shared");
+  assert.throws(loadModelConfigFromEnv, /OPENROUTER_API_KEY/);
 });
