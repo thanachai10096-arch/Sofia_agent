@@ -52,6 +52,7 @@ export class VersionedSkillLifecycle {
     this.minimumConfidence = options.minimumConfidence ?? 0.7;
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
     this.load();
+    const activeRecords: Array<{ skillId: string; record: SkillLifecycleRecord }> = [];
     for (const [skillId, recordId] of Object.entries(this.snapshot.activeBySkill)) {
       const record = this.snapshot.records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
       if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
@@ -59,8 +60,10 @@ export class VersionedSkillLifecycle {
       if (existing && JSON.stringify(existing) !== JSON.stringify(record.package)) {
         throw new Error("Cannot restore active lifecycle skill over a different platform skill: " + skillId);
       }
-      this.platform.register(clone(record.package));
+      activeRecords.push({ skillId, record });
     }
+    // Validate the entire restore set before mutating the supplied platform.
+    for (const { record } of activeRecords) this.platform.register(clone(record.package));
   }
 
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
