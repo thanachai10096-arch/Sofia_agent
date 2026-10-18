@@ -43,6 +43,8 @@ export interface AgentDependencies {
  jobRuntime?: JobRuntime;
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;
+ /** Optional transcript store; used only when sessionId is provided. */
+ sessionStore?: { getOrCreate(id: string): { id: string; messages: string[]; updatedAt: number }; save(session: { id: string; messages: string[]; updatedAt: number }): void };
  learningDiagnostics?: () => unknown;
 }
 export type { ToolCall };
