@@ -240,10 +240,25 @@ export class SofiaModelGateway implements ModelProvider {
     } catch (error) {
       circuit.probeInFlight = false;
       if (!options.signal?.aborted) {
-        circuit.failures++;
-        if (circuit.failures >= 3 || circuit.openedAt) {
-          circuit.openedAt = Date.now();
-          route.healthy = false;
+        // Non-retryable 4xx responses (including OpenRouter 402 billing/quota
+        // rejections) are actionable provider responses, not transient outages.
+        // Do not let them poison the circuit and replace the useful HTTP status
+        // with a later generic "temporarily unavailable" error.
+        const status = error instanceof Error
+          ? Number(error.message.match(/^Model gateway request failed \\((\\d{3})\\):/)?.[1])
+          : NaN;
+        const permanentClientRejection =
+          Number.isInteger(status) && status >= 400 && status < 500 && status !== 408 && status !== 429;
+        if (permanentClientRejection) {
+          circuit.failures = 0;
+          circuit.openedAt = 0;
+          route.healthy = true;
+        } else {
+          circuit.failures++;
+          if (circuit.failures >= 3 || circuit.openedAt) {
+            circuit.openedAt = Date.now();
+            route.healthy = false;
+          }
         }
       }
       throw error;
