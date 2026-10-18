@@ -5,11 +5,68 @@ import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createTelegramAdapter } from "./telegram.js";
 import { createTelegramHttpTransport } from "./telegram-http-transport.js";
+import type { OutboundMessage } from "./types.js";
+import { redactSecrets } from "../../security/guard.js";
 
 export interface TelegramMessagingRuntime {
   start(): Promise<void>;
   stop(): Promise<void>;
 }
+
+interface TelegramRunResult {
+  id: string;
+  status: string;
+  result?: { output?: string };
+  error?: string;
+}
+
+/**
+ * Wait for an accepted run to reach a terminal state and send its actual result
+ * to the originating Telegram conversation. Kept separate for deterministic tests.
+ */
+export async function reportTelegramRunCompletion(input: {
+  runId: string;
+  conversationId: string;
+  waitForRun: (id: string, options: { timeoutMs: number; intervalMs: number }) => Promise<TelegramRunResult>;
+  send: (message: OutboundMessage) => Promise<boolean>;
+  onWarning?: (event: string) => void;
+}): Promise<void> {
+  let run: TelegramRunResult;
+  try {
+    run = await input.waitForRun(input.runId, { timeoutMs: 30 * 60 * 1_000, intervalMs: 1_000 });
+  } catch {
+    try {
+      await input.send({
+        conversationId: input.conversationId,
+        text: "Sofia could not retrieve the final result for run " + input.runId + ". The task may still be running; check the Sofia run status.",
+      });
+    } catch {
+      input.onWarning?.("telegram_completion_delivery_failed");
+    }
+    return;
+  }
+
+  const output = typeof run.result?.output === "string"
+    ? String(redactSecrets(run.result.output)).trim()
+    : "";
+  let text: string;
+  if (run.status === "completed") {
+    text = "✅ Sofia completed the task.\nRun ID: " + input.runId +
+      (output ? "\n\n" + output : "\n\nThe run completed but returned no text output.");
+  } else {
+    const status = ["failed", "cancelled", "queued", "running"].includes(run.status) ? run.status : "unknown";
+    text = "Sofia task " + status + ".\nRun ID: " + input.runId +
+      (status === "failed" ? "\nThe task failed. Check the run details or server logs for a redacted error." : "");
+  }
+
+  try {
+    const delivered = await input.send({ conversationId: input.conversationId, text });
+    if (!delivered) input.onWarning?.("telegram_completion_delivery_failed");
+  } catch {
+    input.onWarning?.("telegram_completion_delivery_failed");
+  }
+}
+
 
 /** Parse immutable Telegram user IDs; reject empty, malformed, or duplicate entries. */
 export function parseTelegramUserAllowlist(value: string): ReadonlySet<string> {
@@ -79,14 +136,29 @@ export function createTelegramMessagingRuntime(
       },
     };
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
-    const handler = createSofiaMessagingHandler({ client, accessPolicy, deduplicator, commandPrefix: "/run" });
+    let gateway: MessagingGateway | undefined;
+    const handler = createSofiaMessagingHandler({
+      client, accessPolicy, deduplicator, commandPrefix: "/run",
+      onAccepted: ({ runId, message }) => {
+        // Poll in the background so one long task does not block incoming Telegram updates.
+        void reportTelegramRunCompletion({
+          runId,
+          conversationId: message.identity.conversationId,
+          waitForRun: (id, options) => client.waitForRun(id, options),
+          send: (outbound) => gateway
+            ? gateway.send("telegram", outbound)
+            : Promise.resolve(false),
+          onWarning: (event) => onWarning("Telegram messaging warning: " + event + "."),
+        });
+      },
+    });
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
       token,
       onError: (event, status) => onWarning(
         "Telegram transport " + event + (status ? " (HTTP " + status + ")" : "") + ".",
       ),
     }));
-    const gateway: MessagingGateway = createMessagingGateway({
+    gateway = createMessagingGateway({
       enabled: true,
       adapters: [adapter],
       allowUser: createMessagingAccessCheck(accessPolicy),
