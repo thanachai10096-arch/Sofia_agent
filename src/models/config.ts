@@ -11,19 +11,30 @@ function numberEnv(name: string, fallback: number) {
 }
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
 
 export function loadModelConfigFromEnv(): SofiaModelConfig {
-  // OpenRouter is the only supported provider. OPENROUTER is retained as a
-  // deployment-compatible alias. Other credentials and custom endpoints are ignored.
-  const apiKey =
-    process.env.OPENROUTER_API_KEY?.trim() ||
-    process.env.OPENROUTER?.trim() ||
-    "";
-  if (!apiKey) {
-    throw new Error("Set OPENROUTER_API_KEY (or the OpenRouter-only OPENROUTER variable) to use Sofia.");
+  // OpenRouter remains the default. Gemini is opt-in for temporary deployments;
+  // credentials and endpoints are never mixed between providers.
+  const selectedProvider = process.env.SOFIA_MODEL_PROVIDER?.trim().toLowerCase() || "openrouter";
+  if (selectedProvider !== "openrouter" && selectedProvider !== "gemini") {
+    throw new Error("SOFIA_MODEL_PROVIDER must be either openrouter or gemini.");
   }
 
-  const defaultModel = process.env.OPENROUTER_MODEL?.trim() || "openrouter/auto";
+  const isGemini = selectedProvider === "gemini";
+  const apiKey = isGemini
+    ? process.env.GEMINI_API_KEY?.trim() || process.env.Gemini_API_Key?.trim() || ""
+    : process.env.OPENROUTER_API_KEY?.trim() || process.env.OPENROUTER?.trim() || "";
+  if (!apiKey) {
+    throw new Error(isGemini
+      ? "Set GEMINI_API_KEY (or the existing Gemini_API_Key variable) to use Gemini."
+      : "Set OPENROUTER_API_KEY (or the OpenRouter-only OPENROUTER variable) to use Sofia.");
+  }
+
+  const baseUrl = isGemini ? GEMINI_BASE_URL : OPENROUTER_BASE_URL;
+  const defaultModel = isGemini
+    ? process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash"
+    : process.env.OPENROUTER_MODEL?.trim() || "openrouter/auto";
   const definitions = [
     ["fast", ["fast"], 1, 1, 5],
     ["coding", ["coding", "tool-use", "reasoning"], 2, 2, 8],
@@ -35,12 +46,13 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
   const providers: SofiaModelConfig["providers"] = {};
 
   for (const [id, capabilities, cost, latency, quality] of definitions) {
-    // Preserve existing OpenRouter-specific overrides while honoring the SOFIA_*_MODEL
-    // names already used by deployed Railway environments.
-    const model =
-      process.env[`OPENROUTER_${id.toUpperCase()}_MODEL`]?.trim() ||
-      process.env[`SOFIA_${id.toUpperCase()}_MODEL`]?.trim() ||
-      defaultModel;
+    const model = isGemini
+      ? process.env[`GEMINI_${id.toUpperCase()}_MODEL]?.trim() ||
+        process.env[`SOFIA_${id.toUpperCase()}_MODEL]?.trim() ||
+        defaultModel
+      : process.env[`OPENROUTER_${id.toUpperCase()}_MODEL]?.trim() ||
+        process.env[`SOFIA_${id.toUpperCase()}_MODEL]?.trim() ||
+        defaultModel;
 
     routes.push({
       id,
@@ -52,10 +64,10 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       healthy: true,
     });
     providers[id] = {
-      baseUrl: OPENROUTER_BASE_URL,
+      baseUrl,
       apiKey,
       model,
-      ...(model !== "openrouter/auto" ? { fallbackModel: "openrouter/auto" } : {}),
+      ...(!isGemini && model !== "openrouter/auto" ? { fallbackModel: "openrouter/auto" } : {}),
     };
   }
 
