@@ -140,7 +140,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         const result = await request<{ message_id: number }>("sendMessage", {
           chat_id: chatId,
           text,
-          ...(replyToMessageId && /^\\d+$/.test(replyToMessageId)
+          ...(replyToMessageId && /^\d+$/.test(replyToMessageId)
             ? { reply_parameters: { message_id: Number(replyToMessageId) } }
             : {}),
         }, activeController.signal);
