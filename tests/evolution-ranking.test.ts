@@ -65,3 +65,17 @@ test("ranking favors verified outcomes over repeated failures for the same task 
   assert.equal(engine.getSkill("reliable-coding-skill")?.successes, 5);
   assert.equal(engine.getSkill("unreliable-coding-skill")?.failures, 5);
 });
+
+test("ranking existing skills is read-only and preserves recorded outcomes", () => {
+  const engine = new EvolutionEngine();
+  engine.recordSuccess("known-skill", 3, 1, "coding");
+  const before = engine.getSkill("known-skill");
+
+  engine.rank(["known-skill", "unseen-skill"], "coding");
+  engine.choose(["known-skill", "unseen-skill"], "coding");
+
+  assert.deepEqual(engine.getSkill("known-skill"), before);
+  assert.equal(engine.getSkill("unseen-skill"), undefined);
+  assert.equal(engine.getDiagnostics().totals.skills, 1);
+  assert.equal(engine.getDiagnostics().totals.attempts, 1);
+});
