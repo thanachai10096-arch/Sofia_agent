@@ -682,6 +682,8 @@ export class SofiaBrain {
     for (const criterion of criteria) {
       this.signal.throwIfAborted();
 
+      // Verification probes execute tools too, so include them in API tool-call metering.
+      this.emit({ type: "brain.tool.started", stepId: criterion.id });
       const result = await this.io(() =>
         this.dependencies.tools.execute(criterion.probe, {
           runId: this.runId,
