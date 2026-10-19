@@ -807,10 +807,13 @@ test("Brain credits the selected repair skill only after verified recovery and p
                 strategy: "fix-implementation",
                 reason: "Use the assertion failure evidence to recover.",
                 steps: [{
-                  id: "verify-recovery",
-                  objective: "Inspect the recovered workspace",
+                  id: "repair-file",
+                  objective: "Repair the missing file after inspecting the assertion failure",
                   dependencies: [],
-                  call: { tool: "workspace.list_files", input: { path: "." } },
+                  call: {
+                    tool: "workspace.write_file",
+                    input: { path: "hello.txt", content: "hello" },
+                  },
                 }],
               }
             : {
@@ -838,13 +841,15 @@ test("Brain credits the selected repair skill only after verified recovery and p
       : name === "workspace.write_file" || name === "workspace.list_files"
         ? { effects: name === "workspace.write_file" ? ["write"] : ["read"] }
         : undefined;
+    let injectedFailure = false;
     tools.execute = async (call, context) => {
-      if (call.tool === "test.fail_once") {
+      if (call.tool === "test.fail_once" && !injectedFailure) {
+        injectedFailure = true;
         return {
           ok: false,
           data: null,
           evidenceId: "assertion-failure-evidence",
-          error: { category: "tool_error", message: "assertion expected value mismatch" },
+          error: { category: "runtime_error", message: "assertion expected value mismatch" },
         };
       }
       return originalExecute(call, context);
