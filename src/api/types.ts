@@ -41,6 +41,8 @@ export interface SofiaApiConfig {
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
+  /** Optional durable quota store. Share its filesystem path across API processes only when the filesystem supports atomic exclusive file creation and rename. */
+  usageStorePath?: string;
   /**
    * Allowed browser origins. If omitted or empty, cross-origin browser access is not granted.
    * Keep the master API key on a trusted server; do not ship it in a browser.
