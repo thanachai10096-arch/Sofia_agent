@@ -536,6 +536,13 @@ export class DurableJobRuntime implements JobRuntime {
     return true;
   }
 
+  private async refreshAfterRejectedSave(record: JobRecord): Promise<void> {
+    // A different worker may have cancelled the job or taken over its lease.
+    // A rejected save must not leave this runtime exposing a stale local status/result.
+    const latest = await this.state.get(record.id);
+    if (latest) Object.assign(record, latest);
+  }
+
   private async execute(
     record: JobRecord,
     input: Omit<BrainRunInput, "signal" | "resume">,
@@ -591,7 +598,10 @@ export class DurableJobRuntime implements JobRuntime {
         // the dedicated snapshot store is temporarily unavailable.
       }
       const saved = await this.state.save(record);
-      if (!saved) controller.abort(new Error("Job execution lease was lost or cancelled"));
+      if (!saved) {
+        await this.refreshAfterRejectedSave(record);
+        controller.abort(new Error("Job execution lease was lost or cancelled"));
+      }
     };
 
     try {
@@ -629,14 +639,16 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = result.completed ? "completed" : "failed";
       }
       record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
+      const saved = await this.state.save(record);
+      if (!saved) await this.refreshAfterRejectedSave(record);
     } catch (error) {
       if (record.status !== "cancelled") {
         record.error = error instanceof Error ? error.message : String(error);
         record.status = controller.signal.aborted ? "cancelled" : "failed";
         record.updatedAt = new Date().toISOString();
       }
-      await this.state.save(record);
+      const saved = await this.state.save(record);
+      if (!saved) await this.refreshAfterRejectedSave(record);
     } finally {
       clearInterval(heartbeat);
       if (externalSignal && onExternalAbort) {
