@@ -184,7 +184,7 @@ test("gateway requests JSON mode for structured Brain calls without tools", asyn
   globalThis.fetch = async (_input, init) => {
     body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify({
-      choices: [{ message: { role: "assistant", content: "{\\"summary\\":\\"ok\\"}" } }],
+      choices: [{ message: { role: "assistant", content: JSON.stringify({ summary: "ok" }) } }],
       usage: { prompt_tokens: 2, completion_tokens: 3 },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
