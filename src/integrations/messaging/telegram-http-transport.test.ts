@@ -62,3 +62,57 @@ test("Telegram delivery errors are sanitized and surfaced to the caller", async 
   assert.ok(errorEvents.includes("delivery_failed"));
   await transport.stop();
 });
+
+
+test("Telegram 409 identifies another poller and stops retrying", async () => {
+  const events: Array<{ event: string; status?: number; diagnosis?: string }> = [];
+  let pollCount = 0;
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/deleteWebhook")) return ok(true);
+    if (url.endsWith("/getUpdates")) {
+      pollCount++;
+      return new Response(JSON.stringify({
+        ok: false,
+        description: "Conflict: terminated by other getUpdates request; make sure that only one bot instance is running",
+      }), { status: 409 });
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event, status, diagnosis) { events.push({ event, status, diagnosis }); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  // The polling loop should exit after the first definitive conflict, not back off and hammer Telegram.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(pollCount, 1);
+  assert.deepEqual(events, [{ event: "poll_failed", status: 409, diagnosis: "another_poller" }]);
+  await transport.stop();
+});
+
+test("Telegram 409 identifies an active webhook without exposing provider text", async () => {
+  const events: Array<{ event: string; status?: number; diagnosis?: string }> = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/deleteWebhook")) {
+      return new Response(JSON.stringify({ ok: false, description: "Webhook is still active" }), { status: 409 });
+    }
+    if (url.endsWith("/getUpdates")) {
+      return new Response(JSON.stringify({ ok: false, description: "Conflict: can't use getUpdates method while webhook is active" }), { status: 409 });
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event, status, diagnosis) { events.push({ event, status, diagnosis }); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  assert.equal(events.length, 2);
+  assert.ok(events.every((event) =>
+    event.event === "poll_failed" && event.status === 409 && event.diagnosis === "webhook_active",
+  ));
+  await transport.stop();
+});
