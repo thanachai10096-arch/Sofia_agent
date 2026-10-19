@@ -46,3 +46,22 @@ test("ranking unknown candidates does not persist phantom skills", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("ranking favors verified outcomes over repeated failures for the same task type", () => {
+  const engine = new EvolutionEngine();
+
+  for (let i = 0; i < 5; i++) {
+    engine.recordSuccess("reliable-coding-skill", 2, 0, "coding");
+    engine.recordFailure("unreliable-coding-skill", "verification failed", "coding");
+  }
+
+  const ranked = engine.rank(
+    ["unreliable-coding-skill", "reliable-coding-skill"],
+    "coding",
+  );
+
+  assert.equal(ranked[0]?.id, "reliable-coding-skill");
+  assert.ok((ranked[0]?.score ?? 0) > (ranked[1]?.score ?? 0));
+  assert.equal(engine.getSkill("reliable-coding-skill")?.successes, 5);
+  assert.equal(engine.getSkill("unreliable-coding-skill")?.failures, 5);
+});
