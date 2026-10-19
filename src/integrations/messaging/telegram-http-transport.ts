@@ -10,7 +10,7 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "delivery_failed", status?: number) => void;
+  onError?: (event: "poll_failed" | "delivery_failed", status?: number, diagnosis?: "webhook_active" | "another_poller" | "api_error") => void;
 }
 
 /**
@@ -47,8 +47,15 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       throw new Error("Telegram API returned invalid JSON.");
     }
     if (!response.ok || data.ok !== true || data.result === undefined) {
+      const description = typeof data.description === "string" ? data.description.toLowerCase() : "";
+      const diagnosis = description.includes("webhook")
+        ? "webhook_active"
+        : description.includes("terminated by other getupdates request") ||
+          description.includes("other getupdates request")
+          ? "another_poller"
+          : "api_error";
       const error = new Error("Telegram API request failed.");
-      Object.assign(error, { status: response.status });
+      Object.assign(error, { status: response.status, diagnosis });
       throw error;
     }
     return data.result;
@@ -88,7 +95,13 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         if (signal.aborted || stopped) break;
         const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
           ? error.status : undefined;
-        try { options.onError?.("poll_failed", status); } catch { /* logging must not terminate polling */ }
+        const diagnosis = error && typeof error === "object" && "diagnosis" in error &&
+          (error.diagnosis === "webhook_active" || error.diagnosis === "another_poller" || error.diagnosis === "api_error")
+          ? error.diagnosis : "api_error";
+        try { options.onError?.("poll_failed", status, diagnosis); } catch { /* logging must not terminate polling */ }
+        // Telegram 409 means polling cannot proceed until the competing webhook/poller
+        // is resolved. Do not hammer the API with retries; surface the diagnosis and stop.
+        if (status === 409) break;
         await wait(backoffMs, signal);
         backoffMs = Math.min(30_000, backoffMs * 2);
       }
@@ -108,9 +121,13 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       if (!controller.signal.aborted) {
         try {
           await request<boolean>("deleteWebhook", { drop_pending_updates: false }, controller.signal);
-        } catch {
-          // Do not log token or provider response bodies. Polling will emit a
-          // safe status-only diagnostic if Telegram still rejects getUpdates.
+        } catch (error) {
+          const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
+            ? error.status : undefined;
+          const diagnosis = error && typeof error === "object" && "diagnosis" in error &&
+            (error.diagnosis === "webhook_active" || error.diagnosis === "another_poller" || error.diagnosis === "api_error")
+            ? error.diagnosis : "api_error";
+          try { options.onError?.("poll_failed", status, diagnosis); } catch { /* logging must not terminate polling */ }
         }
       }
       if (controller.signal.aborted) {
