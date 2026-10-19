@@ -62,6 +62,7 @@ test("complete Telegram configuration constructs a runtime without starting netw
 test("Telegram run completion sends the real completed output to the originating chat", async () => {
   const sent: Array<{ conversationId: string; text: string }> = [];
   const warnings: string[] = [];
+  const assistantReplies: Array<{ conversationId: string; text: string }> = [];
   await reportTelegramRunCompletion({
     runId: "run-123",
     conversationId: "chat-456",
@@ -75,12 +76,14 @@ test("Telegram run completion sends the real completed output to the originating
       sent.push({ conversationId: message.conversationId, text: message.text });
       return true;
     },
+    onAssistantReply: (conversationId, text) => assistantReplies.push({ conversationId, text }),
     onWarning: (event) => warnings.push(event),
   });
   assert.equal(sent.length, 1);
   assert.equal(sent[0]?.conversationId, "chat-456");
-  assert.match(sent[0]?.text ?? "", /Sofia completed the task/);
+  assert.equal(sent[0]?.text, "สวัสดีจาก Sofia");
   assert.match(sent[0]?.text ?? "", /สวัสดีจาก Sofia/);
+  assert.deepEqual(assistantReplies, [{ conversationId: "chat-456", text: "สวัสดีจาก Sofia" }]);
   assert.deepEqual(warnings, []);
 });
 
@@ -95,7 +98,7 @@ test("Telegram run completion reports failed runs without exposing internal erro
       return true;
     },
   });
-  assert.match(sent[0]?.text ?? "", /task failed/i);
-  assert.match(sent[0]?.text ?? "", /Reason: provider_http_402_insufficient_credits/);
+  assert.match(sent[0]?.text ?? "", /งานนี้ทำไม่สำเร็จ/);
+  assert.match(sent[0]?.text ?? "", /provider_http_402_insufficient_credits/);
   assert.doesNotMatch(sent[0]?.text ?? "", /Bearer secret-token/);
 });

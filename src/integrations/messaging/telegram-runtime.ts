@@ -20,15 +20,12 @@ interface TelegramRunResult {
   error?: string;
 }
 
-/**
- * Wait for an accepted run to reach a terminal state and send its actual result
- * to the originating Telegram conversation. Kept separate for deterministic tests.
- */
 export async function reportTelegramRunCompletion(input: {
   runId: string;
   conversationId: string;
   waitForRun: (id: string, options: { timeoutMs: number; intervalMs: number }) => Promise<TelegramRunResult>;
   send: (message: OutboundMessage) => Promise<boolean>;
+  onAssistantReply?: (conversationId: string, text: string) => void;
   onWarning?: (event: string) => void;
 }): Promise<void> {
   let run: TelegramRunResult;
@@ -38,7 +35,7 @@ export async function reportTelegramRunCompletion(input: {
     try {
       await input.send({
         conversationId: input.conversationId,
-        text: "Sofia could not retrieve the final result for run " + input.runId + ". The task may still be running; check the Sofia run status.",
+        text: "ขอโทษนะ ตอนนี้ดึงผลลัพธ์ของงานกลับมาไม่ได้ งานอาจยังทำอยู่ ลองตรวจสถานะอีกครั้งได้เลย (Run: " + input.runId + ")",
       });
     } catch {
       input.onWarning?.("telegram_completion_delivery_failed");
@@ -51,27 +48,28 @@ export async function reportTelegramRunCompletion(input: {
     : "";
   let text: string;
   if (run.status === "completed") {
-    text = "✅ Sofia completed the task.\nRun ID: " + input.runId +
-      (output ? "\n\n" + output : "\n\nThe run completed but returned no text output.");
+    text = output || "ทำงานเสร็จแล้ว แต่ไม่มีข้อความผลลัพธ์ส่งกลับมา";
   } else {
     const status = ["failed", "cancelled", "queued", "running"].includes(run.status) ? run.status : "unknown";
     const safeError = typeof run.error === "string"
       ? String(redactSecrets(run.error)).replace(/[\r\n\t]+/g, " ").slice(0, 240).trim()
       : "";
-    text = "Sofia task " + status + ".\nRun ID: " + input.runId +
-      (status === "failed"
-        ? (safeError ? "\nReason: " + safeError : "\nNo safe error detail was returned by the API.")
-        : "");
+    text = status === "failed"
+      ? "ขอโทษนะ งานนี้ทำไม่สำเร็จ" + (safeError ? "\nสาเหตุ: " + safeError : "") + "\nถ้าต้องการ ลองบอกฉันให้ลองวิธีอื่นได้"
+      : "สถานะงานตอนนี้: " + status + " (Run: " + input.runId + ")";
   }
 
   try {
     const delivered = await input.send({ conversationId: input.conversationId, text });
-    if (!delivered) input.onWarning?.("telegram_completion_delivery_failed");
+    if (delivered) {
+      if (run.status === "completed") input.onAssistantReply?.(input.conversationId, text);
+    } else {
+      input.onWarning?.("telegram_completion_delivery_failed");
+    }
   } catch {
     input.onWarning?.("telegram_completion_delivery_failed");
   }
 }
-
 
 /** Parse immutable Telegram user IDs; reject empty, malformed, or duplicate entries. */
 export function parseTelegramUserAllowlist(value: string): ReadonlySet<string> {
@@ -103,18 +101,13 @@ export interface TelegramMessagingEnvironment {
   RAILWAY_PUBLIC_DOMAIN?: string;
 }
 
-/**
- * Build the optional Telegram bridge using the existing Sofia API and command
- * dispatcher. Missing/invalid optional configuration disables Telegram without
- * taking the core API offline. Authorized Telegram users may send plain-language tasks.
- */
+/** Optional Telegram bridge using the existing Sofia API and security policy. */
 export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
   workspace = process.cwd(),
   onWarning: (message: string) => void = (message) => console.error(message),
 ): TelegramMessagingRuntime | undefined {
-  const requested = env.SOFIA_MESSAGING_ENABLED === "true";
-  if (!requested) return undefined;
+  if (env.SOFIA_MESSAGING_ENABLED !== "true") return undefined;
 
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
   const rawUsers = env.TELEGRAM_ALLOWED_USER_IDS?.trim();
@@ -149,7 +142,6 @@ export function createTelegramMessagingRuntime(
       commandPrefix: "/run",
       acceptPlainTextTasks: true,
       onAccepted: ({ runId, message }) => {
-        // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
           runId,
           conversationId: message.identity.conversationId,
@@ -157,6 +149,7 @@ export function createTelegramMessagingRuntime(
           send: (outbound) => gateway
             ? gateway.send("telegram", outbound)
             : Promise.resolve(false),
+          onAssistantReply: (conversationId, text) => handler.recordAssistantReply(conversationId, text),
           onWarning: (event) => onWarning("Telegram messaging warning: " + event + "."),
         });
       },
@@ -171,7 +164,6 @@ export function createTelegramMessagingRuntime(
       enabled: true,
       adapters: [adapter],
       allowUser: createMessagingAccessCheck(accessPolicy),
-      // The command handler owns the shared dedupe claim. Do not claim it twice in the gateway.
       maxMessagesPerWindow: 5,
       rateWindowMs: 60_000,
       onMessage: (message) => handler(message),
@@ -185,8 +177,6 @@ export function createTelegramMessagingRuntime(
       stop: () => gateway.stop(),
     };
   } catch (error) {
-    // Report only the static validation message from our own constructors. Never log
-    // environment values, bot tokens, API keys, or provider response bodies.
     const safeMessage = error instanceof Error && [
       "TELEGRAM_ALLOWED_USER_IDS must be a comma-separated list of valid numeric IDs.",
       "TELEGRAM_ALLOWED_CHAT_IDS must be a comma-separated list of valid numeric IDs.",
