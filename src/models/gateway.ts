@@ -19,8 +19,10 @@ export interface GatewayProviderConfig {
 
 interface ChatResponse {
   choices?: Array<{
+    finish_reason?: string | null;
     message?: {
-      content?: string | null;
+      content?: string | Array<{ type?: string; text?: string }> | null;
+      refusal?: string | null;
       tool_calls?: Array<{
         id?: string;
         function?: { name?: string; arguments?: string };
@@ -287,10 +289,29 @@ export class SofiaModelGateway implements ModelProvider {
       };
     });
 
-    const text = message.content?.trim() ?? "";
+    // Gemini's OpenAI-compatible endpoint can return content as typed parts,
+    // not only a plain string. Normalize text parts without logging provider
+    // payloads (which may contain user data or secrets).
+    const text = typeof message.content === "string"
+      ? message.content.trim()
+      : Array.isArray(message.content)
+        ? message.content
+            .filter((part): part is { type?: string; text: string } =>
+              typeof part?.text === "string" && part.text.trim().length > 0)
+            .map((part) => part.text.trim())
+            .join("\n")
+        : "";
 
     if (!text && !calls.length) {
-      return failResponse("Model gateway returned an empty response.");
+      if (message.refusal?.trim()) {
+        return failResponse("Model gateway returned a refusal response.");
+      }
+      const finishReason = data.choices?.[0]?.finish_reason;
+      return failResponse(
+        finishReason
+          ? `Model gateway returned no usable content (finish_reason=${finishReason}).`
+          : "Model gateway returned an empty response.",
+      );
     }
     circuit.failures = 0;
     circuit.openedAt = 0;
