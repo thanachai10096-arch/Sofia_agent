@@ -85,7 +85,7 @@ test("ranking prototype-like candidate IDs stays read-only", () => {
   const engine = new EvolutionEngine();
   const candidates = ["__proto__", "constructor", "toString"];
 
-  const ranked = engine.rank(candidates, "coding");
+  const ranked = engine.rank(candidates, "__proto__");
 
   assert.deepEqual(new Set(ranked.map(item => item.id)), new Set(candidates));
   assert.equal(engine.getSkill("__proto__"), undefined);
