@@ -110,9 +110,9 @@ test("Telegram 409 identifies an active webhook without exposing provider text",
     onError(event, status, diagnosis) { events.push({ event, status, diagnosis }); },
   });
   await transport.start(new AbortController().signal, async () => {});
-  assert.deepEqual(events, [
-    { event: "poll_failed", status: 409, diagnosis: "webhook_active" },
-    { event: "poll_failed", status: 409, diagnosis: "webhook_active" },
-  ]);
+  assert.equal(events.length, 2);
+  assert.ok(events.every((event) =>
+    event.event === "poll_failed" && event.status === 409 && event.diagnosis === "webhook_active",
+  ));
   await transport.stop();
 });
