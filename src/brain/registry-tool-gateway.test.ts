@@ -180,6 +180,46 @@ test("security kill switch prevents a tool from starting after approval wait", a
   assert.match(result.error?.message ?? "", /kill switch/i);
 });
 
+test("caller-requested approval is enforced for otherwise read-only tools", async () => {
+  const rt = runtime();
+  let toolStarted = false;
+  let approvalCalls = 0;
+  const registry = new MapToolRegistry([{
+    name: "custom.read",
+    description: "Read-only test tool",
+    inputSchema: { type: "object", properties: {} },
+    effects: ["read"] as const,
+    async execute() {
+      toolStarted = true;
+      return { read: true };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    defaultPolicy,
+    async () => {
+      approvalCalls += 1;
+      return false;
+    },
+  );
+
+  const result = await gateway.execute(
+    { tool: "custom.read", input: {} },
+    {
+      runId: "caller-requested-approval-test",
+      principalId: "test-principal",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.equal(approvalCalls, 1);
+  assert.equal(toolStarted, false);
+});
+
 test("approval cannot mutate the action that the gateway executes", async () => {
   const rt = runtime();
   let executedInput: Record<string, unknown> | undefined;
