@@ -99,7 +99,7 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const userMemoryStore = new FileUserMemoryStore();
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,enableUserMemoryContext:process.env.SOFIA_ENABLE_USER_MEMORY_CONTEXT === "true",learningDiagnostics:()=>evolution.getDiagnostics()};
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */

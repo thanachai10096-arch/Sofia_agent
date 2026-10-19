@@ -11,6 +11,8 @@ export interface SofiaRunInput {
   task: string;
   workspace?: string;
   context?: string | Record<string, unknown>;
+  /** Stable caller-provided conversation key; the API scopes it to the authenticated key. */
+  sessionId?: string;
   maxSteps?: number;
   acceptanceCriteria?: Array<{ id: string; description: string; probe: { tool: string; input: Record<string, unknown> } }>;
 }
