@@ -33,6 +33,7 @@ Sofia Agent is distributed under the [MIT License](LICENSE). Review third-party 
 - **Contribute:** [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Report security issues:** [SECURITY.md](SECURITY.md)
 - **Open-source and commercial roadmap boundaries:** [docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md](docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md)
+- **General-purpose agent roadmap:** [docs/HERMES_PARITY_ROADMAP.md](docs/HERMES_PARITY_ROADMAP.md)
 - **Shared access architecture:** [docs/UNIFIED_ACCESS_ARCHITECTURE.md](docs/UNIFIED_ACCESS_ARCHITECTURE.md)
 
 Hosted and enterprise services described in the roadmap are potential offerings, not a claim that they are currently available.
