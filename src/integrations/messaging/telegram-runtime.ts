@@ -159,8 +159,13 @@ export function createTelegramMessagingRuntime(
     });
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
       token,
-      onError: (event, status) => onWarning(
-        "Telegram transport " + event + (status ? " (HTTP " + status + ")" : "") + ".",
+      onError: (event, status, reason) => onWarning(
+        "Telegram transport " + event +
+        (status ? " (HTTP " + status + ")" : "") +
+        (reason === "webhook_active" ? ": Telegram reports a webhook is still active." :
+          reason === "another_poller" ? ": another getUpdates poller is using this bot token; stop the other instance or rotate the token." :
+          event === "polling_conflict" ? ": Telegram rejected polling with a conflict; inspect Telegram bot ownership/configuration." : "") +
+        ".",
       ),
     }));
     gateway = createMessagingGateway({
