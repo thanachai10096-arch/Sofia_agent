@@ -46,6 +46,8 @@ export interface AgentDependencies {
  /** Optional transcript store; used only when sessionId is provided. */
  /** Optional explicit user-scoped memory store; writes require an explicit API action. */
  userMemoryStore?: import("../brain/user-memory.js").UserMemoryStore;
+ /** Opt in to injecting bounded, principal-scoped retrieved memories as untrusted context. */
+ enableUserMemoryContext?: boolean;
  sessionStore?: { getOrCreate(id: string): { id: string; messages: string[]; updatedAt: number }; save(session: { id: string; messages: string[]; updatedAt: number }): void };
  learningDiagnostics?: () => unknown;
 }
