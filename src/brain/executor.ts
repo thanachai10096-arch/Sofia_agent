@@ -581,7 +581,7 @@ export class SofiaBrain {
       task: input.task,
       understanding,
       ...(input.context?.trim()
-        ? { referenceContext: { trust: "untrusted_reference_data", content: `UNTRUSTED REFERENCE DATA\\n${fenceUntrustedOutput(input.context.slice(0, 3200))}` } }
+        ? { referenceContext: { trust: "untrusted_reference_data", content: `UNTRUSTED REFERENCE DATA\n${fenceUntrustedOutput("caller-context", input.context, { maxChars: 3200 }).text}` } }
         : {}),
       availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
