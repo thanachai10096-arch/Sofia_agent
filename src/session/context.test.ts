@@ -6,6 +6,7 @@ test("session context uses recent turns and labels transcript as untrusted", () 
   const context = buildSessionContext([
     "user: old topic",
     "assistant: old answer",
+    ...Array.from({ length: 11 }, (_, index) => `user: intermediate ${index}`),
     "user: remember the blue bicycle",
   ]);
   assert.match(context ?? "", /Prior conversation/);
