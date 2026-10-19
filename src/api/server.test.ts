@@ -81,6 +81,8 @@ test("API sessions replay context and search transcripts within the authenticate
     assert.deepEqual(sessions.get(`${idFor("key-one")}:shared-client-session`)?.messages, [
       "user: first user's task",
       "assistant: Task completed.",
+      "user: What was my first task?",
+      "assistant: Task completed.",
     ]);
     assert.deepEqual(sessions.get(`${idFor("key-two")}:shared-client-session`)?.messages, [
       "user: second user's task",
