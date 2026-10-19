@@ -1,6 +1,7 @@
 import path from "node:path";
 import { SofiaClient } from "../../sdk/client.js";
 import { FileChatMessageDeduplicator } from "../file-chat-deduplicator.js";
+import { FileConversationSessionStore } from "./conversation-session-store.js";
 import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createTelegramAdapter } from "./telegram.js";
@@ -139,6 +140,7 @@ export function createTelegramMessagingRuntime(
       client,
       accessPolicy,
       deduplicator,
+      sessionStore: new FileConversationSessionStore(path.join(workspace, ".sofia", "chat-sessions")),
       commandPrefix: "/run",
       acceptPlainTextTasks: true,
       onAccepted: ({ runId, message }) => {
