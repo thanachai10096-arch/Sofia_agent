@@ -488,21 +488,36 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
-  const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
-  } as unknown as SofiaBrain), undefined, namespace));
+  const createRuntime = () => new DurableJobRuntime(() => ({
+    // Finish promptly so the test never removes the lock while background writes are active.
+    run: async () => ({ completed: true, state: "completed", output: "ok" }),
+  } as unknown as SofiaBrain), undefined, namespace);
+  const runtimes = Array.from({ length: 12 }, createRuntime);
 
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
     runtime.submit({ task: "concurrent worker submission " + index }),
   ));
-  const reader = new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
-  } as unknown as SofiaBrain), undefined, namespace);
-  const persisted = await reader.list();
-  const persistedIds = new Set(persisted.map((record) => record.id));
+  const reader = createRuntime();
+  const submittedIds = new Set(submitted.map((record) => record.id));
+  let persisted: Awaited<ReturnType<typeof reader.list>> = [];
+  let settled = false;
 
-  assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
+  // Wait for the asynchronous execution writes to finish before cleaning up the shared file.
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    persisted = await reader.list();
+    const records = persisted.filter((record) => submittedIds.has(record.id));
+    if (records.length === submitted.length && records.every((record) => record.status === "completed")) {
+      settled = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  const persistedIds = new Set(persisted.map((record) => record.id));
+  assert.equal(persisted.filter((record) => submittedIds.has(record.id)).length, submitted.length,
+    "no job records should be lost to concurrent read-modify-write");
   for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
+  assert.ok(settled, "all test jobs should finish before shared-state cleanup");
 
   const file = path.join(
     os.tmpdir(),
