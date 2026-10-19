@@ -27,9 +27,6 @@ export { createEditPatch, applyEditPatch, unifiedDiff } from "./brain/edit-engin
 export { reviewCodeChange } from "./review/code-review.js";
 export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
-export type { JobStateStore } from "./brain/job-runtime.js";
-export { PostgresJobStateStore } from "./brain/postgres-job-state-store.js";
-export type { JobSqlPool, JobSqlClient, JobSqlResult } from "./brain/postgres-job-state-store.js";
 export { BoundedSubagentCoordinator } from "./brain/subagent-coordinator.js";
 export type { SubagentTask, SubagentBatchItem, SubagentCoordinatorOptions, SubagentRuntimeFactory } from "./brain/subagent-coordinator.js";
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
