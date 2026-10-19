@@ -156,7 +156,7 @@ test("gateway normalizes Gemini typed text content parts", async () => {
       "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model" },
     });
     const result = await gateway.generate(request, makeRoute());
-    assert.equal(result.text, "Hello\\nfrom Gemini");
+    assert.equal(result.text, "Hello\nfrom Gemini");
   } finally {
     globalThis.fetch = originalFetch;
   }
