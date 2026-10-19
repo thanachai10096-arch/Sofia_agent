@@ -301,7 +301,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         // Search results are filtered by the authenticated key's namespace before
         // any transcript content is returned; client-supplied session IDs are not trusted.
         const ownerPrefix = auth.keyId + ":";
-        const matches = deps.sessionStore.search(query, { limit: 100 })
+        const matches = deps.sessionStore.search(query, { limit: rawLimit, ownerPrefix })
           .filter((session) => session.id.startsWith(ownerPrefix))
           .slice(0, rawLimit)
           .map((session) => ({
