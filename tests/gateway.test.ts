@@ -140,3 +140,39 @@ test("gateway rejects unsafe concurrency and timeout configuration", () => {
     "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model", requestTimeoutMs: -1 },
   }), /Invalid requestTimeoutMs/);
 });
+
+
+test("gateway normalizes Gemini typed text content parts", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { role: "assistant", content: [
+      { type: "text", text: "  Hello" },
+      { type: "text", text: "from Gemini  " },
+      { type: "image", image_url: "ignored" },
+    ] } }],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model" },
+    });
+    const result = await gateway.generate(request, makeRoute());
+    assert.equal(result.text, "Hello\\nfrom Gemini");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("gateway reports finish reason for a response without usable content", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ finish_reason: "MAX_TOKENS", message: { role: "assistant", content: "" } }],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model" },
+    });
+    await assert.rejects(gateway.generate(request, makeRoute()), /finish_reason=MAX_TOKENS/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
