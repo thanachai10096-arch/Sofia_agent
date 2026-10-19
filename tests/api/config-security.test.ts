@@ -28,3 +28,28 @@ test("UsageLimiter rejects invalid limits and usage increments", () => {
   assert.throws(() => limiter.consume("key", Number.NaN), /Invalid tool call usage amount/);
   assert.throws(() => limiter.consume("key", -1), /Invalid tool call usage amount/);
 });
+
+test("UsageLimiter returns defensive copies so callers cannot mutate quota counters", () => {
+  const limiter = new UsageLimiter(1, 5);
+  limiter.consume("key", 2);
+
+  const exposed = limiter.get("key");
+  exposed.runs = 0;
+  exposed.toolCalls = 0;
+  exposed.startedAt = 0;
+
+  assert.deepEqual(limiter.get("key"), {
+    keyId: "key",
+    runs: 1,
+    toolCalls: 2,
+    startedAt: limiter.get("key").startedAt,
+  });
+  assert.throws(() => limiter.consume("key"), /API usage quota exceeded/);
+});
+
+test("UsageLimiter returns a fresh record for unknown keys", () => {
+  const limiter = new UsageLimiter(1, 5);
+  const exposed = limiter.get("unknown");
+  exposed.runs = 999;
+  assert.equal(limiter.get("unknown").runs, 0);
+});
