@@ -619,3 +619,106 @@ test("Brain preserves the highest-ranked project memories when limiting context"
   assert.equal(selected[0]?.content, "ranked-memory-0");
   assert.equal(selected[11]?.content, "ranked-memory-11");
 });
+
+
+test("Brain does not award Evolution success when acceptance verification fails", async () => {
+  const { EvolutionEngine } = await import("./evolution.js");
+  const evolution = new EvolutionEngine();
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      evolution,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 0,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt but fail acceptance verification",
+    acceptanceCriteria: [{
+      id: "deliberately-failing",
+      description: "A deliberately false acceptance condition",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate() {
+        return { passed: false, detail: "intentional test failure" };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, false);
+  assert.equal(report.state, "failed");
+  const snapshot = evolution.getSnapshot();
+  assert.equal(Object.keys(snapshot.skills).length, 0);
+  assert.deepEqual(snapshot.taskTypes["file-write"], {
+    attempts: 1,
+    successes: 0,
+    failures: 1,
+  });
+});
+
+test("Brain records Evolution success only after verification and review approve", async () => {
+  const { EvolutionEngine } = await import("./evolution.js");
+  const evolution = new EvolutionEngine();
+  const events: Array<{ type: string; passed?: boolean }> = [];
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      evolution,
+      onEvent(event) {
+        if (event.type === "brain.review.completed" || event.type === "brain.coding.loop.completed") {
+          events.push({ type: event.type, passed: "passed" in event ? event.passed : undefined });
+        }
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.ok(events.some(event => event.type === "brain.review.completed" && event.passed === true));
+  assert.ok(events.some(event => event.type === "brain.coding.loop.completed" && event.passed === true));
+  assert.deepEqual(evolution.getSnapshot().taskTypes["file-write"], {
+    attempts: 1,
+    successes: 1,
+    failures: 0,
+  });
+  assert.equal(Object.keys(evolution.getSnapshot().skills).length, 0,
+    "a successful run with no selected repair skill must not invent skill credit");
+});
