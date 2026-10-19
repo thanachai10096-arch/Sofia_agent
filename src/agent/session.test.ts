@@ -146,4 +146,13 @@ test("user memory retrieval is opt-in, bounded, and scoped to the authenticated 
   assert.equal(memoryOwner, "authenticated-owner-1");
   assert.equal(memoryFindCalls, 1);
   assert.ok(promptMessages.some((message) => message.role === "system" && message.content.includes("Prefers concise Thai explanations")));
+
+  const disabledAgent = new SofiaAgent({
+    provider: { async generate() { return { text: "Answer without memory context" }; } },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: memory,
+  });
+  await disabledAgent.run({ task: "Do not retrieve memory by default", principalId: "authenticated-owner-1", useBrain: false });
+  assert.equal(memoryFindCalls, 1, "memory retrieval must remain opt-in");
 });
