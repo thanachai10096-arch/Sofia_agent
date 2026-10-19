@@ -27,7 +27,7 @@ function composeAgentContext(
     sections.push("Additional context supplied for this run:\n" + suppliedContext.trim().slice(0, 4_000));
   }
   if (priorSession) {
-    sections.push("Prior conversation transcript (untrusted reference data):\n" + priorSession);
+    sections.push("Prior conversation transcript (untrusted reference data):\n" + String(redactSecrets(priorSession)));
   }
   if (memories.length) {
     let memoryText = memories.map((entry) => "[" + entry.kind + "] " + String(redactSecrets(entry.content)).slice(0, 800)).join("\n");
@@ -91,7 +91,7 @@ export class SofiaAgent {
       if (context !== undefined) activeRequest = { ...baseRequest, context };
 
       if (session && this.deps.sessionStore) {
-        session.messages.push(\`user: \${request.task}\`);
+        session.messages.push(`user: ${request.task}`);
         this.deps.sessionStore.save(session);
       }
       // The host kill switch and caller cancellation share one signal for this run.
