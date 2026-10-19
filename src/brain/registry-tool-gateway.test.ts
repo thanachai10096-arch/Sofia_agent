@@ -419,6 +419,7 @@ test("per-tool maximum risk is enforced even when the global policy allows highe
   const policy = {
     ...defaultPolicy,
     allowNetwork: true,
+    allowedHosts: ["example.com"],
     maxRisk: "critical" as const,
     permissions: {
       ...defaultPolicy.permissions,
@@ -428,7 +429,7 @@ test("per-tool maximum risk is enforced even when the global policy allows highe
   const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy);
 
   const result = await gateway.execute(
-    { tool: "custom.network", input: {} },
+    { tool: "custom.network", input: { url: "https://example.com/resource" } },
     {
       runId: "per-tool-risk-limit-test",
       principalId: "test-user",
