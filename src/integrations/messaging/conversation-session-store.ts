@@ -34,7 +34,8 @@ export class FileConversationSessionStore implements ConversationSessionStore {
   private async pruneSessions(protectedPath: string): Promise<void> {
     const entries = await readdir(this.directory, { withFileTypes: true });
     const files = await Promise.all(entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))\n      .map(async (entry) => ({ path: path.join(this.directory, entry.name), modified: (await stat(path.join(this.directory, entry.name))).mtimeMs })));
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => ({ path: path.join(this.directory, entry.name), modified: (await stat(path.join(this.directory, entry.name))).mtimeMs })));
     files.sort((a, b) => b.modified - a.modified);
     const otherFiles = files.filter((file) => file.path !== protectedPath);
     await Promise.all(otherFiles.slice(499).map((file) => unlink(file.path).catch(() => undefined)));
