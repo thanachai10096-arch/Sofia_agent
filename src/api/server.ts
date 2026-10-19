@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { SofiaAgent } from "../agent/core.js";
+import { SessionAwareSofiaAgent } from "../agent/session-aware.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { DesktopCapability } from "../desktop/types.js";
 import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } from "./types.js";
@@ -121,7 +122,7 @@ function pathId(url: string): string | null {
 }
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
-  const agent = new SofiaAgent(deps);
+  const agent = deps.sessionStore ? new SessionAwareSofiaAgent(deps) : new SofiaAgent(deps);
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
   const discordRoute = config.discordInteractionRoute;
   const discordRoutePath = discordRoute?.path ?? "/v1/integrations/discord/interactions";
@@ -284,6 +285,32 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      if (requestUrl.pathname === "/v1/sessions/search") {
+        if (req.method !== "GET") return json(res, 405, { error: "method_not_allowed" }, origin, config);
+        if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+        }
+        if (!deps.sessionStore?.search) return json(res, 503, { error: "session_search_unavailable" }, origin, config);
+        const query = requestUrl.searchParams.get("q")?.trim() ?? "";
+        if (query.length > 1000) return json(res, 400, { error: "session_query_too_long" }, origin, config);
+        const rawLimit = Number(requestUrl.searchParams.get("limit") ?? "20");
+        if (!Number.isSafeInteger(rawLimit) || rawLimit < 1 || rawLimit > 100) {
+          return json(res, 400, { error: "invalid_limit" }, origin, config);
+        }
+        if (!query) return json(res, 200, { sessions: [] }, origin, config);
+        // Search results are filtered by the authenticated key's namespace before
+        // any transcript content is returned; client-supplied session IDs are not trusted.
+        const ownerPrefix = auth.keyId + ":";
+        const matches = deps.sessionStore.search(query, { limit: 100 })
+          .filter((session) => session.id.startsWith(ownerPrefix))
+          .slice(0, rawLimit)
+          .map((session) => ({
+            sessionId: session.id.slice(ownerPrefix.length),
+            updatedAt: session.updatedAt,
+            messages: session.messages.filter((message) => message.toLocaleLowerCase().includes(query.toLocaleLowerCase())),
+          }));
+        return json(res, 200, { sessions: matches }, origin, config);
+      }
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
         if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
