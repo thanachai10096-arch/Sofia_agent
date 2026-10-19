@@ -222,6 +222,6 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
     }
   };
 
-  onMessage.recordAssistantReply = (conversationId, text) => appendTurn(conversationId, "Sofia", text);
+  onMessage.recordAssistantReply = (conversationId: string, text: string) => appendTurn(conversationId, "Sofia", text);
   return onMessage;
 }
