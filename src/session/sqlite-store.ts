@@ -194,7 +194,7 @@ export class SqliteSessionStore {
     return rows.map((row) => this.get(row.id)).filter((session): session is Session => session !== undefined);
   }
 
-  search(query: string, options: { limit?: number; offset?: number } = {}): Session[] {
+  search(query: string, options: { limit?: number; offset?: number; ownerPrefix?: string } = {}): Session[] {
     const term = query.trim();
     if (!term) return [];
     const limit = boundedInteger(options.limit, 20, 1, 100);
@@ -206,29 +206,29 @@ export class SqliteSessionStore {
         ids = (this.db.prepare(`
           SELECT DISTINCT session_id AS id
           FROM session_messages_fts
-          WHERE session_messages_fts MATCH ?
+          WHERE session_messages_fts MATCH ? AND (? IS NULL OR session_id LIKE ?)
           LIMIT ? OFFSET ?
-        `).all(ftsQuery, limit, offset) as Array<{ id: string }>).map((row) => row.id);
+        `).all(ftsQuery, options.ownerPrefix ?? null, options.ownerPrefix === undefined ? null : options.ownerPrefix + "%", limit, offset) as Array<{ id: string }>).map((row) => row.id);
       } catch {
-        ids = this.searchLike(term, limit, offset);
+        ids = this.searchLike(term, limit, offset, options.ownerPrefix);
       }
     } else {
-      ids = this.searchLike(term, limit, offset);
+      ids = this.searchLike(term, limit, offset, options.ownerPrefix);
     }
     return ids.map((id) => this.get(id)).filter((session): session is Session => session !== undefined);
   }
 
-  private searchLike(term: string, limit: number, offset: number): string[] {
+  private searchLike(term: string, limit: number, offset: number, ownerPrefix?: string): string[] {
     const pattern = `%${term.replace(/[\\%_]/gu, "\\$&")}%`;
     return (this.db.prepare(`
       SELECT DISTINCT s.id
       FROM sessions s JOIN session_messages m ON m.session_id = s.id
       WHERE m.content LIKE ? ESCAPE '\\'
+        AND (? IS NULL OR s.id LIKE ?)
       ORDER BY s.updated_at DESC, s.id ASC
       LIMIT ? OFFSET ?
-    `).all(pattern, limit, offset) as Array<{ id: string }>).map((row) => row.id);
+    `).all(pattern, ownerPrefix ?? null, ownerPrefix === undefined ? null : ownerPrefix + "%", limit, offset) as Array<{ id: string }>).map((row) => row.id);
   }
-
   delete(id: string): void {
     this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
     if (this.ftsAvailable) this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
