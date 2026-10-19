@@ -18,11 +18,11 @@ test("mobile async start returns a durable run ID and sends async=true", async (
     },
   });
 
-  const result = await client.start({ task: "inspect the project" });
+  const result = await client.start({ task: "inspect the project", sessionId: "telegram:chat-1:user-1" });
   assert.deepEqual(result, { id: "run-123", status: "queued" });
   assert.equal(request?.method, "POST");
   assert.equal((request?.headers as Record<string, string>).authorization, "Bearer test-key");
-  assert.deepEqual(JSON.parse(String(request?.body)), { task: "inspect the project", async: true });
+  assert.deepEqual(JSON.parse(String(request?.body)), { task: "inspect the project", sessionId: "telegram:chat-1:user-1", async: true });
 });
 
 test("mobile polling retries transient server errors with bounded backoff", async () => {
