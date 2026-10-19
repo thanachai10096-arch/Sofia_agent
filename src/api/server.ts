@@ -134,7 +134,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
-  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
+  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStorePath);
   const countToolCall = (keyId: string, controller: AbortController, event: { type: string }): boolean => {
     if (event.type !== "tool.started") return true;
     try { usage.consumeToolCall(keyId); return true; }
