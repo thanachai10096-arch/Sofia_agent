@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createSofiaApi } from "../../src/api/server.js";
@@ -52,4 +55,35 @@ test("UsageLimiter returns a fresh record for unknown keys", () => {
   const exposed = limiter.get("unknown");
   exposed.runs = 999;
   assert.equal(limiter.get("unknown").runs, 0);
+});
+
+
+test("UsageLimiter counts tool-call attempts without incrementing run count", () => {
+  const limiter = new UsageLimiter(2, 2);
+  limiter.consume("key");
+  limiter.consumeToolCall("key");
+  assert.deepEqual(limiter.get("key"), {
+    keyId: "key",
+    runs: 1,
+    toolCalls: 1,
+    startedAt: limiter.get("key").startedAt,
+  });
+  limiter.consumeToolCall("key");
+  assert.throws(() => limiter.consumeToolCall("key"), /API usage quota exceeded/);
+  assert.equal(limiter.get("key").runs, 1);
+});
+
+
+test("UsageLimiter persists counters across instances and enforces the shared quota", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-usage-quota-"));
+  const storePath = path.join(directory, "usage.json");
+  try {
+    const first = new UsageLimiter(10, 1, storePath);
+    first.consumeToolCall("key");
+    const second = new UsageLimiter(10, 1, storePath);
+    assert.equal(second.get("key").toolCalls, 1);
+    assert.throws(() => second.consumeToolCall("key"), /API usage quota exceeded/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
