@@ -50,12 +50,12 @@ try {
   const recovered = await storeB.claim(ids[0], "recovery-worker-" + randomUUID(), 15_000);
   assert.ok(recovered, "expired lease should be claimable by a replacement worker");
   assert.notEqual(recovered?.leaseOwnerToken, winnerToken, "recovery must issue a new fencing token");
-  assert.equal(await storeA.save({ ...winner!, status: "completed", updatedAt: new Date().toISOString() }), false,
+  assert.equal(await storeA.save({ ...winner, status: "completed", updatedAt: new Date().toISOString() }), false,
     "stale worker must not overwrite state after a replacement claim");
 
   const cancelled = await storeB.cancel(ids[0]);
   assert.equal(cancelled?.status, "cancelled");
-  assert.equal(await storeA.heartbeat(ids[0], recovered!.leaseOwnerToken!, 15_000), false,
+  assert.equal(await storeA.heartbeat(ids[0], recovered.leaseOwnerToken!, 15_000), false,
     "cancelled job must reject subsequent heartbeats");
   assert.equal(await storeA.save({ ...recovered!, status: "completed", updatedAt: new Date().toISOString() }), false,
     "a worker must not overwrite terminal cancellation");
