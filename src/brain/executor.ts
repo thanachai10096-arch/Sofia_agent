@@ -101,6 +101,8 @@ interface Dependencies {
 
 export interface BrainRunInput {
   task: string;
+  /** Bounded prior conversation or user memory, treated as untrusted reference data. */
+  context?: string;
   principalId?: string;
   understanding?: unknown;
   plan?: unknown;
@@ -499,6 +501,12 @@ export class SofiaBrain {
 
     const value = await this.infer("understand", {
       task: input.task,
+      referenceContext: input.context?.trim()
+        ? {
+            trust: "untrusted_reference_data",
+            content: fenceUntrustedOutput("agent.context", input.context.slice(0, 12_000)).text,
+          }
+        : undefined,
       availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
@@ -570,6 +578,12 @@ export class SofiaBrain {
     const value = await this.infer("plan", {
       task: input.task,
       understanding,
+      referenceContext: input.context?.trim()
+        ? {
+            trust: "untrusted_reference_data",
+            content: fenceUntrustedOutput("agent.context", input.context.slice(0, 12_000)).text,
+          }
+        : undefined,
       availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
