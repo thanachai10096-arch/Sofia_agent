@@ -693,7 +693,7 @@ export class SofiaBrain {
 
     for (const criterion of criteria) {
       this.signal.throwIfAborted();
-
+      this.emit({ type: "brain.tool.started", stepId: criterion.id });
       const result = await this.io(() =>
         this.dependencies.tools.execute(criterion.probe, {
           runId: this.runId,
