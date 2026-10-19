@@ -55,9 +55,9 @@ try {
 
   const cancelled = await storeB.cancel(ids[0]);
   assert.equal(cancelled?.status, "cancelled");
-  assert.equal(await storeA.heartbeat(ids[0], recovered.leaseOwnerToken!, 15_000), false,
+  assert.equal(await storeA.heartbeat(ids[0], recovered.leaseOwnerToken, 15_000), false,
     "cancelled job must reject subsequent heartbeats");
-  assert.equal(await storeA.save({ ...recovered!, status: "completed", updatedAt: new Date().toISOString() }), false,
+  assert.equal(await storeA.save({ ...recovered, status: "completed", updatedAt: new Date().toISOString() }), false,
     "a worker must not overwrite terminal cancellation");
 
   const loaded = await storeA.get(ids[0]);
