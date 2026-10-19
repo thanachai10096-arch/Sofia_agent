@@ -233,7 +233,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
-    if ("closeSessionStore" in deps && typeof deps.closeSessionStore === "function") deps.closeSessionStore();
-    server.close();
+    server.close(() => {
+      if ("closeSessionStore" in deps && typeof deps.closeSessionStore === "function") deps.closeSessionStore();
+    });
   });
 }
