@@ -10,7 +10,7 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "delivery_failed", status?: number) => void;
+  onError?: (event: "poll_failed" | "delivery_failed" | "webhook_cleanup_failed" | "polling_conflict", status?: number, reason?: "webhook_active" | "another_poller" | "unknown") => void;
 }
 
 /**
@@ -48,7 +48,13 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
     }
     if (!response.ok || data.ok !== true || data.result === undefined) {
       const error = new Error("Telegram API request failed.");
-      Object.assign(error, { status: response.status });
+      const description = typeof data.description === "string" ? data.description.toLowerCase() : "";
+      const reason = description.includes("webhook")
+        ? "webhook_active"
+        : description.includes("terminated by other getupdates request") || description.includes("other getupdates")
+          ? "another_poller"
+          : "unknown";
+      Object.assign(error, { status: response.status, reason });
       throw error;
     }
     return data.result;
@@ -88,7 +94,17 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         if (signal.aborted || stopped) break;
         const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
           ? error.status : undefined;
-        try { options.onError?.("poll_failed", status); } catch { /* logging must not terminate polling */ }
+        const reason = error && typeof error === "object" && "reason" in error &&
+          (error.reason === "webhook_active" || error.reason === "another_poller")
+          ? error.reason : "unknown";
+        try {
+          options.onError?.(status === 409 ? "polling_conflict" : "poll_failed", status, reason);
+        } catch { /* logging must not terminate polling */ }
+        // A 409 is a configuration/ownership conflict, not a transient network error.
+        // Stop instead of retrying forever and repeatedly competing for this bot token.
+        if (status === 409) {
+          break;
+        }
         await wait(backoffMs, signal);
         backoffMs = Math.min(30_000, backoffMs * 2);
       }
@@ -108,9 +124,13 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       if (!controller.signal.aborted) {
         try {
           await request<boolean>("deleteWebhook", { drop_pending_updates: false }, controller.signal);
-        } catch {
-          // Do not log token or provider response bodies. Polling will emit a
-          // safe status-only diagnostic if Telegram still rejects getUpdates.
+        } catch (error) {
+          const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
+            ? error.status : undefined;
+          const reason = error && typeof error === "object" && "reason" in error &&
+            (error.reason === "webhook_active" || error.reason === "another_poller")
+            ? error.reason : "unknown";
+          try { options.onError?.("webhook_cleanup_failed", status, reason); } catch { /* diagnostics must not interrupt startup */ }
         }
       }
       if (controller.signal.aborted) {

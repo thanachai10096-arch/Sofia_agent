@@ -62,3 +62,54 @@ test("Telegram delivery errors are sanitized and surfaced to the caller", async 
   assert.ok(errorEvents.includes("delivery_failed"));
   await transport.stop();
 });
+
+
+test("Telegram polling stops on 409 and classifies another poller without logging provider text", async () => {
+  const events: Array<{ event: string; status?: number; reason?: string }> = [];
+  let pollCalls = 0;
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/deleteWebhook")) return ok(true);
+    if (url.endsWith("/getUpdates")) {
+      pollCalls++;
+      return new Response(JSON.stringify({
+        ok: false,
+        error_code: 409,
+        description: "Conflict: terminated by other getUpdates request; do not expose this raw text",
+      }), { status: 409 });
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError: (event, status, reason) => events.push({ event, status, reason }),
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await transport.stop();
+  assert.equal(pollCalls, 1, "409 conflicts must not trigger an endless polling retry");
+  assert.ok(events.some((event) => event.event === "polling_conflict" && event.status === 409 && event.reason === "another_poller"));
+  assert.doesNotMatch(JSON.stringify(events), /do not expose this raw text/);
+});
+
+test("Telegram webhook cleanup failures produce a safe diagnostic", async () => {
+  const events: Array<{ event: string; status?: number; reason?: string }> = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/deleteWebhook")) {
+      return new Response(JSON.stringify({ ok: false, error_code: 409, description: "Webhook is active" }), { status: 409 });
+    }
+    if (url.endsWith("/getUpdates")) return ok([]);
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError: (event, status, reason) => events.push({ event, status, reason }),
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await transport.stop();
+  assert.ok(events.some((event) => event.event === "webhook_cleanup_failed" && event.status === 409 && event.reason === "webhook_active"));
+  assert.doesNotMatch(JSON.stringify(events), /Webhook is active/);
+});
