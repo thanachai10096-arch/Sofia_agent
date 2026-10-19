@@ -244,7 +244,7 @@ try {
 
 Set `SOFIA_SESSION_DB_PATH` on the API server to opt into durable SQLite transcripts and bounded replay of recent turns; this requires Node 22.5+ (Node 24 is recommended). Without that variable, the API keeps its existing session behavior. Use a persistent, access-controlled volume for the database and keep the path outside the workspace when practical.
 
-Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Session transcript persistence does not automatically replay history into model context or add transcript retrieval endpoints. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
+Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default when no explicit database path is configured.
 
 ## User memory
 
