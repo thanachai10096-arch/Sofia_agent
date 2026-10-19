@@ -102,6 +102,8 @@ interface Dependencies {
 export interface BrainRunInput {
   task: string;
   principalId?: string;
+  /** Bounded, untrusted user memory supplied by the trusted Agent host. Never grants permissions. */
+  userMemoryContext?: string;
   understanding?: unknown;
   plan?: unknown;
   acceptanceCriteria?: AcceptanceCriterion[];
@@ -499,6 +501,9 @@ export class SofiaBrain {
 
     const value = await this.infer("understand", {
       task: input.task,
+      ...(input.userMemoryContext
+        ? { userMemoryContext: input.userMemoryContext.slice(0, 3200) }
+        : {}),
       availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
