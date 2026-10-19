@@ -103,6 +103,20 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       const stopFromParent = () => controller?.abort(signal.reason);
       signal.addEventListener("abort", stopFromParent, { once: true });
       if (signal.aborted) stopFromParent();
+      // This runtime uses long polling, so remove any stale Telegram webhook
+      // configuration before getUpdates. Preserve queued updates.
+      if (!controller.signal.aborted) {
+        try {
+          await request<boolean>("deleteWebhook", { drop_pending_updates: false }, controller.signal);
+        } catch {
+          // Do not log token or provider response bodies. Polling will emit a
+          // safe status-only diagnostic if Telegram still rejects getUpdates.
+        }
+      }
+      if (controller.signal.aborted) {
+        signal.removeEventListener("abort", stopFromParent);
+        return;
+      }
       loop = poll(controller.signal, onUpdate).finally(() => {
         signal.removeEventListener("abort", stopFromParent);
       });
