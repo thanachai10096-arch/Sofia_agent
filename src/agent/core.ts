@@ -88,6 +88,7 @@ export class SofiaAgent {
 
     const report = await brain.run({
       task: request.task,
+      ...(request.context !== undefined ? { context: request.context } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
       ...(request.acceptanceCriteria
         ? { acceptanceCriteria: request.acceptanceCriteria }
