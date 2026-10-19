@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { EvolutionEngine } from "./evolution.js";
 
 import { createSofiaBrain } from "./executor.js";
 import { InMemorySkillLedger } from "./learning.js";
@@ -776,4 +780,122 @@ test("Brain does not award Evolution success when code review rejects an empty d
     successes: 0,
     failures: 1,
   });
+});
+
+
+test("Brain credits the selected repair skill only after verified recovery and persists it across restart", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-brain-evolution-recovery-"));
+  const file = join(directory, "evolution.json");
+  try {
+    const evolution = new EvolutionEngine(file);
+    const reasoner: BrainReasoner = {
+      async prepare(request) {
+        const parsed = JSON.parse(request) as { phase: string };
+        const value = parsed.phase === "understand"
+          ? {
+              objective: "Recover from an assertion failure",
+              constraints: [],
+              assumptions: [],
+              requiredCapabilities: ["file-write"],
+              requiredTools: ["test.fail_once"],
+              risk: "low",
+              successCriteria: ["hello.txt exists"],
+              ambiguities: [],
+            }
+          : parsed.phase === "replan"
+            ? {
+                strategy: "fix-implementation",
+                reason: "Use the assertion failure evidence to recover.",
+                steps: [{
+                  id: "verify-recovery",
+                  objective: "Inspect the recovered workspace",
+                  dependencies: [],
+                  call: { tool: "workspace.list_files", input: { path: "." } },
+                }],
+              }
+            : {
+                strategy: "initial",
+                reason: "Trigger one recoverable assertion failure.",
+                steps: [{
+                  id: "trigger-failure",
+                  objective: "Trigger a recoverable assertion failure",
+                  dependencies: [],
+                  call: { tool: "test.fail_once", input: {} },
+                }],
+              };
+        return {
+          inputTokens: 10,
+          async invoke() {
+            return { value, usage: { inputTokens: 10, outputTokens: 20 } };
+          },
+        };
+      },
+    };
+    const tools = makeTools();
+    const originalExecute = tools.execute.bind(tools);
+    tools.describe = (name) => name === "test.fail_once"
+      ? { effects: ["read"] }
+      : name === "workspace.write_file" || name === "workspace.list_files"
+        ? { effects: name === "workspace.write_file" ? ["write"] : ["read"] }
+        : undefined;
+    tools.execute = async (call, context) => {
+      if (call.tool === "test.fail_once") {
+        return {
+          ok: false,
+          data: null,
+          evidenceId: "assertion-failure-evidence",
+          error: { category: "tool_error", message: "assertion expected value mismatch" },
+        };
+      }
+      return originalExecute(call, context);
+    };
+
+    const brain = createSofiaBrain({
+      dependencies: {
+        reasoner,
+        tools,
+        allowShell: false,
+        allowNetwork: false,
+        evolution,
+      },
+      limits: {
+        maxSteps: 4,
+        maxToolCalls: 12,
+        maxReplans: 2,
+        maxModelCalls: 6,
+        maxTokens: 2_000,
+        maxContextTokens: 500,
+        maxOutputTokens: 100,
+        timeoutMs: 5_000,
+      },
+    });
+    const report = await brain.run({
+      task: "Recover from an assertion failure and confirm hello.txt exists",
+      acceptanceCriteria: [{
+        id: "file-exists",
+        description: "hello.txt exists",
+        probe: { tool: "workspace.list_files", input: { path: "." } },
+        evaluate(data) {
+          return {
+            passed: Array.isArray(data) && data.includes("hello.txt"),
+            detail: "hello.txt exists",
+          };
+        },
+      }],
+    });
+
+    assert.equal(report.completed, true, report.summary);
+    assert.equal(evolution.getSkill("test-failure-repair")?.successes, 1);
+    assert.equal(evolution.getSkill("test-failure-repair")?.failures, 0);
+    await evolution.flush();
+
+    const afterRestart = new EvolutionEngine(file);
+    const persisted = afterRestart.getSkill("test-failure-repair");
+    assert.ok(persisted, "verified repair skill should survive a new engine instance");
+    assert.equal(persisted.successes, 1);
+    assert.equal(persisted.failures, 0);
+    assert.equal(persisted.taskTypes["file-write"]?.successes, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
