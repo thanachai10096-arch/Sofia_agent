@@ -722,3 +722,58 @@ test("Brain records Evolution success only after verification and review approve
   assert.equal(Object.keys(evolution.getSnapshot().skills).length, 0,
     "a successful run with no selected repair skill must not invent skill credit");
 });
+
+
+test("Brain does not award Evolution success when code review rejects an empty diff scope", async () => {
+  const { EvolutionEngine } = await import("./evolution.js");
+  const evolution = new EvolutionEngine();
+  const tools = makeTools();
+  tools.changedFiles = async () => [];
+  const reviewEvents: boolean[] = [];
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+      evolution,
+      onEvent(event) {
+        if (event.type === "brain.review.completed") reviewEvents.push(event.passed);
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 0,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, false);
+  assert.deepEqual(reviewEvents, [false]);
+  assert.equal(Object.keys(evolution.getSnapshot().skills).length, 0);
+  assert.deepEqual(evolution.getSnapshot().taskTypes["file-write"], {
+    attempts: 1,
+    successes: 0,
+    failures: 1,
+  });
+});
