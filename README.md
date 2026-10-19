@@ -242,7 +242,7 @@ try {
 }
 ```
 
-Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns and include a bounded window of prior turns as untrusted context. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Retrieved session context is capped and fenced as untrusted reference data before reaching the model. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+). User-memory retrieval remains opt-in: set `SOFIA_ENABLE_USER_MEMORY_CONTEXT=true` to include a small, principal-scoped set of relevant stored memories as untrusted context; memory retrieval failures do not block tasks.
+Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns and include a bounded window of prior turns as untrusted context. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Retrieved session context is capped and fenced as untrusted reference data before reaching the model. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+). For the API entrypoint, set `SOFIA_SESSION_DB_PATH=/var/lib/sofia/sessions.sqlite` on a persistent, access-controlled volume to enable durable conversation continuity; without this setting, transcript replay is disabled in the entrypoint. User-memory retrieval remains opt-in: set `SOFIA_ENABLE_USER_MEMORY_CONTEXT=true` to include a small, principal-scoped set of relevant stored memories as untrusted context; memory retrieval failures do not block tasks.
 
 ## User memory
 
