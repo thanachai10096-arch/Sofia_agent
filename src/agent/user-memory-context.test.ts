@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SofiaAgent } from "../src/agent/core.js";
-import { ModelRouter } from "../src/models/router.js";
-import { Reviewer } from "../src/review/reviewer.js";
+import { SofiaAgent } from "./core.js";
+import { ModelRouter } from "../models/router.js";
+import { Reviewer } from "../review/reviewer.js";
 
 test("agent retrieves only the authenticated principal's bounded memory for Brain context", async () => {
   let requestedPrincipal = "";
@@ -14,7 +14,7 @@ test("agent retrieves only the authenticated principal's bounded memory for Brai
     ]),
     reviewer: new Reviewer(),
     userMemoryStore: {
-      async find(principalId, _query, limit) {
+      async find(principalId: string, _query: string, limit?: number) {
         requestedPrincipal = principalId;
         assert.equal(limit, 5);
         return [{
