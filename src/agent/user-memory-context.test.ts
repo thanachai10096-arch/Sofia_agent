@@ -88,3 +88,77 @@ test("agent does not retrieve user memory when no authenticated principal is pre
   await agent.run({ task: "Explain this project" });
   assert.equal(memoryLookups, 0);
 });
+
+
+test("agent bounds retrieved memory count and total context size", async () => {
+  let brainInput: Record<string, unknown> | undefined;
+  const agent = new SofiaAgent({
+    provider: { async generate() { return { text: "unused" }; } },
+    router: new ModelRouter([
+      { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: new Reviewer(),
+    userMemoryStore: {
+      async find() {
+        return Array.from({ length: 8 }, (_, index) => ({
+          id: `memory-${index + 1}`,
+          kind: "preference" as const,
+          content: `ENTRY_${index + 1}_${"x".repeat(900)}`,
+          source: "explicit-user-request" as const,
+          confidence: 1,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          uses: 0,
+        }));
+      },
+      async save() {},
+      async list() { return []; },
+      async delete() { return false; },
+      async clear() {},
+    },
+    brainFactory: (() => ({
+      runId: "test-run",
+      async run(input: Record<string, unknown>) {
+        brainInput = input;
+        return { completed: true, summary: "Task completed", state: "completed", changedFiles: [], verification: [], usage: { steps: 1 } };
+      },
+    })) as never,
+  });
+
+  await agent.run({ task: "Explain this project", principalId: "authenticated-user" });
+  const context = String(brainInput?.userMemoryContext ?? "");
+  assert.ok(context.length <= 3200, `context length was ${context.length}`);
+  assert.match(context, /ENTRY_1_/);
+  assert.match(context, /ENTRY_5_/);
+  assert.doesNotMatch(context, /ENTRY_6_/);
+});
+
+test("memory store failure does not prevent an otherwise valid Brain run", async () => {
+  let brainRan = false;
+  const agent = new SofiaAgent({
+    provider: { async generate() { return { text: "unused" }; } },
+    router: new ModelRouter([
+      { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: new Reviewer(),
+    userMemoryStore: {
+      async find() { throw new Error("temporary memory backend failure"); },
+      async save() {},
+      async list() { return []; },
+      async delete() { return false; },
+      async clear() {},
+    },
+    brainFactory: (() => ({
+      runId: "test-run",
+      async run(input: Record<string, unknown>) {
+        brainRan = true;
+        assert.equal(input.userMemoryContext, undefined);
+        return { completed: true, summary: "Task completed", state: "completed", changedFiles: [], verification: [], usage: { steps: 1 } };
+      },
+    })) as never,
+  });
+
+  const result = await agent.run({ task: "Explain this project", principalId: "authenticated-user" });
+  assert.equal(brainRan, true);
+  assert.equal(result.output, "Task completed");
+});
