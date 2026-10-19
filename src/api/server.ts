@@ -135,6 +135,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay);
+  const countToolCall = (keyId: string, controller: AbortController, event: { type: string }): boolean => {
+    if (event.type !== "tool.started") return true;
+    try { usage.consumeToolCall(keyId); return true; }
+    catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
+  };
   const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
@@ -207,6 +212,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
+          onEvent: (event) => { countToolCall(run.ownerKeyId, run.controller, event); },
         });
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
@@ -218,7 +224,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       } catch (error) {
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
-          run.error = "Run cancelled.";
+          run.error = run.controller.signal.reason instanceof Error ? run.controller.signal.reason.message : "Run cancelled.";
         } else {
           run.status = "failed";
           run.error = error instanceof Error ? error.message : "Agent failed";
@@ -448,7 +454,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
-            onEvent: (event) => send({ type: "event", runId, event }),
+            onEvent: (event) => {
+              if (!countToolCall(auth.keyId, controller, event)) return;
+              send({ type: "event", runId, event });
+            },
           });
           if (controller.signal.aborted) throw new Error("Run cancelled.");
           run.result = result;
@@ -456,7 +465,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           send({ type: "result", runId, status: "completed", result: run.result });
         } catch (error) {
           run.status = controller.signal.aborted ? "cancelled" : "failed";
-          run.error = controller.signal.aborted ? "Run cancelled." : error instanceof Error ? error.message : "Agent failed";
+          run.error = controller.signal.aborted
+            ? controller.signal.reason instanceof Error ? controller.signal.reason.message : "Run cancelled."
+            : error instanceof Error ? error.message : "Agent failed";
           send({ type: "error", runId, status: run.status, error: run.error });
         }
         send({ type: "done", runId });
@@ -555,9 +566,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
+            onEvent: (event) => { countToolCall(auth.keyId, controller, event); },
           });
           if (controller.signal.aborted) {
-            return json(res, 504, { id: runId, status: "failed", error: "Request timed out or was cancelled." }, origin, config);
+            const reason = controller.signal.reason instanceof Error ? controller.signal.reason.message : "Request timed out or was cancelled.";
+            return json(res, reason === "API tool-call quota exceeded." ? 429 : 504, { id: runId, status: "failed", error: reason }, origin, config);
           }
           return json(res, 200, { id: runId, status: "completed", result }, origin, config);
         } catch (error) {
