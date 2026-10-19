@@ -1,6 +1,7 @@
 import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import type { UsageStore } from "./usage-store.js";
 
 export interface AgentRunInput {
   task: string;
@@ -41,6 +42,8 @@ export interface SofiaApiConfig {
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
+  /** Optional shared atomic usage store. When supplied, failures reject quota checks (fail closed). */
+  usageStore?: UsageStore;
   /**
    * Allowed browser origins. If omitted or empty, cross-origin browser access is not granted.
    * Keep the master API key on a trusted server; do not ship it in a browser.
