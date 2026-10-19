@@ -53,3 +53,19 @@ test("UsageLimiter returns a fresh record for unknown keys", () => {
   exposed.runs = 999;
   assert.equal(limiter.get("unknown").runs, 0);
 });
+
+
+test("UsageLimiter counts tool-call attempts without incrementing run count", () => {
+  const limiter = new UsageLimiter(2, 2);
+  limiter.consume("key");
+  limiter.consumeToolCall("key");
+  assert.deepEqual(limiter.get("key"), {
+    keyId: "key",
+    runs: 1,
+    toolCalls: 1,
+    startedAt: limiter.get("key").startedAt,
+  });
+  limiter.consumeToolCall("key");
+  assert.throws(() => limiter.consumeToolCall("key"), /API usage quota exceeded/);
+  assert.equal(limiter.get("key").runs, 1);
+});
