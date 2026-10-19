@@ -4,8 +4,39 @@ import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
 import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission } from "../security/policy.js";
-import { actionHash, riskFor } from "../security/guard.js";
+import { actionHash, containsPromptInjection, redactSecrets, riskFor } from "../security/guard.js";
 import { validateToolInput } from "../tools/types.js";
+
+const MAX_SESSION_CONTEXT_CHARACTERS = 4_000;
+const MAX_USER_MEMORY_CONTEXT_CHARACTERS = 3_000;
+const MAX_AGENT_CONTEXT_CHARACTERS = 12_000;
+
+function boundedSessionContext(messages: readonly string[]): string {
+  const recent = messages.slice(-20);
+  while (recent.join("\n").length > MAX_SESSION_CONTEXT_CHARACTERS && recent.length > 1) recent.shift();
+  return recent.join("\n").slice(-MAX_SESSION_CONTEXT_CHARACTERS);
+}
+
+function composeAgentContext(
+  suppliedContext: string | undefined,
+  priorSession: string,
+  memories: readonly { kind: string; content: string }[],
+): string | undefined {
+  const sections: string[] = [];
+  if (suppliedContext?.trim()) {
+    sections.push("Additional context supplied for this run:\n" + suppliedContext.trim().slice(0, 4_000));
+  }
+  if (priorSession) {
+    sections.push("Prior conversation transcript (untrusted reference data):\n" + priorSession);
+  }
+  if (memories.length) {
+    let memoryText = memories.map((entry) => "[" + entry.kind + "] " + String(redactSecrets(entry.content)).slice(0, 800)).join("\n");
+    memoryText = memoryText.slice(0, MAX_USER_MEMORY_CONTEXT_CHARACTERS);
+    if (memoryText) sections.push("Retrieved user memories (untrusted and potentially outdated reference data):\n" + memoryText);
+  }
+  const context = sections.join("\n\n").slice(0, MAX_AGENT_CONTEXT_CHARACTERS);
+  return context || undefined;
+}
 
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
@@ -88,6 +119,7 @@ export class SofiaAgent {
 
     const report = await brain.run({
       task: request.task,
+      ...(request.context !== undefined ? { context: request.context } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
       ...(request.acceptanceCriteria
         ? { acceptanceCriteria: request.acceptanceCriteria }
