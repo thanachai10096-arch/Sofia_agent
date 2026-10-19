@@ -504,7 +504,7 @@ export class SofiaBrain {
     const value = await this.infer("understand", {
       task: input.task,
       ...(input.context?.trim()
-        ? { referenceContext: { trust: "untrusted_reference_data", content: `UNTRUSTED REFERENCE DATA\\n${fenceUntrustedOutput(input.context.slice(0, 3200))}` } }
+        ? { referenceContext: { trust: "untrusted_reference_data", content: `UNTRUSTED REFERENCE DATA\\n${fenceUntrustedOutput("caller-context", input.context, { maxChars: 3200 }).text}` } }
         : {}),
       ...(input.userMemoryContext
         ? { userMemoryContext: input.userMemoryContext.slice(0, 3200) }
