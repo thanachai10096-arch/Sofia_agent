@@ -23,7 +23,7 @@ const deps = sessionDatabasePath
   ? await createSofiaAgentDependenciesWithSessions(workspace, undefined, path.resolve(sessionDatabasePath))
   : createSofiaAgentDependencies(workspace);
 const closeSessionStore: (() => void) | undefined = "closeSessionStore" in deps && typeof deps.closeSessionStore === "function"
-  ? deps.closeSessionStore
+  ? deps.closeSessionStore as () => void
   : undefined;
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
