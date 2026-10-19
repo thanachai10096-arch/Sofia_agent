@@ -65,26 +65,30 @@ export class UsageLimiter {
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== "EEXIST") throw error;
-        let stale = false;
         try {
-          const lock = JSON.parse(readFileSync(this.lockPath, "utf8")) as { pid?: unknown; hostname?: unknown; createdAt?: unknown; token?: unknown };
+          const lock = JSON.parse(readFileSync(this.lockPath, "utf8")) as { pid?: unknown; hostname?: unknown; createdAt?: unknown };
+          if (typeof lock.createdAt === "number" && Date.now() - lock.createdAt > STALE_LOCK_MS) {
+            // Avoid unlink races between multiple reclaimers. Stale locks require explicit operator review.
+            throw new Error("Usage quota lock is stale; refusing unsafe automatic recovery.");
+          }
           if (lock.hostname === os.hostname() && Number.isSafeInteger(lock.pid) && Number(lock.pid) > 0) {
             try { process.kill(Number(lock.pid), 0); }
-            catch (probeError) { stale = (probeError as NodeJS.ErrnoException).code === "ESRCH"; }
-          } else if (typeof lock.hostname === "string" && lock.hostname !== os.hostname()) {
-            // Never reclaim a remote process's lock based on age alone.
-            stale = false;
-          } else if (typeof lock.createdAt === "number" && Date.now() - lock.createdAt > STALE_LOCK_MS) {
-            throw new Error("Usage quota lock is stale or malformed; refusing unsafe recovery.");
-          }
-          if (stale) {
-            // Re-read immediately before reclaiming; do not remove a replacement lock.
-            const latest = JSON.parse(readFileSync(this.lockPath, "utf8")) as { token?: unknown; pid?: unknown; hostname?: unknown };
-            if (latest.token === lock.token && latest.pid === lock.pid && latest.hostname === lock.hostname) rmSync(this.lockPath, { force: true });
-            continue;
+            catch (probeError) {
+              if ((probeError as NodeJS.ErrnoException).code === "ESRCH") {
+                throw new Error("Usage quota lock owner is no longer running; remove the stale lock after verifying no writer is active.");
+              }
+            }
           }
         } catch (readError) {
           if ((readError as NodeJS.ErrnoException).code === "ENOENT") continue;
+          if (readError instanceof SyntaxError) {
+            // Another process may have created the lock but not finished writing its owner record.
+            if (Date.now() < deadline) {
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+              continue;
+            }
+            throw new Error("Timed out waiting for a valid shared usage quota lock.");
+          }
           throw readError;
         }
         if (Date.now() >= deadline) throw new Error("Timed out waiting for the shared usage quota lock.");
