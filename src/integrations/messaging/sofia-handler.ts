@@ -123,6 +123,8 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
         sessions.delete(oldest);
         modes.delete(oldest);
         loaded.delete(oldest);
+        saveQueues.delete(oldest);
+        loadQueues.delete(oldest);
       }
     }
   };
