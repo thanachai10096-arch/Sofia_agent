@@ -40,6 +40,23 @@ test("SQLite transcript pagination and full-text search work", async () => {
   }
 });
 
+test("SQLite transcript search applies owner prefix before pagination", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-owner-search-"));
+  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  try {
+    store.save({ id: "owner-b:shared", messages: ["same searchable phrase"], updatedAt: 0 });
+    store.save({ id: "owner-a:shared", messages: ["same searchable phrase"], updatedAt: 0 });
+    for (let i = 0; i < 105; i += 1) {
+      store.save({ id: "owner-b:other-" + i, messages: ["same searchable phrase"], updatedAt: 0 });
+    }
+    const matches = store.search("same searchable phrase", { ownerPrefix: "owner-a:", limit: 1 });
+    assert.deepEqual(matches.map((session) => session.id), ["owner-a:shared"]);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("invalid transcript writes do not replace stored messages", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-test-"));
   const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
