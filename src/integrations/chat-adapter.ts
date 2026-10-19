@@ -28,6 +28,8 @@ export interface ChatRunStarter {
   start(input: {
     task: string;
     context?: string;
+    /** Stable per-user conversation key; the API namespaces it by authenticated owner. */
+    sessionId?: string;
   }, signal?: AbortSignal, options?: { idempotencyKey?: string }): Promise<{ id: string; status: string; error?: string }>;
 }
 
@@ -97,6 +99,7 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
       const run = await options.client.start({
         task,
         context: `Origin: ${command.platform} chat integration. Conversation ID: ${command.conversationId}.`,
+        sessionId: `${command.platform}:${command.conversationId}:${command.senderId}`,
       }, undefined, { idempotencyKey });
       return { status: "accepted", runId: run.id, runStatus: run.status };
     } catch (error) {
