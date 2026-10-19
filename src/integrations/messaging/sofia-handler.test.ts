@@ -86,7 +86,7 @@ test("command prefix can be configured for a bot mention", async () => {
 test("denied user cannot start a run", async () => {
   const h = harness(false);
   const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true });
-  assert.match(String(await handle(inbound("do work")), /ยังไม่ได้รับอนุญาต/);
+  assert.match(String(await handle(inbound("do work"))), /ยังไม่ได้รับอนุญาต/);
   assert.equal(h.starts.length, 0);
 });
 
