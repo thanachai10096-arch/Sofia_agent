@@ -1,5 +1,5 @@
 import { redactSecrets } from "../security/guard.js";
-import type { JobRecord } from "./job-runtime.js";
+import type { JobRecord, JobStateStore } from "./job-runtime.js";
 
 /** Structural subset of a PostgreSQL client pool (for example node-postgres). */
 export interface JobSqlResult<Row = Record<string, unknown>> { rows: Row[]; }
@@ -12,15 +12,6 @@ export interface JobSqlPool {
   connect(): Promise<JobSqlClient>;
 }
 
-export interface DurableJobStateStore {
-  save(record: JobRecord): Promise<boolean>;
-  get(id: string): Promise<JobRecord | undefined>;
-  list(): Promise<JobRecord[]>;
-  claim(id: string, ownerToken: string, leaseMs: number): Promise<JobRecord | undefined>;
-  heartbeat(id: string, ownerToken: string, leaseMs: number): Promise<boolean>;
-  markInterruptedIfExpired(id: string): Promise<JobRecord | undefined>;
-  cancel(id: string): Promise<JobRecord | undefined>;
-}
 
 function safeRecord(record: JobRecord): JobRecord {
   return {
@@ -50,7 +41,7 @@ function decodeRecord(value: unknown): JobRecord {
  * Every state mutation locks the row and validates the lease fencing token.
  * Run ensureSchema() during controlled startup/migration before accepting jobs.
  */
-export class PostgresJobStateStore implements DurableJobStateStore {
+export class PostgresJobStateStore implements JobStateStore {
   constructor(private readonly pool: JobSqlPool) {}
 
   async ensureSchema(): Promise<void> {
