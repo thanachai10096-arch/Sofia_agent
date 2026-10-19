@@ -3,6 +3,7 @@ import test from "node:test";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import type { ChatAccessPolicy, ChatMessageDeduplicator, ChatRunStarter } from "../chat-adapter.js";
 import type { InboundMessage } from "./types.js";
+import type { ConversationSession, ConversationSessionStore } from "./conversation-session-store.js";
 
 const inbound = (text: string, overrides: Partial<InboundMessage> = {}): InboundMessage => ({
   platform: "telegram",
@@ -123,4 +124,46 @@ test("invalid command prefixes are rejected at configuration time", () => {
   const h = harness();
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: " " }), /commandPrefix/);
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: "/run\nadmin" }), /commandPrefix/);
+});
+
+
+test("task mode ignores ordinary text and still accepts explicit /task commands", async () => {
+  const h = harness();
+  const persisted = new Map<string, ConversationSession>();
+  const sessionStore: ConversationSessionStore = {
+    async load(id) {
+      const value = persisted.get(id);
+      return value ? { turns: [...value.turns], mode: value.mode } : undefined;
+    },
+    async save(id, session) {
+      persisted.set(id, { turns: [...session.turns], mode: session.mode });
+    },
+  };
+  const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true, sessionStore });
+  assert.match(String(await handle(inbound("/mode task"))), /โหมด task/);
+  assert.equal(await handle(inbound("please just chat", { messageId: "message-2" })), undefined);
+  assert.equal(h.starts.length, 0);
+  assert.match(String(await handle(inbound("/task inspect logs", { messageId: "message-3" }))), /รับเรื่องแล้ว/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(persisted.get("chat-1")?.mode, "task");
+
+  const secondHarness = harness();
+  const restored = createSofiaMessagingHandler({ ...secondHarness, acceptPlainTextTasks: true, sessionStore });
+  assert.equal(await restored(inbound("ordinary message after restart", { messageId: "message-4" })), undefined);
+  assert.equal(secondHarness.starts.length, 0);
+});
+
+test("clear-context removes prior turns but preserves the selected mode", async () => {
+  const h = harness();
+  const persisted = new Map<string, ConversationSession>();
+  const sessionStore: ConversationSessionStore = {
+    async load(id) { return persisted.get(id); },
+    async save(id, session) { persisted.set(id, { turns: [...session.turns], mode: session.mode }); },
+  };
+  const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true, sessionStore });
+  await handle(inbound("ช่วยดู error นี้"));
+  await handle(inbound("/clear-context", { messageId: "message-2" }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(persisted.get("chat-1")?.turns, []);
+  assert.equal(persisted.get("chat-1")?.mode, "chat");
 });
