@@ -103,7 +103,6 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         // A 409 is a configuration/ownership conflict, not a transient network error.
         // Stop instead of retrying forever and repeatedly competing for this bot token.
         if (status === 409) {
-          stopped = true;
           break;
         }
         await wait(backoffMs, signal);
