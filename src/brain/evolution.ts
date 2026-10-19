@@ -107,7 +107,14 @@ export class EvolutionEngine {
   rank(ids: readonly string[], taskType = "general"): SkillRanking[] {
     const key = normalizeTaskType(taskType);
     return ids.map(id => {
-      const s = this.get(id);
+      // Candidate IDs may be unknown to the ledger. Rank them using an
+      // ephemeral prior instead of registering them as learned skills.
+      // Otherwise a mere ranking query pollutes persistent diagnostics.
+      const s: SkillPerformance = ownValue(this.snapshot.skills, id) ?? {
+        id, attempts: 0, successes: 0, failures: 0,
+        confidence: 0.5, avgSteps: 0, avgRecoveryRounds: 0,
+        successHistory: [], failureHistory: [], taskTypes: {},
+      };
       // Use a Beta(1, 1) prior so one lucky outcome does not make a
       // barely-tested skill appear perfectly reliable. As evidence grows,
       // the smoothed estimate converges toward the observed success rate.
