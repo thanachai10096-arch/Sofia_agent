@@ -1,83 +1,83 @@
-# Sofia Agent: User Experience and Hermes-Parity Roadmap
+# Sofia Agent: Thai Messaging and Channel Integration Plan
 
-This document defines a product roadmap, not a claim that every capability is already implemented. Use the code and current CI on the exact commit as the source of truth.
+This document narrows the channel work into implementation-ready acceptance criteria. The broader product roadmap, including memory, skills, durable jobs, model configuration, setup, and commercial boundaries, belongs in [HERMES_PARITY_ROADMAP.md](HERMES_PARITY_ROADMAP.md). This plan does not claim that any channel is production-ready.
 
-## Product direction
+## Target experience
 
-Sofia should feel like a persistent assistant that users can reach from the tools they already use. The differentiator is a Thai-first experience with explicit permissions, evidence-backed verification, and auditable work—not a feature-count race.
+Sofia should feel natural in Thai and let users continue a conversation without memorizing commands, while clearly separating ordinary chat from actions that can change files, run tools, or affect external systems.
 
-Keep one shared Sofia Core and versioned API. Web, desktop, mobile, Telegram, Discord, LINE, and future adapters must call the same core. Adapters may map identities, format messages, and handle transport/retries, but must not bypass authentication, Tool Gateway authorization, approvals, quotas, or audit boundaries.
+All channels must use the existing Sofia Core and policy path. A channel adapter is transport glue, not a second agent runtime.
 
-## Priority 0 — prove continuity
+## Phase 0 — reconcile existing messaging work
 
-1. **Session continuity:** replay a bounded, ordered window of recent turns for the authenticated session. Keep the current user request distinct from reference context.
-2. **User memory:** retrieve only memories belonging to the authenticated principal, rank them for relevance, and include a small bounded set in model context. Memory is untrusted reference data—not policy, permission, or a source of new authority.
-3. **Persistence:** document which stores are temporary, local durable, or shared/transactional. Do not describe file-backed single-process stores as multi-host durable.
-4. **User controls:** provide clear ways to inspect, correct, and delete stored memories and clear a conversation. Avoid storing inferred personal facts without user intent.
-5. **Failure behavior:** memory and transcript retrieval should be best-effort where safe; storage/authorization failures must never silently cross user boundaries.
+Before adding another adapter, review current code and exact-head CI for:
+- [PR #255 — plain-language Telegram tasks](https://github.com/thanachai10096-arch/Sofia_agent/pull/255)
+- [PR #256 — conversational Telegram behavior](https://github.com/thanachai10096-arch/Sofia_agent/pull/256)
+- [PR #258 — persistent messaging sessions and chat/task modes](https://github.com/thanachai10096-arch/Sofia_agent/pull/258)
+- [PR #260 — session replay and scoped user memory](https://github.com/thanachai10096-arch/Sofia_agent/pull/260)
 
-**Acceptance evidence:** tests for principal isolation, context ordering and bounds, secret redaction, prompt-injection fencing, deletion, restart behavior, disabled-by-default behavior where configured, and the exact CI run for the reviewed commit.
+Do not stack duplicate implementations. Reconcile overlapping contracts and tests first; these links are pointers to review, not proof of merge or deployment.
 
-## Priority 1 — conversational messaging
+### Telegram acceptance criteria
 
-1. Make Telegram ordinary-text conversation work without requiring `/run`; retain `/run` for explicit task execution and backward compatibility.
-2. Support Thai-first onboarding, help, greetings, follow-ups, and clear distinction between casual chat and actions that can change files or external systems.
-3. Persist bounded conversation context across restarts only when configured with a suitable private persistent store.
-4. Preserve per-user/per-chat identity mapping, allowlists, deduplication, rate limits, cancellation, safe error reporting, and delivery acknowledgements.
-5. Add LINE as a new adapter only after documenting webhook signature verification, replay/deduplication, user identity mapping, rate limiting, message-size handling, and secret storage. Reuse the existing messaging contracts and Sofia Core; do not build another agent runtime.
-6. Add Discord and other channels through the same adapter contract and prove that each channel reaches the same authorization and policy gates.
+- Plain text can continue a conversation without requiring `/run`; retain `/run` for explicit task execution and compatibility.
+- `/start` and `/help` explain the available capabilities in concise Thai.
+- Follow-up questions use a bounded, ordered recent transcript only for the correct user/chat scope.
+- Casual replies do not silently trigger tools. Consequential actions must pass the same policy and approval gates as API/CLI requests.
+- Long responses, timeouts, provider errors, duplicate updates, cancellation, and delivery failures have tested behavior.
+- User-facing errors are actionable but redact credentials, internal prompts, and sensitive tool output.
 
-**Acceptance evidence:** adapter contract tests plus integration tests for authorized and unauthorized senders, duplicate events, timeouts/retries, provider/model errors, long responses, and follow-up context. A green unit suite alone does not prove the deployed bot works.
+## Phase 1 — shared channel contract
 
-## Priority 2 — user-controlled model configuration
+Before adding LINE, define or reuse one adapter contract with:
+- verified platform identity and sender/conversation identifiers;
+- normalized text, attachment metadata, and event id;
+- deduplication/idempotency key;
+- explicit response status and provider delivery error;
+- bounded context/session identifier;
+- cancellation and timeout semantics.
 
-The product should offer a provider-neutral model preference while preserving secure defaults:
+The adapter may normalize and format messages but must not choose a less restrictive policy, manufacture authenticated principal IDs, or bypass the shared Tool Gateway.
 
-- `auto`: Sofia chooses among explicitly configured, permitted routes.
-- `provider/model`: user or administrator selects a specific configured route.
-- Optional organization policy can restrict available providers/models and override user preference.
-- Do not silently fall back to another provider when the selected route fails; explain the failure and require an explicit fallback policy.
-- Keep credentials server-side. Never accept raw API keys in chat messages, expose shared master keys to clients, or log prompts/secrets.
-- Apply budgets, quotas, timeouts, context limits, and provider capability checks consistently regardless of selected model.
-- Make the effective provider/model visible through safe diagnostics without exposing credentials or private prompts.
+## Phase 2 — LINE adapter (Thailand priority)
 
-**Acceptance evidence:** configuration validation, unauthorized-provider rejection, model-route selection tests, no-silent-fallback tests, secret-redaction tests, and real-provider smoke tests with explicitly configured credentials. Provider smoke tests may incur third-party costs.
+Implement LINE only after confirming the available messaging abstractions and test conventions in the current repository.
 
-## Priority 3 — one-command setup
+Security and reliability requirements:
+1. Verify the LINE webhook signature against the exact raw request body before parsing or acting.
+2. Keep the channel secret and access token server-side; never commit them or echo them in logs/errors.
+3. Deduplicate webhook events and safely handle provider retries.
+4. Map LINE user/group/room identifiers to an authenticated Sofia principal using an explicit allowlist or trusted account-linking flow; identifiers alone are not proof of authorization.
+5. Apply per-principal rate limits, task budgets, timeouts, and bounded message/context sizes.
+6. Use the same approval, run-ownership, audit, and tool-policy path as other entrypoints.
+7. Handle unsupported attachments, empty events, malformed signatures, revoked users, provider outages, and send-message failures without claiming a task completed.
+8. Make webhook health and delivery failures diagnosable without exposing secrets or private conversation contents.
 
-1. Verify the published package and `sofia` CLI from a clean machine and supported Node.js versions.
-2. Provide a guided setup for local runtime, model credentials, storage, and optional messaging adapters.
-3. Keep secrets in environment variables or a private local secret store; never write them to example files, logs, or generated public configuration.
-4. Separate a local self-hosted install from hosted deployment instructions. Make optional browser/Docker dependencies and platform limitations explicit.
-5. Publish a short Thai quick-start video only after the documented steps are reproducible from a clean checkout/package.
+### Required tests
 
-**Acceptance evidence:** clean-install CI on supported operating systems, smoke tests for CLI startup and health, and a reproducible quick-start with no undocumented manual steps.
+- Valid and invalid signatures, including altered raw body.
+- Duplicate/replayed event delivery and concurrent duplicate requests.
+- Unauthorized sender, missing identity, revoked allowlist entry, and cross-user/session isolation.
+- Oversized messages, unsupported event types, malformed payloads, and rate-limit rejection.
+- Provider timeout/retry behavior and safe failure reporting.
+- Proof that a consequential request reaches the same policy/approval gates as the API.
+- Follow-up context is bounded and treated as untrusted reference data, never as permission or system instructions.
 
-## Priority 4 — trust and commercial readiness
+## Phase 3 — prove operation before calling it ready
 
-- Show task status, key actions, verification evidence, and actionable failure reasons without leaking sensitive tool output.
-- Do not report success unless verification supports the claim.
-- Require explicit approval for consequential actions and preserve cancellation and audit history.
-- Before hosted or enterprise launch, implement and test quotas, spend caps, data-retention controls, backups, monitoring, support boundaries, and multi-tenant isolation.
-- Keep the core useful and open source; sell managed operations, team controls, deployment support, and reliability only when they actually exist.
+A channel is not operational merely because unit tests pass or a webhook endpoint exists. For each release candidate, record:
+- exact commit SHA and CI run URLs;
+- automated adapter/security test results;
+- a real provider smoke test with test credentials;
+- successful inbound message, authorized task, follow-up, and outbound response;
+- negative test for unauthorized sender and duplicate delivery;
+- deployment environment and limitations (test vs production).
 
-## Existing work to reconcile before starting duplicate implementation
+Do not deploy to Production as part of this work. Keep provider credentials in the test environment and do not claim live success without an observed end-to-end result.
 
-Review the latest head and CI for these existing pull requests before stacking or duplicating work:
+## Engineering gates
 
-- Session replay and user-memory retrieval: [PR #260](https://github.com/thanachai10096-arch/Sofia_agent/pull/260)
-- Scoped user-memory context in Brain: [PR #268](https://github.com/thanachai10096-arch/Sofia_agent/pull/268)
-- Easier plain-language Telegram tasks: [PR #255](https://github.com/thanachai10096-arch/Sofia_agent/pull/255)
-- More conversational Telegram behavior: [PR #256](https://github.com/thanachai10096-arch/Sofia_agent/pull/256)
-- Persistent messaging sessions and chat/task modes: [PR #258](https://github.com/thanachai10096-arch/Sofia_agent/pull/258)
-
-These references identify work to review; they do not mean the PRs are merged, CI-green, or production-ready.
-
-## Delivery and safety gates
-
-- Inspect the current base branch and each PR's changed files before editing.
-- Keep changes additive and narrowly scoped; do not overwrite user work or rebuild an existing runtime.
-- Never merge or deploy automatically as part of this roadmap.
-- Do not change production secrets, production services, or destructive state.
+- Inspect git status/diff, public interfaces, dependencies, and tests before code edits.
+- Prefer small, additive changes; preserve existing runtime, Tool Registry, job engine, and policy system.
+- No destructive Git operations, production configuration changes, or automatic merges.
 - Require green CI on the exact reviewed head and inspect the final diff before merge.
-- Report evidence precisely: distinguish source changes, passing automated tests, real-provider tests, and deployed end-to-end behavior.
