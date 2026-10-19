@@ -37,6 +37,16 @@ Sofia Agent is distributed under the [MIT License](LICENSE). Review third-party 
 
 Hosted and enterprise services described in the roadmap are potential offerings, not a claim that they are currently available.
 
+
+
+## Project creator
+
+Sofia Agent was created and is developed by **Thanachai Khongseechay**.
+
+- **Developer:** Thanachai Khongseechay
+- **Country:** Thailand
+- **Age:** 18
+
 ## `> Execution lifecycle`
 
 ```text
