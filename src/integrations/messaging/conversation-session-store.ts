@@ -31,7 +31,15 @@ export class FileConversationSessionStore implements ConversationSessionStore {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
   }
 
-  private async pruneSessions(protectedPath: string): Promise<void> {\n    const entries = await readdir(this.directory, { withFileTypes: true });\n    const files = await Promise.all(entries\n      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))\n      .map(async (entry) => ({ path: path.join(this.directory, entry.name), modified: (await stat(path.join(this.directory, entry.name))).mtimeMs })));\n    files.sort((a, b) => b.modified - a.modified);\n    const otherFiles = files.filter((file) => file.path !== protectedPath);\n    await Promise.all(otherFiles.slice(499).map((file) => unlink(file.path).catch(() => undefined)));\n  }\n\n  private filePath(conversationId: string): string {
+  private async pruneSessions(protectedPath: string): Promise<void> {
+    const entries = await readdir(this.directory, { withFileTypes: true });
+    const files = await Promise.all(entries\n      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))\n      .map(async (entry) => ({ path: path.join(this.directory, entry.name), modified: (await stat(path.join(this.directory, entry.name))).mtimeMs })));
+    files.sort((a, b) => b.modified - a.modified);
+    const otherFiles = files.filter((file) => file.path !== protectedPath);
+    await Promise.all(otherFiles.slice(499).map((file) => unlink(file.path).catch(() => undefined)));
+  }
+
+  private filePath(conversationId: string): string {
     const digest = createHash("sha256").update(conversationId).digest("hex");
     return path.join(this.directory, digest + ".json");
   }
@@ -72,7 +80,8 @@ export class FileConversationSessionStore implements ConversationSessionStore {
       await handle.writeFile(JSON.stringify({ turns, mode: session.mode }), "utf8");
       await handle.close();
       handle = undefined;
-      await rename(temporary, target);\n      await this.pruneSessions(target);
+      await rename(temporary, target);
+      await this.pruneSessions(target);
     } catch (error) {
       if (handle) await handle.close().catch(() => undefined);
       const { unlink } = await import("node:fs/promises");
