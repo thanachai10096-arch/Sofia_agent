@@ -6,6 +6,8 @@ export interface MessagingIdentity {
   userId: string;
   channelId: string;
   conversationId: string;
+  /** Provider-native topic/thread ID when a chat supports sub-conversations. */
+  threadId?: string;
   displayName?: string;
 }
 export interface MessagingAttachment {
