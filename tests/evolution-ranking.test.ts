@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EvolutionEngine } from "../src/brain/evolution.js";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 test("ranking an unknown candidate does not register a phantom learned skill", () => {
   const engine = new EvolutionEngine();
@@ -23,4 +26,23 @@ test("diagnostics stay empty after ranking only unobserved candidates", () => {
   assert.equal(diagnostics.totals.attempts, 0);
   assert.equal(diagnostics.totals.successes, 0);
   assert.equal(diagnostics.totals.failures, 0);
+});
+
+test("ranking unknown candidates does not persist phantom skills", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-evolution-ranking-only-"));
+  const file = join(directory, "evolution.json");
+  try {
+    const engine = new EvolutionEngine(file);
+    engine.rank(["unseen-coding", "unseen-research"], "coding");
+    await engine.flush();
+
+    const persisted = JSON.parse(await readFile(file, "utf8")) as {
+      skills: Record<string, unknown>;
+      taskTypes: Record<string, unknown>;
+    };
+    assert.deepEqual(persisted.skills, {});
+    assert.deepEqual(persisted.taskTypes, {});
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
