@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  createMessagingAccessCheck,
-  createSofiaMessagingHandler,
-} from "./sofia-handler.js";
+import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import type { ChatAccessPolicy, ChatMessageDeduplicator, ChatRunStarter } from "../chat-adapter.js";
 import type { InboundMessage } from "./types.js";
 
@@ -18,7 +15,7 @@ const inbound = (text: string, overrides: Partial<InboundMessage> = {}): Inbound
 });
 
 function harness(allowed = true) {
-  const starts: Array<{ task: string; options?: { idempotencyKey?: string } }> = [];
+  const starts: Array<{ task: string; context?: string; options?: { idempotencyKey?: string } }> = [];
   const claims = new Set<string>();
   const policyInputs: Array<{ platform: string; senderId: string; conversationId: string }> = [];
   const policy: ChatAccessPolicy = {
@@ -30,67 +27,84 @@ function harness(allowed = true) {
   };
   const client: ChatRunStarter = {
     async start(input, _signal, options) {
-      starts.push({ task: input.task, options });
+      starts.push({ task: input.task, context: input.context, options });
       return { id: "run-123", status: "queued" };
     },
   };
   return { starts, claims, policyInputs, accessPolicy: policy, deduplicator, client };
 }
 
-test("command-only mode stays backwards compatible", async () => {
+test("greeting is answered conversationally without starting an agent run", async () => {
   const h = harness();
-  const handle = createSofiaMessagingHandler({ ...h });
-  assert.equal(await handle(inbound("hello Sofia")), undefined);
-  assert.match(String(await handle(inbound("/run build the project"))), /Sofia received your task/);
-  assert.deepEqual(h.starts.map((entry) => entry.task), ["build the project"]);
-  assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
+  const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true });
+  assert.match(String(await handle(inbound("สวัสดี Sofia"))), /วันนี้อยากคุย/);
+  assert.equal(h.starts.length, 0);
 });
 
 test("plain text can be submitted as a task when enabled", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true });
   const reply = await handle(inbound("Please explain this TypeScript error", { messageId: "message-2" }));
-  assert.match(String(reply), /Sofia received your task/);
+  assert.match(String(reply), /รับเรื่องแล้ว/);
   assert.deepEqual(h.starts.map((entry) => entry.task), ["Please explain this TypeScript error"]);
 });
 
-test("help and start explain natural chat without starting a run", async () => {
+test("help explains natural chat and warns against sharing secrets", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true });
-  assert.match(String(await handle(inbound("/start"))), /Send a task as a normal message/);
-  assert.match(String(await handle(inbound("/help"))), /\/run <task>/);
+  assert.match(String(await handle(inbound("/start"))), /คุยกับฉันได้เหมือนคุยกับคน/);
+  assert.match(String(await handle(inbound("/help"))), /อย่าส่งรหัสผ่าน/);
   assert.equal(h.starts.length, 0);
+});
+
+test("recent conversation context is included in the next task", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true });
+  await handle(inbound("ช่วยดู error นี้", { messageId: "message-1" }));
+  handle.recordAssistantReply("chat-1", "ฉันพบว่า error มาจาก TypeScript");
+  await handle(inbound("แล้วควรแก้ยังไง", { messageId: "message-2" }));
+  assert.equal(h.starts.length, 2);
+  assert.match(h.starts[1]?.context ?? "", /User: ช่วยดู error นี้/);
+  assert.match(h.starts[1]?.context ?? "", /Sofia: ฉันพบว่า error มาจาก TypeScript/);
+});
+
+test("sensitive-looking messages are not retained in session context", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true });
+  await handle(inbound("my api_key=supersecretvalue", { messageId: "message-1" }));
+  await handle(inbound("please continue", { messageId: "message-2" }));
+  assert.doesNotMatch(h.starts[1]?.context ?? "", /supersecretvalue/);
 });
 
 test("command prefix can be configured for a bot mention", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, commandPrefix: "/run@SofiaBot" });
-  assert.match(String(await handle(inbound("/run@SofiaBot inspect logs"))), /Sofia received your task/);
+  assert.match(String(await handle(inbound("/run@SofiaBot inspect logs"))), /รับเรื่องแล้ว/);
   assert.equal(await handle(inbound("/run inspect logs")), undefined);
 });
 
 test("denied user cannot start a run", async () => {
   const h = harness(false);
   const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true });
-  assert.equal(await handle(inbound("do work")), "Access denied.");
+  assert.match(String(await handle(inbound("do work")), /ยังไม่ได้รับอนุญาต/);
   assert.equal(h.starts.length, 0);
 });
 
-test("empty and overlong tasks are rejected by existing dispatcher", async () => {
+test("empty and overlong tasks are rejected", async () => {
   const empty = harness();
   const handleEmpty = createSofiaMessagingHandler({ ...empty });
-  assert.match(String(await handleEmpty(inbound("/run"))), /Usage: \/run <task>/);
+  assert.match(String(await handleEmpty(inbound("/run"))), /พิมพ์สิ่งที่อยากให้ช่วย/);
 
   const long = harness();
   const handleLong = createSofiaMessagingHandler({ ...long, maxTaskCharacters: 3 });
-  assert.equal(await handleLong(inbound("/run four")), "That message is too long. Please shorten it and try again.");
+  assert.match(String(await handleLong(inbound("/run four"))), /ยาวเกินไป/);
   assert.equal(long.starts.length, 0);
 });
 
 test("duplicate provider message is not started twice", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
-  assert.match(String(await handle(inbound("/run do work"))), /Sofia received your task/);
+  assert.match(String(await handle(inbound("/run do work"))), /รับเรื่องแล้ว/);
   assert.equal(await handle(inbound("/run do work")), undefined);
   assert.equal(h.starts.length, 1);
 });
