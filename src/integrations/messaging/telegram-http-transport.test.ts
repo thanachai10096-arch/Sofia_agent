@@ -21,6 +21,7 @@ test("Telegram HTTP transport polls, advances update offset, sends replies and s
       });
     }
     if (url.endsWith("/sendMessage")) return ok({ message_id: 9 });
+    if (url.endsWith("/deleteWebhook")) return ok(true);
     throw new Error("Unexpected Telegram endpoint.");
   };
   const transport = createTelegramHttpTransport({ token, fetchImpl, pollTimeoutSeconds: 2 });
@@ -48,6 +49,49 @@ test("Telegram HTTP transport polls, advances update offset, sends replies and s
   assert.equal(sendBody.reply_parameters.message_id, 8);
 });
 
+test("a failed update handler does not block later updates or repeat the failed update", async () => {
+  const requests: Array<{ url: string; init?: RequestInit }> = [];
+  const errorEvents: string[] = [];
+  let pollCount = 0;
+  let laterUpdateResolve!: () => void;
+  const laterUpdate = new Promise<void>((resolve) => { laterUpdateResolve = resolve; });
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    requests.push({ url, init });
+    if (url.endsWith("/deleteWebhook")) return ok(true);
+    if (url.endsWith("/getUpdates")) {
+      pollCount++;
+      if (pollCount === 1) return ok([{ update_id: 40 }, { update_id: 41 }]);
+      return await new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) { reject(new Error("aborted")); return; }
+        signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event) { errorEvents.push(event); },
+  });
+  await transport.start(new AbortController().signal, async (update) => {
+    if (update.update_id === 40) throw new Error("private task details must not be logged");
+    if (update.update_id === 41) laterUpdateResolve();
+  });
+  await Promise.race([
+    laterUpdate,
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for later update")), 1_000)),
+  ]);
+  await transport.stop();
+
+  const pollBodies = requests.filter((request) => request.url.endsWith("/getUpdates"))
+    .map((request) => JSON.parse(String(request.init?.body)) as Record<string, unknown>);
+  assert.equal(pollBodies.length, 2);
+  assert.equal(pollBodies[1]?.offset, 42);
+  assert.deepEqual(errorEvents, ["update_failed"]);
+});
+
 test("Telegram transport rejects malformed tokens and poll timeouts", () => {
   assert.throws(() => createTelegramHttpTransport({ token: "not-a-token" }), /token/);
   assert.throws(() => createTelegramHttpTransport({ token, pollTimeoutSeconds: 51 }), /timeout/);
@@ -55,7 +99,10 @@ test("Telegram transport rejects malformed tokens and poll timeouts", () => {
 
 test("Telegram delivery errors are sanitized and surfaced to the caller", async () => {
   const errorEvents: string[] = [];
-  const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({ ok: false, description: "secret-bearing provider detail" }), { status: 403 });
+  const fetchImpl: typeof fetch = async (input) => {
+    if (String(input).endsWith("/deleteWebhook")) return ok(true);
+    return new Response(JSON.stringify({ ok: false, description: "secret-bearing provider detail" }), { status: 403 });
+  };
   const transport = createTelegramHttpTransport({ token, fetchImpl, onError(event) { errorEvents.push(event); } });
   await transport.start(new AbortController().signal, async () => {});
   await assert.rejects(() => transport.sendMessage("chat-1", "hello"), /delivery failed/);
