@@ -77,6 +77,15 @@ export class SofiaAgent {
       ...(request.maxSteps !== undefined ? { maxSteps: request.maxSteps } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
       ...(request.desktopCapabilities?.length ? { desktopCapabilities: request.desktopCapabilities } : {}),
+      onEvent: (event) => {
+        if (event.type === "brain.tool.started") {
+          emit({
+            type: "tool.started",
+            message: "Running Brain tool.",
+            metadata: { stepId: event.stepId },
+          });
+        }
+      },
     });
 
     emit({ type: "run.started", message: "Sofia Brain run started." });
