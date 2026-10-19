@@ -69,6 +69,9 @@ export class SofiaAgent {
     let activeRequest = baseRequest;
     let session: { id: string; messages: string[]; updatedAt: number } | undefined;
     try {
+      // Do not retrieve or append contextual data when the host kill switch or caller signal is active.
+      security?.assertRunning();
+      baseRequest.signal?.throwIfAborted();
       let priorSessionContext = "";
       if (request.sessionId && this.deps.sessionStore) {
         session = this.deps.sessionStore.getOrCreate(request.sessionId);
@@ -94,8 +97,6 @@ export class SofiaAgent {
         session.messages.push(`user: ${request.task}`);
         this.deps.sessionStore.save(session);
       }
-      // The host kill switch and caller cancellation share one signal for this run.
-      security?.assertRunning();
       const shouldUseBrain =
         this.deps.brainFactory !== undefined &&
         request.useBrain !== false;
