@@ -10,7 +10,7 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "delivery_failed", status?: number) => void;
+  onError?: (event: "poll_failed" | "update_failed" | "delivery_failed", status?: number) => void;
 }
 
 /**
@@ -80,8 +80,18 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         }, signal);
         for (const update of updates) {
           if (signal.aborted || stopped) break;
-          await onUpdate(update);
-          if (Number.isSafeInteger(update.update_id)) offset = update.update_id + 1;
+          // A single malformed/poison update must not prevent later updates in
+          // the same batch from being handled. Report only a safe event name;
+          // never log message content, credentials, or provider response text.
+          try {
+            await onUpdate(update);
+          } catch {
+            try { options.onError?.("update_failed"); } catch { /* diagnostics must not stop polling */ }
+          } finally {
+            // Advance past every safely identified update even when its handler
+            // fails, otherwise Telegram will redeliver it and can starve the queue.
+            if (Number.isSafeInteger(update.update_id)) offset = update.update_id + 1;
+          }
         }
         backoffMs = 1_000;
       } catch (error) {
@@ -130,7 +140,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         const result = await request<{ message_id: number }>("sendMessage", {
           chat_id: chatId,
           text,
-          ...(replyToMessageId && /^\d+$/.test(replyToMessageId)
+          ...(replyToMessageId && /^\\d+$/.test(replyToMessageId)
             ? { reply_parameters: { message_id: Number(replyToMessageId) } }
             : {}),
         }, activeController.signal);
