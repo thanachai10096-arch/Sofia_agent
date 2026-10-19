@@ -37,44 +37,60 @@ function harness(allowed = true) {
   return { starts, claims, policyInputs, accessPolicy: policy, deduplicator, client };
 }
 
-test("only explicit run commands start Sofia work", async () => {
+test("command-only mode stays backwards compatible", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
   assert.equal(await handle(inbound("hello Sofia")), undefined);
-  assert.equal(await handle(inbound("/run build the project")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.match(String(await handle(inbound("/run build the project"))), /Sofia received your task/);
   assert.deepEqual(h.starts.map((entry) => entry.task), ["build the project"]);
   assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
+});
+
+test("plain text can be submitted as a task when enabled", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true });
+  const reply = await handle(inbound("Please explain this TypeScript error", { messageId: "message-2" }));
+  assert.match(String(reply), /Sofia received your task/);
+  assert.deepEqual(h.starts.map((entry) => entry.task), ["Please explain this TypeScript error"]);
+});
+
+test("help and start explain natural chat without starting a run", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true });
+  assert.match(String(await handle(inbound("/start"))), /Send a task as a normal message/);
+  assert.match(String(await handle(inbound("/help"))), /\/run <task>/);
+  assert.equal(h.starts.length, 0);
 });
 
 test("command prefix can be configured for a bot mention", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, commandPrefix: "/run@SofiaBot" });
-  assert.equal(await handle(inbound("/run@SofiaBot inspect logs")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.match(String(await handle(inbound("/run@SofiaBot inspect logs"))), /Sofia received your task/);
   assert.equal(await handle(inbound("/run inspect logs")), undefined);
 });
 
 test("denied user cannot start a run", async () => {
   const h = harness(false);
-  const handle = createSofiaMessagingHandler({ ...h });
-  assert.equal(await handle(inbound("/run do work")), "Access denied.");
+  const handle = createSofiaMessagingHandler({ ...h, acceptPlainTextTasks: true });
+  assert.equal(await handle(inbound("do work")), "Access denied.");
   assert.equal(h.starts.length, 0);
 });
 
 test("empty and overlong tasks are rejected by existing dispatcher", async () => {
   const empty = harness();
   const handleEmpty = createSofiaMessagingHandler({ ...empty });
-  assert.equal(await handleEmpty(inbound("/run")), "Usage: /run <task>");
+  assert.match(String(await handleEmpty(inbound("/run"))), /Usage: \/run <task>/);
 
   const long = harness();
   const handleLong = createSofiaMessagingHandler({ ...long, maxTaskCharacters: 3 });
-  assert.equal(await handleLong(inbound("/run four")), "Task is too long. Please shorten it.");
+  assert.equal(await handleLong(inbound("/run four")), "That message is too long. Please shorten it and try again.");
   assert.equal(long.starts.length, 0);
 });
 
 test("duplicate provider message is not started twice", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
-  assert.equal(await handle(inbound("/run do work")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.match(String(await handle(inbound("/run do work"))), /Sofia received your task/);
   assert.equal(await handle(inbound("/run do work")), undefined);
   assert.equal(h.starts.length, 1);
 });
