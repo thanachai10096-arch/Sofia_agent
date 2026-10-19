@@ -220,6 +220,44 @@ test("caller-requested approval is enforced for otherwise read-only tools", asyn
   assert.equal(toolStarted, false);
 });
 
+test("caller-requested approval permits a read-only tool only after explicit approval", async () => {
+  let toolStarted = false;
+  let approvalCalls = 0;
+  const registry = new MapToolRegistry([{
+    name: "custom.read",
+    description: "Read-only test tool",
+    inputSchema: { type: "object", properties: {} },
+    effects: ["read"] as const,
+    async execute() {
+      toolStarted = true;
+      return { read: true };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async () => {
+      approvalCalls += 1;
+      return true;
+    },
+  );
+
+  const result = await gateway.execute(
+    { tool: "custom.read", input: {} },
+    {
+      runId: "caller-requested-approval-approved-test",
+      principalId: "test-principal",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(approvalCalls, 1);
+  assert.equal(result.ok, true);
+  assert.equal(toolStarted, true);
+});
+
 test("approval cannot mutate the action that the gateway executes", async () => {
   const rt = runtime();
   let executedInput: Record<string, unknown> | undefined;
