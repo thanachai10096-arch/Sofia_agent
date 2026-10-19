@@ -36,12 +36,12 @@ test("ranking unknown candidates does not persist phantom skills", async () => {
     engine.rank(["unseen-coding", "unseen-research"], "coding");
     await engine.flush();
 
-    const persisted = JSON.parse(await readFile(file, "utf8")) as {
-      skills: Record<string, unknown>;
-      taskTypes: Record<string, unknown>;
-    };
-    assert.deepEqual(persisted.skills, {});
-    assert.deepEqual(persisted.taskTypes, {});
+    // Ranking is read-only: with no recorded outcomes, it should not
+    // create a snapshot file at all.
+    await assert.rejects(
+      readFile(file, "utf8"),
+      (error: NodeJS.ErrnoException) => error.code === "ENOENT",
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
