@@ -176,3 +176,50 @@ test("gateway reports finish reason for a response without usable content", asyn
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("gateway requests JSON mode for structured Brain calls without tools", async () => {
+  const originalFetch = globalThis.fetch;
+  let body: Record<string, unknown> | undefined;
+  globalThis.fetch = async (_input, init) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      choices: [{ message: { role: "assistant", content: "{\\"summary\\":\\"ok\\"}" } }],
+      usage: { prompt_tokens: 2, completion_tokens: 3 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model" },
+    });
+    await gateway.generate({
+      ...request,
+      context: JSON.stringify({
+        phase: "plan",
+        instructions: "Return a JSON object",
+        acceptanceCriteria: ["valid JSON"],
+      }),
+    }, makeRoute());
+    assert.deepEqual(body?.response_format, { type: "json_object" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("gateway leaves JSON mode disabled for ordinary chat", async () => {
+  const originalFetch = globalThis.fetch;
+  let body: Record<string, unknown> | undefined;
+  globalThis.fetch = async (_input, init) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return okResponse();
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model" },
+    });
+    await gateway.generate(request, makeRoute());
+    assert.equal("response_format" in (body ?? {}), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
