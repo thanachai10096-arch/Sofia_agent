@@ -79,3 +79,17 @@ test("ranking existing skills is read-only and preserves recorded outcomes", () 
   assert.equal(engine.getDiagnostics().totals.skills, 1);
   assert.equal(engine.getDiagnostics().totals.attempts, 1);
 });
+
+
+test("ranking prototype-like candidate IDs stays read-only", () => {
+  const engine = new EvolutionEngine();
+  const candidates = ["__proto__", "constructor", "toString"];
+
+  const ranked = engine.rank(candidates, "coding");
+
+  assert.deepEqual(new Set(ranked.map(item => item.id)), new Set(candidates));
+  assert.equal(engine.getSkill("__proto__"), undefined);
+  assert.equal(engine.getSkill("constructor"), undefined);
+  assert.equal(engine.getSkill("toString"), undefined);
+  assert.equal(engine.getDiagnostics().totals.skills, 0);
+});
