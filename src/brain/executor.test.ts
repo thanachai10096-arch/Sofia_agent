@@ -890,6 +890,7 @@ test("Brain credits the selected repair skill only after verified recovery and p
     });
 
     assert.equal(report.completed, true, report.summary);
+    assert.equal(injectedFailure, true, "the recovery path must begin with the injected assertion failure");
     assert.equal(evolution.getSkill("test-failure-repair")?.successes, 1);
     assert.equal(evolution.getSkill("test-failure-repair")?.failures, 0);
     await evolution.flush();
