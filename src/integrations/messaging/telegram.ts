@@ -7,6 +7,7 @@ export interface TelegramUpdate {
     message_id: number;
     date: number;
     text?: string;
+    message_thread_id?: number;
     chat: { id: number | string; type: string; title?: string; username?: string };
     from?: { id: number | string; username?: string; first_name?: string };
     document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
@@ -40,6 +41,8 @@ export function createTelegramAdapter(transport: TelegramTransport): MessagingAd
         const inbound: InboundMessage = {
           platform: "telegram", messageId: String(msg.message_id),
           identity: { platform: "telegram", userId, channelId, conversationId: channelId,
+            ...(Number.isSafeInteger(msg.message_thread_id) && msg.message_thread_id! > 0
+              ? { threadId: String(msg.message_thread_id) } : {}),
             ...(msg.from.username ? { displayName: msg.from.username } : {}) },
           text: msg.text ?? "", attachments, receivedAt: msg.date * 1000,
         };
