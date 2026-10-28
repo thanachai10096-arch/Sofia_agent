@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { discoverModels } from "./discovery.js";
+import { discoverModels, probeModelCapabilities } from "./discovery.js";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -52,28 +52,82 @@ test("uses Anthropic authentication for native model discovery", async () => {
   assert.deepEqual(models, [{ id: "claude-model", displayName: "Claude Model", capabilities: null }]);
 });
 
-test("rejects unsafe URLs, bad response shapes, and non-success responses", async () => {
-  await assert.rejects(
-    discoverModels({ baseUrl: "http://models.example.test/v1" }),
-    /HTTPS/,
-  );
-  await assert.rejects(
-    discoverModels({ baseUrl: "https://user:pass@models.example.test/v1" }),
-    /must not contain credentials/,
-  );
+test("probes actual OpenAI-compatible chat and tool-call behavior without executing tools", async () => {
+  let calls = 0;
+  let toolChoice: unknown;
+  globalThis.fetch = async (_input, init) => {
+    calls++;
+    const body = JSON.parse(String(init?.body)) as { tool_choice?: unknown };
+    toolChoice = body.tool_choice;
+    return new Response(JSON.stringify(calls === 1
+      ? { choices: [{ message: { role: "assistant", content: "OK" } }] }
+      : { choices: [{ message: { role: "assistant", tool_calls: [{ id: "call-1", function: { name: "report_probe", arguments: "{\"ok\":true}" } }] } }] }),
+    { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const result = await probeModelCapabilities({
+    baseUrl: "https://models.example.test/v1",
+    apiKey: "test-secret",
+    model: "test-model",
+  });
+  assert.equal(calls, 2);
+  assert.deepEqual(toolChoice, { type: "function", function: { name: "report_probe" } });
+  assert.deepEqual(result, {
+    model: "test-model",
+    chat: "supported",
+    toolUse: "supported",
+    verifiedCapabilities: ["tool-use"],
+  });
+});
+
+test("probes Anthropic tool use with native headers and does not infer unsupported capabilities", async () => {
+  let calls = 0;
+  let auth = "";
+  globalThis.fetch = async (_input, init) => {
+    calls++;
+    auth = new Headers(init?.headers).get("x-api-key") ?? "";
+    return new Response(JSON.stringify(calls === 1
+      ? { content: [{ type: "text", text: "OK" }] }
+      : { content: [{ type: "tool_use", id: "toolu_1", name: "report_probe", input: { ok: true } }] }),
+    { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const result = await probeModelCapabilities({
+    baseUrl: "https://api.anthropic.com/v1",
+    apiKey: "secret",
+    model: "claude-test",
+    protocol: "anthropic",
+  });
+  assert.equal(calls, 2);
+  assert.equal(auth, "secret");
+  assert.deepEqual(result.verifiedCapabilities, ["tool-use"]);
+  assert.equal(result.toolUse, "supported");
+});
+
+test("reports tool support as unknown when endpoint rejects tool calling", async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return calls === 1
+      ? new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), { status: 200 })
+      : new Response(JSON.stringify({ error: "tools unsupported" }), { status: 400 });
+  };
+  const result = await probeModelCapabilities({
+    baseUrl: "https://models.example.test/v1",
+    model: "no-tools-model",
+  });
+  assert.equal(result.toolUse, "unknown");
+  assert.deepEqual(result.verifiedCapabilities, []);
+});
+
+test("rejects unsafe URLs, bad response shapes, and non-success discovery responses", async () => {
+  await assert.rejects(discoverModels({ baseUrl: "http://models.example.test/v1" }), /HTTPS/);
+  await assert.rejects(discoverModels({ baseUrl: "https://user:pass@models.example.test/v1" }), /must not contain credentials/);
 
   globalThis.fetch = async () => new Response(JSON.stringify({ models: [] }), {
     status: 200,
     headers: { "content-type": "application/json" },
   });
-  await assert.rejects(
-    discoverModels({ baseUrl: "https://models.example.test/v1" }),
-    /unsupported response shape/,
-  );
+  await assert.rejects(discoverModels({ baseUrl: "https://models.example.test/v1" }), /unsupported response shape/);
 
   globalThis.fetch = async () => new Response("denied", { status: 403 });
-  await assert.rejects(
-    discoverModels({ baseUrl: "https://models.example.test/v1" }),
-    /HTTP 403/,
-  );
+  await assert.rejects(discoverModels({ baseUrl: "https://models.example.test/v1" }), /HTTP 403/);
 });
