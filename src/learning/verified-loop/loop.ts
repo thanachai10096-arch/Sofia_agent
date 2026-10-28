@@ -1,0 +1,130 @@
+import { createHash, randomUUID } from "node:crypto";
+import { normalizeText, validEvidence, validReceipt, validScope } from "./validation.js";
+import type {
+  ActiveLearningSkill, LearningExperience, LearningLoopOptions, LearningScope,
+  SkillCandidate, VerifiedLearningHost, VerificationReceipt,
+} from "./ports.js";
+
+const DEFAULTS = {
+  maxEvidenceAgeMs: 7 * 24 * 60 * 60 * 1000,
+  minimumConfidence: 0.8,
+  maxExperienceSummaryChars: 1200,
+  maxSkillProcedureSteps: 8,
+  historyLimit: 200,
+};
+function fingerprint(text: string): string {
+  return createHash("sha256").update(text.toLocaleLowerCase()).digest("hex");
+}
+function safeError(host: VerifiedLearningHost, error: unknown): Error {
+  const message = error instanceof Error ? error.message : "Unknown learning failure";
+  return new Error(host.redact(message).slice(0, 300));
+}
+
+/**
+ * Evidence-gated learning loop. A receipt is only a pointer to persisted trusted
+ * verification evidence; it is never accepted solely because a caller says "passed".
+ * Reusable skills are only activated after repeat-pattern detection, policy assessment,
+ * current-policy recheck, and a passing regression run.
+ */
+export class VerifiedLearningLoop {
+  private readonly options: typeof DEFAULTS;
+  constructor(private readonly host: VerifiedLearningHost, options: LearningLoopOptions = {}) {
+    this.options = { ...DEFAULTS, ...options };
+    if (!Number.isFinite(this.options.minimumConfidence) || this.options.minimumConfidence < 0 || this.options.minimumConfidence > 1) {
+      throw new Error("minimumConfidence must be between 0 and 1");
+    }
+    for (const key of ["maxEvidenceAgeMs", "maxExperienceSummaryChars", "maxSkillProcedureSteps", "historyLimit"] as const) {
+      if (!Number.isSafeInteger(this.options[key]) || this.options[key] < 1) throw new Error(`Invalid learning option: ${key}`);
+    }
+  }
+
+  async recordVerifiedCompletion(scope: LearningScope, receiptId: string, summary: string): Promise<{ recorded: boolean; experienceId?: string; skillActivated?: string }> {
+    if (!validScope(scope)) throw new Error("Invalid authenticated learning scope");
+    try {
+      const receipt = await this.host.verification.getReceipt(scope, receiptId);
+      if (!receipt || !validReceipt(receipt, scope, Date.now(), this.options.maxEvidenceAgeMs)) {
+        return { recorded: false };
+      }
+      const currentPolicy = await this.host.currentPolicyRevision(scope);
+      if (receipt.policyRevision !== currentPolicy) return { recorded: false };
+      const evidence = await this.host.verification.getEvidence(scope, receipt.evidenceIds);
+      const trustedIds = new Set(evidence.filter(item => validEvidence(item, receipt)).map(item => item.id));
+      if (receipt.evidenceIds.some(id => !trustedIds.has(id))) return { recorded: false };
+
+      const safeSummary = normalizeText(this.host.redact(summary), this.options.maxExperienceSummaryChars);
+      if (!safeSummary) return { recorded: false };
+      const taskFingerprint = fingerprint(safeSummary);
+      const experience: LearningExperience = {
+        id: randomUUID(), scope: { ...scope }, receiptId: receipt.id, runId: receipt.runId,
+        evidenceIds: [...receipt.evidenceIds], summary: safeSummary, taskFingerprint,
+        createdAt: new Date().toISOString(),
+      };
+
+      return await this.host.transaction(scope, async tx => {
+        const inserted = await tx.insertExperienceIfAbsent(experience);
+        if (!inserted) return { recorded: false, experienceId: experience.id };
+        const history = await tx.listExperiences(scope, this.options.historyLimit);
+        const repeats = history.filter(item => item.taskFingerprint === taskFingerprint);
+        if (repeats.length < 2) return { recorded: true, experienceId: experience.id };
+
+        const procedure = [
+          "Inspect the current task and trusted evidence before applying this pattern.",
+          "Confirm the current project, permissions, and policy still allow the approach.",
+          `Apply the previously verified approach: ${safeSummary.slice(0, 500)}`,
+          "Run the relevant regression checks and verify the result against current acceptance criteria.",
+        ].slice(0, this.options.maxSkillProcedureSteps);
+        const candidate: SkillCandidate = {
+          id: randomUUID(), scope: { ...scope }, experienceId: experience.id,
+          name: `learned-${taskFingerprint.slice(0, 12)}`,
+          trigger: safeSummary.slice(0, 240), procedure, confidence: Math.min(0.95, 0.65 + 0.05 * repeats.length),
+        };
+        const assessment = await this.host.assessCandidate(scope, candidate);
+        const confidence = Math.min(candidate.confidence, assessment.confidence);
+        const assessedCandidate = { ...candidate, confidence };
+        await tx.putCandidate(assessedCandidate);
+        if (!assessment.allowed || confidence < this.options.minimumConfidence) return { recorded: true, experienceId: experience.id };
+
+        const evaluation = await this.host.verification.runRegression(scope, assessedCandidate);
+        await tx.recordEvaluation(scope, candidate.id, evaluation);
+        if (!evaluation.passed || evaluation.checks.length === 0 ||
+            !evaluation.checks.every(check => check.passed) || evaluation.regressionEvidenceIds.length === 0) {
+          return { recorded: true, experienceId: experience.id };
+        }
+        // Policy may change while regression checks run; re-check immediately before activation.
+        const latestPolicy = await this.host.currentPolicyRevision(scope);
+        if (latestPolicy !== currentPolicy) return { recorded: true, experienceId: experience.id };
+        const active: ActiveLearningSkill = {
+          ...assessedCandidate, status: "active", activatedAt: new Date().toISOString(),
+          policyRevision: latestPolicy,
+        };
+        await tx.activateSkill(active);
+        return { recorded: true, experienceId: experience.id, skillActivated: active.id };
+      });
+    } catch (error) {
+      throw safeError(this.host, error);
+    }
+  }
+
+  async retrieveSkills(scope: LearningScope, query: string): Promise<ActiveLearningSkill[]> {
+    if (!validScope(scope)) throw new Error("Invalid authenticated learning scope");
+    const needle = normalizeText(query, 500).toLocaleLowerCase();
+    if (!needle) return [];
+    try {
+      const policyRevision = await this.host.currentPolicyRevision(scope);
+      return await this.host.transaction(scope, async tx => {
+        const skills = await tx.listActiveSkills(scope);
+        return skills.filter(skill =>
+          skill.status === "active" && skill.policyRevision === policyRevision &&
+          skill.scope.tenantId === scope.tenantId &&
+          skill.scope.principalId === scope.principalId &&
+          skill.scope.projectId === scope.projectId &&
+          (skill.trigger.toLocaleLowerCase().includes(needle) ||
+           skill.name.toLocaleLowerCase().includes(needle) ||
+           skill.procedure.some(step => step.toLocaleLowerCase().includes(needle))),
+        ).slice(0, 12).map(skill => ({ ...skill, procedure: [...skill.procedure] }));
+      });
+    } catch (error) {
+      throw safeError(this.host, error);
+    }
+  }
+}
