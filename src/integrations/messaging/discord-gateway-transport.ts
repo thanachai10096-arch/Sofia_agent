@@ -286,12 +286,15 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
       await new Promise<void>((resolve, reject) => {
         firstReadyResolve = resolve;
         firstReadyReject = reject;
-        if (controller?.signal.aborted) settleFirstReady(new Error("Discord Gateway transport stopped before ready."));
         const timeout = setTimeout(() => settleFirstReady(new Error("Discord Gateway did not become ready in time.")), 30_000);
         const originalResolve = firstReadyResolve;
         const originalReject = firstReadyReject;
         firstReadyResolve = () => { clearTimeout(timeout); originalResolve?.(); };
         firstReadyReject = (error) => { clearTimeout(timeout); originalReject?.(error); };
+        const readinessSignal = controller?.signal;
+        const abortReadiness = () => settleFirstReady(new Error("Discord Gateway transport stopped before ready."));
+        readinessSignal?.addEventListener("abort", abortReadiness, { once: true });
+        if (readinessSignal?.aborted) abortReadiness();
       }).catch(async (error) => {
         await this.stop();
         throw error;
