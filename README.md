@@ -23,7 +23,7 @@ A model-agnostic AI agent runtime with internal model routing, policy-controlled
 
 Sofia Agent is a standalone agent runtime and platform. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
 
-> **Model routing is an internal policy.** End users do not choose models; Sofia decides how requests are handled.
+> **Model setup has two separate scopes.** A self-hosted Sofia installation can configure its own provider and model. The local `sofia setup` command writes only to that installation's `~/.sofia/config.json` and local environment; it does not configure other users. Per-user model/provider profiles for a shared hosted Sofia service (including securely stored user-supplied API keys) are not implemented yet and must not be counted as a completed end-user feature.
 
 
 ## Open source and contribution
@@ -36,6 +36,12 @@ Sofia Agent is distributed under the [MIT License](LICENSE). Review third-party 
 - **Shared access architecture:** [docs/UNIFIED_ACCESS_ARCHITECTURE.md](docs/UNIFIED_ACCESS_ARCHITECTURE.md)
 
 Hosted and enterprise services described in the roadmap are potential offerings, not a claim that they are currently available.
+
+### Self-hosted configuration vs. shared hosted accounts
+
+- **Self-hosted / personal instance:** each user or operator configures their own provider credentials and model on their own machine/server. `sofia setup` is local-only convenience, and its SQLite sessions are local to that installation.
+- **Shared hosted service:** one server-side environment currently supplies the model configuration to its runtime. The API does not yet provide an isolated per-user provider profile or encrypted BYOK secret vault. Do not enter a personal provider key into a shared deployment expecting it to affect only your account.
+- **Product requirement before calling Sofia multi-user/Hermes-like:** add authenticated per-user model profiles, encrypted secret storage backed by a deployment-managed encryption key, provider/model validation, usage/cost limits, and tests proving users cannot read or use another user's credentials. Keep server-owned provider options separate from user-owned BYOK credentials.
 
 
 
