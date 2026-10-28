@@ -234,7 +234,7 @@ export class UsageLimiter {
           ? current.configuredCostNanoUsd
           : (BigInt(current.configuredCostNanoUsd ?? "0") + BigInt(usage.configuredCostNanoUsd)).toString(),
       };
-      if (Object.values(next).some((value) => value !== undefined && !Number.isSafeInteger(value))) {
+      if (Object.values(next).some((value) => typeof value === "number" && !Number.isSafeInteger(value))) {
         throw new Error("Aggregated usage metrics exceed the safe integer range.");
       }
       current.brainRuns = next.brainRuns;
