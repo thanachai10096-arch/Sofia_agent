@@ -16,6 +16,7 @@ import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.j
 import { createCronTools } from "../brain/cron-tools.js";
 import type { MapToolRegistry } from "../tools/types.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import type { ContinuousWorkRecord } from "../brain/continuous-work.js";
 
 interface ActiveRun {
   id: string;
@@ -410,6 +411,72 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (!memoryId || memoryId.length > 256) return json(res, 400, { error: "invalid_memory_id" }, origin, config);
           const deleted = await deps.userMemoryStore.delete(auth.keyId, memoryId);
           return deleted ? json(res, 200, { deleted: true }, origin, config) : json(res, 404, { error: "memory_not_found" }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
+      }
+
+      const continuousWorkMatch = requestUrl.pathname.match(/^\/v1\/continuous-work(?:\/([^/]+)(?:\/(resume|pause|stop))?)?$/);
+      if (continuousWorkMatch) {
+        const supervisor = config.continuousWorkSupervisor;
+        if (!supervisor) return json(res, 503, { error: "continuous_work_unavailable" }, origin, config);
+        const encodedId = continuousWorkMatch[1];
+        let workId: string | undefined;
+        if (encodedId) {
+          try { workId = decodeURIComponent(encodedId); }
+          catch { return json(res, 400, { error: "invalid_continuous_work_id" }, origin, config); }
+          if (!workId || workId.length > 128 || workId.includes("/")) {
+            return json(res, 400, { error: "invalid_continuous_work_id" }, origin, config);
+          }
+        }
+        if (req.method === "GET") {
+          if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+            return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+          }
+          if (workId) {
+            const record = await supervisor.get(workId, auth.keyId);
+            return record
+              ? json(res, 200, { work: record }, origin, config)
+              : json(res, 404, { error: "continuous_work_not_found" }, origin, config);
+          }
+          return json(res, 200, { work: await supervisor.list(auth.keyId) }, origin, config);
+        }
+        if (req.method !== "POST") return json(res, 405, { error: "method_not_allowed" }, origin, config);
+        if (!auth.scopes.includes("agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+        }
+        const action = continuousWorkMatch[2];
+        if (!workId) {
+          if (action) return json(res, 400, { error: "continuous_work_id_required" }, origin, config);
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw) || typeof (raw as Record<string, unknown>).task !== "string") {
+            return json(res, 400, { error: "task_required" }, origin, config);
+          }
+          try {
+            const record = await supervisor.create(auth.keyId, (raw as { task: string }).task);
+            return json(res, 201, { work: record }, origin, config);
+          } catch (error) {
+            return json(res, 400, { error: error instanceof Error ? error.message : "invalid_continuous_work" }, origin, config);
+          }
+        }
+        const current = await supervisor.get(workId, auth.keyId);
+        if (!current) return json(res, 404, { error: "continuous_work_not_found" }, origin, config);
+        if (action === "resume") {
+          if (current.status === "active") return json(res, 409, { error: "continuous_work_already_active" }, origin, config);
+          if (current.status === "stopped" || current.status === "completed") {
+            return json(res, 409, { error: "continuous_work_terminal", status: current.status }, origin, config);
+          }
+          // Start bounded work asynchronously; clients poll GET for durable progress.
+          void supervisor.resume(workId, auth.keyId).catch(() => undefined);
+          return json(res, 202, { accepted: true, workId, status: "active" }, origin, config);
+        }
+        if (action === "pause" || action === "stop") {
+          const changed = action === "pause"
+            ? await supervisor.pause(workId, auth.keyId)
+            : await supervisor.stop(workId, auth.keyId);
+          const latest: ContinuousWorkRecord | undefined = await supervisor.get(workId, auth.keyId);
+          return changed && latest
+            ? json(res, 200, { work: latest }, origin, config)
+            : json(res, 409, { error: "continuous_work_not_changeable", status: latest?.status }, origin, config);
         }
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
