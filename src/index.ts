@@ -89,6 +89,13 @@ export { createSlackEventsTransport } from "./integrations/messaging/slack-event
 export type { SlackEventsTransport, SlackEventsTransportOptions, SlackEventsRequest, SlackEventsResult } from "./integrations/messaging/slack-events-transport.js";
 export { handleSlackEventsHttpRequest } from "./integrations/messaging/slack-http-route.js";
 export { createSlackMessagingRuntime, parseSlackAllowlist } from "./integrations/messaging/slack-runtime.js";
+export { createLineAdapter } from "./integrations/messaging/line.js";
+export type { LineTransport, VerifiedLineMessage } from "./integrations/messaging/line.js";
+export { createLineWebhookTransport } from "./integrations/messaging/line-webhook-transport.js";
+export type { LineWebhookTransport, LineWebhookTransportOptions, LineWebhookRequest, LineWebhookResult } from "./integrations/messaging/line-webhook-transport.js";
+export { handleLineWebhookHttpRequest } from "./integrations/messaging/line-http-route.js";
+export { createLineMessagingRuntime, parseLineAllowlist } from "./integrations/messaging/line-runtime.js";
+export type { LineMessagingRuntime, LineMessagingEnvironment } from "./integrations/messaging/line-runtime.js";
 export type { SlackMessagingRuntime, SlackMessagingEnvironment } from "./integrations/messaging/slack-runtime.js";
 export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
 export { createDiscordInteractionTransport } from "./integrations/messaging/discord-interaction-transport.js";
