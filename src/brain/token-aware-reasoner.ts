@@ -36,14 +36,19 @@ function evidenceText(value: unknown): string {
   }
 }
 
-function relevanceFor(task: string, text: string): number {
-  const terms = new Set((task.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? []));
-  if (terms.size === 0) return 0.5;
-  const lower = text.toLocaleLowerCase();
+function taskTermsFor(task: string): Set<string> {
+  return new Set(task.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? []);
+}
+
+function relevanceFor(taskTerms: ReadonlySet<string>, text: string): number {
+  if (taskTerms.size === 0) return 0.5;
+  // Compare whole tokens, not substrings (for example, "token" must not match
+  // "tokenizer"). This reduces irrelevant evidence being packed into the prompt.
+  const evidenceTerms = new Set(text.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? []);
   let matches = 0;
-  for (const term of terms) if (lower.includes(term)) matches++;
+  for (const term of taskTerms) if (evidenceTerms.has(term)) matches++;
   // Keep non-matching reference evidence eligible, but rank task-relevant context first.
-  return Math.max(0.15, Math.min(1, 0.2 + (matches / terms.size) * 0.8));
+  return Math.max(0.15, Math.min(1, 0.2 + (matches / taskTerms.size) * 0.8));
 }
 
 function asInferenceRequest(request: string): InferenceRequest {
@@ -57,13 +62,14 @@ function asInferenceRequest(request: string): InferenceRequest {
   const memory = parsed.memory ?? {};
   const understanding = payload.understanding as Record<string, unknown> | undefined;
   const task = typeof payload.task === "string" ? payload.task : "Execute the requested Brain phase.";
+  const taskTerms = taskTermsFor(task);
   const evidence: EvidenceChunk[] = [];
   const addEvidence = (id: string, label: string, value: unknown, relevance?: number) => {
     const text = evidenceText(value);
     if (!text) return;
     evidence.push({
       id,
-      relevance: relevance ?? relevanceFor(task, text),
+      relevance: relevance ?? relevanceFor(taskTerms, text),
       // Mark retrieved workspace and historical content as reference data, not instructions.
       text: label + ": " + text.slice(0, 12_000),
     });
