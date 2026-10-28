@@ -152,3 +152,11 @@ Create `createMatrixMessagingRuntime(process.env, workspace)` and start/stop it 
 - Messaging adapters sign the normalized platform, immutable sender ID, conversation ID, message ID, and task hash. The API verifies the HMAC and binds the trusted destination and user principal before executing the task.
 - `schedule_task` stores the verified destination with the schedule. Completion notices are sent through the configured messaging adapter and retried on later scheduler ticks until the provider accepts the send. Delivery is at-least-once if the process crashes after provider acceptance but before the durable delivery marker is saved.
 - If the secret is unset or invalid, ordinary chat tasks still work, but scheduled results are not bound to a chat destination; they remain in durable schedule history.
+
+
+## Per-user model profiles
+
+- Set `SOFIA_MODEL_PROFILE_ENCRYPTION_KEY` to a randomly generated base64-encoded 32-byte key to enable encrypted profiles. Do not commit it. Without it, profile endpoints return `503 model_profile_storage_not_configured` and Sofia uses the operator's server-side provider configuration.
+- The authenticated API key owns its own profile. Grant `model:profile:read` to read metadata and `model:profile:write` to set/delete it. The API never returns a stored provider key.
+- `PUT /v1/model-profile` accepts `provider`, `model`, `apiKey`, and (only for `openai-compatible`) `baseUrl`. Gemini and OpenRouter use fixed HTTPS endpoints. Custom OpenAI-compatible endpoints must use HTTPS and an operator-allowlisted hostname; add exact hostnames to `SOFIA_MODEL_PROFILE_ALLOWED_HOSTS`.
+- Profile keys are encrypted with AES-256-GCM and keyed by a hash of the authenticated principal. Per-user model profiles are separate from local `sofia setup` and from the operator's default provider environment.
