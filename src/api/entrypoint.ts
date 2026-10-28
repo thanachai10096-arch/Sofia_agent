@@ -233,8 +233,9 @@ const server = createSofiaApi(deps, {
   onCronExecutionFinished: async (schedule, execution, job) => {
     const target = schedule.notificationTarget;
     if (!target) return false;
-    // The Discord owner ID is independently bound to the trusted adapter identity.
-    if (target.platform === "discord" && schedule.ownerKeyId !== "discord:" + target.userId) return false;
+    // Re-check the immutable owner binding for every provider before sending.
+    // The target was HMAC-verified at ingress, but persisted state is still treated as untrusted.
+    if (schedule.ownerKeyId !== target.platform + ":" + target.userId) return false;
     const summary = typeof job?.result?.summary === "string" ? String(redactSecrets(job.result.summary)).trim() : "";
     const status = execution.status;
     const message = status === "completed"
