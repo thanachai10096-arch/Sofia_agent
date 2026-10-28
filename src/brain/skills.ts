@@ -76,8 +76,8 @@ export function matchSkills(
     .map((skill) => ({
       skill,
       score:
-        (skill.categories.includes(category) ? 100 : 0) +
-        skill.triggers.filter((trigger) => lower.includes(trigger.toLowerCase())).length * 10,
+        (skill.categories.includes(category) ? 20 : 0) +
+        skill.triggers.filter((trigger) => lower.includes(trigger.toLowerCase())).length * 15,
     }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.skill.id.localeCompare(b.skill.id))
