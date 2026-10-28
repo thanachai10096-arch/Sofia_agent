@@ -10,6 +10,7 @@ Set these variables in the server process or your secret manager. Do not commit 
 |---|---|---|---|
 | Google Gemini | `gemini` (default) | `GEMINI_API_KEY` or legacy `Gemini_API_Key` | Google Gemini OpenAI-compatible endpoint |
 | OpenAI | `openai` | `OPENAI_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.openai.com/v1` |
+| Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.anthropic.com/v1` (native Messages API) |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://openrouter.ai/api/v1` |
 | Ollama | `ollama` | Usually none for local use | `http://127.0.0.1:11434/v1` |
 | Any OpenAI-compatible endpoint | `openai-compatible` | Depends on endpoint | Set `SOFIA_MODEL_BASE_URL` |
@@ -40,8 +41,8 @@ SOFIA_MODEL_NAME=your-installed-model
 
 ## Compatibility and security notes
 
-- The built-in gateway currently uses the OpenAI Chat Completions-compatible request/response format. A model is usable through this path only if its provider endpoint implements the needed chat, tool-call, and usage fields.
-- Providers with a different native protocol (for example, Anthropic's native Messages API) need a dedicated adapter or a compatible gateway; setting a provider name alone does not make every API protocol compatible.
+- The gateway supports the OpenAI Chat Completions-compatible protocol and a native Anthropic Messages API path. Other native protocols need their own adapter or a compatible gateway.
+- The Anthropic path translates chat messages, tool definitions/tool calls, and token usage into Sofia’s common model interface. Structured Brain output is requested through instructions; availability and behavior still depend on the selected Claude model.
 - Unknown provider names fail closed. Sofia does not silently switch providers or send data to another service when a provider fails.
 - Remote endpoints must use HTTPS. Plain HTTP is accepted only for loopback local model servers. URL credentials, query strings, and fragments are rejected.
 - API keys are read from environment variables and are not written to Sofia's setup config by this module.
