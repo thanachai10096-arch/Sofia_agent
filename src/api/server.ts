@@ -673,6 +673,53 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       if (isCronRequest && cronScheduler) {
+        if (requestUrl.pathname === "/v1/model-profile") {
+          const profileStore = deps.modelProfileStore;
+          if (!profileStore) return json(res, 503, { error: "model_profile_storage_not_configured" }, origin, config);
+          if (req.method === "GET") {
+            if (!auth.scopes.includes("model:profile:read")) return json(res, 403, { error: "forbidden", requiredScope: "model:profile:read" }, origin, config);
+            try {
+              return json(res, 200, { profile: await profileStore.getMetadata(auth.keyId) ?? null }, origin, config);
+            } catch {
+              return json(res, 500, { error: "model_profile_unavailable" }, origin, config);
+            }
+          }
+          if (req.method === "PUT") {
+            if (!auth.scopes.includes("model:profile:write")) return json(res, 403, { error: "forbidden", requiredScope: "model:profile:write" }, origin, config);
+            const raw = await body(req, maxBytes);
+            if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_model_profile" }, origin, config);
+            const value = raw as Record<string, unknown>;
+            if (typeof value.provider !== "string" || !["openai-compatible", "gemini", "openrouter"].includes(value.provider) ||
+                typeof value.model !== "string" || typeof value.apiKey !== "string" ||
+                (value.baseUrl !== undefined && typeof value.baseUrl !== "string")) {
+              return json(res, 400, { error: "invalid_model_profile", message: "provider, model, and apiKey are required; baseUrl is only for openai-compatible." }, origin, config);
+            }
+            try {
+              const profile = await profileStore.set(auth.keyId, {
+                provider: value.provider as import("../models/profile-store.js").UserModelProvider,
+                model: value.model,
+                apiKey: value.apiKey,
+                ...(typeof value.baseUrl === "string" ? { baseUrl: value.baseUrl } : {}),
+              });
+              return json(res, 200, { profile }, origin, config);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "";
+              const validationError = /^(Unsupported model provider|model must|apiKey must|baseUrl must|Built-in providers|A supported provider)/.test(message);
+              return json(res, validationError ? 400 : 500, validationError ? { error: "invalid_model_profile", message } : { error: "model_profile_unavailable" }, origin, config);
+            }
+          }
+          if (req.method === "DELETE") {
+            if (!auth.scopes.includes("model:profile:write")) return json(res, 403, { error: "forbidden", requiredScope: "model:profile:write" }, origin, config);
+            try {
+              return json(res, 200, { deleted: await profileStore.delete(auth.keyId) }, origin, config);
+            } catch {
+              return json(res, 500, { error: "model_profile_unavailable" }, origin, config);
+            }
+          }
+          res.setHeader("allow", "GET, PUT, DELETE");
+          return json(res, 405, { error: "method_not_allowed" }, origin, config);
+        }
+
         const schedulePath = "/v1/cron/schedules";
         const historyMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/history$/);
         const actionMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/(enable|disable)$/);
