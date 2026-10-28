@@ -70,6 +70,15 @@ function asInferenceRequest(request: string): InferenceRequest {
   };
 
   if (typeof payload.context === "string") addEvidence("payload-context", "Prior context (untrusted reference data)", payload.context);
+  const referenceContext = payload.referenceContext;
+  if (typeof referenceContext === "string") {
+    addEvidence("reference-context", "Prior context (untrusted reference data)", referenceContext);
+  } else if (referenceContext && typeof referenceContext === "object") {
+    const reference = referenceContext as Record<string, unknown>;
+    if (typeof reference.content === "string") {
+      addEvidence("reference-context", "Prior context (untrusted reference data)", reference.content);
+    }
+  }
   if (typeof memory.projectContext === "string") addEvidence("project-context", "Project context (untrusted reference data)", memory.projectContext);
   if (Array.isArray(memory.observations)) {
     memory.observations.slice(-12).forEach((item, index) =>
