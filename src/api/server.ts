@@ -242,11 +242,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
+  // Keep cancellation as a sticky run-ID fact as well as an AbortSignal. This
+  // prevents late asynchronous completion from reviving a cancelled run.
+  const cancelledRunIds = new Set<string>();
   const runStore = config.runStore;
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
     const record: RunRecord = {
-      id: run.id, status: run.cancelRequested ? "cancelled" : run.status,
+      id: run.id, status: (cancelledRunIds.has(run.id) || run.cancelRequested) ? "cancelled" : run.status,
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
       ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
       ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
@@ -289,7 +292,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
   const publicResponse = (run: ActiveRun): AgentRunResponse => ({
     id: run.id,
-    status: run.cancelRequested ? "cancelled" : run.status,
+    status: (cancelledRunIds.has(run.id) || run.cancelRequested) ? "cancelled" : run.status,
     ...(run.result ? { result: run.result } : {}),
     ...(run.error ? { error: run.error } : {}),
   });
@@ -315,7 +318,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         });
         // Cancellation is terminal: a late agent result must never overwrite it,
         // even if the underlying agent ignores the abort signal until it returns.
-        if (isCancellationRequested(run)) {
+        if (cancelledRunIds.has(run.id) || isCancellationRequested(run)) {
           run.status = "cancelled";
           run.error ??= run.controller.signal.reason instanceof Error
             ? run.controller.signal.reason.message
@@ -325,7 +328,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.status = "completed";
         }
       } catch (error) {
-        if (isCancellationRequested(run)) {
+        if (cancelledRunIds.has(run.id) || isCancellationRequested(run)) {
           run.status = "cancelled";
           run.error ??= run.controller.signal.reason instanceof Error
             ? run.controller.signal.reason.message
@@ -671,6 +674,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
         if (run.status === "queued" || run.status === "running") {
           run.cancelRequested = true;
+          cancelledRunIds.add(run.id);
           run.controller.abort();
           run.status = "cancelled";
           run.updatedAt = Date.now();
