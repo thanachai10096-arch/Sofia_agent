@@ -65,7 +65,7 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
       } catch (error) {
         controller.abort();
         stopped = true;
-        await Promise.allSettled([...adapters.values()].map((adapter) => adapter.stop()));
+        await Promise.allSettled([...registry.list()].map(({ platform }) => registry.get(platform)!).map((adapter) => adapter.stop()));
         started = false;
         log?.warn("messaging_start_failed", { errorType: error instanceof Error ? error.name : "unknown" });
         throw error;
@@ -75,7 +75,7 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
       if (stopped) return;
       stopped = true;
       controller.abort();
-      await Promise.allSettled([...adapters.values()].map((adapter) => adapter.stop()));
+      await Promise.allSettled([...registry.list()].map(({ platform }) => registry.get(platform)!).map((adapter) => adapter.stop()));
       started = false;
       counts.clear();
     },
