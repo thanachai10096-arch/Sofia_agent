@@ -148,7 +148,7 @@ export class UsageLimiter {
   private currentRecord(keyId: string, now = Date.now()): UsageRecord {
     const current = this.records.get(keyId);
     if (!current) {
-      const created: UsageRecord = { keyId, runs: 0, toolCalls: 0, startedAt: now, brainRuns: 0, brainModelCalls: 0, brainReservedOrUsedTokens: 0 };
+      const created: UsageRecord = { keyId, runs: 0, toolCalls: 0, startedAt: now };
       this.records.set(keyId, created);
       return created;
     }
@@ -156,9 +156,9 @@ export class UsageLimiter {
       current.runs = 0;
       current.toolCalls = 0;
       current.startedAt = now;
-      current.brainRuns = 0;
-      current.brainModelCalls = 0;
-      current.brainReservedOrUsedTokens = 0;
+      if (current.brainRuns !== undefined) current.brainRuns = 0;
+      if (current.brainModelCalls !== undefined) current.brainModelCalls = 0;
+      if (current.brainReservedOrUsedTokens !== undefined) current.brainReservedOrUsedTokens = 0;
     }
     return current;
   }
