@@ -234,7 +234,7 @@ export class SofiaClient {
     };
   }, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>("/v1/continuous-work/chat", {
-      method: "POST", headers: this.headers(), body: JSON.stringify(input),
+      method: "POST", headers: this.headers(), body: JSON.stringify({ signedTask: input.signedTask, _messagingContext: input.messagingContext }),
     }, signal);
   }
 
