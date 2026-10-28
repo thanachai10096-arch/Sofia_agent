@@ -120,4 +120,11 @@ test("Git runtime blocks force pushes and Git execution/configuration overrides"
   assert.throws(() => assertSafeGitArgs(["push", "--force-with-lease", "origin", "feature-branch"]), /Destructive or force Git options/);
   assert.throws(() => assertSafeGitArgs(["status", "-c", "core.pager=cat"]), /Git option is not allowed/);
   assert.throws(() => assertSafeGitArgs(["status", "--git-dir=/tmp/other.git"]), /Git option is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["branch", "-D", "main"]), /Destructive or force Git options/);
+  assert.throws(() => assertSafeGitArgs(["branch", "-d", "old-branch"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["tag", "--delete", "v1.0"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["remote", "remove", "origin"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["stash", "clear"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["push", "--delete", "origin", "main"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["commit", "--amend", "--no-edit"]), /ref deletion, stash deletion/);
 });
