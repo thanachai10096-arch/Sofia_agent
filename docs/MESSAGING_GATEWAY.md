@@ -128,7 +128,8 @@ This matrix describes code in the repository, not a claim of live account connec
 | Telegram | Adapter, Bot API long-poll transport, optional runtime | Requires bot token, Sofia API credentials, and explicit user/chat allowlists. |
 | Discord | Adapter and interaction transport/route | Requires application setup, valid signature verification, and explicit user/channel allowlists. |
 | Slack | Adapter and signed Events API receiver | Requires a Slack app, signing secret, bot token, allowlists, and a deployed HTTPS callback. |
-| LINE, WhatsApp, Signal, Matrix, Teams, Google Chat, Messenger, Instagram, WeChat, iMessage, Viber, KakaoTalk, Zalo, Mattermost, Rocket.Chat, Zulip, IRC, email, SMS | Not confirmed as end-to-end adapters by this matrix | Do not show as connected or available until a concrete adapter, authentication path, send/receive transport, tests, and setup instructions exist. |
+| LINE | Adapter, LINE Messaging API push transport, raw-body HMAC signature verification, webhook event mapper, unit tests | Host must mount a raw-body webhook route and call `handleWebhook`; configure channel access token/secret and explicit Sofia sender/conversation allowlists. Real provider smoke test still required. |
+| WhatsApp, Signal, Matrix, Teams, Google Chat, Messenger, Instagram, WeChat, iMessage, Viber, KakaoTalk, Zalo, Mattermost, Rocket.Chat, Zulip, IRC, email, SMS | Not confirmed as end-to-end adapters by this matrix | Do not show as connected or available until a concrete adapter, authentication path, send/receive transport, tests, and setup instructions exist. |
 
 A platform string in `ChatPlatform` is only a type-level identifier. At runtime, the adapter registry lists only the concrete adapters passed to it. Unit tests and CI do not prove a real provider account has been connected; record provider smoke tests separately.
 
