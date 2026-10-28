@@ -96,10 +96,11 @@ function asInferenceRequest(request: string): InferenceRequest {
   // labels, so the gateway's final-text dedupe alone cannot catch it.
   const evidenceByContent = new Map<string, number>();
   const addEvidence = (id: string, label: string, value: unknown, relevance?: number) => {
-    const text = evidenceText(value).slice(0, 12_000);
-    if (!text) return;
+    const sourceText = evidenceText(value);
+    if (!sourceText) return;
+    const text = sourceText.slice(0, 12_000);
     const score = relevance ?? relevanceFor(taskTerms, text);
-    const existingIndex = evidenceByContent.get(text);
+    const existingIndex = evidenceByContent.get(sourceText);
     if (existingIndex !== undefined) {
       // Keep one copy, preferring the source with the stronger task relevance.
       // Do not normalize whitespace or code; only byte-for-byte source content
@@ -113,7 +114,7 @@ function asInferenceRequest(request: string): InferenceRequest {
       }
       return;
     }
-    evidenceByContent.set(text, evidence.length);
+    evidenceByContent.set(sourceText, evidence.length);
     evidence.push({
       id,
       relevance: score,
