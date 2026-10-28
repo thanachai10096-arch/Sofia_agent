@@ -2,7 +2,7 @@ import type { MessagingAdapter, InboundMessage, DeliveryReceipt, OutboundMessage
 import { splitMessage } from "./format.js";
 
 export interface VerifiedDiscordMessage {
-  /** Must only be emitted by a transport after validating Discord's signature and timestamp. */
+  /** Must only be emitted after provider authenticity is established (signed interaction or authenticated Gateway session). */
   signatureVerified: true;
   id: string;
   channelId: string;
