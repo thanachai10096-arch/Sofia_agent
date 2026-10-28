@@ -37,7 +37,7 @@ function harness(allowed = true) {
   return { starts, claims, policyInputs, accessPolicy: policy, deduplicator, client };
 }
 
-test("only explicit run commands start Sofia work", async () => {
+test("only explicit run commands start Sofia work when chat-first mode is disabled", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
   assert.equal(await handle(inbound("hello Sofia")), undefined);
@@ -64,7 +64,6 @@ test("empty and overlong tasks are rejected by existing dispatcher", async () =>
   const empty = harness();
   const handleEmpty = createSofiaMessagingHandler({ ...empty });
   assert.equal(await handleEmpty(inbound("/run")), "Usage: /run <task>");
-
   const long = harness();
   const handleLong = createSofiaMessagingHandler({ ...long, maxTaskCharacters: 3 });
   assert.equal(await handleLong(inbound("/run four")), "Task is too long. Please shorten it.");
@@ -95,11 +94,49 @@ test("invalid command prefixes are rejected at configuration time", () => {
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: "/run\nadmin" }), /commandPrefix/);
 });
 
-
-test("chat-first mode dispatches ordinary text but leaves slash commands alone", async () => {
+test("chat-first mode dispatches ordinary text and leaves slash commands alone", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, allowPlainText: true });
   assert.equal(await handle(inbound("Can you help me plan this project?")), "Sofia accepted the task (run run-123, status: queued).");
   assert.equal(await handle(inbound("/status")), undefined);
   assert.deepEqual(h.starts.map((entry) => entry.task), ["Can you help me plan this project?"]);
+});
+
+test("chat-first mode still rejects unauthorized users before creating a run", async () => {
+  const h = harness(false);
+  const handle = createSofiaMessagingHandler({ ...h, allowPlainText: true });
+  assert.equal(await handle(inbound("Please inspect my project")), "Access denied.");
+  assert.equal(h.starts.length, 0);
+});
+
+test("chat-first sessions remain isolated by immutable user and conversation identity", async () => {
+  const starts: Array<{ task: string; sessionId?: string }> = [];
+  const client: ChatRunStarter = {
+    async start(input) {
+      starts.push({ task: input.task, sessionId: input.sessionId });
+      return { id: "run-" + starts.length, status: "queued" };
+    },
+  };
+  const claims = new Set<string>();
+  const handle = createSofiaMessagingHandler({
+    client,
+    accessPolicy: { isAllowed: () => true },
+    deduplicator: {
+      claim(key) { if (claims.has(key)) return false; claims.add(key); return true; },
+      release(key) { claims.delete(key); },
+    },
+    allowPlainText: true,
+  });
+  await handle(inbound("remember my project", {
+    messageId: "m-1",
+    identity: { platform: "telegram", userId: "user-1", channelId: "chat-1", conversationId: "chat-1" },
+  }));
+  await handle(inbound("remember my project", {
+    messageId: "m-2",
+    identity: { platform: "telegram", userId: "user-2", channelId: "chat-2", conversationId: "chat-2" },
+  }));
+  assert.equal(starts.length, 2);
+  assert.ok(starts[0]?.sessionId);
+  assert.ok(starts[1]?.sessionId);
+  assert.notEqual(starts[0]?.sessionId, starts[1]?.sessionId);
 });
