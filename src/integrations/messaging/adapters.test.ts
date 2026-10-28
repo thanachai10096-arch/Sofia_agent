@@ -5,6 +5,7 @@ import { createDiscordAdapter, type VerifiedDiscordMessage } from "./discord.js"
 import { createSlackAdapter, type VerifiedSlackMessage } from "./slack.js";
 import { createLineAdapter, type VerifiedLineMessage } from "./line.js";
 import { createWhatsAppAdapter, type VerifiedWhatsAppMessage } from "./whatsapp.js";
+import { createMatrixAdapter, type VerifiedMatrixMessage } from "./matrix.js";
 
 test("Telegram adapter normalizes messages and splits oversized replies", async () => {
   let onUpdate: ((update: TelegramUpdate) => Promise<void>) | undefined;
@@ -145,4 +146,61 @@ test("WhatsApp adapter normalizes verified messages and safely chunks replies", 
   assert.equal((received as { platform: string }).platform, "whatsapp");
   assert.equal((await adapter.send({ conversationId: "66812345678", text: "x".repeat(5_000) })).state, "sent");
   assert.equal(sent.length, 2);
+});
+
+
+test("Matrix adapter accepts only authenticated events and normalizes room identity", async () => {
+  let onEvent: ((message: VerifiedMatrixMessage) => Promise<void>) | undefined;
+  const adapter = createMatrixAdapter({
+    async start(_signal, callback) { onEvent = callback; },
+    async sendMessage() { return { messageId: "matrix-event-1" }; },
+    async stop() {},
+  });
+  const received: Array<{ platform: string; userId: string; channelId: string; conversationId: string; text: string }> = [];
+  await adapter.start(new AbortController().signal, async (message) => {
+    received.push({
+      platform: message.platform,
+      userId: message.identity.userId,
+      channelId: message.identity.channelId,
+      conversationId: message.identity.conversationId,
+      text: message.text,
+    });
+  });
+  assert.ok(onEvent);
+  const base = { eventId: "$event-1", roomId: "!room:example.org", senderId: "@alice:example.org", text: "hello Sofia", createdAt: 1710000000000 };
+  await onEvent!({ ...base, authenticated: false } as unknown as VerifiedMatrixMessage);
+  await onEvent!({ ...base, authenticated: true, text: 42 } as unknown as VerifiedMatrixMessage);
+  await onEvent!({ ...base, authenticated: true });
+  assert.deepEqual(received, [{
+    platform: "matrix",
+    userId: "@alice:example.org",
+    channelId: "!room:example.org",
+    conversationId: "!room:example.org",
+    text: "hello Sofia",
+  }]);
+});
+
+test("Matrix adapter chunks long outbound messages and returns safe delivery failures", async () => {
+  const chunks: string[] = [];
+  const adapter = createMatrixAdapter({
+    async start() {},
+    async sendMessage(_roomId, text) { chunks.push(text); return { messageId: "$event-" + chunks.length }; },
+    async stop() {},
+  });
+  const output = "x".repeat(65_000);
+  const receipt = await adapter.send({ conversationId: "!room:example.org", text: output });
+  assert.equal(receipt.state, "sent");
+  assert.equal(chunks.length, 3);
+  assert.equal(chunks.join(""), output);
+  assert.ok(chunks.every((chunk) => chunk.length <= 30_000));
+
+  const failing = createMatrixAdapter({
+    async start() {},
+    async sendMessage() { throw new Error("secret homeserver detail"); },
+    async stop() {},
+  });
+  assert.deepEqual(await failing.send({ conversationId: "!room:example.org", text: "hello" }), {
+    state: "failed",
+    errorCode: "matrix_delivery_failed",
+  });
 });
