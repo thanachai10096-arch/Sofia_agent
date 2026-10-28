@@ -171,3 +171,52 @@ test("extended probe leaves capabilities unknown when the endpoint rejects them"
   assert.equal(result.visionInput, "unknown");
   assert.equal(result.jsonObjectOutput, "unknown");
 });
+
+test("extended probe uses native Anthropic image blocks and JSON instructions", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  let headers = new Headers();
+  globalThis.fetch = async (_input, init) => {
+    headers = new Headers(init?.headers);
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    bodies.push(body);
+    const messages = body.messages as Array<{ content: unknown }>;
+    if (Array.isArray(messages[0]?.content)) {
+      const parts = messages[0]?.content as Array<Record<string, unknown>>;
+      assert.equal(parts.some((part) => part.type === "image" && typeof part.source === "object"), true);
+      return new Response(JSON.stringify({ content: [{ type: "text", text: "A tiny test image." }] }), { status: 200 });
+    }
+    assert.equal(typeof body.system, "string");
+    return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ ok: true }) }] }), { status: 200 });
+  };
+  const { probeExtendedModelCapabilities } = await import("./discovery.js");
+  const result = await probeExtendedModelCapabilities({
+    baseUrl: "https://api.anthropic.com/v1",
+    apiKey: "anthropic-secret",
+    model: "claude-multimodal-test",
+    protocol: "anthropic",
+  });
+  assert.equal(bodies.length, 2);
+  assert.equal(headers.get("x-api-key"), "anthropic-secret");
+  assert.equal(headers.get("anthropic-version"), "2023-06-01");
+  assert.deepEqual(result, {
+    model: "claude-multimodal-test",
+    visionInput: "accepted",
+    jsonObjectOutput: "verified",
+  });
+});
+
+test("model discovery ignores invalid or non-positive context-window metadata", async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    data: [
+      { id: "negative-context", context_length: -1 },
+      { id: "fractional-context", context_window: 2048.5 },
+      { id: "string-context", max_context_length: "8192" },
+    ],
+  }), { status: 200 });
+  const models = await discoverModels({ baseUrl: "https://models.example.test/v1" });
+  assert.deepEqual(models, [
+    { id: "negative-context", capabilities: null },
+    { id: "fractional-context", capabilities: null },
+    { id: "string-context", capabilities: null },
+  ]);
+});
