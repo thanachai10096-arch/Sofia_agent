@@ -112,12 +112,14 @@ test("generic BASE_URL + API_KEY + MODEL config supports custom OpenAI-compatibl
   clear();
   process.env.BASE_URL = "https://models.example/v1/";
   process.env.API_KEY = "custom-provider-secret";
+  process.env.OPENAI_API_KEY = "must-not-leak-to-custom-endpoint";
   process.env.MODEL = "vendor/model-large";
   const config = loadModelConfigFromEnv();
   assert.equal(config.routes.length, 4);
   for (const route of config.routes) {
     assert.equal(config.providers[route.id]?.baseUrl, "https://models.example/v1");
     assert.equal(config.providers[route.id]?.apiKey, "custom-provider-secret");
+    assert.notEqual(config.providers[route.id]?.apiKey, "must-not-leak-to-custom-endpoint");
     assert.equal(config.providers[route.id]?.model, "vendor/model-large");
   }
 });
@@ -152,4 +154,16 @@ test("custom provider URLs reject embedded credentials, query strings, and fragm
   process.env.SOFIA_MODEL_BASE_URL = "https://user:password@models.example/v1";
   process.env.SOFIA_MODEL_API_KEY = "custom-key";
   assert.throws(loadModelConfigFromEnv, /must not contain credentials/);
+});
+
+
+test("OPENAI_BASE_URL selects the OpenAI preset when no provider is explicitly selected", () => {
+  clear();
+  process.env.OPENAI_BASE_URL = "https://gateway.example/v1";
+  process.env.OPENAI_API_KEY = "openai-compatible-key";
+  process.env.OPENAI_MODEL = "vendor/model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://gateway.example/v1");
+  assert.equal(config.providers.fast?.apiKey, "openai-compatible-key");
+  assert.equal(config.providers.fast?.model, "vendor/model");
 });
