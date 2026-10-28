@@ -1,6 +1,6 @@
 # Messaging Gateway (incremental integration)
 
-Status: opt-in gateway, Telegram Bot API long-polling transport, Discord interaction verification/REST transport, and a shared-gateway Slack adapter contract. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
+Status: opt-in gateway with Telegram, Discord, Slack, LINE, WhatsApp Cloud API, and Matrix runtime/transport code. The standalone API entrypoint now mounts configured Slack/LINE/WhatsApp signed webhook routes and starts/stops their runtimes with the existing server lifecycle; Matrix uses authenticated polling. Public factory functions and configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
 
 ## Safety defaults
 
@@ -42,9 +42,8 @@ Required environment:
 - `SOFIA_API_KEY`, `SOFIA_API_BASE_URL`
 
 Composition outline:
-1. Call `createSlackMessagingRuntime(process.env, workspace)`; if it returns undefined, Slack remains disabled.
-2. Pass `slackRuntime.transport` into `createSofiaApi(deps, { ...config, slackEventsRoute: { transport: slackRuntime.transport } })`.
-3. Start `slackRuntime` after the API route is mounted and stop it during graceful shutdown. The route defaults to `/v1/integrations/slack/events`.
+1. The standalone API entrypoint creates `createSlackMessagingRuntime(process.env, workspace)` and passes its transport to the existing API route when configuration is valid.
+2. Start/stop is tied to the existing API lifecycle. The route defaults to `/v1/integrations/slack/events`.
 4. In Slack API settings, enable Event Subscriptions, use that HTTPS Request URL, subscribe to `message.channels` and/or `message.im` as appropriate, install the app, and grant only needed scopes such as `chat:write` and the relevant message history/event scopes. Do not grant broad scopes unnecessarily.
 5. Test URL verification, allowed and denied user/channel pairs, retries, duplicate events, and actual outbound replies in a non-production workspace before enabling production.
 
