@@ -40,6 +40,25 @@ test("skill regression evaluator requires passing candidate fixtures and no qual
   assert.ok(result.checks.some((check) => check.name === "quality-regression:fixture-1" && check.passed));
 });
 
+
+test("skill regression evaluator applies configured minimum improvement and pass-rate thresholds", async () => {
+  const evaluator = createSkillRegressionEvaluator({
+    fixtures,
+    minimumPassRate: 0.5,
+    minimumScoreDelta: 0.2,
+    runCase: async ({ mode, fixture }: SkillRegressionRunRequest) => ({
+      passed: mode === "baseline" || fixture.id === "fixture-1",
+      score: mode === "baseline" ? 0.7 : fixture.id === "fixture-1" ? 0.8 : 0,
+    }),
+  });
+  const result = await evaluator(skill);
+  assert.equal(result.passed, true);
+  assert.ok(result.checks.some((check) => check.name === "minimum-pass-rate" && check.passed));
+  assert.ok(result.checks.some((check) => check.name === "quality-regression:fixture-1" && !check.passed));
+  // A quality regression still fails the whole evaluation even if the aggregate pass rate meets its threshold.
+  assert.equal(result.passed, false);
+});
+
 test("skill regression evaluator rejects candidate failures and performance regressions", async () => {
   const evaluator = createSkillRegressionEvaluator({
     fixtures,
