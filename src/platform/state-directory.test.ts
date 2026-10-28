@@ -4,11 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { sofiaStateDirectory } from "./state-directory.js";
 
-test("state directory defaults to the historical OS-temp store path", () => {
+test("state directory defaults to persistent storage under ~/.sofia", () => {
   const previous = process.env.SOFIA_STATE_DIR;
   delete process.env.SOFIA_STATE_DIR;
   try {
-    assert.equal(sofiaStateDirectory("jobs"), path.join(os.tmpdir(), "sofia-agents-jobs"));
+    assert.equal(sofiaStateDirectory("jobs"), path.join(os.homedir(), ".sofia", "sofia-agents-jobs"));
   } finally {
     if (previous === undefined) delete process.env.SOFIA_STATE_DIR;
     else process.env.SOFIA_STATE_DIR = previous;
