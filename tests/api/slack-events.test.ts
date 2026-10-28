@@ -111,11 +111,12 @@ test("Slack retry of the same event reuses the same Sofia idempotency key", asyn
         keys.push(key);
         // Model the API contract: one distinct accepted run per idempotency key.
         let id = acceptedByKey.get(key);
+        const isNewRun = !id;
         if (!id) {
           id = "run-idempotent-" + (++acceptedRuns);
           acceptedByKey.set(key, id);
         }
-        return { ok: true, status: acceptedRuns === 1 ? 202 : 200, async json() { return { id, status: "queued" }; } } as Response;
+        return { ok: true, status: isNewRun ? 202 : 200, async json() { return { id, status: "queued" }; } } as Response;
       }
       return { ok: true, status: 200, async json() { return { ok: true }; } } as Response;
     }) as typeof fetch;
