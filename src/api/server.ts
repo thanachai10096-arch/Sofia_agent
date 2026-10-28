@@ -739,8 +739,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
+          const jobContext = await contextForRun(auth.keyId, input);
           const job = await deps.jobRuntime.submit({
             task: input.task,
+            ...(jobContext.context !== undefined ? { context: jobContext.context } : {}),
             ownerKeyId: auth.keyId,
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });
