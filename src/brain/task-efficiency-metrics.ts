@@ -71,6 +71,7 @@ export class TaskEfficiencyMetrics {
   }
 
   recordModelCall(call: ModelCallMeasurement): void {
+    if (this.startedAt === undefined) throw new Error("Task telemetry has not started");
     validCount(call.inputTokens, "input tokens");
     validCount(call.outputTokens, "output tokens");
     validCount(call.durationMs, "duration");
@@ -93,7 +94,7 @@ export class TaskEfficiencyMetrics {
     passedCriteria: number;
     now?: number;
   }): TaskMeasurement {
-    if (!this.startedAt) throw new Error("Task telemetry has not started");
+    if (this.startedAt === undefined) throw new Error("Task telemetry has not started");
     if (!input.taskId.trim()) throw new Error("Task ID is required");
     validCount(input.acceptanceCriteria, "acceptance criteria");
     validCount(input.passedCriteria, "passed criteria");
