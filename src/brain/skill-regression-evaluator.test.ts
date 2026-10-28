@@ -52,11 +52,10 @@ test("skill regression evaluator applies configured minimum improvement and pass
     }),
   });
   const result = await evaluator(skill);
-  assert.equal(result.passed, true);
+  assert.equal(result.passed, false);
   assert.ok(result.checks.some((check) => check.name === "minimum-pass-rate" && check.passed));
   assert.ok(result.checks.some((check) => check.name === "quality-regression:fixture-1" && !check.passed));
   // A quality regression still fails the whole evaluation even if the aggregate pass rate meets its threshold.
-  assert.equal(result.passed, false);
 });
 
 test("skill regression evaluator rejects candidate failures and performance regressions", async () => {
