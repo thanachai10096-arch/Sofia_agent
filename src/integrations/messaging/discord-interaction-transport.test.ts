@@ -94,3 +94,26 @@ test("Discord transport accepts additional allowlisted slash command names and f
   await transport.stop();
 });
 
+
+test("Discord work slash command forwards task text to the shared chat handler", async () => {
+  const transport = createDiscordInteractionTransport({
+    publicKeyHex,
+    botToken,
+    additionalCommandNames: ["work"],
+    fetchImpl: async () => response({ id: "987654321" }),
+  });
+  let received = "";
+  await transport.start(new AbortController().signal, async (event) => { received = event.content; });
+  const body = Buffer.from(JSON.stringify({
+    type: 2,
+    id: "222222222223",
+    application_id: "111111111111",
+    token: "interaction-token-work",
+    channel_id: "123456789",
+    member: { user: { id: "333333333333", username: "tester" } },
+    data: { name: "work", options: [{ name: "task", type: 3, value: "create improve the project" }] },
+  }));
+  assert.deepEqual(await transport.handleRequest(signed(body)), { status: 200, body: { type: 5 } });
+  assert.equal(received, "/work create improve the project");
+  await transport.stop();
+});
