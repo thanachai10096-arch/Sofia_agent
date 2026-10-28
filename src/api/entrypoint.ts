@@ -22,11 +22,13 @@ async function sendDiscordText(
   transport: ReturnType<typeof createDiscordInteractionTransport>,
   channelId: string,
   text: string,
-  replyToMessageId?: string,
+  interactionId?: string,
 ): Promise<void> {
   const chunks = splitMessage(text, 1_700);
   for (let index = 0; index < chunks.length; index += 1) {
-    await transport.sendMessage(channelId, chunks[index]!, index === 0 ? replyToMessageId : undefined);
+    // The interaction token is used only for the first chunk; subsequent chunks
+    // are ordinary bot messages and do not depend on the short-lived token.
+    await transport.sendMessage(channelId, chunks[index]!, undefined, index === 0 ? interactionId : undefined);
   }
 }
 
