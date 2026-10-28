@@ -107,6 +107,10 @@ function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"])
   }));
 }
 
+function isCancellationRequested(run: ActiveRun): boolean {
+  return isCancellationRequested(run);
+}
+
 function integerSetting(
   name: string,
   value: number | undefined,
@@ -309,7 +313,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         });
         // Cancellation is terminal: a late agent result must never overwrite it,
         // even if the underlying agent ignores the abort signal until it returns.
-        if (run.status === "cancelled" || run.controller.signal.aborted) {
+        if (isCancellationRequested(run)) {
           run.status = "cancelled";
           run.error ??= run.controller.signal.reason instanceof Error
             ? run.controller.signal.reason.message
@@ -319,7 +323,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.status = "completed";
         }
       } catch (error) {
-        if (run.status === "cancelled" || run.controller.signal.aborted) {
+        if (isCancellationRequested(run)) {
           run.status = "cancelled";
           run.error ??= run.controller.signal.reason instanceof Error
             ? run.controller.signal.reason.message
