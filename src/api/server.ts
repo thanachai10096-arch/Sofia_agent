@@ -7,6 +7,7 @@ import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } 
 import { UsageLimiter } from "./usage.js";
 import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
+import { handleSlackEventsHttpRequest } from "../integrations/messaging/slack-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
@@ -133,6 +134,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   }
   if (discordRoute && (!Number.isSafeInteger(discordMaxBodyBytes) || discordMaxBodyBytes < 1 || discordMaxBodyBytes > 1_000_000)) {
     throw new Error("Discord interaction route maxBodyBytes must be between 1 and 1000000.");
+  }
+  const slackRoute = config.slackEventsRoute;
+  const slackRoutePath = slackRoute?.path ?? "/v1/integrations/slack/events";
+  const slackMaxBodyBytes = slackRoute?.maxBodyBytes ?? 1_000_000;
+  if (slackRoute && (!slackRoutePath.startsWith("/") || slackRoutePath.includes("?") || slackRoutePath.includes("#"))) {
+    throw new Error("Slack Events route path must be an absolute path without query or fragment.");
+  }
+  if (slackRoute && (!Number.isSafeInteger(slackMaxBodyBytes) || slackMaxBodyBytes < 1 || slackMaxBodyBytes > 1_000_000)) {
+    throw new Error("Slack Events route maxBodyBytes must be between 1 and 1000000.");
+  }
+  if (slackRoute && discordRoute && slackRoutePath === discordRoutePath) {
+    throw new Error("Discord and Slack messaging routes must use different paths.");
   }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
@@ -261,6 +274,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try {
       if (discordRoute && req.url === discordRoutePath) {
         await handleDiscordInteractionHttpRequest(req, res, discordRoute.transport, discordMaxBodyBytes);
+        return;
+      }
+      if (slackRoute && req.url === slackRoutePath) {
+        await handleSlackEventsHttpRequest(req, res, slackRoute.transport, slackMaxBodyBytes);
         return;
       }
 
