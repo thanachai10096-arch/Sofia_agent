@@ -1,6 +1,6 @@
 # Messaging Gateway (incremental integration)
 
-Status: opt-in gateway, command bridge, Telegram Bot API long polling transport, and Discord interaction verification/REST transport. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
+Status: opt-in gateway, natural-chat command bridge, Telegram Bot API long polling transport, Discord interaction verification/REST transport, and a Slack adapter plus request-signature verifier. The Slack adapter maps normalized verified events and posts replies through an injected transport; a complete Slack Events API HTTP receiver and app installation flow are still required. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
 
 ## Safety defaults
 
@@ -30,6 +30,18 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. The shared handler defaults to natural chat, so ordinary text can start a task without `/run`; set `mode: "command"` when a deployment intentionally requires a prefix. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
+
+## Slack adapter (incremental; transport host required)
+
+The repository exports `verifySlackRequest` and `createSlackAdapter`.
+
+- Verify the exact raw HTTP request body using the Slack signing secret, `X-Slack-Request-Timestamp`, and `X-Slack-Signature` before parsing JSON. Reject stale timestamps and oversized bodies. Do not verify a re-serialized JSON body.
+- Respond to Slack's URL-verification challenge in the HTTP receiver only after validating the request signature; do not pass the challenge as a user message.
+- Pass only normalized message events from the authenticated receiver to the adapter. The adapter expects `signatureVerified: true`, stable event/message identifiers, channel and user IDs from Slack metadata, and ignores bot messages.
+- Implement `SlackTransport.start` to receive verified events and `postMessage` to call Slack's authenticated Web API. Keep the bot token and signing secret server-side. Request only the Slack scopes/events needed by the deployment and configure an explicit user/channel allowlist.
+- Treat `url_private` file URLs as untrusted metadata; this adapter does not download files. Add bounded retry handling and durable event deduplication in the host/gateway before production use.
+
+This is an adapter plus signature-verification primitive, **not yet a turnkey Slack webhook server or verified live Slack integration**. Use a test Slack app and validate signature failures, retries, bot echoes, allowlist denial, and outbound delivery before enabling it for users.
 
 ## Composition contract
 
