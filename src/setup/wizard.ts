@@ -22,8 +22,9 @@ export interface SetupReadiness {
 }
 
 /**
- * Validate a Sofia API base URL before storing it. Remote HTTP is rejected;
- * plain HTTP is permitted only for loopback development URLs.
+ * Validate a Sofia API origin before storing it. API routes are rooted at "/",
+ * so path prefixes are rejected rather than silently discarded by URL joining.
+ * Remote HTTP is rejected; plain HTTP is permitted only for loopback development URLs.
  */
 export function validateSofiaApiBaseUrl(input: string): string {
   const raw = input.trim();
@@ -44,6 +45,9 @@ export function validateSofiaApiBaseUrl(input: string): string {
   }
   if (url.search || url.hash) {
     throw new Error("The Sofia API URL must not contain a query string or fragment.");
+  }
+  if (url.pathname !== "/") {
+    throw new Error("Use the Sofia API origin only, without a path prefix; API routes are rooted at '/'.");
   }
 
   const hostname = url.hostname.toLowerCase();
