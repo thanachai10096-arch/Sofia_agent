@@ -488,20 +488,33 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
-  const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
-  } as unknown as SofiaBrain), undefined, namespace));
+  const brainFactory = () => ({
+    run: async () => {
+      // Keep the worker alive briefly to overlap writes, but let it terminate so
+      // the test does not leave unbounded heartbeats running after cleanup.
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return { completed: true, state: "completed", output: "ok" };
+    },
+  } as unknown as SofiaBrain);
+  const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(brainFactory, undefined, namespace));
 
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
     runtime.submit({ task: "concurrent worker submission " + index }),
   ));
-  const reader = new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
-  } as unknown as SofiaBrain), undefined, namespace);
-  const persisted = await reader.list();
+  const reader = new DurableJobRuntime(brainFactory, undefined, namespace);
+  const deadline = Date.now() + 5_000;
+  let persisted = await reader.list();
+  while (Date.now() < deadline && (
+    persisted.length !== submitted.length ||
+    persisted.some((record) => record.status === "queued" || record.status === "running")
+  )) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    persisted = await reader.list();
+  }
   const persistedIds = new Set(persisted.map((record) => record.id));
 
   assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
+  assert.ok(persisted.every((record) => record.status === "completed"), "all test workers should finish before cleanup");
   for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
 
   const file = path.join(
