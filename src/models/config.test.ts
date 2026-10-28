@@ -178,3 +178,54 @@ test("Gemini endpoint override remains pinned to Google's official origin", () =
   process.env.SOFIA_MODEL_BASE_URL = "https://attacker.example/v1";
   assert.throws(loadModelConfigFromEnv, /official Gemini API origin/);
 });
+
+test("custom endpoint rejects query strings and fragments to avoid ambiguous request targets", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
+  process.env.SOFIA_MODEL_API_KEY = "custom-test-key";
+  process.env.SOFIA_MODEL_NAME = "custom-model";
+
+  process.env.SOFIA_MODEL_BASE_URL = "https://models.example.test/v1?tenant=other";
+  assert.throws(loadModelConfigFromEnv, /must not contain credentials, query parameters, or fragments/);
+
+  process.env.SOFIA_MODEL_BASE_URL = "https://models.example.test/v1#fragment";
+  assert.throws(loadModelConfigFromEnv, /must not contain credentials, query parameters, or fragments/);
+});
+
+test("Gemini endpoint rejects lookalike hostnames and unrelated origins", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "gemini";
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+
+  process.env.SOFIA_MODEL_BASE_URL = "https://generativelanguage.googleapis.com.attacker.example/v1";
+  assert.throws(loadModelConfigFromEnv, /official Gemini API origin/);
+
+  process.env.SOFIA_MODEL_BASE_URL = "https://attacker.example/gemini";
+  assert.throws(loadModelConfigFromEnv, /official Gemini API origin/);
+});
+
+test("explicit provider-neutral API key applies only to the selected provider", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai";
+  process.env.SOFIA_MODEL_API_KEY = "explicit-openai-key";
+  process.env.OPENAI_API_KEY = "provider-openai-key";
+  process.env.GEMINI_API_KEY = "unselected-gemini-key";
+  process.env.SOFIA_MODEL_NAME = "gpt-test-model";
+
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "explicit-openai-key");
+  assert.equal(config.providers.fast?.baseUrl, "https://api.openai.com/v1");
+  assert.equal(config.providers.fast?.model, "gpt-test-model");
+});
+
+test("loopback Ollama HTTP is allowed while remote HTTP remains rejected", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "ollama";
+  process.env.SOFIA_MODEL_NAME = "local-model";
+  assert.equal(loadModelConfigFromEnv().providers.fast?.baseUrl, "http://127.0.0.1:11434/v1");
+
+  process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
+  process.env.SOFIA_MODEL_BASE_URL = "http://models.example.test/v1";
+  process.env.SOFIA_MODEL_NAME = "remote-model";
+  assert.throws(loadModelConfigFromEnv, /HTTPS/);
+});
