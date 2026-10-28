@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
@@ -70,6 +70,62 @@ test("API sessions are persisted and scoped to the authenticated API key", async
       "assistant: Task completed.",
     ]);
     assert.equal(sessions.get("shared-client-session"), undefined);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API accepts only a valid signed messaging origin and binds user principal", async () => {
+  const apiKey = "chat-bridge-key";
+  const secret = "server-only-test-secret-with-more-than-32-characters";
+  const task = "check project status";
+  const taskHash = createHash("sha256").update(task).digest("hex");
+  const unsigned = {
+    platform: "telegram" as const,
+    userId: "user-7",
+    conversationId: "chat-9",
+    messageId: "message-1",
+    taskHash,
+  };
+  const signature = createHmac("sha256", secret).update(JSON.stringify(unsigned)).digest("hex");
+  const principals: string[] = [];
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: {
+      async find(userId: string) { principals.push(userId); return []; },
+      async save() {}, async list() { return []; }, async delete() { return false; }, async clear() {},
+    },
+  }, {
+    apiKeys: { [apiKey]: ["agent:run", "agent:read"] },
+    messagingContextSecret: secret,
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const valid = await fetch(`${baseUrl}/v1/agent/runs`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ task, _messagingContext: { ...unsigned, signature } }),
+    });
+    assert.equal(valid.status, 200);
+    assert.deepEqual(principals, ["telegram:user-7"]);
+
+    const forged = await fetch(`${baseUrl}/v1/agent/runs`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        task,
+        _messagingContext: { ...unsigned, conversationId: "other-user-chat", signature },
+      }),
+    });
+    assert.equal(forged.status, 403);
+    assert.deepEqual(principals, ["telegram:user-7"]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
