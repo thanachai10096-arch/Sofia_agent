@@ -13,24 +13,10 @@ import { createMatrixMessagingRuntime } from "../integrations/messaging/matrix-r
 import { createSlackMessagingRuntime } from "../integrations/messaging/slack-runtime.js";
 import { createLineMessagingRuntime } from "../integrations/messaging/line-runtime.js";
 import { createWhatsAppMessagingRuntime } from "../integrations/messaging/whatsapp-runtime.js";
-import { splitMessage } from "../integrations/messaging/format.js";
+import { sendDiscordText } from "../integrations/messaging/discord-delivery.js";
 import { redactSecrets } from "../security/guard.js";
 import { ContinuousWorkSupervisor, FileContinuousWorkStore, hasVerifiedCompletionEvidence } from "../brain/continuous-work.js";
 
-
-async function sendDiscordText(
-  transport: ReturnType<typeof createDiscordInteractionTransport>,
-  channelId: string,
-  text: string,
-  interactionId?: string,
-): Promise<void> {
-  const chunks = splitMessage(text, 1_700);
-  for (let index = 0; index < chunks.length; index += 1) {
-    // The interaction token is used only for the first chunk; subsequent chunks
-    // are ordinary bot messages and do not depend on the short-lived token.
-    await transport.sendMessage(channelId, chunks[index]!, undefined, index === 0 ? interactionId : undefined);
-  }
-}
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
