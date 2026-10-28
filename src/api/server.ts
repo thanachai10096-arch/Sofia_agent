@@ -415,6 +415,77 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
 
+      if (requestUrl.pathname === "/v1/continuous-work/chat") {
+        if (req.method !== "POST") return json(res, 405, { error: "method_not_allowed" }, origin, config);
+        if (!auth.scopes.includes("agent:run")) return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+        const supervisor = config.continuousWorkSupervisor;
+        if (!supervisor) return json(res, 503, { error: "continuous_work_unavailable" }, origin, config);
+        const raw = await body(req, maxBytes);
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_chat_action" }, origin, config);
+        const envelope = raw as Record<string, unknown>;
+        if (typeof envelope.signedTask !== "string" || envelope.signedTask.length > 8_000 ||
+            !envelope._messagingContext || typeof envelope._messagingContext !== "object" || Array.isArray(envelope._messagingContext)) {
+          return json(res, 400, { error: "invalid_chat_action" }, origin, config);
+        }
+        const target = verifyMessagingContext({
+          task: envelope.signedTask,
+          _messagingContext: envelope._messagingContext as AgentRunInput["_messagingContext"],
+        }, config);
+        if (!target) return json(res, 401, { error: "invalid_messaging_context" }, origin, config);
+        let actionInput: unknown;
+        try { actionInput = JSON.parse(envelope.signedTask); }
+        catch { return json(res, 400, { error: "invalid_chat_action" }, origin, config); }
+        if (!actionInput || typeof actionInput !== "object" || Array.isArray(actionInput)) return json(res, 400, { error: "invalid_chat_action" }, origin, config);
+        const action = actionInput as Record<string, unknown>;
+        const allowedFields = new Set(["action", "task", "workId"]);
+        if (Object.keys(action).some((key) => !allowedFields.has(key)) ||
+            !["create", "list", "status", "resume", "continue", "pause", "stop"].includes(String(action.action))) {
+          return json(res, 400, { error: "invalid_chat_action" }, origin, config);
+        }
+        const owner = "chat:" + createHash("sha256").update(JSON.stringify([target.platform, target.userId])).digest("hex");
+        if (action.action === "create") {
+          if (typeof action.task !== "string" || !action.task.trim() || action.task.length > 4_000 || action.workId !== undefined) {
+            return json(res, 400, { error: "task_required" }, origin, config);
+          }
+          try {
+            const work = await supervisor.create(owner, action.task);
+            return json(res, 201, { work }, origin, config);
+          } catch (error) {
+            return json(res, 400, { error: error instanceof Error ? error.message : "invalid_continuous_work" }, origin, config);
+          }
+        }
+        if (action.task !== undefined || (action.action === "list" && action.workId !== undefined)) {
+          return json(res, 400, { error: "invalid_chat_action" }, origin, config);
+        }
+        if (action.action === "list") return json(res, 200, { work: await supervisor.list(owner) }, origin, config);
+        if (typeof action.workId !== "string" || !action.workId.trim() || action.workId.length > 128 || action.workId.includes("/")) {
+          return json(res, 400, { error: "work_id_required" }, origin, config);
+        }
+        const workId = action.workId;
+        const current = await supervisor.get(workId, owner);
+        if (!current) return json(res, 404, { error: "continuous_work_not_found" }, origin, config);
+        if (action.action === "status") return json(res, 200, { work: current }, origin, config);
+        if (action.action === "continue") {
+          const started = await supervisor.runContinuously(workId, owner);
+          return started ? json(res, 202, { accepted: true, workId, mode: "continuous" }, origin, config)
+            : json(res, 409, { error: "continuous_work_not_startable", status: current.status }, origin, config);
+        }
+        if (action.action === "resume") {
+          if (supervisor.isContinuous(workId)) return json(res, 409, { error: "continuous_work_mode_active" }, origin, config);
+          if (current.status === "active" && supervisor.isRunning(workId)) return json(res, 409, { error: "continuous_work_already_active" }, origin, config);
+          if (current.status === "stopped" || current.status === "completed") return json(res, 409, { error: "continuous_work_terminal", status: current.status }, origin, config);
+          void supervisor.resume(workId, owner).catch(() => undefined);
+          return json(res, 202, { accepted: true, workId, status: "active" }, origin, config);
+        }
+        if (action.action === "pause" || action.action === "stop") {
+          const changed = action.action === "pause" ? await supervisor.pause(workId, owner) : await supervisor.stop(workId, owner);
+          const latest = await supervisor.get(workId, owner);
+          return changed && latest ? json(res, 200, { work: latest }, origin, config)
+            : json(res, 409, { error: "continuous_work_not_changeable", status: latest?.status }, origin, config);
+        }
+        return json(res, 400, { error: "invalid_chat_action" }, origin, config);
+      }
+
       const continuousWorkMatch = requestUrl.pathname.match(/^\/v1\/continuous-work(?:\/([^/]+)(?:\/(resume|continue|pause|stop))?)?$/);
       if (continuousWorkMatch) {
         const supervisor = config.continuousWorkSupervisor;
