@@ -126,5 +126,7 @@ test("Git runtime blocks force pushes and Git execution/configuration overrides"
   assert.throws(() => assertSafeGitArgs(["remote", "remove", "origin"]), /ref deletion, stash deletion/);
   assert.throws(() => assertSafeGitArgs(["stash", "clear"]), /ref deletion, stash deletion/);
   assert.throws(() => assertSafeGitArgs(["push", "--delete", "origin", "main"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["push", "origin", ":main"]), /Deleting remote refs via Git push refspecs/);
+  assert.throws(() => assertSafeGitArgs(["push", "origin", "+:refs/heads/main"]), /Deleting remote refs via Git push refspecs/);
   assert.throws(() => assertSafeGitArgs(["commit", "--amend", "--no-edit"]), /ref deletion, stash deletion/);
 });
