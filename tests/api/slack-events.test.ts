@@ -86,7 +86,7 @@ test("Slack Events acknowledges only after Sofia accepts a run and posts a threa
       assert.equal(calls[0]?.url, "https://sofia.example/v1/agent/runs");
       assert.equal(calls[1]?.url, "https://slack.com/api/chat.postMessage");
       const runRequest = JSON.parse(String(calls[0]?.init?.body)) as { task: string; async: boolean };
-      assert.deepEqual(runRequest, { task: "do the task", async: true, context: "Origin: Slack message event. Slack user ID: UALLOWED. Channel ID: CALLOWED." });
+      assert.deepEqual(runRequest, { task: "do the task", async: true, context: "Origin: Slack message event. Slack user ID: UALLOWED. Channel ID: CALLOWED. Message timestamp: 1790000000.000001." });
       const receipt = JSON.parse(String(calls[1]?.init?.body)) as { channel: string; thread_ts: string; text: string };
       assert.equal(receipt.channel, "CALLOWED");
       assert.equal(receipt.thread_ts, "1790000000.000001");
