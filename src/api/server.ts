@@ -289,7 +289,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
   const publicResponse = (run: ActiveRun): AgentRunResponse => ({
     id: run.id,
-    status: run.status,
+    status: run.cancelRequested ? "cancelled" : run.status,
     ...(run.result ? { result: run.result } : {}),
     ...(run.error ? { error: run.error } : {}),
   });
