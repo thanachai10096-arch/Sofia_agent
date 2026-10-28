@@ -467,8 +467,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         } catch (error) {
           run.status = controller.signal.aborted ? "cancelled" : "failed";
           run.error = controller.signal.aborted
-            ? controller.signal.reason instanceof Error ? controller.signal.reason.message : "Run cancelled."
-            : error instanceof Error ? error.message : "Agent failed";
+            ? safeErrorMessage(controller.signal.reason, "Run cancelled.")
+            : safeErrorMessage(error, "Agent failed");
           send({ type: "error", runId, status: run.status, error: run.error });
         }
         send({ type: "done", runId });
