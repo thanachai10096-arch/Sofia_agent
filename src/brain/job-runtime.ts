@@ -51,6 +51,41 @@ async function renameStateFile(source: string, destination: string): Promise<voi
 
 function isJobCancelled(record: JobRecord): boolean { return record.status === "cancelled"; }
 
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error("Job execution aborted.");
+}
+
+/** Stop waiting for a worker that ignores AbortSignal so leases and heartbeats are released. */
+function awaitWithAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      },
+    );
+    if (signal.aborted) onAbort();
+  });
+}
+
 function redactJobRecord(record: JobRecord): JobRecord {
   return {
     ...record,
@@ -612,12 +647,15 @@ export class DurableJobRuntime implements JobRuntime {
       }
 
       const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot });
-      const result = await brain.run({
-        ...input,
-        ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
-        signal: controller.signal,
-        resume,
-      });
+      const result = await awaitWithAbort(
+        Promise.resolve().then(() => brain.run({
+          ...input,
+          ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
+          signal: controller.signal,
+          resume,
+        })),
+        controller.signal,
+      );
       const resultState: string = result.state;
       if (controller.signal.aborted || resultState === "cancelled" || isJobCancelled(record)) {
         // Cancellation is terminal: discard any result that arrives after abort.
