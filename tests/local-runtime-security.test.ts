@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createNodeWorkspaceRuntime } from "../src/platform/local-runtime.js";
+import { assertSafeGitArgs, createNodeWorkspaceRuntime } from "../src/platform/local-runtime.js";
 
 async function fixture() {
   const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-runtime-security-"));
@@ -100,4 +100,23 @@ test("Docker sandbox mode fails closed without an explicitly pinned image", asyn
     else process.env.SOFIA_SANDBOX_IMAGE = oldImage;
     await rm(f.parent, { recursive: true, force: true });
   }
+});
+
+
+test("Git runtime blocks destructive history and working-tree operations", () => {
+  assert.doesNotThrow(() => assertSafeGitArgs(["status", "--short"]));
+  assert.doesNotThrow(() => assertSafeGitArgs(["restore", "--staged", "src/file.ts"]));
+  assert.throws(() => assertSafeGitArgs(["reset", "--hard", "HEAD"]), /subcommand is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["clean", "-fd"]), /subcommand is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["rebase", "main"]), /subcommand is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["checkout", "--", "src/file.ts"]), /subcommand is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["restore", "src/file.ts"]), /working tree is blocked/);
+});
+
+test("Git runtime blocks force pushes and Git execution/configuration overrides", () => {
+  assert.doesNotThrow(() => assertSafeGitArgs(["push", "origin", "feature-branch"]));
+  assert.throws(() => assertSafeGitArgs(["push", "--force", "origin", "feature-branch"]), /Destructive or force Git options/);
+  assert.throws(() => assertSafeGitArgs(["push", "--force-with-lease", "origin", "feature-branch"]), /Destructive or force Git options/);
+  assert.throws(() => assertSafeGitArgs(["status", "-c", "core.pager=cat"]), /Git option is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["status", "--git-dir=/tmp/other.git"]), /Git option is not allowed/);
 });
