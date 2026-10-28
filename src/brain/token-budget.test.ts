@@ -114,6 +114,26 @@ test("known output overrun is fully charged and stops the budget", () => {
   assert.equal(ledger.snapshot().stopped, true);
 });
 
+test("known input overrun is fully charged and stops the budget", () => {
+  const ledger = budget();
+
+  const lease = ledger.reserve("internal-pool", {
+    inputTokens: 10,
+    outputTokens: 10,
+  });
+
+  const settlement = lease.settle({
+    inputTokens: 11,
+    outputTokens: 5,
+  });
+
+  assert.equal(settlement.usageKnown, true);
+  assert.equal(settlement.capExceeded, true);
+  assert.equal(ledger.snapshot().chargedTokens, 16);
+  assert.equal(ledger.snapshot().committedCostNanoUsd, "31");
+  assert.equal(ledger.snapshot().stopped, true);
+});
+
 test("call and concurrency limits are enforced before mutation", () => {
   const ledger = new TokenBudget(
     {
