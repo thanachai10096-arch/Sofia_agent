@@ -120,7 +120,14 @@ export class UsageLimiter {
     if (!Array.isArray(parsed) || !parsed.every(validRecord)) {
       throw new Error("Usage quota store is invalid; refusing to reset counters.");
     }
-    for (const record of parsed) this.records.set(record.keyId, { ...record });
+    for (const record of parsed) {
+      this.records.set(record.keyId, {
+        ...record,
+        brainRuns: record.brainRuns ?? 0,
+        brainModelCalls: record.brainModelCalls ?? 0,
+        brainReservedOrUsedTokens: record.brainReservedOrUsedTokens ?? 0,
+      });
+    }
   }
 
   private persistRecords(): void {
@@ -148,10 +155,17 @@ export class UsageLimiter {
   private currentRecord(keyId: string, now = Date.now()): UsageRecord {
     const current = this.records.get(keyId);
     if (!current) {
-      const created: UsageRecord = { keyId, runs: 0, toolCalls: 0, startedAt: now };
+      const created: UsageRecord = {
+        keyId, runs: 0, toolCalls: 0, startedAt: now,
+        brainRuns: 0, brainModelCalls: 0, brainReservedOrUsedTokens: 0,
+      };
       this.records.set(keyId, created);
       return created;
     }
+    // Normalize records created by older versions before exposing or updating them.
+    current.brainRuns ??= 0;
+    current.brainModelCalls ??= 0;
+    current.brainReservedOrUsedTokens ??= 0;
     if (now - current.startedAt >= WINDOW_MS) {
       current.runs = 0;
       current.toolCalls = 0;
@@ -199,7 +213,17 @@ export class UsageLimiter {
   get(keyId: string): UsageRecord {
     return this.transaction(() => {
       const current = this.records.get(keyId);
-      return current ? { ...current } : { keyId, runs: 0, toolCalls: 0, startedAt: Date.now() };
+      return current
+        ? {
+            ...current,
+            brainRuns: current.brainRuns ?? 0,
+            brainModelCalls: current.brainModelCalls ?? 0,
+            brainReservedOrUsedTokens: current.brainReservedOrUsedTokens ?? 0,
+          }
+        : {
+            keyId, runs: 0, toolCalls: 0, startedAt: Date.now(),
+            brainRuns: 0, brainModelCalls: 0, brainReservedOrUsedTokens: 0,
+          };
     }, false);
   }
 }
