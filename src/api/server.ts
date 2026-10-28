@@ -467,6 +467,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             : json(res, 409, { error: "continuous_work_not_startable", status: current.status }, origin, config);
         }
         if (action === "resume") {
+          if (supervisor.isContinuous(workId)) return json(res, 409, { error: "continuous_work_mode_active" }, origin, config);
           if (current.status === "active" && supervisor.isRunning(workId)) return json(res, 409, { error: "continuous_work_already_active" }, origin, config);
           if (current.status === "stopped" || current.status === "completed") {
             return json(res, 409, { error: "continuous_work_terminal", status: current.status }, origin, config);
