@@ -9,7 +9,7 @@ test("records aggregate Brain usage without conflating it with API runs and tool
   const usage = new UsageLimiter(10, 100);
   usage.consume("key-a", 2);
   usage.recordBrainUsage("key-a", { modelCalls: 3, reservedOrUsedTokens: 480 });
-  usage.recordBrainUsage("key-a", { modelCalls: 2, reservedOrUsedTokens: 120 });
+  usage.recordBrainUsage("key-a", { modelCalls: 2, reservedOrUsedTokens: 120, providerInputTokens: 90, providerOutputTokens: 30, providerUsageCalls: 2 });
 
   assert.deepEqual(usage.get("key-a"), {
     keyId: "key-a",
@@ -19,6 +19,9 @@ test("records aggregate Brain usage without conflating it with API runs and tool
     brainRuns: 2,
     brainModelCalls: 5,
     brainReservedOrUsedTokens: 600,
+    providerInputTokens: 90,
+    providerOutputTokens: 30,
+    providerUsageCalls: 2,
   });
   assert.equal(usage.get("key-b").brainReservedOrUsedTokens, undefined);
 });
@@ -29,7 +32,7 @@ test("persists Brain usage counters across limiter restarts", () => {
   try {
     const first = new UsageLimiter(10, 100, store);
     first.consume("key-a", 1);
-    first.recordBrainUsage("key-a", { modelCalls: 4, reservedOrUsedTokens: 999 });
+    first.recordBrainUsage("key-a", { modelCalls: 4, reservedOrUsedTokens: 999, providerInputTokens: 200, providerOutputTokens: 50, providerUsageCalls: 4 });
 
     const restarted = new UsageLimiter(10, 100, store);
     assert.deepEqual(restarted.get("key-a"), first.get("key-a"));
@@ -42,5 +45,6 @@ test("rejects invalid Brain usage counters without mutating the ledger", () => {
   const usage = new UsageLimiter(10, 100);
   assert.throws(() => usage.recordBrainUsage("key-a", { modelCalls: -1, reservedOrUsedTokens: 1 }));
   assert.throws(() => usage.recordBrainUsage("key-a", { modelCalls: 1, reservedOrUsedTokens: Number.MAX_SAFE_INTEGER + 1 }));
+  assert.throws(() => usage.recordBrainUsage("key-a", { modelCalls: 1, reservedOrUsedTokens: 1, providerInputTokens: -1, providerOutputTokens: 1, providerUsageCalls: 1 }));
   assert.equal(usage.get("key-a").brainRuns, undefined);
 });
