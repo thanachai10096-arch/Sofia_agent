@@ -146,6 +146,7 @@ export async function checkHostedSofiaApi(input: {
         method: "GET",
         headers: { accept: "application/json" },
         signal: controller.signal,
+        redirect: "error",
       });
     } catch {
       return {
@@ -171,6 +172,7 @@ export async function checkHostedSofiaApi(input: {
         method: "GET",
         headers: { authorization: `Bearer ${input.apiKey}`, accept: "application/json" },
         signal: controller.signal,
+        redirect: "error",
       });
     } catch {
       return {
