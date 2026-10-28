@@ -458,6 +458,13 @@ export class SofiaBrain {
         this.usage.providerInputTokens = (this.usage.providerInputTokens ?? 0) + result.usage.inputTokens;
         this.usage.providerOutputTokens = (this.usage.providerOutputTokens ?? 0) + result.usage.outputTokens;
         this.usage.providerUsageCalls = (this.usage.providerUsageCalls ?? 0) + 1;
+        const configuredCost = result.usage.configuredCostNanoUsd;
+        if (configuredCost !== undefined) {
+          if (!/^(0|[1-9][0-9]*)$/.test(configuredCost)) throw new Stop("Invalid configured model cost");
+          this.usage.configuredCostNanoUsd = (
+            BigInt(this.usage.configuredCostNanoUsd ?? "0") + BigInt(configuredCost)
+          ).toString();
+        }
       }
 
       if (this.usage.reservedOrUsedTokens > this.limits.maxTokens) {
@@ -859,6 +866,7 @@ export class SofiaBrain {
           providerInputTokens: this.usage.providerInputTokens ?? 0,
           providerOutputTokens: this.usage.providerOutputTokens ?? 0,
           providerUsageCalls: this.usage.providerUsageCalls,
+          ...(this.usage.configuredCostNanoUsd !== undefined ? { configuredCostNanoUsd: this.usage.configuredCostNanoUsd } : {}),
         } : {}),
       },
     };
@@ -937,6 +945,7 @@ export class SofiaBrain {
         this.usage.toolCalls = resumed.usage.toolCalls;
         this.usage.modelCalls = resumed.usage.modelCalls;
         this.usage.reservedOrUsedTokens = resumed.usage.reservedOrUsedTokens;
+        this.usage.configuredCostNanoUsd = resumed.usage.configuredCostNanoUsd;
         this.usage.replans = resumed.usage.replans;
         this.state = "planning";
         this.emit({ type: "brain.run.resumed" });
