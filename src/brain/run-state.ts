@@ -12,6 +12,9 @@ export interface BrainRunUsageSnapshot {
   toolCalls: number;
   modelCalls: number;
   reservedOrUsedTokens: number;
+  providerInputTokens?: number;
+  providerOutputTokens?: number;
+  providerUsageCalls?: number;
   replans: number;
 }
 
