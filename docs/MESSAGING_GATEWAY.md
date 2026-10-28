@@ -145,7 +145,7 @@ The code outline above is not a claim that the repository's API server is alread
 
 ## Matrix Client-Server API integration
 
-Sofia includes an opt-in Matrix adapter and client-server API polling transport. It authenticates with the configured homeserver using a server-side access token, uses `/_matrix/client/v3/sync` for incoming events, ignores its own messages and non-text events, and sends replies through the Matrix send-event API. The homeserver must be a public HTTPS origin; redirects are rejected. User and room allowlists are both mandatory and there is no wildcard mode.
+Sofia includes an opt-in Matrix adapter and client-server API polling transport. It authenticates with the configured homeserver using a server-side access token, uses `/_matrix/client/v3/sync` for incoming events, ignores its own messages and non-text events, and sends replies through the Matrix send-event API. The homeserver must be a public HTTPS origin; redirects are rejected, and the transport resolves the hostname before each request and rejects DNS answers containing private, loopback, link-local, or other non-public IP ranges. This DNS preflight is defense-in-depth; deployments exposed to hostile DNS should also enforce outbound network egress rules because DNS can change between validation and connection. User and room allowlists are both mandatory and there is no wildcard mode.
 
 Required environment:
 - `SOFIA_MESSAGING_ENABLED=true`
