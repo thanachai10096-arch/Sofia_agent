@@ -1,6 +1,6 @@
 # Messaging Gateway (incremental integration)
 
-Status: opt-in gateway, command bridge, Telegram Bot API long polling transport, and Discord interaction verification/REST transport. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
+Status: opt-in gateway, Telegram Bot API long-polling transport, Discord interaction verification/REST transport, and a shared-gateway Slack adapter contract. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
 
 ## Safety defaults
 
@@ -30,6 +30,12 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Only explicit `/run <task>` commands dispatch work; ordinary messages do not start runs. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
+
+## Slack adapter status
+
+Sofia now exports `createSlackAdapter` and its `SlackTransport` contract. The adapter normalizes verified human Slack messages into the shared gateway format, ignores unverified events and bot messages, chunks outbound replies, and returns redacted delivery error codes.
+
+Important: this is the adapter layer, **not yet a complete Slack installation**. The host must provide a transport that validates Slack's `X-Slack-Signature` and `X-Slack-Request-Timestamp` against the exact raw request body, handles Slack URL verification and event retries, maps stable user/channel/thread IDs, and calls `chat.postMessage` using a server-side bot token. Do not wire an unverified HTTP request directly into `VerifiedSlackMessage`. A Slack app manifest, event route, OAuth/token setup, and live workspace smoke test are still required before calling Slack end-to-end supported.
 
 ## Composition contract
 
