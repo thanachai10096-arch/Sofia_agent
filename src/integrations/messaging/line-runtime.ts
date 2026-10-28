@@ -54,7 +54,7 @@ export function createLineMessagingRuntime(
     const conversations = parseLineAllowlist(rawConversations, "LINE_ALLOWED_CONVERSATION_IDS");
     const client = new SofiaClient({ apiKey, baseUrl });
     const accessPolicy = {
-      isAllowed(input: { platform: "telegram" | "discord" | "slack" | "line" | "whatsapp"; senderId: string; conversationId: string }) {
+      isAllowed(input: { platform: "telegram" | "discord" | "slack" | "line" | "whatsapp" | "matrix"; senderId: string; conversationId: string }) {
         return input.platform === "line" && users.has(input.senderId) && conversations.has(input.conversationId);
       },
     };
