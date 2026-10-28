@@ -103,3 +103,16 @@ test("Discord Gateway transport rejects invalid bot token and does not dispatch 
   assert.equal(dispatches, 0);
   await transport.stop();
 });
+
+test("Discord Gateway startup aborts promptly before READY", async () => {
+  const socket = new FakeSocket();
+  const controller = new AbortController();
+  const transport = createDiscordGatewayTransport({
+    botToken: "BotToken_1234567890.abcdef-XYZ",
+    webSocketFactory: () => socket,
+  });
+  const started = transport.start(controller.signal, async () => {});
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  controller.abort();
+  await assert.rejects(started, /stopped before ready/);
+});
