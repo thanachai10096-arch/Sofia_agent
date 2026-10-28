@@ -14,10 +14,12 @@ function signed(body: Buffer, secret: string) {
 async function invoke(body: Buffer, headers: Record<string, string>) {
   const req = Object.assign(Readable.from([body]), { method: "POST", headers }) as unknown as IncomingMessage;
   const out: { statusCode: number; body: string } = { statusCode: 200, body: "" };
+  let responseStatus = 200;
   const res = {
-    statusCode: 200,
+    get statusCode() { return responseStatus; },
+    set statusCode(value: number) { responseStatus = value; },
     setHeader() {},
-    end(value?: string) { out.statusCode = this.statusCode; out.body = value ?? ""; },
+    end(value?: string) { out.statusCode = responseStatus; out.body = value ?? ""; },
   } as unknown as ServerResponse;
   await slackEvents(req, res);
   return { statusCode: out.statusCode, body: JSON.parse(out.body || "{}") as Record<string, unknown> };
