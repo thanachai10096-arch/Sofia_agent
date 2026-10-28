@@ -42,16 +42,21 @@ test("Matrix transport authenticates, normalizes text events and ignores its own
 
 test("Matrix transport sends a text event using the configured server-side token", async () => {
   let request: { url: string; method?: string; auth: string | null; body: string } | undefined;
+  const controller = new AbortController();
   const transport = createMatrixClientTransport({
     homeserverUrl: "https://matrix.example.org",
     accessToken: token,
     fetchImpl: async (url, init) => {
-      request = { url: String(url), method: init?.method, auth: new Headers(init?.headers).get("authorization"), body: String(init?.body ?? "") };
       if (String(url).includes("/account/whoami")) return new Response(JSON.stringify({ user_id: "@sofia:example.org" }));
+      if (String(url).includes("/sync")) {
+        controller.abort();
+        return new Response(JSON.stringify({ next_batch: "s1" }));
+      }
+      request = { url: String(url), method: init?.method, auth: new Headers(init?.headers).get("authorization"), body: String(init?.body ?? "") };
       return new Response(JSON.stringify({ event_id: "$sent" }));
     },
   });
-  await transport.start(new AbortController().signal, async () => {});
+  await transport.start(controller.signal, async () => {});
   assert.deepEqual(await transport.sendMessage("!room:example.org", "hello"), { messageId: "$sent" });
   assert.equal(request?.method, "PUT");
   assert.equal(request?.auth, "Bearer " + token);
