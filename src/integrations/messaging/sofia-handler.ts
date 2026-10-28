@@ -14,6 +14,8 @@ export interface SofiaMessagingHandlerOptions {
   deduplicator: ChatMessageDeduplicator;
   /** Exact command prefix, e.g. /run or /run@SofiaBot. Defaults to /run. */
   commandPrefix?: string;
+  /** Natural-language mode treats ordinary non-command messages as task requests. */
+  naturalLanguageMode?: "commands-only" | "natural-language";
   maxTaskCharacters?: number;
   /** Called after the API accepts a run; implementations should schedule completion reporting without blocking polling. */
   onAccepted?: (input: { runId: string; runStatus: string; message: InboundMessage }) => void;
@@ -31,7 +33,10 @@ export function createMessagingAccessCheck(policy: ChatAccessPolicy) {
 
 /**
  * Bridges normalized inbound messages to Sofia's existing command dispatcher.
- * Only explicit command messages start a run; ordinary chat and attachments do not.
+ * In natural-language mode, ordinary text enters the same authorized run path
+ * as /run; slash commands other than the configured run prefix are never treated
+ * as task text. Attachments-only messages are not executed.
+ *
  * Do not also pass this same deduplicator to createMessagingGateway, because the
  * existing command handler claims the provider/channel/message key itself.
  */
@@ -49,8 +54,9 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
 
   return async function onMessage(message: InboundMessage): Promise<string | void> {
     const text = message.text.trim();
-    if (text !== prefix && !text.startsWith(prefix + " ") && !text.startsWith(prefix + "\t")) return;
-    const task = text.slice(prefix.length).trim();
+    const isCommand = text === prefix || text.startsWith(prefix + " ") || text.startsWith(prefix + "\t");
+    if (!isCommand && (options.naturalLanguageMode !== "natural-language" || !text || text.startsWith("/"))) return;
+    const task = isCommand ? text.slice(prefix.length).trim() : text;
     const result = await handleCommand({
       platform: message.platform,
       messageId: message.messageId,
