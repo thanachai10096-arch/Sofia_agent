@@ -102,15 +102,20 @@ test("Slack retry of the same event reuses the same Sofia idempotency key", asyn
   await withEnv({ SLACK_SIGNING_SECRET: "test-secret", SLACK_ALLOWED_USER_IDS: "UALLOWED", SLACK_ALLOWED_CHANNEL_IDS: "CALLOWED", SOFIA_API_BASE_URL: "https://sofia.example", SOFIA_API_KEY: "test-key", SLACK_BOT_TOKEN: "xoxb-12345678901234567890" }, async () => {
     const original = globalThis.fetch;
     const keys: string[] = [];
+    const acceptedByKey = new Map<string, string>();
     let acceptedRuns = 0;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       if (String(input) === "https://sofia.example/v1/agent/runs") {
         const key = new Headers(init?.headers).get("idempotency-key");
         assert.ok(key);
         keys.push(key);
-        // Model the API's idempotent response: the same event resolves to one run.
-        acceptedRuns = 1;
-        return { ok: true, status: 202, async json() { return { id: "run-idempotent-1", status: "queued" }; } } as Response;
+        // Model the API contract: one distinct accepted run per idempotency key.
+        let id = acceptedByKey.get(key);
+        if (!id) {
+          id = "run-idempotent-" + (++acceptedRuns);
+          acceptedByKey.set(key, id);
+        }
+        return { ok: true, status: acceptedRuns === 1 ? 202 : 200, async json() { return { id, status: "queued" }; } } as Response;
       }
       return { ok: true, status: 200, async json() { return { ok: true }; } } as Response;
     }) as typeof fetch;
