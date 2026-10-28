@@ -94,3 +94,26 @@ test("Discord transport accepts additional allowlisted slash command names and f
   await transport.stop();
 });
 
+test("Discord transport deduplicates replayed signed interactions before dispatch", async () => {
+  const transport = createDiscordInteractionTransport({ publicKeyHex, botToken });
+  let dispatches = 0;
+  await transport.start(new AbortController().signal, async () => { dispatches++; });
+  const body = Buffer.from(JSON.stringify({
+    type: 2,
+    id: "222222222224",
+    application_id: "111111111111",
+    token: "interaction-token-abc",
+    channel_id: "123456789",
+    member: { user: { id: "333333333333", username: "tester" } },
+    data: { name: "run", options: [{ name: "task", type: 3, value: "do the task once" }] },
+  }));
+  const request = signed(body);
+  assert.deepEqual(await transport.handleRequest(request), { status: 200, body: { type: 5 } });
+  assert.deepEqual(await transport.handleRequest(request), {
+    status: 200,
+    body: { type: 4, data: { content: "This interaction was already received.", flags: 64 } },
+  });
+  for (let attempt = 0; attempt < 20 && dispatches === 0; attempt++) await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(dispatches, 1, "the same signed interaction must never dispatch the task twice");
+  await transport.stop();
+});
