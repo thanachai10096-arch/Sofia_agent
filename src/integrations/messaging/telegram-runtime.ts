@@ -94,7 +94,7 @@ function parseTelegramIds(value: string, pattern: RegExp, name: string): Readonl
 }
 
 export interface TelegramMessagingEnvironment {
-  SOFIA_MESSAGING_ENABLED?: string;
+  SOFIA_MESSAGING_ENABLED?: string;\n  /** "commands" restores /run-only mode; default is natural chat. */\n  SOFIA_CHAT_MODE?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
@@ -104,9 +104,9 @@ export interface TelegramMessagingEnvironment {
 }
 
 /**
- * Build the optional Telegram bridge using the existing Sofia API and command
- * dispatcher. Missing/invalid optional configuration disables Telegram without
- * taking the core API offline. Only /run commands can start agent work.
+ * Build the optional Telegram bridge using the existing Sofia API and dispatcher.
+ * Natural chat is enabled by default; SOFIA_CHAT_MODE=commands restores /run-only mode.
+ * Missing/invalid optional configuration disables Telegram without taking the core API offline.
  */
 export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
@@ -143,7 +143,7 @@ export function createTelegramMessagingRuntime(
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
-      client, accessPolicy, deduplicator, commandPrefix: "/run",
+      client, accessPolicy, deduplicator, commandPrefix: env.SOFIA_CHAT_MODE?.trim().toLowerCase() === "commands" ? "/run" : false,
       onAccepted: ({ runId, message }) => {
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
