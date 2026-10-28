@@ -973,3 +973,42 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("DurableJobRuntime does not publish a late completion after cancellation from another runtime", async () => {
+  const namespace = "job-runtime-cross-runtime-cancel-" + randomUUID();
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => { started = resolve; });
+  let finish!: () => void;
+  const allowCompletion = new Promise<void>((resolve) => { finish = resolve; });
+  const brain = {
+    run: async () => {
+      started();
+      await allowCompletion;
+      return { completed: true, state: "completed", result: "late result" };
+    },
+  } as unknown as SofiaBrain;
+
+  const worker = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await worker.submit({ task: "cross-runtime cancellation" });
+  await running;
+
+  // A second process/runtime has no local AbortController, but must still be
+  // able to cancel the persisted job without the first worker overwriting it.
+  const controller = new DurableJobRuntime(() => brain, undefined, namespace);
+  assert.equal(await controller.cancel(submitted.id), true);
+  finish();
+
+  let finalRecord = await worker.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && finalRecord?.status === "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    finalRecord = await worker.get(submitted.id);
+  }
+
+  assert.equal(finalRecord?.status, "cancelled");
+  assert.equal(finalRecord?.result, undefined);
+  const restarted = new DurableJobRuntime(() => brain, undefined, namespace);
+  const persisted = await restarted.get(submitted.id);
+  assert.equal(persisted?.status, "cancelled");
+  assert.equal(persisted?.result, undefined);
+});
+
