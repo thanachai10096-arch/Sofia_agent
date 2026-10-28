@@ -24,7 +24,7 @@ function integer(value: number, name: string, min: number, max: number): number 
   return value;
 }
 
-/** Local single-host store with private permissions; multi-host use needs a transactional shared store. */
+/** Local single-process store with private permissions; use a transactional store for multi-process or multi-host workers. */
 export class FileContinuousWorkStore implements ContinuousWorkStore {
   private readonly file: string;
   private writes: Promise<void> = Promise.resolve();
@@ -93,7 +93,9 @@ export class ContinuousWorkSupervisor {
   private async changeStatus(id: string, owner: string, status: "paused" | "stopped"): Promise<boolean> {
     const r = await this.get(id, owner); if (!r || ["stopped", "completed", "failed"].includes(r.status)) return false;
     r.status = status; r.updatedAt = new Date().toISOString(); await this.store.save(r);
-    this.active.get(id)?.abort(new Error("Continuous work " + status + " by owner")); return true;
+    this.active.get(id)?.abort(new Error("Continuous work " + status + " by owner"));
+    if (r.currentJobId) await this.jobs.cancel(r.currentJobId).catch(() => false);
+    return true;
   }
   async resume(id: string, owner: string): Promise<ContinuousWorkRecord> {
     if (this.active.has(id)) throw new Error("Continuous work is already active");
@@ -137,7 +139,13 @@ export class ContinuousWorkSupervisor {
       return (await this.store.get(id))!;
     } catch (error) {
       const latest = await this.store.get(id);
-      if (latest?.status === "active") { latest.status = controller.signal.aborted ? "paused" : "failed"; latest.lastError = error instanceof Error ? error.message.slice(0, 1000) : "Continuous work failed"; latest.currentJobId = undefined; latest.updatedAt = new Date().toISOString(); await this.store.save(latest); }
+      if (latest?.currentJobId) await this.jobs.cancel(latest.currentJobId).catch(() => false);
+      if (latest?.status === "active") {
+        const message = error instanceof Error ? error.message : "Continuous work failed";
+        latest.status = controller.signal.aborted || message === "Activation deadline reached" ? "paused" : "failed";
+        latest.lastError = message.slice(0, 1000);
+        latest.currentJobId = undefined; latest.updatedAt = new Date().toISOString(); await this.store.save(latest);
+      }
       throw error;
     } finally { if (this.active.get(id) === controller) this.active.delete(id); }
   }
