@@ -48,6 +48,14 @@ export interface SofiaContinuousWorkRecord {
 
 export type SofiaRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
+/** Per-API-key usage counters for the current rolling 24-hour window. */
+export interface SofiaUsageSnapshot {
+  keyId: string;
+  runs: number;
+  toolCalls: number;
+  startedAt: number;
+}
+
 export interface SofiaRunResponse {
   id: string;
   status: SofiaRunStatus;
@@ -189,6 +197,11 @@ export class SofiaClient {
   }
 
   /** Read this API key's model profile. Provider credentials are never returned. */
+  /** Read this API key's current usage counters; no provider credentials or raw key are returned. */
+  async getUsage(signal?: AbortSignal): Promise<SofiaUsageSnapshot> {
+    return this.request<SofiaUsageSnapshot>("/v1/usage", { headers: this.headers() }, signal);
+  }
+
   async getModelProfile(signal?: AbortSignal): Promise<{ profile: SofiaModelProfileMetadata | null }> {
     return this.request("/v1/model-profile", {
       headers: this.headers(),
