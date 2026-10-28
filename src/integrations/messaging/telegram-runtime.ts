@@ -94,7 +94,9 @@ function parseTelegramIds(value: string, pattern: RegExp, name: string): Readonl
 }
 
 export interface TelegramMessagingEnvironment {
-  SOFIA_MESSAGING_ENABLED?: string;\n  /** "commands" restores /run-only mode; default is natural chat. */\n  SOFIA_CHAT_MODE?: string;
+  SOFIA_MESSAGING_ENABLED?: string;
+  /** "commands" restores /run-only mode; default is natural chat. */
+  SOFIA_CHAT_MODE?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
