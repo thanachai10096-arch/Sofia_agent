@@ -189,7 +189,7 @@ test("Brain feeds a failed verification into a specialist and executes its valid
       return {
         role: "debugger",
         usage: { inputTokens: 7, outputTokens: 3 },
-        summary: "Retry the file write."
+        summary: "Retry the file write.",
         output: "validated recovery proposal",
         proposedAction: {
           tool: "workspace.write_file",
