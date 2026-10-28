@@ -7,6 +7,8 @@ import { TokenAwareBrainReasoner } from "./token-aware-reasoner.js";
 
 test("token-aware Brain reasoner passes project memory and execution evidence through the packer", async () => {
   let packedEvidence: readonly { id: string; text: string; relevance: number }[] = [];
+  let packedCoreState: unknown;
+  let packedAcceptanceCriteria: readonly string[] = [];
   const budget = new TokenBudget(
     { maxTokens: 20_000, maxCostNanoUsd: 100_000_000n, maxCalls: 4, maxInFlight: 1 },
     [{
@@ -29,6 +31,8 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
         inputTokensUpperBound: Math.ceil(encoded.length / 4),
         async invoke() {
           packedEvidence = prompt.evidence;
+          packedCoreState = prompt.core.state;
+          packedAcceptanceCriteria = prompt.core.acceptanceCriteria;
           return {
             value: { ok: true },
             usage: { inputTokens: Math.ceil(encoded.length / 4), outputTokens: 5 },
@@ -62,6 +66,10 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
   const result = await prepared.invoke({ signal: new AbortController().signal, maxOutputTokens: 512 });
   assert.deepEqual(result.value, { ok: true });
   assert.ok(packedEvidence.length >= 5);
+  const packedStateText = JSON.stringify(packedCoreState);
+  assert.ok(!packedStateText.includes("Caller context says preserve the benchmark fixture."));
+  assert.ok(!packedStateText.includes("Update the token efficiency benchmark"));
+  assert.deepEqual(packedAcceptanceCriteria, ["preserve relevant evidence"]);
   assert.ok(packedEvidence.some((item) => item.text.includes("benchmark runner reports input tokens")));
   assert.ok(packedEvidence.some((item) => item.text.includes("Caller context says preserve the benchmark fixture.")));
   assert.ok(packedEvidence.some((item) => item.id === "reference-context-0"));
