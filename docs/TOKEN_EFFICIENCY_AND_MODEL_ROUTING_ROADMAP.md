@@ -22,7 +22,7 @@ These are foundations, not proof of measured savings or production readiness. Th
 1. **Optimize cost per verified success.** Track correctness and regression alongside token use.
 2. **One Core, one budget.** Web, desktop, mobile, SDK, and chat adapters must use the same Brain, Tool Gateway, policy, and accounting path.
 3. **Model choice is policy-bound.** Support a user-selected single model and smart routing among explicitly enabled models. Never send prompts to an unapproved provider.
-4. **Known prices before heuristics.** Use configured provider prices where available. If prices are missing or equal, use deterministic configured route weights rather than silently relying on array order.
+4. **Known prices before heuristics.** Use configured provider prices where available. If estimated costs tie, use deterministic configured route weights rather than silently relying on array order.
 5. **No speculative model fan-out.** Do not call several models merely to compare answers unless the user or a measured workflow explicitly requests it.
 6. **Context is selected, not dumped.** Preserve system instructions, task requirements, security constraints, and relevant evidence; remove duplicate evidence and prefer useful compact evidence.
 7. **Tools before repeated reasoning.** Use deterministic local tools for exact operations where safe, and send concise, relevant results back to the model.
