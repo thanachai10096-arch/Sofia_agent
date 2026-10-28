@@ -19,6 +19,18 @@ Sofia's continuous-work supervisor runs a large objective as small, verifiable w
 - The default API host deliberately uses a completion evaluator that never auto-declares success. This avoids treating a model's claim as verified completion; objectives must be stopped by the owner unless the host is changed to provide task-specific evidence checks. Optionally set `SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS` to a positive integer to impose a hard lifetime cap.
 - Startup recovery automatically schedules objectives persisted in `active` state. It reconciles the recorded child job before creating another slice, reuses a completed child checkpoint, and pauses safely if the child is missing or ended unsuccessfully. Recovery is best-effort on a single process; multi-replica transactional coordination is not implemented.
 
+## SDK controls
+
+The TypeScript SDK exposes `createContinuousWork`, `listContinuousWork`, `getContinuousWork`, `resumeContinuousWork`, `continueContinuousWork`, `pauseContinuousWork`, and `stopContinuousWork`. Web and mobile clients can use the same authenticated API without hand-building HTTP requests. These controls are not yet commands inside Telegram/Discord chat.
+
+```ts
+const { work } = await client.createContinuousWork("Improve the project in verified steps");
+await client.continueContinuousWork(work.id);
+// Poll for progress and give the owner a way to pause or stop:
+const current = await client.getContinuousWork(work.id);
+await client.pauseContinuousWork(work.id); // or stopContinuousWork(work.id)
+```
+
 ## Example
 
 ```ts
