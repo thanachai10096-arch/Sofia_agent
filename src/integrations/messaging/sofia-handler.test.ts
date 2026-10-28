@@ -18,7 +18,7 @@ const inbound = (text: string, overrides: Partial<InboundMessage> = {}): Inbound
 });
 
 function harness(allowed = true) {
-  const starts: Array<{ task: string; options?: { idempotencyKey?: string } }> = [];
+  const starts: Array<{ task: string; context?: string; options?: { idempotencyKey?: string } }> = [];
   const claims = new Set<string>();
   const policyInputs: Array<{ platform: string; senderId: string; conversationId: string }> = [];
   const policy: ChatAccessPolicy = {
@@ -30,7 +30,7 @@ function harness(allowed = true) {
   };
   const client: ChatRunStarter = {
     async start(input, _signal, options) {
-      starts.push({ task: input.task, options });
+      starts.push({ task: input.task, context: input.context, options });
       return { id: "run-123", status: "queued" };
     },
   };
@@ -52,6 +52,18 @@ test("natural-chat mode starts a run from ordinary text without /run", async () 
   assert.equal(await handle(inbound("Hi Sofia, help me plan a release")), "Sofia accepted the task (run run-123, status: queued).");
   assert.deepEqual(h.starts.map((entry) => entry.task), ["Hi Sofia, help me plan a release"]);
   assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
+});
+
+test("conversation context is forwarded through the existing API run starter", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    commandPrefix: false,
+    conversationContext: () => "Earlier: user asked about release planning.\nassistant: We chose staged rollout.",
+  });
+  await handle(inbound("continue the plan"));
+  assert.match(h.starts[0]?.context ?? "", /Earlier: user asked about release planning/);
+  assert.match(h.starts[0]?.context ?? "", /continue the plan/);
 });
 
 test("natural-chat mode ignores slash commands but keeps /run available", async () => {
