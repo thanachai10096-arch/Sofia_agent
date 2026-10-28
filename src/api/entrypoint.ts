@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
@@ -19,7 +19,7 @@ function parseSlackAllowlist(value: string | undefined): Set<string> {
 /** Send final results only for Slack events already accepted by the signed receiver and allowlists. */
 async function notifySlackRunTerminal(
   run: { id: string; status: string; result?: { output?: string }; error?: string },
-  input: { context?: string },
+  input: { context?: string; task: string },
 ): Promise<void> {
   const context = input.context;
   if (typeof context !== "string") return;
@@ -28,7 +28,8 @@ async function notifySlackRunTerminal(
   const [, userId, channelId, threadTs, signature] = match;
   const callbackSecret = process.env.SOFIA_SLACK_CALLBACK_SECRET?.trim();
   if (!callbackSecret || callbackSecret.length < 32) return;
-  const expected = createHmac("sha256", callbackSecret).update(`${userId}|${channelId}|${threadTs}`).digest();
+  const taskDigest = createHash("sha256").update(input.task).digest("hex");
+  const expected = createHmac("sha256", callbackSecret).update(`${userId}|${channelId}|${threadTs}|${taskDigest}`).digest();
   const supplied = Buffer.from(signature!, "hex");
   if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return;
   if (!parseSlackAllowlist(process.env.SLACK_ALLOWED_USER_IDS).has(userId!) ||
