@@ -95,6 +95,13 @@ export { createLineWebhookTransport } from "./integrations/messaging/line-webhoo
 export type { LineWebhookTransport, LineWebhookTransportOptions, LineWebhookRequest, LineWebhookResult } from "./integrations/messaging/line-webhook-transport.js";
 export { handleLineWebhookHttpRequest } from "./integrations/messaging/line-http-route.js";
 export { createLineMessagingRuntime, parseLineAllowlist } from "./integrations/messaging/line-runtime.js";
+export { createWhatsAppAdapter } from "./integrations/messaging/whatsapp.js";
+export type { WhatsAppTransport, VerifiedWhatsAppMessage } from "./integrations/messaging/whatsapp.js";
+export { createWhatsAppWebhookTransport } from "./integrations/messaging/whatsapp-webhook-transport.js";
+export type { WhatsAppWebhookTransport, WhatsAppWebhookTransportOptions, WhatsAppWebhookRequest, WhatsAppWebhookResult } from "./integrations/messaging/whatsapp-webhook-transport.js";
+export { handleWhatsAppWebhookHttpRequest } from "./integrations/messaging/whatsapp-http-route.js";
+export { createWhatsAppMessagingRuntime, parseWhatsAppAllowlist } from "./integrations/messaging/whatsapp-runtime.js";
+export type { WhatsAppMessagingRuntime, WhatsAppMessagingEnvironment } from "./integrations/messaging/whatsapp-runtime.js";
 export type { LineMessagingRuntime, LineMessagingEnvironment } from "./integrations/messaging/line-runtime.js";
 export type { SlackMessagingRuntime, SlackMessagingEnvironment } from "./integrations/messaging/slack-runtime.js";
 export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
