@@ -85,7 +85,7 @@ test("continuous work reconciles a persisted child job instead of submitting a d
     createdAt: now, updatedAt: now,
   };
   await store.save(record);
-  const supervisor = new ContinuousWorkSupervisor(jobs, store, { isComplete: () => false });
+  const supervisor = new ContinuousWorkSupervisor(jobs, store, { maxIterationsPerActivation: 1, isComplete: () => false });
   const resumed = await supervisor.resume(record.id, "owner");
   assert.equal(resumed.iteration, 1);
   assert.equal(resumed.lastSummary, "Recovered verified checkpoint");
