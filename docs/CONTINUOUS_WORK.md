@@ -21,7 +21,7 @@ Sofia's continuous-work supervisor runs a large objective as small, verifiable w
 
 ## SDK controls
 
-The TypeScript SDK exposes `createContinuousWork`, `listContinuousWork`, `getContinuousWork`, `resumeContinuousWork`, `continueContinuousWork`, `pauseContinuousWork`, and `stopContinuousWork`. It also exposes `getUsage()` to read the authenticated API key's run count, tool-call count, and rolling-window start time from `/v1/usage`; these counters are not token counts or provider-cost estimates. Web and mobile clients can use the same authenticated API without hand-building HTTP requests. These controls are not yet commands inside Telegram/Discord chat.
+The TypeScript SDK exposes `createContinuousWork`, `listContinuousWork`, `getContinuousWork`, `resumeContinuousWork`, `continueContinuousWork`, `pauseContinuousWork`, and `stopContinuousWork`. It also exposes `getUsage()` to read the authenticated API key's run count, tool-call count, and rolling-window start time from `/v1/usage`; these counters are not token counts or provider-cost estimates. Web and mobile clients can use the same authenticated API without hand-building HTTP requests. These controls are not yet commands inside Telegram/Discord chat. Do not wire these endpoints directly to a multi-user chat bridge that shares one API key: the API owner scope is the authenticated API-key principal, so users behind the same bridge key would otherwise share an objective namespace. Chat controls need a signed, server-verified per-message identity and a per-user owner binding before they are exposed in Telegram/Discord.
 
 ```ts
 const { work } = await client.createContinuousWork("Improve the project in verified steps");
