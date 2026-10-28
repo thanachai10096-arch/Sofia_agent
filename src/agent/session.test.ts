@@ -134,3 +134,51 @@ test("SofiaAgent retrieves only principal-scoped memory and fences it as untrust
   assert.match(combined, /untrusted reference only/);
   assert.match(combined, /prefers Sofia Agent/);
 });
+
+
+test("ordinary conversation uses one model call without tools or a second review", async () => {
+  let modelCalls = 0;
+  let reviewCalls = 0;
+  let suppliedTools: unknown;
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async (request) => {
+        modelCalls += 1;
+        suppliedTools = request.tools;
+        return { text: "An AI agent is software that can reason and act toward a goal." };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: {
+      review: async () => {
+        reviewCalls += 1;
+        return { approved: true, reason: "Reviewed." };
+      },
+    },
+    // The full Brain exists, but ordinary conversation should not start it.
+    brainFactory: () => { throw new Error("Brain should not be created for simple conversation"); },
+  });
+
+  const result = await agent.run({ task: "What is an AI agent?" });
+  assert.equal(result.output, "An AI agent is software that can reason and act toward a goal.");
+  assert.equal(modelCalls, 1);
+  assert.equal(reviewCalls, 0);
+  assert.deepEqual(suppliedTools, []);
+  assert.equal(result.steps, 1);
+});
+
+test("explicit useBrain=true keeps the full Brain path", async () => {
+  let legacyCalls = 0;
+  const agent = new SofiaAgent({
+    provider: { generate: async () => { legacyCalls += 1; return { text: "legacy" }; } },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Reviewed." }) },
+    brainFactory: () => { throw new Error("Explicit Brain selection"); },
+  });
+
+  await assert.rejects(
+    agent.run({ task: "What is an AI agent?", useBrain: true }),
+    /Explicit Brain selection/,
+  );
+  assert.equal(legacyCalls, 0);
+});
