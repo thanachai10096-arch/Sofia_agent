@@ -164,7 +164,7 @@ export function createWebChatGateway(apiKeys: ApiKeyMap) {
       const input = await readJson(req);
       const apiKey = typeof input?.apiKey === "string" ? input.apiKey.trim() : "";
       const scopes = Object.prototype.hasOwnProperty.call(apiKeys, apiKey) ? apiKeys[apiKey] : undefined;
-      if (!apiKey || !scopes || !scopes.some((scope) => scope === "agent:run" || scope === "agent:read")) {
+      if (!apiKey || !scopes || !scopes.includes("agent:run")) {
         send(res, 401, { error: "invalid_credentials" });
         return true;
       }
