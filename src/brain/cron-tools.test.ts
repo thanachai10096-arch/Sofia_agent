@@ -23,7 +23,7 @@ test("schedule_task binds ownership to the authenticated principal", async () =>
 
   const result = await tool.execute(
     { name: "Daily check", task: "Check project status", cron: "0 9 * * *", timeZone: "Asia/Bangkok" },
-    { runtime: {} as never, principalId: "user-key-1" },
+    { runtime: {} as never, principalId: "user-key-1", notificationTarget: { platform: "discord", userId: "discord-user-7", conversationId: "discord-channel-4" } },
   ) as { created: boolean; id: string };
 
   assert.equal(result.created, true);
@@ -31,6 +31,7 @@ test("schedule_task binds ownership to the authenticated principal", async () =>
   assert.equal(captured?.actor, "user-key-1");
   assert.equal(captured?.input.ownerKeyId, "user-key-1");
   assert.equal(captured?.input.timeZone, "Asia/Bangkok");
+  assert.deepEqual(captured?.input.notificationTarget, { platform: "discord", userId: "discord-user-7", conversationId: "discord-channel-4" });
 });
 
 test("schedule_task rejects missing authenticated principal", async () => {
