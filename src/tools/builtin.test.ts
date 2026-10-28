@@ -91,3 +91,31 @@ test("web tools require network opt-in and an explicit host allowlist", async ()
     else process.env.SOFIA_ALLOWED_HOSTS = previousHosts;
   }
 });
+
+
+test("web.fetch decodes HTML entities once and strips script tags with spaced closing delimiters", async () => {
+  const previousNetwork = process.env.SOFIA_ALLOW_NETWORK;
+  const previousHosts = process.env.SOFIA_ALLOWED_HOSTS;
+  const originalFetch = globalThis.fetch;
+  try {
+    process.env.SOFIA_ALLOW_NETWORK = "true";
+    process.env.SOFIA_ALLOWED_HOSTS = "example.com";
+    globalThis.fetch = async () => new Response(
+      "<html><body>&amp;lt;safe&amp;gt;<script>alert(1)</script > visible text</body></html>",
+      { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
+    );
+    const fetchTool = createBuiltinTools().find((item) => item.name === "web.fetch");
+    assert.ok(fetchTool);
+    const result = await fetchTool.execute(
+      { url: "https://example.com/" },
+      { runtime: {} as ToolContext["runtime"] },
+    ) as { text: string };
+    assert.equal(result.text, "&lt;safe&gt; visible text");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousNetwork === undefined) delete process.env.SOFIA_ALLOW_NETWORK;
+    else process.env.SOFIA_ALLOW_NETWORK = previousNetwork;
+    if (previousHosts === undefined) delete process.env.SOFIA_ALLOWED_HOSTS;
+    else process.env.SOFIA_ALLOWED_HOSTS = previousHosts;
+  }
+});
