@@ -36,7 +36,7 @@ function evidenceText(value: unknown): string {
 }
 
 function relevanceFor(task: string, text: string): number {
-  const terms = new Set((task.toLocaleLowerCase().match(/[\\p{L}\\p{N}]{2,}/gu) ?? []));
+  const terms = new Set((task.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? []));
   if (terms.size === 0) return 0.5;
   const lower = text.toLocaleLowerCase();
   let matches = 0;
