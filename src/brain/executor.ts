@@ -1,4 +1,5 @@
 import { fenceUntrustedOutput } from "../security/untrusted.js";
+import { redactSecrets } from "../security/guard.js";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -1175,7 +1176,7 @@ export class SofiaBrain {
         // workflows, learn only when a non-empty plan and trusted verification exist.
         const taskType = (understanding.requiredCapabilities[0] ?? "general")
           .toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "general";
-        const workflowTrigger = String(understanding.objective || input.task)
+        const workflowTrigger = String(redactSecrets(String(understanding.objective || input.task)))
           .replace(/[\r\n\t]+/g, " ").trim().slice(0, 160);
         const learnedCandidate: LearnedSkillCandidate | undefined = last
           ? {
@@ -1195,7 +1196,7 @@ export class SofiaBrain {
                 strategy,
                 procedure: [
                   "re-check the current objective and constraints",
-                  ...currentPlan.steps.slice(0, 8).map((step) => String(step.objective).replace(/[\r\n\t]+/g, " ").slice(0, 240)),
+                  ...currentPlan.steps.slice(0, 8).map((step) => String(redactSecrets(String(step.objective))).replace(/[\r\n\t]+/g, " ").slice(0, 240)),
                   "verify the outcome using the trusted checks recorded for this workflow",
                 ].filter((step) => step.trim().length > 0),
                 verification: verification.map((item) => item.criterionId),
