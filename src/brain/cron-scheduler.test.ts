@@ -79,6 +79,41 @@ test("two scheduler instances cannot claim the same occurrence through a transac
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(submitted, 1);
 });
+test("completed scheduled jobs deliver to their trusted target and retry until accepted", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const job = { id: "job-delivery", status: "completed", task: "scheduled task", result: { summary: "Scheduled result" } } as unknown as JobRecord;
+  const runtime = {
+    async submit() { return job; },
+    async get() { return job; },
+    async cancel() { return true; },
+    async list() { return [job]; },
+    async resume() { return job; },
+  } as unknown as JobRuntime;
+  let attempts = 0;
+  const scheduler = new CronScheduler(runtime, {
+    store,
+    onExecutionFinished: async (schedule, execution, deliveredJob) => {
+      attempts++;
+      assert.equal(schedule.notificationTarget?.conversationId, "channel-1");
+      assert.equal(execution.status, "completed");
+      assert.equal(deliveredJob?.id, job.id);
+      return attempts > 1;
+    },
+  });
+  await scheduler.create({
+    name: "deliver result", task: "scheduled task", runAt: "2026-10-28T12:00:00.000Z",
+    timeZone: "UTC", ownerKeyId: "discord:user-1",
+    notificationTarget: { platform: "discord", userId: "user-1", conversationId: "channel-1" },
+  }, "discord:user-1");
+  await scheduler.tick();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(attempts, 1);
+  await scheduler.tick();
+  assert.equal(attempts, 2);
+  assert.equal(state.history[0].notificationDelivered, true);
+});
+
 test("authorization prevents another owner from disabling a schedule", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
