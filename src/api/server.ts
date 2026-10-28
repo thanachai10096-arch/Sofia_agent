@@ -721,11 +721,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
 
         if (!cronScheduler) return json(res, 404, { error: "not_found" }, origin, config);
+        const scheduler = cronScheduler;
+        if (!scheduler) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
         const schedulePath = "/v1/cron/schedules";
         const historyMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/history$/);
         const actionMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/(enable|disable)$/);
         if (req.method === "GET" && requestUrl.pathname === schedulePath) {
-          return json(res, 200, { schedules: await cronScheduler.list(auth.keyId) }, origin, config);
+          return json(res, 200, { schedules: await scheduler.list(auth.keyId) }, origin, config);
         }
         if (req.method === "POST" && requestUrl.pathname === schedulePath) {
           const raw = await body(req, maxBytes);
@@ -760,7 +762,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(typeof input.timeoutMs === "number" ? { timeoutMs: input.timeoutMs } : {}),
           };
           try {
-            const created = await cronScheduler.create(scheduleInput, auth.keyId);
+            const created = await scheduler.create(scheduleInput, auth.keyId);
             return json(res, 201, created, origin, config);
           } catch (error) {
             const message = error instanceof Error ? error.message : "Invalid cron schedule";
@@ -769,7 +771,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (historyMatch && req.method === "GET") {
           try {
-            return json(res, 200, { history: await cronScheduler.history(historyMatch[1]!, auth.keyId) }, origin, config);
+            return json(res, 200, { history: await scheduler.history(historyMatch[1]!, auth.keyId) }, origin, config);
           } catch (error) {
             const message = error instanceof Error ? error.message : "Cron history unavailable";
             const status = message === "Unknown cron schedule" ? 404 : message.startsWith("Not authorized") ? 403 : 400;
@@ -778,7 +780,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (actionMatch && req.method === "POST") {
           try {
-            const updated = await cronScheduler.setEnabled(actionMatch[1]!, actionMatch[2] === "enable", auth.keyId);
+            const updated = await scheduler.setEnabled(actionMatch[1]!, actionMatch[2] === "enable", auth.keyId);
             return json(res, 200, updated, origin, config);
           } catch (error) {
             const message = error instanceof Error ? error.message : "Cron schedule update failed";
@@ -789,7 +791,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const cancelMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)$/);
         if (cancelMatch && req.method === "DELETE") {
           try {
-            const cancelled = await cronScheduler.cancel(cancelMatch[1]!, auth.keyId);
+            const cancelled = await scheduler.cancel(cancelMatch[1]!, auth.keyId);
             return cancelled
               ? json(res, 200, { id: cancelMatch[1], status: "disabled" }, origin, config)
               : json(res, 404, { error: "cron_schedule_not_found" }, origin, config);
