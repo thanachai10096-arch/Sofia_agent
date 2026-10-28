@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { SofiaClient } from "../sdk/client.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
+import { runSetupWizard } from "./setup-wizard.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -10,6 +11,7 @@ function help() {
 Sofia Agent CLI
 
 Commands:
+  sofia setup
   sofia init
   sofia run "<task>"
   sofia status
@@ -22,6 +24,11 @@ Environment:
 
 async function main() {
   if (!command || command === "help" || command === "--help") return help();
+
+  if (command === "setup") {
+    await runSetupWizard();
+    return;
+  }
 
   const runtime = createNodeWorkspaceRuntime();
   if (command === "init") {
