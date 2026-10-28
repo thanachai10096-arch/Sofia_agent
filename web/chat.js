@@ -50,12 +50,35 @@ $("model-select").addEventListener("change", async () => {
   try { const result = await api("/model", { method: "PUT", body: JSON.stringify({ modelSelection: selection }) }); $("model-source").textContent = result.source === "saved" ? "Saved for this API key" : "Sofia default"; toast("Default model saved: " + selection); }
   catch (error) { toast("Could not save model: " + error.message, true); await loadPreference(); }
 });
+function explicitMemoryRequest(task) {
+  const patterns = [
+    { regex: /^จำไว้ว่า\s*(.+)$/u, kind: "fact" },
+    { regex: /^จำไว้ว่าฉันชอบ\s*(.+)$/u, kind: "preference" },
+    { regex: /^เป้าหมายของฉันคือ\s*(.+)$/u, kind: "goal" },
+    { regex: /^remember\s+(?:that\s+)?I\s+prefer\s+(.+)$/i, kind: "preference" },
+    { regex: /^remember\s+(?:that\s+)?my\s+goal\s+is\s+(.+)$/i, kind: "goal" },
+    { regex: /^remember\s+(?:that\s+)?(.+)$/i, kind: "fact" },
+  ];
+  for (const pattern of patterns) {
+    const match = task.match(pattern.regex);
+    const value = match?.[1]?.trim().replace(/[.!。\s]+$/u, "");
+    if (value && value.length >= 3 && value.length <= 1200) return { kind: pattern.kind, content: value };
+  }
+  return undefined;
+}
 async function submitMessage(text) {
   const task = text.trim(); if (!task || state.busy) return;
   state.history.push({ role: "user", content: task }); saveHistory(); renderHistory(); $("prompt").value = ""; setBusy(true);
   const placeholder = { role: "assistant", content: "Sofia is working on it…", meta: "Starting run" }; state.history.push(placeholder); renderHistory();
   try {
-    const prior = state.history.slice(-10, -2).map((m) => (m.role === "user" ? "User: " : "Sofia: ") + m.content).join("\n");
+    const memoryRequest = explicitMemoryRequest(task);
+    if (memoryRequest) {
+      await api("/memory", { method: "POST", body: JSON.stringify(memoryRequest) });
+      placeholder.content = "จำไว้แล้ว — Sofia จะใช้ข้อมูลนี้เป็นความทรงจำอ้างอิงเมื่อเกี่ยวข้อง";
+      placeholder.meta = "Saved to your Sofia memory";
+      saveHistory(); renderHistory(); return;
+    }
+        const prior = state.history.slice(-10, -2).map((m) => (m.role === "user" ? "User: " : "Sofia: ") + m.content).join("\n");
     const started = await api("/runs", { method: "POST", body: JSON.stringify({ task, async: true, sessionId: state.sessionId, modelSelection: $("model-select").value, ...(prior ? { context: "Recent conversation (reference only):\n" + prior.slice(-6000) } : {}) }) });
     if (!started.id) throw new Error("Sofia did not return a run ID.");
     let result = started;
