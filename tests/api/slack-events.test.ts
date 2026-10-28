@@ -65,3 +65,34 @@ test("Slack Events returns retryable error when Sofia does not confirm run creat
     } finally { globalThis.fetch = original; }
   });
 });
+
+
+test("Slack Events acknowledges only after Sofia accepts a run and posts a thread receipt", async () => {
+  await withEnv({ SLACK_SIGNING_SECRET: "test-secret", SLACK_ALLOWED_USER_IDS: "UALLOWED", SLACK_ALLOWED_CHANNEL_IDS: "CALLOWED", SOFIA_API_BASE_URL: "https://sofia.example", SOFIA_API_KEY: "test-key", SLACK_BOT_TOKEN: "xoxb-12345678901234567890" }, async () => {
+    const original = globalThis.fetch;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      if (String(input) === "https://sofia.example/v1/agent/runs") {
+        return { ok: true, status: 202, async json() { return { id: "run-accepted-123", status: "queued" }; } } as Response;
+      }
+      return { ok: true, status: 200, async json() { return { ok: true, ts: "1790000001.000002" }; } } as Response;
+    }) as typeof fetch;
+    try {
+      const body = Buffer.from(JSON.stringify({ type: "event_callback", event_id: "EvAccepted", event: { type: "message", user: "UALLOWED", channel: "CALLOWED", text: "  do the task  ", ts: "1790000000.000001" } }));
+      const result = await invoke(body, signed(body, "test-secret"));
+      assert.deepEqual(result, { statusCode: 200, body: { ok: true } });
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0]?.url, "https://sofia.example/v1/agent/runs");
+      assert.equal(calls[1]?.url, "https://slack.com/api/chat.postMessage");
+      const runRequest = JSON.parse(String(calls[0]?.init?.body)) as { task: string; async: boolean };
+      assert.deepEqual(runRequest, { task: "do the task", async: true, context: "Origin: Slack message event. Slack user ID: UALLOWED. Channel ID: CALLOWED." });
+      const receipt = JSON.parse(String(calls[1]?.init?.body)) as { channel: string; thread_ts: string; text: string };
+      assert.equal(receipt.channel, "CALLOWED");
+      assert.equal(receipt.thread_ts, "1790000000.000001");
+      assert.match(receipt.text, /run-accepted-123/);
+      assert.match(receipt.text, /queued/);
+      assert.equal(new Headers(calls[0]?.init?.headers).get("idempotency-key")?.startsWith("slack_"), true);
+    } finally { globalThis.fetch = original; }
+  });
+});
