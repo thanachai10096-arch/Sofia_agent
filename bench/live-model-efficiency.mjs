@@ -125,7 +125,7 @@ async function packWithSofiaGateway(task) {
     evidence.push({
       id: task.id + "-noise-" + index,
       relevance: 0.15 + ((index % 5) * 0.01),
-      text: "Unrelated synthetic note " + index + ": " + task.noise + " ".repeat(12),
+      text: "Unrelated synthetic note " + index + ": " + task.noise.repeat(5),
     });
   }
   let selectedEvidence = [];
@@ -155,7 +155,7 @@ async function packWithSofiaGateway(task) {
 const results = [];
 for (const task of tasks) {
   const fullEvidence = task.relevant + "\n" +
-    Array.from({ length: 64 }, (_, index) => "Unrelated synthetic note " + index + ": " + task.noise).join("\n");
+    Array.from({ length: 64 }, (_, index) => "Unrelated synthetic note " + index + ": " + task.noise.repeat(5)).join("\n");
   const packedEvidence = await packWithSofiaGateway(task);
   results.push(await callModel(task, fullEvidence, "baseline-full-evidence"));
   results.push(await callModel(task, packedEvidence, "sofia-token-aware-gateway"));
