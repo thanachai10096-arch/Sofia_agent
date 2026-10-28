@@ -145,3 +145,63 @@ test("API runs automatically receive relevant owner-scoped saved memory", async 
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API background jobs receive owner-scoped saved memory as durable context", async () => {
+  let submittedContext = "";
+  let queriedOwner = "";
+  const memory = {
+    save: async () => undefined,
+    list: async () => [],
+    find: async (ownerId: string, query: string, limit?: number) => {
+      queriedOwner = ownerId;
+      assert.match(query, /Sofia/);
+      assert.equal(limit, 4);
+      return [{
+        id: "memory-job-1",
+        kind: "preference" as const,
+        content: "Use concise Thai explanations for Sofia Agent jobs.",
+        source: "explicit-user-request" as const,
+        confidence: 1,
+        createdAt: "2026-10-28T00:00:00.000Z",
+        updatedAt: "2026-10-28T00:00:00.000Z",
+        uses: 0,
+      }];
+    },
+    delete: async () => false,
+    clear: async () => undefined,
+  };
+  const jobRuntime = {
+    submit: async (input: { task: string; context?: string; ownerKeyId?: string }) => {
+      submittedContext = input.context ?? "";
+      return { id: "job-memory-test", status: "queued", task: input.task, ownerKeyId: input.ownerKeyId };
+    },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    userMemoryStore: memory,
+    jobRuntime,
+  } as unknown as import("../agent/types.js").AgentDependencies, {
+    apiKeys: { "job-memory-owner": ["agent:run"] },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/jobs`, {
+      method: "POST",
+      headers: { authorization: "Bearer job-memory-owner", "content-type": "application/json" },
+      body: JSON.stringify({ task: "Help me improve Sofia Agent", context: "Keep existing job context." }),
+    });
+    assert.equal(response.status, 202);
+    assert.match(submittedContext, /Keep existing job context/);
+    assert.match(submittedContext, /Use concise Thai explanations for Sofia Agent jobs/);
+    assert.match(submittedContext, /untrusted reference data/);
+    assert.equal(queriedOwner, createHash("sha256").update("job-memory-owner").digest("hex").slice(0, 32));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
