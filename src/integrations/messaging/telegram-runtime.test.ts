@@ -84,6 +84,28 @@ test("Telegram run completion sends the real completed output to the originating
   assert.deepEqual(warnings, []);
 });
 
+test("Telegram run completion splits long Unicode output into deliverable messages", async () => {
+  const sent: Array<{ conversationId: string; text: string }> = [];
+  const output = "สวัสดี🙂".repeat(1_400);
+  await reportTelegramRunCompletion({
+    runId: "run-long",
+    conversationId: "chat-long",
+    waitForRun: async (id) => ({ id, status: "completed", result: { output } }),
+    send: async (message) => {
+      sent.push({ conversationId: message.conversationId, text: message.text });
+      return true;
+    },
+  });
+  assert.ok(sent.length > 1);
+  assert.ok(sent.every((message) => message.conversationId === "chat-long"));
+  assert.ok(sent.every((message) => Array.from(message.text).length <= 4_096));
+  const reconstructed = sent.map((message, index) => index === 0
+    ? message.text.replace(/^✅ Sofia completed the task\\nRun ID: run-long\\n\\n/, "")
+    : message.text.replace(/^↪️ Sofia result \\(continued\\):\\n/, "")
+  ).join("");
+  assert.equal(reconstructed, output);
+});
+
 test("Telegram run completion hides internal provider errors from chat", async () => {
   const sent: Array<{ conversationId: string; text: string }> = [];
   await reportTelegramRunCompletion({
