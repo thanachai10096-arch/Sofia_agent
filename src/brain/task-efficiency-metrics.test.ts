@@ -47,6 +47,8 @@ test("records aggregate usage and verified cost per successful task without prom
     outputTokens: 35,
     cachedInputTokens: 40,
     modelCalls: 2,
+    unmeasuredModelCalls: 0,
+    usageComplete: true,
     retries: 1,
     medianDurationMs: 750,
     p95DurationMs: 750,
@@ -162,4 +164,20 @@ test("does not report zero cost as known when no model calls were recorded", () 
   assert.equal(task.costKnown, false);
   assert.equal(task.estimatedCostNanoUsd, undefined);
   assert.equal(metrics.snapshot().estimatedCostNanoUsd, null);
+});
+
+
+test("marks usage and cost incomplete when a model call fails before usage is returned", () => {
+  const metrics = new TaskEfficiencyMetrics();
+  metrics.start(100);
+  metrics.recordModelCall({ inputTokens: 20, outputTokens: 5, durationMs: 10, estimatedCostNanoUsd: 100n });
+  metrics.recordUnmeasuredModelCall();
+  const task = metrics.finishTask({ taskId: "partial-usage", completed: true, acceptanceCriteria: 1, passedCriteria: 1, now: 150 });
+  assert.equal(task.modelCalls, 2);
+  assert.equal(task.unmeasuredModelCalls, 1);
+  assert.equal(task.usageComplete, false);
+  assert.equal(task.costKnown, false);
+  assert.equal(task.estimatedCostNanoUsd, undefined);
+  assert.equal(metrics.snapshot().usageComplete, false);
+  assert.equal(metrics.snapshot().unmeasuredModelCalls, 1);
 });
