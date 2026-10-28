@@ -12,6 +12,7 @@ Sofia Agent CLI
 Commands:
   sofia init
   sofia run [--model auto|fast|coding|reasoning|vision] "<task>"
+  sofia model [get|set <auto|fast|coding|reasoning|vision>|reset]
   sofia status
 
 Environment:
@@ -40,6 +41,33 @@ async function main() {
       workspace: await runtime.cwd(),
     }, null, 2));
     return;
+  }
+
+  if (command === "model") {
+    const apiKey = process.env.SOFIA_API_KEY;
+    if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
+    const client = new SofiaClient({
+      apiKey,
+      baseUrl: process.env.SOFIA_API_URL ?? "http://localhost:3000",
+    });
+    const action = args[1] ?? "get";
+    if (action === "get") {
+      console.log(JSON.stringify(await client.getModelPreference(), null, 2));
+      return;
+    }
+    if (action === "reset") {
+      console.log(JSON.stringify(await client.resetModelPreference(), null, 2));
+      return;
+    }
+    if (action === "set") {
+      const selected = args[2];
+      if (!["auto", "fast", "coding", "reasoning", "vision"].includes(selected ?? "")) {
+        throw new Error("Usage: sofia model set <auto|fast|coding|reasoning|vision>");
+      }
+      console.log(JSON.stringify(await client.setModelPreference(selected as import("../sdk/client.js").SofiaModelSelection), null, 2));
+      return;
+    }
+    throw new Error("Usage: sofia model [get|set <auto|fast|coding|reasoning|vision>|reset]");
   }
 
   if (command === "run") {
