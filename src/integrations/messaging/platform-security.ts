@@ -43,7 +43,7 @@ export function verifySlackRequest(input: {
 }): boolean {
   const { signingSecret, signature, timestamp, rawBody } = input;
   if (!signingSecret || signingSecret.length > 512 || !signature || !/^v0=[0-9a-f]{64}$/i.test(signature) ||
-      !timestamp || !/^\\d{10}$/.test(timestamp) || rawBody.byteLength > 1_000_000) return false;
+      !timestamp || !/^\d{10}$/.test(timestamp) || rawBody.byteLength > 1_000_000) return false;
   const timestampMs = Number(timestamp) * 1000;
   const now = input.nowMs ?? Date.now();
   if (!Number.isFinite(timestampMs) || Math.abs(now - timestampMs) > (input.maxAgeMs ?? 5 * 60_000)) return false;
