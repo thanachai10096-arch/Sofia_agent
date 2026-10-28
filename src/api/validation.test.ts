@@ -45,3 +45,14 @@ test("API run validation rejects duplicate acceptance criterion IDs", () => {
     acceptanceCriteria: [criterion, { ...criterion, description: "Second criterion" }],
   }).valid, false);
 });
+
+
+test("API run validation accepts supported model profiles and rejects unknown profiles", () => {
+  for (const modelSelection of ["auto", "fast", "coding", "reasoning", "vision"]) {
+    assert.equal(validateAgentRunInput({ task: "run", modelSelection }).valid, true);
+  }
+  assert.deepEqual(validateAgentRunInput({ task: "run", modelSelection: "arbitrary-provider-model" }), {
+    valid: false,
+    error: "invalid_model_selection",
+  });
+});
