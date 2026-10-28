@@ -19,11 +19,6 @@ export interface MatrixClientTransportOptions {
   onError?: (event: "sync_failed" | "delivery_failed", status?: number) => void;
   syncTimeoutMs?: number;
 }
-export interface MatrixTransport {
-  start(signal: AbortSignal, onMessage: (message: VerifiedMatrixMessage) => Promise<void>): Promise<void>;
-  sendMessage(roomId: string, text: string): Promise<{ messageId: string }>;
-  stop(): Promise<void>;
-}
 function validateHomeserver(value: string): URL {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("Matrix homeserver URL is invalid."); }
