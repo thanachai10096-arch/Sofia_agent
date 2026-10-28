@@ -111,6 +111,7 @@ export function createInternalRoute(
           return {
             value: parseStructured(response.text),
             usage: response.usage,
+            retries: response.retries ?? 0,
             finishReason: "complete",
           };
         },
