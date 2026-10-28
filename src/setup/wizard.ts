@@ -135,10 +135,6 @@ export async function checkHostedSofiaApi(input: {
   timeoutMs?: number;
 }): Promise<HostedApiCheckResult> {
   const baseUrl = validateSofiaApiBaseUrl(input.apiBaseUrl);
-  if (!input.apiKey.trim()) {
-    return { reachable: false, authenticated: false, message: "SOFIA_API_KEY is not configured." };
-  }
-
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = Math.max(1, Math.min(input.timeoutMs ?? 8_000, 30_000));
   const controller = new AbortController();
