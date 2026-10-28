@@ -238,8 +238,8 @@ const server = createSofiaApi(deps, {
     const summary = typeof job?.result?.summary === "string" ? String(redactSecrets(job.result.summary)).trim() : "";
     const status = execution.status;
     const message = status === "completed"
-      ? "⏰ Sofia scheduled task completed.\\nSchedule: " + schedule.name + "\\n" + (summary || "The task completed without a text summary.")
-      : "⏰ Sofia scheduled task " + status + ".\\nSchedule: " + schedule.name + "\\nCheck Sofia schedule history for details.";
+      ? "⏰ Sofia scheduled task completed.\nSchedule: " + schedule.name + "\n" + (summary || "The task completed without a text summary.")
+      : "⏰ Sofia scheduled task " + status + ".\nSchedule: " + schedule.name + "\nCheck Sofia schedule history for details.";
     const outbound = { conversationId: target.conversationId, text: message.slice(0, 1700) };
     switch (target.platform) {
       case "discord":
