@@ -105,7 +105,7 @@ export class TaskEfficiencyMetrics {
       throw new Error("Passed criteria exceed acceptance criteria");
     }
 
-    const allCostsKnown = this.calls.every((call) => call.estimatedCostNanoUsd !== undefined);
+    const allCostsKnown = this.calls.length > 0 && this.calls.every((call) => call.estimatedCostNanoUsd !== undefined);
     const estimatedCost = allCostsKnown
       ? this.calls.reduce((sum, call) => sum + call.estimatedCostNanoUsd!, 0n)
       : undefined;
