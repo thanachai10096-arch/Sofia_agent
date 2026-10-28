@@ -68,6 +68,25 @@ Composition outline:
 
 The code and deterministic transport tests are present, but live LINE channel setup and real-account end-to-end testing have not been performed. Push messages are subject to LINE channel/account eligibility and platform limits.
 
+## WhatsApp Cloud API integration
+
+Sofia now includes a Meta WhatsApp Cloud API adapter, signed webhook transport, bounded HTTP route, and allowlisted runtime. It supports Meta's GET webhook challenge verification, validates `X-Hub-Signature-256` against raw POST bytes, accepts text messages for the configured phone-number ID, de-duplicates message IDs, and sends outbound text via the Graph API. The Graph API version is explicitly configured rather than silently defaulted.
+
+Required environment:
+- `SOFIA_MESSAGING_ENABLED=true`
+- `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`
+- `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_API_VERSION`
+- `WHATSAPP_ALLOWED_PHONE_IDS` (explicit allowlist; no wildcard)
+- `SOFIA_API_KEY`, `SOFIA_API_BASE_URL`
+
+Composition:
+1. Create the runtime with `createWhatsAppMessagingRuntime(process.env, workspace)`.
+2. Mount `whatsAppRuntime.transport` using `createSofiaApi(deps, { ...config, whatsAppWebhookRoute: { transport: whatsAppRuntime.transport } })`.
+3. Start/stop the runtime with the API. The route defaults to `/v1/integrations/whatsapp/webhook`; configure this HTTPS URL in Meta's app dashboard.
+4. Set the same verify token in Meta's webhook configuration, subscribe only to the required WhatsApp message fields, and test against a non-production number first.
+
+This is the **WhatsApp Cloud API** path, not QR-based WhatsApp Web. The code and deterministic transport tests are present; Meta business/app setup and live end-to-end validation have not been performed. Messaging windows, template requirements, quotas, and account eligibility remain governed by Meta.
+
 ## Composition contract
 
 Implementations of `MessagingAdapter` normalize incoming events only after provider authentication and identity mapping. The Telegram transport handles long polling and outbound Bot API calls. The Discord interaction transport exposes a request handler for mounting in an existing HTTPS route and uses Discord's interaction webhook token for the deferred response.
