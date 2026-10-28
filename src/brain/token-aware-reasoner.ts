@@ -91,14 +91,34 @@ function asInferenceRequest(request: string): InferenceRequest {
     else delete state.understanding;
   }
   const evidence: EvidenceChunk[] = [];
+  // Deduplicate the source content before adding labels: the same text can arrive
+  // through caller context, project context, and retrieved memory with different
+  // labels, so the gateway's final-text dedupe alone cannot catch it.
+  const evidenceByContent = new Map<string, number>();
   const addEvidence = (id: string, label: string, value: unknown, relevance?: number) => {
-    const text = evidenceText(value);
+    const text = evidenceText(value).slice(0, 12_000);
     if (!text) return;
+    const score = relevance ?? relevanceFor(taskTerms, text);
+    const existingIndex = evidenceByContent.get(text);
+    if (existingIndex !== undefined) {
+      // Keep one copy, preferring the source with the stronger task relevance.
+      // Do not normalize whitespace or code; only byte-for-byte source content
+      // is considered duplicate.
+      if (score > evidence[existingIndex].relevance) {
+        evidence[existingIndex] = {
+          id,
+          relevance: score,
+          text: label + ": " + text,
+        };
+      }
+      return;
+    }
+    evidenceByContent.set(text, evidence.length);
     evidence.push({
       id,
-      relevance: relevance ?? relevanceFor(taskTerms, text),
+      relevance: score,
       // Mark retrieved workspace and historical content as reference data, not instructions.
-      text: label + ": " + text.slice(0, 12_000),
+      text: label + ": " + text,
     });
   };
   const addContextEvidence = (id: string, value: string) => {
