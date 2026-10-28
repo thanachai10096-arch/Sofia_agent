@@ -38,6 +38,7 @@ test("continuous-work API is owner-scoped and exposes create, resume, pause, and
       record.status = "active";
       return { ...record };
     },
+    isContinuous() { return false; },
     async runContinuously(id: string, owner: string) {
       const record = records.get(id);
       if (!record || record.ownerKeyId !== owner || ["stopped", "completed", "failed"].includes(record.status)) return false;
