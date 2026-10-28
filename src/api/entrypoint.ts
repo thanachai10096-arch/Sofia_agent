@@ -9,6 +9,9 @@ import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } fro
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 import { createMatrixMessagingRuntime } from "../integrations/messaging/matrix-runtime.js";
+import { createSlackMessagingRuntime } from "../integrations/messaging/slack-runtime.js";
+import { createLineMessagingRuntime } from "../integrations/messaging/line-runtime.js";
+import { createWhatsAppMessagingRuntime } from "../integrations/messaging/whatsapp-runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -21,6 +24,9 @@ const deps = await createSofiaAgentDependenciesWithSessions(workspace, undefined
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 // Matrix polling bridge reuses the existing Sofia API and shared messaging gateway.
 const matrixRuntime = createMatrixMessagingRuntime(process.env, workspace);
+const slackRuntime = createSlackMessagingRuntime(process.env, workspace);
+const lineRuntime = createLineMessagingRuntime(process.env, workspace);
+const whatsAppRuntime = createWhatsAppMessagingRuntime(process.env, workspace);
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -218,6 +224,9 @@ const server = createSofiaApi(deps, {
   runStore: new FileRunRecordStore(path.join(workspace, ".sofia", "api-runs")),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
+  ...(slackRuntime ? { slackEventsRoute: { transport: slackRuntime.transport } } : {}),
+  ...(lineRuntime ? { lineWebhookRoute: { transport: lineRuntime.transport } } : {}),
+  ...(whatsAppRuntime ? { whatsAppWebhookRoute: { transport: whatsAppRuntime.transport } } : {}),
 });
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
@@ -229,6 +238,15 @@ server.listen(port, "0.0.0.0", () => {
   void matrixRuntime?.start().catch((error) => {
     console.error("Matrix integration failed to start:", error instanceof Error ? error.name : "UnknownError");
   });
+  void slackRuntime?.start().catch((error) => {
+    console.error("Slack integration failed to start:", error instanceof Error ? error.name : "UnknownError");
+  });
+  void lineRuntime?.start().catch((error) => {
+    console.error("LINE integration failed to start:", error instanceof Error ? error.name : "UnknownError");
+  });
+  void whatsAppRuntime?.start().catch((error) => {
+    console.error("WhatsApp integration failed to start:", error instanceof Error ? error.name : "UnknownError");
+  });
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
@@ -237,6 +255,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     void discordTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
     void matrixRuntime?.stop().catch(() => console.error("Matrix integration shutdown failed."));
+    void slackRuntime?.stop().catch(() => console.error("Slack integration shutdown failed."));
+    void lineRuntime?.stop().catch(() => console.error("LINE integration shutdown failed."));
+    void whatsAppRuntime?.stop().catch(() => console.error("WhatsApp integration shutdown failed."));
     server.close(() => {
       void deps.closeSessionStore().catch(() => console.error("Sofia session/MCP shutdown failed."));
     });
