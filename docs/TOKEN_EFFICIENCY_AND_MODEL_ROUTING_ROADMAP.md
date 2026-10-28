@@ -151,3 +151,8 @@ These are foundations, not proof of measured savings or production readiness. Th
 - Added `bench/brain-loop-efficiency.mjs`, which runs a complete deterministic synthetic task through `SofiaBrain`, `TokenAwareBrainReasoner`, `TokenAwareGateway`, tool execution, and acceptance-criteria verification.
 - The benchmark emits aggregate model-call usage and verified-task telemetry without logging prompts or responses. Its synthetic route reports a deterministic character-based token estimate; it performs no network/provider calls and does not estimate provider billing.
 - Added `bench/brain-loop-efficiency.test.mjs` and wired it into Sofia Benchmark CI. This is a runtime integration regression, not evidence of live-provider token savings. Fresh CI must pass before this exact change is considered validated.
+
+
+### Context evidence granularity — 2026-10-28
+
+Caller-provided multiline context is now split into individually ranked evidence chunks before TokenAwareGateway packing. Each line receives a stable per-source ID and remains labeled as untrusted reference data. This allows the gateway to retain task-relevant lines without treating a large transcript as a single indivisible evidence item. A regression test covers multiple lines and a later relevant line. This is an internal packing behavior change; it does not change BrainRunInput or public interfaces. Fresh CI is required to validate the latest commit.
