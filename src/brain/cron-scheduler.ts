@@ -249,6 +249,9 @@ export class CronScheduler {
   async create(input: CronScheduleInput, actor: string): Promise<CronSchedule> {
     if (!await this.authorize(actor, "create")) throw new Error("Not authorized to create cron schedule");
     if (input.ownerKeyId !== actor) throw new Error("Schedule owner must match the authenticated API key");
+    if (input.notificationTarget && input.ownerKeyId !== input.notificationTarget.platform + ":" + input.notificationTarget.userId) {
+      throw new Error("Notification target must match the authenticated schedule owner");
+    }
     if (!input.name.trim() || !input.task.trim() || !input.ownerKeyId.trim()) throw new Error("name, task and ownerKeyId are required");
     const hasCron = input.cron !== undefined;
     const hasRunAt = input.runAt !== undefined;
