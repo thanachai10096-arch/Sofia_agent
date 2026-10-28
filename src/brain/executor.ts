@@ -247,9 +247,6 @@ export class SofiaBrain {
     toolCalls: 0,
     modelCalls: 0,
     reservedOrUsedTokens: 0,
-    providerInputTokens: 0,
-    providerOutputTokens: 0,
-    providerUsageCalls: 0,
     replans: 0,
   };
 
@@ -458,9 +455,9 @@ export class SofiaBrain {
 
       this.usage.reservedOrUsedTokens += actual;
       if (prepared.providerReportedUsage) {
-        this.usage.providerInputTokens += result.usage.inputTokens;
-        this.usage.providerOutputTokens += result.usage.outputTokens;
-        this.usage.providerUsageCalls += 1;
+        this.usage.providerInputTokens = (this.usage.providerInputTokens ?? 0) + result.usage.inputTokens;
+        this.usage.providerOutputTokens = (this.usage.providerOutputTokens ?? 0) + result.usage.outputTokens;
+        this.usage.providerUsageCalls = (this.usage.providerUsageCalls ?? 0) + 1;
       }
 
       if (this.usage.reservedOrUsedTokens > this.limits.maxTokens) {
@@ -852,7 +849,18 @@ export class SofiaBrain {
       changedFilesKnown,
       verification,
       remainingRisks,
-      usage: { ...this.usage },
+      usage: {
+        steps: this.usage.steps,
+        toolCalls: this.usage.toolCalls,
+        modelCalls: this.usage.modelCalls,
+        reservedOrUsedTokens: this.usage.reservedOrUsedTokens,
+        replans: this.usage.replans,
+        ...(this.usage.providerUsageCalls ? {
+          providerInputTokens: this.usage.providerInputTokens ?? 0,
+          providerOutputTokens: this.usage.providerOutputTokens ?? 0,
+          providerUsageCalls: this.usage.providerUsageCalls,
+        } : {}),
+      },
     };
   }
 
