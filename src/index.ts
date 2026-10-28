@@ -83,6 +83,8 @@ export type { TelegramTransport, TelegramUpdate } from "./integrations/messaging
 export { createTelegramHttpTransport } from "./integrations/messaging/telegram-http-transport.js";
 export type { TelegramHttpTransportOptions } from "./integrations/messaging/telegram-http-transport.js";
 export { createDiscordAdapter } from "./integrations/messaging/discord.js";
+export { createSlackAdapter } from "./integrations/messaging/slack.js";
+export type { SlackTransport, VerifiedSlackMessage } from "./integrations/messaging/slack.js";
 export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
 export { createDiscordInteractionTransport } from "./integrations/messaging/discord-interaction-transport.js";
 export type { DiscordInteractionTransport, DiscordInteractionTransportOptions, DiscordInteractionRequest, DiscordInteractionResult } from "./integrations/messaging/discord-interaction-transport.js";
@@ -91,7 +93,7 @@ export { createMessagingAccessCheck, createSofiaMessagingHandler } from "./integ
 export type { SofiaMessagingHandlerOptions } from "./integrations/messaging/sofia-handler.js";
 export { splitMessage } from "./integrations/messaging/format.js";
 export { messagingSessionKey } from "./integrations/messaging/session-key.js";
-export { verifyDiscordRequest, verifyTelegramWebhookSecret, safeMessageCorrelationId } from "./integrations/messaging/platform-security.js";
+export { verifyDiscordRequest, verifyTelegramWebhookSecret, verifySlackRequest, safeMessageCorrelationId } from "./integrations/messaging/platform-security.js";
 export type { DeliveryState, DeliveryReceipt, InboundMessage, MessagingAdapter, MessagingAttachment, MessagingIdentity, MessagingLogger, OutboundMessage } from "./integrations/messaging/types.js";
 
 export { ADVANCED_SKILLS, ADVANCED_SKILL_COUNT, getAdvancedSkill, listAdvancedSkillsByCategory, validateAdvancedSkillCatalog } from "./skills/advanced-skill-catalog.js";
