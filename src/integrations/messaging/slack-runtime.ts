@@ -60,7 +60,7 @@ export function createSlackMessagingRuntime(
     const channels = parseSlackAllowlist(rawChannels, "SLACK_ALLOWED_CHANNEL_IDS");
     const client = new SofiaClient({ apiKey, baseUrl });
     const accessPolicy = {
-      isAllowed(input: { platform: "telegram" | "discord" | "slack" | "line" | "whatsapp"; senderId: string; conversationId: string }) {
+      isAllowed(input: { platform: "telegram" | "discord" | "slack" | "line" | "whatsapp" | "matrix"; senderId: string; conversationId: string }) {
         return input.platform === "slack" && users.has(input.senderId) && channels.has(input.conversationId);
       },
     };
