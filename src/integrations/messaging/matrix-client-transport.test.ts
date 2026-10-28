@@ -60,7 +60,7 @@ test("Matrix transport sends a text event using the configured server-side token
   assert.deepEqual(await transport.sendMessage("!room:example.org", "hello"), { messageId: "$sent" });
   assert.equal(request?.method, "PUT");
   assert.equal(request?.auth, "Bearer " + token);
-  assert.match(request?.url ?? "", /rooms\\/!room%3Aexample.org\\/send/);
+  assert.match(request?.url ?? "", /rooms\/!room%3Aexample.org\/send/);
   assert.deepEqual(JSON.parse(request?.body ?? "{}"), { msgtype: "m.text", body: "hello" });
   await transport.stop();
 });
