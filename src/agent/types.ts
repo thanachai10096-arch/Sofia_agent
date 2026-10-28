@@ -46,7 +46,7 @@ export interface AgentDependencies {
  /** Optional transcript store; used only when sessionId is provided. */
  /** Optional explicit user-scoped memory store; writes require an explicit API action. */
  userMemoryStore?: import("../brain/user-memory.js").UserMemoryStore;
- sessionStore?: { getOrCreate(id: string): { id: string; messages: string[]; updatedAt: number }; save(session: { id: string; messages: string[]; updatedAt: number }): void };
+ sessionStore?: { getOrCreate(id: string): { id: string; messages: string[]; updatedAt: number }; save(session: { id: string; messages: string[]; updatedAt: number }): void; search?(query: string, options?: { limit?: number; offset?: number; ownerPrefix?: string }): Array<{ id: string; messages: string[]; updatedAt: number }>; };
  learningDiagnostics?: () => unknown;
 }
 export type { ToolCall };
