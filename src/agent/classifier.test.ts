@@ -11,6 +11,8 @@ test("ordinary conversation is eligible for the single-pass low-token path", () 
 test("tasks that imply actions or specialist work keep the full Brain path", () => {
   assert.equal(shouldUseSinglePassConversation("Fix the bug in this TypeScript code"), false);
   assert.equal(shouldUseSinglePassConversation("Research the latest agent frameworks"), false);
+  assert.equal(shouldUseSinglePassConversation("verify a complete async lifecycle"), false);
+  assert.equal(shouldUseSinglePassConversation("verify usage ledger"), false);
   assert.equal(shouldUseSinglePassConversation("ทำมาให้หน่อย"), false);
   assert.equal(shouldUseSinglePassConversation("ตรวจสอบโค้ดทั้งหมด"), false);
 });
