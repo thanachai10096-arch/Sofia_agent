@@ -44,8 +44,8 @@ test("schedule_task rejects missing authenticated principal", async () => {
 });
 
 test("schedule_task requires exactly one of cron and runAt", async () => {
-  const tool = createCronTools({ async create() { throw new Error("should not be called"); } } as never)
-    .find((item) => item.name === "schedule_task")!;
+  const scheduler: Pick<CronScheduler, "create"> = { async create() { throw new Error("should not be called"); } };
+  const tool = createCronTools(scheduler).find((item) => item.name === "schedule_task")!;
   await assert.rejects(
     tool.execute({ name: "Invalid", task: "Do task" }, { runtime: {} as never, principalId: "user-key-1" }),
     /exactly one of cron or runAt/,
