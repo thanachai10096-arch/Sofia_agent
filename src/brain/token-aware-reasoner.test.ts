@@ -7,6 +7,8 @@ import { TokenAwareBrainReasoner } from "./token-aware-reasoner.js";
 
 test("token-aware Brain reasoner passes project memory and execution evidence through the packer", async () => {
   let packedEvidence: readonly { id: string; text: string; relevance: number }[] = [];
+  let packedCoreState: unknown;
+  let packedAcceptanceCriteria: readonly string[] = [];
   const budget = new TokenBudget(
     { maxTokens: 20_000, maxCostNanoUsd: 100_000_000n, maxCalls: 4, maxInFlight: 1 },
     [{
@@ -29,6 +31,8 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
         inputTokensUpperBound: Math.ceil(encoded.length / 4),
         async invoke() {
           packedEvidence = prompt.evidence;
+          packedCoreState = prompt.core.state;
+          packedAcceptanceCriteria = prompt.core.acceptanceCriteria;
           return {
             value: { ok: true },
             usage: { inputTokens: Math.ceil(encoded.length / 4), outputTokens: 5 },
@@ -43,6 +47,9 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
     phase: "plan",
     payload: {
       task: "Update the token efficiency benchmark",
+      // This repeats projectContext through a different source/label. The prompt
+      // should carry the content only once to avoid wasting input tokens.
+      context: "Project instructions: preserve existing public interfaces.",
       referenceContext: { trust: "untrusted_reference_data", content: "Caller context says preserve the benchmark fixture.\\nUnrelated note: the sample mascot is Fern.\\nRelevant project note: do not remove the token budget." },
       understanding: { successCriteria: ["preserve relevant evidence"] },
     },
@@ -51,19 +58,37 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
       diagnoses: [{ category: "incomplete_solution", message: "the task missed provider usage" }],
       decisions: [{ strategy: "inspect-evidence", reason: "check the benchmark fixture" }],
       projectContext: "Project instructions: preserve existing public interfaces.",
-      projectMemory: [{ kind: "convention", content: "Use node:test for regression tests", confidence: 0.9 }],
+      projectMemory: [
+        { kind: "convention", content: "Use node:test for regression tests", confidence: 0.9 },
+        { kind: "note", content: "Tokenizer diagnostics concern another issue." },
+        { kind: "note", content: "The unrelated note contains no task words." },
+      ],
     },
   }), { signal: new AbortController().signal, maxContextTokens: 8_000 });
 
   const result = await prepared.invoke({ signal: new AbortController().signal, maxOutputTokens: 512 });
   assert.deepEqual(result.value, { ok: true });
   assert.ok(packedEvidence.length >= 5);
+  const packedStateText = JSON.stringify(packedCoreState);
+  assert.ok(!packedStateText.includes("Caller context says preserve the benchmark fixture."));
+  assert.ok(!packedStateText.includes("Update the token efficiency benchmark"));
+  assert.deepEqual(packedAcceptanceCriteria, ["preserve relevant evidence"]);
   assert.ok(packedEvidence.some((item) => item.text.includes("benchmark runner reports input tokens")));
   assert.ok(packedEvidence.some((item) => item.text.includes("Caller context says preserve the benchmark fixture.")));
   assert.ok(packedEvidence.some((item) => item.id === "reference-context-0"));
   assert.ok(packedEvidence.some((item) => item.id === "reference-context-2" && item.text.includes("do not remove the token budget")));
-  assert.ok(packedEvidence.some((item) => item.text.includes("preserve existing public interfaces")));
+  assert.equal(
+    packedEvidence.filter((item) => item.text.includes("Project instructions: preserve existing public interfaces.")).length,
+    1,
+    "identical content from caller context and project context should be packed once",
+  );
   assert.ok(packedEvidence.some((item) => item.text.includes("Use node:test for regression tests")));
+  const tokenizerOnlyEvidence = packedEvidence.find((item) => item.text.includes("Tokenizer diagnostics"));
+  assert.ok(tokenizerOnlyEvidence);
+  assert.equal(tokenizerOnlyEvidence.relevance, 0.2, "whole-token matching must not treat tokenizer as token");
+  const stopWordOnlyEvidence = packedEvidence.find((item) => item.text.includes("The unrelated note"));
+  assert.ok(stopWordOnlyEvidence);
+  assert.equal(stopWordOnlyEvidence.relevance, 0.2, "common stop words must not inflate evidence relevance");
   assert.ok(packedEvidence.every((item) => item.text.includes("untrusted reference data")));
   assert.equal(new Set(packedEvidence.map((item) => item.id)).size, packedEvidence.length);
 });

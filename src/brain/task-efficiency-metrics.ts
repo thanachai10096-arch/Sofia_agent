@@ -183,9 +183,9 @@ export class TaskEfficiencyMetrics {
       retries: tasks.reduce((sum, task) => sum + task.retries, 0),
       medianDurationMs: percentile(tasks.map((task) => task.durationMs), 0.5),
       p95DurationMs: percentile(tasks.map((task) => task.durationMs), 0.95),
-      estimatedCostNanoUsd: costsKnown.length === 0 ? null : totalKnownCost.toString(),
+      estimatedCostNanoUsd: tasks.length === 0 || costsKnown.length !== tasks.length ? null : totalKnownCost.toString(),
       costKnownTasks: costsKnown.length,
-      costPerVerifiedSuccessNanoUsd: successCostsKnown.length === 0
+      costPerVerifiedSuccessNanoUsd: successes.length === 0 || successCostsKnown.length !== successes.length
         ? null
         : (successCost / BigInt(successCostsKnown.length)).toString(),
     };

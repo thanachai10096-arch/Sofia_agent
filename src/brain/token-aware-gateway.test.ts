@@ -37,7 +37,8 @@ function route(invoke: () => Promise<ProviderReply>): InternalRoute {
     hardOutputCap: true,
     prepare() {
       return {
-        inputTokensUpperBound: 10,
+        // Leave room for the measured usage used by the default route fixtures.
+        inputTokensUpperBound: 20,
         invoke,
       };
     },
@@ -163,6 +164,27 @@ test("gateway stops when provider usage exceeds the reserved cap", async () => {
       error instanceof GatewayError && error.code === "provider_cap_exceeded",
   );
 
+  assert.equal(budget.snapshot().stopped, true);
+});
+
+test("gateway stops when actual input usage exceeds its reservation", async () => {
+  const budget = makeBudget();
+  const gateway = new TokenAwareGateway(
+    budget,
+    [route(async () => ({
+      value: { shouldNotBeAccepted: true },
+      usage: { inputTokens: 21, outputTokens: 1 },
+      finishReason: "complete",
+    }))],
+  );
+
+  await assert.rejects(
+    gateway.generate(request()),
+    (error: unknown) =>
+      error instanceof GatewayError && error.code === "provider_cap_exceeded",
+  );
+
+  assert.equal(budget.snapshot().chargedTokens, 22);
   assert.equal(budget.snapshot().stopped, true);
 });
 

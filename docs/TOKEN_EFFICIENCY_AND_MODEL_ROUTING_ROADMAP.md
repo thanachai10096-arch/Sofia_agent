@@ -8,7 +8,7 @@ Minimize the cost and compute used per successfully verified task while preservi
 
 ## Current foundation verified in the repository
 
-- `src/brain/token-budget.ts`: per-run and per-model token/cost/call/concurrency reservations, settlement against reported usage, and fail-closed behavior when usage is unknown.
+- `src/brain/token-budget.ts`: per-run and per-model token/cost/call/concurrency reservations, settlement against reported usage, and fail-closed behavior when usage is unknown or actual input/output usage exceeds its reservation. Overruns are fully charged and stop further calls rather than silently undercounting usage.
 - `src/brain/token-aware-gateway.ts`: phase-specific input/output caps, evidence packing, capability/quality eligibility, estimated-cost routing, cancellation, and safe provider error categories.
 - `src/brain/task-efficiency-metrics.ts`: privacy-safe in-memory aggregation for per-task token usage, model-call counts, duration percentiles, verification outcomes, and estimated cost when explicitly supplied. `SofiaBrain` records successful model-call usage/duration, flags failed or unreported usage as incomplete, aggregates built-in subagent usage when reported, and emits a per-run measurement through the optional `onEfficiencyMeasurement` host callback. Durable JSONL persistence is opt-in with `SOFIA_EFFICIENCY_METRICS_ENABLED=true`; records are namespaced by workspace and principal, and contain only aggregate usage/verification metadata. A dashboard and benchmark savings claim are not included yet. Cached-token counts and actual provider billing remain unknown unless an integration supplies them. The authoritative budget remains `TokenBudget`.
 - `src/brain/model-route-adapter.ts`: adapts existing model routes into the token-aware Brain gateway.
@@ -39,8 +39,9 @@ These are foundations, not proof of measured savings or production readiness. Th
 - Record the exact commit, configuration, provider/model, and task fixture for each benchmark.
 - Measure reported input/output usage, cached usage when the provider exposes it, model calls, retries, latency, completion result, and verified task success.
 - Separate measured provider cost from estimates; label missing prices or usage explicitly.
+- Aggregate cost and cost-per-verified-success remain unknown when any task in the comparison set has unknown cost; expose known-task counts separately rather than presenting a partial sum as a complete total.
 - Establish deterministic tests for route selection, evidence packing, budget settlement, unknown usage, cancellation, and provider failure.
-- Run the offline evidence-packing fixture in CI; treat its tokenizer estimate separately from real provider usage and verified task outcomes.
+- Run the offline evidence-packing fixture and deterministic Brain-loop benchmark in CI; the Brain-loop benchmark now reports a naive full-context baseline beside the packed prompt estimate and asserts the baseline is larger. Treat both as synthetic character-based estimates, not provider-billed usage or real-world savings.
 - Do not publish a savings percentage until the same benchmark suite has a valid baseline and comparison run.
 
 **Exit gate:** typecheck, unit tests, build, and CI results reported separately for the exact commit; no benchmark claims without stored results.
@@ -48,7 +49,9 @@ These are foundations, not proof of measured savings or production readiness. Th
 ### P1 — Lower waste in the existing gateway
 
 - Pack evidence by relevance-to-size value; reject empty evidence and duplicate IDs.
-- Deduplicate byte-for-byte identical evidence text without normalizing source code or whitespace.
+- Rank task context using whole-token overlap rather than substring matches (for example, `token` must not match `tokenizer`) and ignore common English stop words, so generic wording is less likely to boost unrelated evidence into the input budget.
+- Avoid serializing task/context/reference-context fields twice: keep the task and acceptance criteria in the prompt core, and send prior context only through ranked evidence chunks.
+- Deduplicate byte-for-byte identical evidence text before source labels are added, including repeats arriving through caller context, project context, and retrieved memory; do not normalize source code or whitespace. Prefer the duplicate source with stronger task relevance and never treat truncated-prefix matches as identical.
 - Keep phase-specific output caps and use actual usage to settle reservations.
 - When estimated prices tie or are absent, use explicit cost/latency/quality weights with deterministic tie-breaking.
 - Add regression tests for quality-preserving context selection and routing determinism.

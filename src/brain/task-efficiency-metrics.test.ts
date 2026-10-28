@@ -181,3 +181,40 @@ test("marks usage and cost incomplete when a model call fails before usage is re
   assert.equal(metrics.snapshot().usageComplete, false);
   assert.equal(metrics.snapshot().unmeasuredModelCalls, 1);
 });
+
+test("does not present partial known costs as the complete aggregate", () => {
+  const metrics = new TaskEfficiencyMetrics();
+  metrics.start(0);
+  metrics.recordModelCall({
+    inputTokens: 10,
+    outputTokens: 2,
+    durationMs: 5,
+    estimatedCostNanoUsd: 100n,
+  });
+  metrics.finishTask({
+    taskId: "priced-success",
+    completed: true,
+    acceptanceCriteria: 1,
+    passedCriteria: 1,
+    now: 10,
+  });
+
+  metrics.start(20);
+  metrics.recordModelCall({
+    inputTokens: 20,
+    outputTokens: 4,
+    durationMs: 7,
+  });
+  metrics.finishTask({
+    taskId: "unpriced-success",
+    completed: true,
+    acceptanceCriteria: 1,
+    passedCriteria: 1,
+    now: 30,
+  });
+
+  const snapshot = metrics.snapshot();
+  assert.equal(snapshot.costKnownTasks, 1);
+  assert.equal(snapshot.estimatedCostNanoUsd, null);
+  assert.equal(snapshot.costPerVerifiedSuccessNanoUsd, null);
+});
