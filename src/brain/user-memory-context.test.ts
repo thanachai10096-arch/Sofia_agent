@@ -58,3 +58,14 @@ test("memory lookup is skipped for blank tasks", async () => {
   assert.equal(result, "context");
   assert.equal(calls, 0);
 });
+
+
+test("legacy stored secrets are redacted again before memory replay", async () => {
+  const store = {
+    find: async () => [entry("My API key is sk-abcdefghijklmnopqrstuvwxyz and I prefer Thai.")],
+  } as Pick<UserMemoryStore, "find">;
+  const result = await appendRelevantUserMemoryContext(store, "owner-hash", "What language do I prefer?");
+  assert.match(result ?? "", /\[REDACTED\]/);
+  assert.doesNotMatch(result ?? "", /sk-abcdefghijklmnopqrstuvwxyz/);
+  assert.match(result ?? "", /I prefer Thai/);
+});
