@@ -2,6 +2,7 @@ import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import type { SlackEventsTransport } from "../integrations/messaging/slack-events-transport.js";
+import type { LineWebhookTransport } from "../integrations/messaging/line-webhook-transport.js";
 
 export interface AgentRunInput {
   task: string;
@@ -64,6 +65,12 @@ export interface SofiaApiConfig {
   /** Optional Slack Events API route; preserves raw body for Slack signature verification. */
   slackEventsRoute?: {
     transport: SlackEventsTransport;
+    path?: string;
+    maxBodyBytes?: number;
+  };
+  /** Optional LINE Messaging API webhook route; verifies X-Line-Signature on raw bytes. */
+  lineWebhookRoute?: {
+    transport: LineWebhookTransport;
     path?: string;
     maxBodyBytes?: number;
   };
