@@ -154,6 +154,12 @@ Discord is disabled unless its server-side configuration is supplied. Configure 
 
 See [Discord integration setup and smoke-test guide](docs/DISCORD_INTEGRATION_SETUP.md) for required environment variables, command registration, and a private-server acceptance checklist.
 
+## `> Chat integrations`
+
+Sofia uses one normalized messaging gateway contract so additional chat platforms can be added as independent adapters without creating a second agent runtime. The current repository includes Telegram and Discord transports; the gateway contract can also host Slack, WhatsApp Business Platform, Microsoft Teams, Google Chat, Matrix, Signal, LINE, Meta messaging, Web Chat, desktop/mobile clients, and SDK integrations when their adapters are implemented and configured.
+
+**A platform name in the shared type is not proof of a working connector.** Every provider still needs authenticated inbound events, trusted identity mapping, outbound delivery, retries/replay protection, access policy, and provider-specific tests. See [Messaging Gateway](docs/MESSAGING_GATEWAY.md) for the current implementation status and rollout checklist. Natural chat is the default for the shared Sofia message handler, so ordinary text can submit a task without `/run`; command-only deployments can opt into `mode: "command"`. Provider-specific commands and platform policies remain in control.
+
 ## `> Browser & local runtime`
 
 - Browser automation is opt-in and policy-controlled.
@@ -252,7 +258,7 @@ try {
 }
 ```
 
-Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Recent session history is replayed into the next turn as bounded, fenced untrusted context (up to 12 messages, 8,000 characters); dedicated transcript retrieval endpoints are not included. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
+Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Up to four recent session messages are replayed into the next turn as bounded, fenced untrusted context (each message is capped at 800 characters, with the combined context bounded); dedicated transcript retrieval endpoints are not included. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
 
 ## User memory
 
