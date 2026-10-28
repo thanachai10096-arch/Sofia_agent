@@ -191,7 +191,9 @@ export function createTelegramMessagingRuntime(
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
       token,
       onError: (event, status) => onWarning(
-        "Telegram transport " + event + (status ? " (HTTP " + status + ")" : "") + ".",
+        event === "poll_conflict"
+          ? "Telegram polling stopped after HTTP 409: another getUpdates poller may be using this bot token. Ensure only one active polling instance uses the token."
+          : "Telegram transport " + event + (status ? " (HTTP " + status + ")" : "") + ".",
       ),
     }));
     gateway = createMessagingGateway({
