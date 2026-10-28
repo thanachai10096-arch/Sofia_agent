@@ -18,6 +18,8 @@ export interface UsageRecord {
   providerInputTokens?: number;
   providerOutputTokens?: number;
   providerUsageCalls?: number;
+  /** Configured route-price estimate in nano-USD; not provider-billed cost. */
+  configuredCostNanoUsd?: string;
 }
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -36,7 +38,8 @@ function validRecord(value: unknown): value is UsageRecord {
     (record.brainReservedOrUsedTokens === undefined || (Number.isSafeInteger(record.brainReservedOrUsedTokens) && record.brainReservedOrUsedTokens >= 0)) &&
     (record.providerInputTokens === undefined || (Number.isSafeInteger(record.providerInputTokens) && record.providerInputTokens >= 0)) &&
     (record.providerOutputTokens === undefined || (Number.isSafeInteger(record.providerOutputTokens) && record.providerOutputTokens >= 0)) &&
-    (record.providerUsageCalls === undefined || (Number.isSafeInteger(record.providerUsageCalls) && record.providerUsageCalls >= 0));
+    (record.providerUsageCalls === undefined || (Number.isSafeInteger(record.providerUsageCalls) && record.providerUsageCalls >= 0)) &&
+    (record.configuredCostNanoUsd === undefined || (typeof record.configuredCostNanoUsd === "string" && /^(0|[1-9][0-9]*)$/.test(record.configuredCostNanoUsd)));
 }
 
 /**
@@ -172,6 +175,7 @@ export class UsageLimiter {
       if (current.providerInputTokens !== undefined) current.providerInputTokens = 0;
       if (current.providerOutputTokens !== undefined) current.providerOutputTokens = 0;
       if (current.providerUsageCalls !== undefined) current.providerUsageCalls = 0;
+      if (current.configuredCostNanoUsd !== undefined) current.configuredCostNanoUsd = "0";
     }
     return current;
   }
@@ -196,7 +200,7 @@ export class UsageLimiter {
   }
 
   /** Record aggregate Brain usage only when a completed report contains valid counters. */
-  recordBrainUsage(keyId: string, usage: { modelCalls: number; reservedOrUsedTokens: number; providerInputTokens?: number; providerOutputTokens?: number; providerUsageCalls?: number }): void {
+  recordBrainUsage(keyId: string, usage: { modelCalls: number; reservedOrUsedTokens: number; providerInputTokens?: number; providerOutputTokens?: number; providerUsageCalls?: number; configuredCostNanoUsd?: string }): void {
     if (!Number.isSafeInteger(usage.modelCalls) || usage.modelCalls < 0 ||
         !Number.isSafeInteger(usage.reservedOrUsedTokens) || usage.reservedOrUsedTokens < 0) {
       throw new Error("Invalid Brain usage metrics.");
@@ -204,7 +208,8 @@ export class UsageLimiter {
     const providerValues = [usage.providerInputTokens, usage.providerOutputTokens, usage.providerUsageCalls];
     if (providerValues.some((value) => value !== undefined && (!Number.isSafeInteger(value) || value < 0)) ||
         ((usage.providerInputTokens === undefined) !== (usage.providerOutputTokens === undefined)) ||
-        (usage.providerUsageCalls !== undefined && usage.providerInputTokens === undefined)) {
+        (usage.providerUsageCalls !== undefined && usage.providerInputTokens === undefined) ||
+        (usage.configuredCostNanoUsd !== undefined && (typeof usage.configuredCostNanoUsd !== "string" || !/^(0|[1-9][0-9]*)$/.test(usage.configuredCostNanoUsd)))) {
       throw new Error("Invalid provider-reported token metrics.");
     }
     this.transaction(() => {
@@ -225,6 +230,9 @@ export class UsageLimiter {
         providerUsageCalls: usage.providerInputTokens === undefined
           ? current.providerUsageCalls
           : (current.providerUsageCalls ?? 0) + (usage.providerUsageCalls ?? 0),
+        configuredCostNanoUsd: usage.configuredCostNanoUsd === undefined
+          ? current.configuredCostNanoUsd
+          : (BigInt(current.configuredCostNanoUsd ?? "0") + BigInt(usage.configuredCostNanoUsd)).toString(),
       };
       if (Object.values(next).some((value) => value !== undefined && !Number.isSafeInteger(value))) {
         throw new Error("Aggregated usage metrics exceed the safe integer range.");
@@ -235,6 +243,7 @@ export class UsageLimiter {
       if (next.providerInputTokens !== undefined) current.providerInputTokens = next.providerInputTokens;
       if (next.providerOutputTokens !== undefined) current.providerOutputTokens = next.providerOutputTokens;
       if (next.providerUsageCalls !== undefined) current.providerUsageCalls = next.providerUsageCalls;
+      if (next.configuredCostNanoUsd !== undefined) current.configuredCostNanoUsd = next.configuredCostNanoUsd;
     }, true);
   }
 
