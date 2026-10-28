@@ -126,6 +126,41 @@ test("persistent skill ledger merges repeated verified workflows and restores tr
 });
 
 
+test("persistent skill ledger retains custom acceptance checks when repeated workflows merge and reload", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-skill-acceptance-"));
+  const store = new FileProjectMemoryStore("skill-ledger-acceptance", root);
+  const ledger = new PersistentSkillLedger(store);
+  ledger.record({
+    name: "workflow-acceptance",
+    trigger: "Summarize the source faithfully",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect source", "draft summary", "verify each claim against source"],
+    verification: ["acceptance:summary-matches-source"],
+    evidenceIds: ["run-acceptance-1"],
+  });
+  ledger.record({
+    name: "workflow-acceptance",
+    trigger: "Check summary against source evidence",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect source", "verify each claim against source"],
+    verification: ["test", "acceptance:all-claims-grounded"],
+    evidenceIds: ["run-acceptance-2"],
+  });
+  await ledger.flush();
+
+  const restored = new PersistentSkillLedger(new FileProjectMemoryStore("skill-ledger-acceptance", root));
+  assert.deepEqual(
+    new Set(restored.list()[0]?.verification),
+    new Set(["acceptance:summary-matches-source", "test", "acceptance:all-claims-grounded"]),
+  );
+  assert.deepEqual(
+    new Set(restored.list()[0]?.evidenceIds),
+    new Set(["run-acceptance-1", "run-acceptance-2"]),
+  );
+});
+
 test("persistent skill ledger reports durable storage failures when flushed", async () => {
   const brokenStore = {
     async save() { throw new Error("simulated disk failure"); },
