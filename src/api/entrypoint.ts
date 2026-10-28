@@ -12,6 +12,7 @@ import { createMatrixMessagingRuntime } from "../integrations/messaging/matrix-r
 import { createSlackMessagingRuntime } from "../integrations/messaging/slack-runtime.js";
 import { createLineMessagingRuntime } from "../integrations/messaging/line-runtime.js";
 import { createWhatsAppMessagingRuntime } from "../integrations/messaging/whatsapp-runtime.js";
+import { redactSecrets } from "../security/guard.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -224,6 +225,7 @@ const server = createSofiaApi(deps, {
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(path.join(workspace, ".sofia", "api-runs")),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
+  ...(process.env.SOFIA_MESSAGING_CONTEXT_SECRET?.trim() ? { messagingContextSecret: process.env.SOFIA_MESSAGING_CONTEXT_SECRET.trim() } : {}),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
   ...(slackRuntime ? { slackEventsRoute: { transport: slackRuntime.transport } } : {}),
   ...(lineRuntime ? { lineWebhookRoute: { transport: lineRuntime.transport } } : {}),
