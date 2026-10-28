@@ -44,3 +44,7 @@ This is a compatibility roadmap, not a claim that Sofia already equals Hermes in
 ## Validation boundary
 
 A green CI run verifies the checks actually executed by GitHub. It does not prove that a real model provider, a hosted login flow, or a live chat platform is configured. Those require separate integration/smoke-test evidence.
+
+### Learning-loop safety status
+
+The production learned-skill evaluator currently performs metadata/procedure-shape checks only; it does not execute a candidate against isolated task fixtures. These checks are not proof of task improvement. The runtime now fails closed at this boundary: a candidate stays inactive until a real isolated fixture evaluator reports passing outcome evidence, and the existing explicit approval step is still required afterward. This deliberately prioritizes truthful verification over auto-activating an untested skill. The missing fixture runner remains an implementation gap, not a completed Hermes parity feature.
