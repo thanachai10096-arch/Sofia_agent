@@ -48,6 +48,7 @@ export interface SkillCandidate {
   confidence: number;
 }
 export interface SkillEvaluation {
+  regressionRunId: string;
   passed: boolean;
   checks: Array<{ name: string; passed: boolean; detail?: string }>;
   regressionEvidenceIds: string[];
