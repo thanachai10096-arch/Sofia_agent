@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import test from "node:test";
 import {
   createMessagingAccessCheck,
@@ -139,4 +140,39 @@ test("chat-first sessions remain isolated by immutable user and conversation ide
   assert.ok(starts[0]?.sessionId);
   assert.ok(starts[1]?.sessionId);
   assert.notEqual(starts[0]?.sessionId, starts[1]?.sessionId);
+});
+
+
+test("continuous-work chat commands are signed and dispatched with verified user identity", async () => {
+  const h = harness();
+  let received: { signedTask: string; messagingContext: import("../chat-adapter.js").SignedMessagingContext } | undefined;
+  h.client.continuousWorkAction = async (input) => {
+    received = input;
+    return { work: { id: "work-chat-1", status: "paused" } };
+  };
+  const secret = "test-messaging-context-secret-at-least-32-chars";
+  const handle = createSofiaMessagingHandler({ ...h, messagingContextSecret: secret });
+  assert.equal(
+    await handle(inbound("/work create improve the project safely")),
+    "Created continuous task work-chat-1 (paused). Use /work continue work-chat-1 to start it.",
+  );
+  assert.ok(received);
+  const parsed = JSON.parse(received.signedTask) as { action: string; task: string };
+  assert.deepEqual(parsed, { action: "create", task: "improve the project safely" });
+  assert.equal(received.messagingContext.userId, "user-1");
+  assert.equal(received.messagingContext.conversationId, "chat-1");
+  assert.equal(received.messagingContext.taskHash, createHash("sha256").update(received.signedTask).digest("hex"));
+  const { signature, ...unsigned } = received.messagingContext;
+  const expected = createHmac("sha256", secret).update(JSON.stringify(unsigned)).digest();
+  assert.equal(timingSafeEqual(Buffer.from(signature, "hex"), expected), true);
+});
+
+test("continuous-work chat commands fail closed when signed context is not configured", async () => {
+  const h = harness();
+  h.client.continuousWorkAction = async () => ({ work: [] });
+  const handle = createSofiaMessagingHandler({ ...h });
+  assert.equal(
+    await handle(inbound("/work list")),
+    "Continuous-work chat controls are not configured on this Sofia server.",
+  );
 });
