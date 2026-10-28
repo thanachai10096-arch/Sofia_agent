@@ -49,7 +49,7 @@ async function readJson(req) {
 function allowedHost(req) {
   const value = req.headers.host ?? "";
   return value === "localhost:" + port || value === "127.0.0.1:" + port ||
-    (host === "::1" && value === "[::1]:" + port) || value === "localhost" || value === "127.0.0.1";
+    (host === "::1" && value === "[::1]:" + port);
 }
 function sameOrigin(req) {
   const origin = req.headers.origin;
