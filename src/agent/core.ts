@@ -318,6 +318,7 @@ export class SofiaAgent {
               const result = await tool.execute(actionInput, {
                 runtime: this.deps.runtime,
                 ...(request.signal ? { signal: request.signal } : {}),
+                ...(request.principalId ? { principalId: request.principalId } : {}),
               });
               const fenced = fenceUntrustedOutput(call.name, JSON.stringify(result));
               messages.push({ role: "tool", content: fenced.text, toolCallId: call.id });
