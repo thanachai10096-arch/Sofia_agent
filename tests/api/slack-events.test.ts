@@ -39,11 +39,11 @@ test("Slack Events verifies raw body before returning URL challenge", async () =
 });
 
 test("Slack Events denies unallowlisted senders without calling Sofia", async () => {
-  await withEnv({ SLACK_SIGNING_SECRET: "test-secret", SLACK_ALLOWED_USER_IDS: "U_ALLOWED", SLACK_ALLOWED_CHANNEL_IDS: "C_ALLOWED", SOFIA_API_BASE_URL: "https://sofia.example", SOFIA_API_KEY: "test-key", SLACK_BOT_TOKEN: "xoxb-12345678901234567890" }, async () => {
+  await withEnv({ SLACK_SIGNING_SECRET: "test-secret", SLACK_ALLOWED_USER_IDS: "UALLOWED", SLACK_ALLOWED_CHANNEL_IDS: "CALLOWED", SOFIA_API_BASE_URL: "https://sofia.example", SOFIA_API_KEY: "test-key", SLACK_BOT_TOKEN: "xoxb-12345678901234567890" }, async () => {
     const original = globalThis.fetch; let calls = 0;
     globalThis.fetch = (async () => { calls++; throw new Error("unexpected fetch"); }) as typeof fetch;
     try {
-      const body = Buffer.from(JSON.stringify({ type: "event_callback", event_id: "EvDenied", event: { type: "message", user: "U_OTHER", channel: "C_ALLOWED", text: "hello", ts: "1790000000.000001" } }));
+      const body = Buffer.from(JSON.stringify({ type: "event_callback", event_id: "EvDenied", event: { type: "message", user: "U_OTHER", channel: "CALLOWED", text: "hello", ts: "1790000000.000001" } }));
       assert.deepEqual(await invoke(body, signed(body, "test-secret")), { statusCode: 200, body: { ok: true } });
       assert.equal(calls, 0);
     } finally { globalThis.fetch = original; }
@@ -51,11 +51,11 @@ test("Slack Events denies unallowlisted senders without calling Sofia", async ()
 });
 
 test("Slack Events returns retryable error when Sofia does not confirm run creation", async () => {
-  await withEnv({ SLACK_SIGNING_SECRET: "test-secret", SLACK_ALLOWED_USER_IDS: "U_ALLOWED", SLACK_ALLOWED_CHANNEL_IDS: "C_ALLOWED", SOFIA_API_BASE_URL: "https://sofia.example", SOFIA_API_KEY: "test-key", SLACK_BOT_TOKEN: "xoxb-12345678901234567890" }, async () => {
+  await withEnv({ SLACK_SIGNING_SECRET: "test-secret", SLACK_ALLOWED_USER_IDS: "UALLOWED", SLACK_ALLOWED_CHANNEL_IDS: "CALLOWED", SOFIA_API_BASE_URL: "https://sofia.example", SOFIA_API_KEY: "test-key", SLACK_BOT_TOKEN: "xoxb-12345678901234567890" }, async () => {
     const original = globalThis.fetch; const calls: Array<{ url: string; init?: RequestInit }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => { calls.push({ url: String(input), init }); return { ok: false, status: 503, async json() { return { error: "unavailable" }; } } as Response; }) as typeof fetch;
     try {
-      const body = Buffer.from(JSON.stringify({ type: "event_callback", event_id: "EvRetry", event: { type: "message", user: "U_ALLOWED", channel: "C_ALLOWED", text: "run task", ts: "1790000000.000001" } }));
+      const body = Buffer.from(JSON.stringify({ type: "event_callback", event_id: "EvRetry", event: { type: "message", user: "UALLOWED", channel: "CALLOWED", text: "run task", ts: "1790000000.000001" } }));
       const result = await invoke(body, signed(body, "test-secret"));
       assert.equal(result.statusCode, 503);
       assert.deepEqual(result.body, { error: "sofia_run_not_accepted" });
