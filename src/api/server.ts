@@ -720,6 +720,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 405, { error: "method_not_allowed" }, origin, config);
         }
 
+        if (!cronScheduler) return json(res, 404, { error: "not_found" }, origin, config);
         const schedulePath = "/v1/cron/schedules";
         const historyMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/history$/);
         const actionMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/(enable|disable)$/);
