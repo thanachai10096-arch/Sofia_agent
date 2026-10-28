@@ -25,7 +25,7 @@ Sofia Agent is a standalone agent runtime and platform. It turns a request into 
 
 ## Quick start: run Sofia locally
 
-**Prerequisites:** Node.js 20 or newer and access to a supported model provider. This source-checkout path is for developers/testers; it is not yet a claim that `npx sofia` is published and ready.
+**Prerequisites:** Node.js 22.5 or newer (for the built-in SQLite session store) and access to a supported model provider. This source-checkout path is for developers/testers; it is not yet a claim that `npx sofia` is published and ready.
 
 ```bash
 git clone https://github.com/thanachai10096-arch/Sofia_agent.git
