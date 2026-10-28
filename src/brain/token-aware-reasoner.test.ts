@@ -43,7 +43,7 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
     phase: "plan",
     payload: {
       task: "Update the token efficiency benchmark",
-      referenceContext: { trust: "untrusted_reference_data", content: "Caller context says preserve the benchmark fixture." },
+      referenceContext: { trust: "untrusted_reference_data", content: "Caller context says preserve the benchmark fixture.\\nUnrelated note: the sample mascot is Fern.\\nRelevant project note: do not remove the token budget." },
       understanding: { successCriteria: ["preserve relevant evidence"] },
     },
     memory: {
@@ -60,6 +60,8 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
   assert.ok(packedEvidence.length >= 5);
   assert.ok(packedEvidence.some((item) => item.text.includes("benchmark runner reports input tokens")));
   assert.ok(packedEvidence.some((item) => item.text.includes("Caller context says preserve the benchmark fixture.")));
+  assert.ok(packedEvidence.some((item) => item.id === "reference-context-0"));
+  assert.ok(packedEvidence.some((item) => item.id === "reference-context-2" && item.text.includes("do not remove the token budget")));
   assert.ok(packedEvidence.some((item) => item.text.includes("preserve existing public interfaces")));
   assert.ok(packedEvidence.some((item) => item.text.includes("Use node:test for regression tests")));
   assert.ok(packedEvidence.every((item) => item.text.includes("untrusted reference data")));
