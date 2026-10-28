@@ -223,3 +223,25 @@ test("gateway leaves JSON mode disabled for ordinary chat", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("gateway never exposes untrusted provider error bodies in thrown errors", async () => {
+  const originalFetch = globalThis.fetch;
+  const echoedSecret = "sk-live-do-not-leak-this-provider-body";
+  globalThis.fetch = async () => new Response(
+    JSON.stringify({ error: { message: `invalid credential ${echoedSecret}; request prompt: private user data` } }),
+    { status: 401, headers: { "content-type": "application/json" } },
+  );
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": { baseUrl: "https://example.test/v1", apiKey: "configured-key", model: "test-model" },
+    });
+    await assert.rejects(gateway.generate(request, makeRoute()), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /\(401\)/);
+      assert.doesNotMatch(error.message, /do-not-leak-this-provider-body|private user data|invalid credential/);
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
