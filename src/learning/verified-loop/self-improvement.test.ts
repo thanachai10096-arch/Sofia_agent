@@ -26,7 +26,7 @@ test("serializes events, buffers out-of-order notifications, and drains the gap"
   assert.deepEqual(calls, []);
   await worker.onVerifiedExecution({ sequence: 1, receiptId: "r1", summary: "first" });
   await worker.recoverPending();
-  assert.deepEqual(calls, ["r1:first", "r2:[redacted]"]);
+  assert.deepEqual(calls, ["r1:first", "r2:[redacted] second"]);
   assert.deepEqual(await checkpoints.read(scope), { lastSequence: 2, pending: [] });
 });
 test("ignores duplicate or already-consumed notifications", async () => {
