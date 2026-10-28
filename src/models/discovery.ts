@@ -11,6 +11,8 @@ export interface DiscoveredModel {
   displayName?: string;
   ownedBy?: string;
   created?: number;
+  /** Provider-reported context window in tokens; omitted when not reliably exposed. */
+  contextWindow?: number;
   /** Null means the endpoint does not provide verified capability metadata. */
   capabilities: ModelCapability[] | null;
 }
@@ -89,11 +91,19 @@ export async function discoverModels(
     const created = "created" in item && typeof item.created === "number" && Number.isFinite(item.created)
       ? item.created
       : undefined;
+    const contextCandidate = "context_length" in item ? item.context_length
+      : "context_window" in item ? item.context_window
+      : "max_context_length" in item ? item.max_context_length
+      : undefined;
+    const contextWindow = typeof contextCandidate === "number" && Number.isSafeInteger(contextCandidate) && contextCandidate > 0
+      ? contextCandidate
+      : undefined;
     models.push({
       id,
       ...(displayName ? { displayName } : {}),
       ...(ownedBy ? { ownedBy } : {}),
       ...(created !== undefined ? { created } : {}),
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
       capabilities: null,
     });
   }
