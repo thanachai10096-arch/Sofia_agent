@@ -20,6 +20,8 @@ export class FileTaskEfficiencyStore {
     if (!value || typeof value !== "object" || typeof value.taskId !== "string" || !value.taskId.trim()) {
       throw new Error("Invalid efficiency measurement");
     }
+    const unmeasuredModelCalls = value.unmeasuredModelCalls ?? 0;
+    const usageComplete = value.usageComplete ?? (unmeasuredModelCalls === 0);
     for (const [key, count] of [
       ["acceptance criteria", value.acceptanceCriteria],
       ["passed criteria", value.passedCriteria],
@@ -27,7 +29,7 @@ export class FileTaskEfficiencyStore {
       ["output tokens", value.outputTokens],
       ["cached input tokens", value.cachedInputTokens],
       ["model calls", value.modelCalls],
-      ["unmeasured model calls", value.unmeasuredModelCalls],
+      ["unmeasured model calls", unmeasuredModelCalls],
       ["retries", value.retries],
       ["duration", value.durationMs],
     ] as const) {
@@ -35,7 +37,7 @@ export class FileTaskEfficiencyStore {
     }
     if (value.passedCriteria > value.acceptanceCriteria || value.cachedInputTokens > value.inputTokens ||
         typeof value.completed !== "boolean" || typeof value.costKnown !== "boolean" ||
-        typeof value.usageComplete !== "boolean" || value.usageComplete !== (value.unmeasuredModelCalls === 0)) {
+        typeof usageComplete !== "boolean" || usageComplete !== (unmeasuredModelCalls === 0)) {
       throw new Error("Invalid efficiency measurement");
     }
     const clean: TaskMeasurement = {
@@ -43,7 +45,7 @@ export class FileTaskEfficiencyStore {
       acceptanceCriteria: value.acceptanceCriteria, passedCriteria: value.passedCriteria,
       inputTokens: value.inputTokens, outputTokens: value.outputTokens,
       cachedInputTokens: value.cachedInputTokens, modelCalls: value.modelCalls,
-      unmeasuredModelCalls: value.unmeasuredModelCalls, usageComplete: value.usageComplete,
+      unmeasuredModelCalls, usageComplete,
       retries: value.retries, durationMs: value.durationMs, costKnown: value.costKnown,
     };
     if (value.estimatedCostNanoUsd !== undefined) {
