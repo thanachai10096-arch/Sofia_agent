@@ -32,7 +32,7 @@ Run `sofia check` when you explicitly want to verify connectivity. It calls the 
 
 - It does not save or prompt for API keys.
 - It does not make an authenticated or billable model/provider request automatically during setup. `sofia check` is an explicit, non-model API verification.
-- It does not prove that the API is reachable or that the key is authorized.
+- The setup wizard alone does not prove reachability or key authorization; run `sofia check` for an explicit verification.
 - It does not configure a local model provider, desktop/web UI, or messaging integrations.
 - It does not grant tools or change Sofia's policy/approval settings.
 
