@@ -130,11 +130,10 @@ export class PersistentSkillLedger implements SkillLedger {
       id, project: "skill", kind: "repair", content: JSON.stringify(merged),
       source: merged.evidenceIds.join(","), confidence: Math.min(0.99, 0.8 + Math.min(merged.evidenceIds.length, 10) * 0.015),
       createdAt: now, updatedAt: now, uses: previous ? 1 : 0,
-    })).then(() => {
-      this.persistError = undefined;
-    }).catch((error: unknown) => {
-      // Preserve the task result, but surface persistence failure to flush().
-      this.persistError = error;
+    })).catch((error: unknown) => {
+      // Preserve the first failed write until flush() reports it. A later
+      // successful write for another skill must not hide a lost candidate.
+      if (this.persistError === undefined) this.persistError = error;
     });
   }
   async flush(): Promise<void> {
