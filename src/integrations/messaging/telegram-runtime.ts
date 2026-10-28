@@ -131,7 +131,7 @@ export function createTelegramMessagingRuntime(
     const allowedChats = parseTelegramChatAllowlist(rawChats);
     const client = new SofiaClient({ apiKey, baseUrl });
     const accessPolicy = {
-      isAllowed(input: { platform: "telegram" | "discord" | "slack"; senderId: string; conversationId: string }) {
+      isAllowed(input: { platform: "telegram" | "discord" | "slack" | "line"; senderId: string; conversationId: string }) {
         return input.platform === "telegram" &&
           allowedUsers.has(input.senderId) &&
           allowedChats.has(input.conversationId);
