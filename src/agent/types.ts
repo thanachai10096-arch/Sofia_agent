@@ -35,6 +35,7 @@ export interface AgentResult {
 }
 export interface AgentDependencies {
  provider:ModelProvider;
+ modelProfileStore?: import("../models/profile-store.js").UserModelProfileStore;
  router:{select(kind:TaskKind):ModelRoute;markUnhealthy(id:string):void};
  reviewer:{review(task:string,output:string):Promise<{approved:boolean;reason:string}>};
  runtime?:WorkspaceRuntime;
