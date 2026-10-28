@@ -1,0 +1,112 @@
+# Sofia Agent: Token Efficiency and Model Routing Roadmap
+
+Status: implementation plan anchored to the current repository. Items labeled "planned" are not claims of implemented behavior.
+
+## Objective
+
+Minimize the cost and compute used per successfully verified task while preserving task quality, security, user data boundaries, and cancellation/recovery behavior. Do not optimize raw token count at the expense of correctness.
+
+## Current foundation verified in the repository
+
+- `src/brain/token-budget.ts`: per-run and per-model token/cost/call/concurrency reservations, settlement against reported usage, and fail-closed behavior when usage is unknown.
+- `src/brain/token-aware-gateway.ts`: phase-specific input/output caps, evidence packing, capability/quality eligibility, estimated-cost routing, cancellation, and safe provider error categories.
+- `src/brain/model-route-adapter.ts`: adapts existing model routes into the token-aware Brain gateway.
+- `src/models/config.ts`: currently configures direct Gemini routes only and intentionally does not fall back to another provider automatically.
+- `src/models/gateway.ts`: provider request timeout, concurrency gate, retry handling for selected transient errors, and circuit-breaker behavior.
+- `src/brain/executor.ts`: execution limits, trace, verification, recovery, skills, memory, and subagent integration.
+
+These are foundations, not proof of measured savings or production readiness. The current configuration should not be described as a universal multi-provider registry.
+
+## Efficiency principles
+
+1. **Optimize cost per verified success.** Track correctness and regression alongside token use.
+2. **One Core, one budget.** Web, desktop, mobile, SDK, and chat adapters must use the same Brain, Tool Gateway, policy, and accounting path.
+3. **Model choice is policy-bound.** Support a user-selected single model and smart routing among explicitly enabled models. Never send prompts to an unapproved provider.
+4. **Known prices before heuristics.** Use configured provider prices where available. If prices are missing or equal, use deterministic configured route weights rather than silently relying on array order.
+5. **No speculative model fan-out.** Do not call several models merely to compare answers unless the user or a measured workflow explicitly requests it.
+6. **Context is selected, not dumped.** Preserve system instructions, task requirements, security constraints, and relevant evidence; remove duplicate evidence and prefer useful compact evidence.
+7. **Tools before repeated reasoning.** Use deterministic local tools for exact operations where safe, and send concise, relevant results back to the model.
+8. **Cache only within safe boundaries.** Cache keys must include the necessary user/workspace/version/parameters and permission scope. Never share private results across users.
+9. **Bound recovery, not user ambition.** Execution safety controls prevent runaway retries and duplicate side effects; they must not impose arbitrary task-size limits unrelated to policy or resource protection.
+10. **No unverified learning promotion.** Learned skills/workflows require evaluation, versioning, and rollback before becoming trusted defaults.
+
+## Delivery plan
+
+### P0 — Evidence-backed baseline
+
+- Record the exact commit, configuration, provider/model, and task fixture for each benchmark.
+- Measure reported input/output usage, cached usage when the provider exposes it, model calls, retries, latency, completion result, and verified task success.
+- Separate measured provider cost from estimates; label missing prices or usage explicitly.
+- Establish deterministic tests for route selection, evidence packing, budget settlement, unknown usage, cancellation, and provider failure.
+- Do not publish a savings percentage until the same benchmark suite has a valid baseline and comparison run.
+
+**Exit gate:** typecheck, unit tests, build, and CI results reported separately for the exact commit; no benchmark claims without stored results.
+
+### P1 — Lower waste in the existing gateway
+
+- Pack evidence by relevance-to-size value; reject empty evidence and duplicate IDs.
+- Deduplicate byte-for-byte identical evidence text without normalizing source code or whitespace.
+- Keep phase-specific output caps and use actual usage to settle reservations.
+- When estimated prices tie or are absent, use explicit cost/latency/quality weights with deterministic tie-breaking.
+- Add regression tests for quality-preserving context selection and routing determinism.
+
+**Exit gate:** new tests pass on the exact branch and measured benchmark results show no task-quality regression.
+
+### P2 — Provider and model registry
+
+- Introduce a provider adapter contract and a registry of explicitly enabled provider/model configurations.
+- Track each model's capabilities: structured output, tool use, vision, context window, cancellation, usage reporting, and pricing metadata.
+- Support three explicit policies: fixed model, user-selected allowed model, and smart routing among the user's allowed models.
+- Keep credentials server-side; support custom OpenAI-compatible endpoints only with explicit user configuration.
+- Make cross-provider fallback opt-in and visible in policy. Never silently send sensitive data to another company.
+- Validate provider response schemas, usage fields, timeout semantics, and error categories independently.
+
+**Exit gate:** provider contract tests and privacy/fallback tests pass for each supported provider. A model is supported only after its tests pass.
+
+### P3 — Context, memory, and cache
+
+- Retrieve only task-relevant user/project memories and label their provenance and trust level.
+- Summarize old conversation context with a reversible reference to the source, while retaining critical instructions and evidence.
+- Filter tool output at the boundary: return the needed rows/lines/errors, not entire files or logs by default.
+- Use provider prompt caching when supported and cache stable prompt prefixes before dynamic task content.
+- Add scoped deterministic tool-result caching with explicit freshness/invalidation rules.
+- Measure cache hit rate and saved billed tokens; never assume cached tokens are free unless provider pricing confirms it.
+
+**Exit gate:** tests cover freshness, invalidation, user/workspace isolation, secret redaction, and prompt-injection handling.
+
+### P4 — Learning and workflow optimization
+
+- Record successful and failed strategies, usage, duration, and independent verification outcomes.
+- Recommend reusable skills from repeated successful tasks; do not automatically promote untrusted skill/code changes.
+- Evaluate proposed skills against held-out fixtures, compare regressions, version them, and support rollback.
+- Reuse prior verified workflow steps only when repository state, permissions, and task preconditions still match.
+
+**Exit gate:** controlled evaluations show improved cost or time per verified success without a regression in task quality or unsafe-action rate.
+
+### P5 — Platform-wide consistency
+
+- Expose a common usage/trace view across API, SDK, web, desktop, mobile, Telegram, Discord, and future channels.
+- Attribute all model calls—including retries and subagents—to the parent run and principal.
+- Enforce per-user/per-workspace quotas and cost ceilings on hosted deployments while allowing self-hosted operators to configure their own policy.
+- Keep user-facing chat natural; commands such as `/run` are optional channel-specific affordances, not a requirement for ordinary chat.
+
+## Required measurements
+
+- Verified task success rate and acceptance-criteria pass rate.
+- Input, output, and cached tokens per task where available.
+- Actual provider cost and estimated cost, reported separately.
+- Cost per verified successful task.
+- Model calls, retry count, tool calls, and subagent calls per task.
+- Median and p95 latency.
+- Recovery success rate and regression rate.
+- Unsafe-action rate, permission denials, and cross-user isolation test results.
+- Provider compatibility pass rate.
+
+## Safety and compatibility rules
+
+- Preserve existing public interfaces and the immutable Brain contracts unless a separately reviewed migration is approved.
+- Extend existing `TokenAwareGateway`, `TokenBudget`, `ModelRouter`, and provider gateway; do not create a second runtime or policy gateway.
+- Never log API keys, raw authorization headers, or unredacted sensitive prompts.
+- Do not change production deployments or merge this work without review and evidence.
+- If usage is missing or invalid, do not claim precise cost or savings.
+- Report tests only when actually run; distinguish local checks, CI, provider smoke tests, and live channel tests.
