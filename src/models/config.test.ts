@@ -5,7 +5,7 @@ import { loadModelConfigFromEnv } from "./config.js";
 const names = [
   "SOFIA_MODEL_PROVIDER", "SOFIA_MODEL_API_KEY", "SOFIA_MODEL_BASE_URL", "SOFIA_MODEL_NAME",
   "SOFIA_FAST_MODEL", "SOFIA_CODING_MODEL", "SOFIA_REASONING_MODEL", "SOFIA_VISION_MODEL",
-  "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY", "DEEPSEEK_API_KEY", "TOGETHER_API_KEY", "FIREWORKS_API_KEY", "CEREBRAS_API_KEY", "PERPLEXITY_API_KEY",
   "GEMINI_API_KEY", "Gemini_API_Key", "GEMINI_MODEL",
   "GEMINI_FAST_MODEL", "GEMINI_CODING_MODEL", "GEMINI_REASONING_MODEL", "GEMINI_VISION_MODEL",
   "SOFIA_AI_GATEWAY_API_KEY", "AI_GATEWAY_API_KEY", "SOFIA_AI_GATEWAY_URL",
@@ -112,6 +112,29 @@ test("remote HTTP endpoints, credentials in URLs, and unknown providers fail clo
 
   process.env.SOFIA_MODEL_PROVIDER = "unknown-provider";
   assert.throws(loadModelConfigFromEnv, /Unsupported SOFIA_MODEL_PROVIDER/);
+});
+
+test("common compatible inference providers accept provider-specific credentials", () => {
+  const providers = [
+    ["xai", "XAI_API_KEY", "https://api.x.ai/v1"],
+    ["mistral", "MISTRAL_API_KEY", "https://api.mistral.ai/v1"],
+    ["groq", "GROQ_API_KEY", "https://api.groq.com/openai/v1"],
+    ["deepseek", "DEEPSEEK_API_KEY", "https://api.deepseek.com/v1"],
+    ["together", "TOGETHER_API_KEY", "https://api.together.xyz/v1"],
+    ["fireworks", "FIREWORKS_API_KEY", "https://api.fireworks.ai/inference/v1"],
+    ["cerebras", "CEREBRAS_API_KEY", "https://api.cerebras.ai/v1"],
+    ["perplexity", "PERPLEXITY_API_KEY", "https://api.perplexity.ai"],
+  ] as const;
+  for (const [providerId, keyName, baseUrl] of providers) {
+    clear();
+    process.env.SOFIA_MODEL_PROVIDER = providerId;
+    process.env[keyName] = "provider-test-key";
+    process.env.SOFIA_MODEL_NAME = "provider-model-id";
+    const config = loadModelConfigFromEnv();
+    assert.equal(config.providers.fast?.baseUrl, baseUrl, providerId);
+    assert.equal(config.providers.fast?.apiKey, "provider-test-key", providerId);
+    assert.equal(config.providers.fast?.model, "provider-model-id", providerId);
+  }
 });
 
 test("OpenAI-compatible provider requires a base URL and remote providers require a key", () => {
