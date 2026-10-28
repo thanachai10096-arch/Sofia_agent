@@ -53,7 +53,7 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
       projectContext: "Project instructions: preserve existing public interfaces.",
       projectMemory: [
         { kind: "convention", content: "Use node:test for regression tests", confidence: 0.9 },
-        { kind: "note", content: "Tokenizer diagnostics are unrelated to this task." },
+        { kind: "note", content: "Tokenizer diagnostics concern another issue." },
       ],
     },
   }), { signal: new AbortController().signal, maxContextTokens: 8_000 });
