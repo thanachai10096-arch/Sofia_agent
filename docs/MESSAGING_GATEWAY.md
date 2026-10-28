@@ -112,3 +112,8 @@ The shared `ChatPlatform` contract now recognizes Telegram, Discord, Slack, What
 Each provider still needs its own authenticated adapter, event verification, identity mapping, outbound delivery, retry/replay handling, and signed-fixture tests. Use official APIs and supported business/platform access; some networks restrict bots, require business approval, or do not expose public messaging APIs. Never bypass those restrictions or scrape private sessions.
 
 Recommended implementation order: finish natural-chat behavior and Telegram/Discord smoke tests; then Slack, WhatsApp Business Platform, Microsoft Teams, Google Chat, Matrix, and Signal where supported; then LINE and Meta messaging channels; finally add community-maintained adapters only behind the same stable gateway contract. Keep each connector optional and independently configured.
+
+
+## Architecture contract
+
+See [Messaging Gateway Architecture](./MESSAGING_GATEWAY_ARCHITECTURE.md) for the shared adapter contract, message flow, readiness states, security requirements, implementation phases, and acceptance criteria. The architecture document is a target contract; it does not imply that every listed platform is implemented or live-tested.
