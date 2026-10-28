@@ -22,14 +22,14 @@ afterEach(() => {
 test("generic OpenAI-compatible endpoint uses BASE_URL, KEY, and MODEL", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
-  process.env.SOFIA_MODEL_BASE_URL = "https://api.example.test/v1/";
+  process.env.SOFIA_MODEL_BASE_URL = "https://api.example.test/v1";
   process.env.SOFIA_MODEL_API_KEY = "test-key";
   process.env.SOFIA_MODEL_NAME = "example-model";
   process.env.SOFIA_CODING_MODEL = "coding-model";
   const config = loadModelConfigFromEnv();
   assert.equal(config.routes.length, 4);
   for (const route of config.routes) {
-    assert.equal(config.providers[route.id]?.baseUrl, "https://api.example.test/v1/");
+    assert.equal(config.providers[route.id]?.baseUrl, "https://api.example.test/v1");
     assert.equal(config.providers[route.id]?.apiKey, "test-key");
   }
   assert.equal(config.providers.fast?.model, "example-model");
@@ -41,7 +41,7 @@ test("Gemini remains an explicit provider option and supports the legacy key nam
   process.env.SOFIA_MODEL_PROVIDER = "gemini";
   process.env.Gemini_API_Key = "gemini-test-key";
   const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai/");
+  assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
   assert.equal(config.providers.fast?.apiKey, "gemini-test-key");
   assert.equal(config.providers.fast?.model, "gemini-2.5-flash");
 });
@@ -62,7 +62,7 @@ test("OpenRouter legacy configuration remains supported without provider fallbac
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
   process.env.OPENROUTER_MODEL = "openrouter/auto";
   const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1/");
+  assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
   assert.equal(config.providers.fast?.apiKey, "openrouter-test-key");
   assert.equal(config.providers.fast?.model, "openrouter/auto");
 });
