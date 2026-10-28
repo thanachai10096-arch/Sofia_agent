@@ -22,12 +22,12 @@ const GIT_SUBCOMMANDS = new Set([
   "remote", "fetch", "pull", "push", "clone", "apply",
 ]);
 const GIT_DANGEROUS_ARG = /^(?:-c|-C|--config-env|--exec-path|--git-dir|--work-tree|--namespace|--upload-pack|--receive-pack|--exec|--ext-diff|--textconv|--unsafe-paths)(?:=|$)/i;
-const GIT_FORCE_ARG = /^(?:-f|--force|--force-with-lease(?:=.*)?|--mirror|--discard-changes|--merge)$/i;
+const GIT_FORCE_ARG = /^(?:-f|-D|--force|--force-with-lease(?:=.*)?|--mirror|--discard-changes|--merge)$/i;
 
 /**
  * Allow known Git subcommands, but fail closed for operations that can discard
- * local work or rewrite published history. Use `git switch` instead of
- * `checkout`, and `git restore --staged` only when changing the index.
+ * local work, delete remote/local refs, or rewrite history. Use `git switch`
+ * instead of `checkout`, and `git restore --staged` only when changing the index.
  */
 export function assertSafeGitArgs(args: readonly string[]): void {
   const sub = args[0];
@@ -42,6 +42,18 @@ export function assertSafeGitArgs(args: readonly string[]): void {
   }
   if (args.some((arg) => GIT_FORCE_ARG.test(arg))) {
     throw new Error("Destructive or force Git options are blocked by Sofia runtime policy.");
+  }
+  const tail = args.slice(1);
+  const hasAny = (values: readonly string[]) => tail.some((arg) => values.includes(arg));
+  if (
+    (sub === "branch" && hasAny(["-d", "-D", "--delete"])) ||
+    (sub === "tag" && hasAny(["-d", "--delete"])) ||
+    (sub === "remote" && hasAny(["remove", "rm"])) ||
+    (sub === "stash" && hasAny(["drop", "clear"])) ||
+    (sub === "push" && hasAny(["--delete", "-d"])) ||
+    (sub === "commit" && hasAny(["--amend"]))
+  ) {
+    throw new Error("Git ref deletion, stash deletion, remote deletion, and history rewriting are blocked by Sofia runtime policy.");
   }
 }
 
