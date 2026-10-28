@@ -68,6 +68,7 @@ export class FileContinuousWorkStore implements ContinuousWorkStore {
  */
 export class ContinuousWorkSupervisor {
   private readonly active = new Map<string, AbortController>();
+  private readonly starting = new Set<string>();
   private readonly iterations: number;
   private readonly durationMs: number;
   private readonly pollMs: number;
@@ -100,6 +101,12 @@ export class ContinuousWorkSupervisor {
     return true;
   }
   async resume(id: string, owner: string): Promise<ContinuousWorkRecord> {
+    if (this.active.has(id) || this.starting.has(id)) throw new Error("Continuous work is already active");
+    this.starting.add(id);
+    try { return await this.resumeInternal(id, owner); }
+    finally { this.starting.delete(id); }
+  }
+  private async resumeInternal(id: string, owner: string): Promise<ContinuousWorkRecord> {
     if (this.active.has(id)) throw new Error("Continuous work is already active");
     const record = await this.get(id, owner);
     if (!record) throw new Error("Continuous work not found or not owned by this user");
