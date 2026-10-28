@@ -1,6 +1,6 @@
 import { fenceUntrustedOutput } from "../security/untrusted.js";
 import { randomUUID } from "node:crypto";
-import { classifyTask } from "./classifier.js";
+import { classifyTask, shouldUseSinglePassConversation } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
 import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission } from "../security/policy.js";
@@ -75,10 +75,18 @@ export class SofiaAgent {
       }
       // The host kill switch and caller cancellation share one signal for this run.
       security?.assertRunning();
+      // Ordinary conversational requests use one model call without tool schemas.
+      // Any action-like, coding, research, analysis, or vision task keeps the full Brain.
+      // An explicit useBrain=true always opts into the full planner/executor.
+      const singlePassConversation =
+        request.useBrain !== true && shouldUseSinglePassConversation(request.task);
       const shouldUseBrain =
         this.deps.brainFactory !== undefined &&
-        request.useBrain !== false;
-      const result = shouldUseBrain ? await this.runBrain(activeRequest) : await this.runLegacy(activeRequest);
+        request.useBrain !== false &&
+        !singlePassConversation;
+      const result = shouldUseBrain
+        ? await this.runBrain(activeRequest)
+        : await this.runLegacy(activeRequest, singlePassConversation);
       if (session && this.deps.sessionStore) {
         session.messages.push(`assistant: ${result.output.slice(0, 8_000)}`);
         if (session.messages.length > 200) session.messages.splice(0, session.messages.length - 200);
@@ -174,7 +182,7 @@ export class SofiaAgent {
     };
   }
 
-  private async runLegacy(request: AgentRequest): Promise<AgentResult> {
+  private async runLegacy(request: AgentRequest, singlePassConversation = false): Promise<AgentResult> {
     const runId = randomUUID();
     const events: AgentEvent[] = [];
     const emit = (event: AgentEvent) => {
@@ -192,16 +200,20 @@ export class SofiaAgent {
     });
 
     const policy = this.deps.policy ?? loadExecutionPolicyFromEnv();
-    const maxSteps = Math.min(
-      request.maxSteps ?? policy.maxSteps,
-      policy.maxSteps,
-    );
+    const maxSteps = singlePassConversation
+      ? 1
+      : Math.min(
+          request.maxSteps ?? policy.maxSteps,
+          policy.maxSteps,
+        );
 
     const messages: ChatMessage[] = [
       {
         role: "system" as const,
         content:
-          "You are Sofia. Complete the user's task by reasoning and using tools. Work inside the provided workspace. Do not claim a change was made unless a tool confirms it.",
+          singlePassConversation
+            ? "You are Sofia, a helpful conversational assistant. Answer the user's message directly and concisely. Do not claim to have used tools, inspected files, browsed the web, or changed anything."
+            : "You are Sofia. Complete the user's task by reasoning and using tools. Work inside the provided workspace. Do not claim a change was made unless a tool confirms it.",
       },
       { role: "user" as const, content: request.task },
       ...(request.context
@@ -209,7 +221,7 @@ export class SofiaAgent {
         : []),
     ];
 
-    const toolDefs: ToolDefinition[] = (this.deps.tools?.list() ?? []).map((tool) => ({
+    const toolDefs: ToolDefinition[] = (singlePassConversation ? [] : (this.deps.tools?.list() ?? [])).map((tool) => ({
       type: "function",
       function: {
         name: tool.name,
