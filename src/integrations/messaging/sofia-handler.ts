@@ -34,9 +34,10 @@ export function createMessagingAccessCheck(policy: ChatAccessPolicy) {
 
 /**
  * Bridges normalized inbound messages to Sofia's existing command dispatcher.
- * Only explicit command messages start a run; ordinary chat and attachments do not.
- * Do not also pass this same deduplicator to createMessagingGateway, because the
- * existing command handler claims the provider/channel/message key itself.
+ * Natural mode treats ordinary text as a task; command mode requires the configured prefix.
+ * Slash commands other than the configured run prefix are ignored. Attachments are not
+ * downloaded or executed. Do not also pass this same deduplicator to createMessagingGateway,
+ * because the existing command handler claims the provider/channel/message key itself.
  */
 export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOptions) {
   const prefix = options.commandPrefix ?? "/run";
