@@ -25,4 +25,6 @@ jobs:
       - run: node bench/run.mjs --agent noop
       - run: node bench/run.mjs --agent reference
       - run: node --import tsx bench/token-efficiency.mjs
+      - run: node --test bench/estimated-cost.test.mjs
       - run: node --check bench/live-model-efficiency.mjs
+      - run: node --check bench/estimated-cost.mjs
