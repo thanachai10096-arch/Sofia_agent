@@ -212,6 +212,12 @@ export class UsageLimiter {
         !Number.isSafeInteger(usage.reservedOrUsedTokens) || usage.reservedOrUsedTokens < 0) {
       throw new Error("Invalid Brain usage metrics.");
     }
+    const providerValues = [usage.providerInputTokens, usage.providerOutputTokens, usage.providerUsageCalls];
+    if (providerValues.some((value) => value !== undefined && (!Number.isSafeInteger(value) || value < 0)) ||
+        ((usage.providerInputTokens === undefined) !== (usage.providerOutputTokens === undefined)) ||
+        (usage.providerUsageCalls !== undefined && usage.providerInputTokens === undefined)) {
+      throw new Error("Invalid provider-reported token metrics.");
+    }
     this.transaction(() => {
       const current = this.currentRecord(keyId);
       current.brainRuns = (current.brainRuns ?? 0) + 1;
