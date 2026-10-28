@@ -4,6 +4,8 @@ import type { DiscordInteractionTransport } from "../integrations/messaging/disc
 import type { SlackEventsTransport } from "../integrations/messaging/slack-events-transport.js";
 import type { LineWebhookTransport } from "../integrations/messaging/line-webhook-transport.js";
 import type { WhatsAppWebhookTransport } from "../integrations/messaging/whatsapp-webhook-transport.js";
+import type { CronSchedule, CronExecution } from "../brain/cron-scheduler.js";
+import type { JobRecord } from "../brain/job-runtime.js";
 
 export interface AgentRunInput {
   task: string;
@@ -57,6 +59,8 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Deliver a terminal cron result to its trusted origin. Return true only when the provider accepted it. */
+  onCronExecutionFinished?: (schedule: CronSchedule, execution: CronExecution, job?: JobRecord) => Promise<boolean> | boolean;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
