@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ContinuousWorkSupervisor, type ContinuousWorkRecord, type ContinuousWorkStore } from "./continuous-work.js";
+import { ContinuousWorkSupervisor, hasVerifiedCompletionEvidence, type ContinuousWorkRecord, type ContinuousWorkStore } from "./continuous-work.js";
 import type { JobRecord, JobRuntime } from "./job-runtime.js";
 
 class MemoryStore implements ContinuousWorkStore {
@@ -134,4 +134,31 @@ test("continuous mode allows multiple objectives per owner while preventing dupl
   assert.equal(supervisor.isContinuous(second.id), true);
   await supervisor.stop(first.id, "owner-a");
   await supervisor.stop(second.id, "owner-a");
+});
+
+
+test("continuous completion requires successful verification evidence and no remaining risks", () => {
+  const verified = {
+    completed: true,
+    state: "completed",
+    summary: "All acceptance criteria passed.",
+    verification: [{
+      criterionId: "tests-pass",
+      passed: true,
+      detail: "Tests passed",
+      evidenceIds: ["evidence-123"],
+      workspaceRevision: "revision-abc",
+    }],
+    remainingRisks: [],
+    changedFiles: [],
+    changedFilesKnown: true,
+    usage: { steps: 1, toolCalls: 1, modelCalls: 1, reservedOrUsedTokens: 100, replans: 0 },
+  };
+  const job = { result: verified } as unknown as JobRecord;
+  assert.equal(hasVerifiedCompletionEvidence(job), true);
+  assert.equal(hasVerifiedCompletionEvidence({ result: { ...verified, verification: [] } } as unknown as JobRecord), false);
+  assert.equal(hasVerifiedCompletionEvidence({ result: { ...verified, verification: [{ ...verified.verification[0], passed: false }] } } as unknown as JobRecord), false);
+  assert.equal(hasVerifiedCompletionEvidence({ result: { ...verified, remainingRisks: ["unverified behavior"] } } as unknown as JobRecord), false);
+  assert.equal(hasVerifiedCompletionEvidence({ result: { ...verified, state: "failed" } } as unknown as JobRecord), false);
+  assert.equal(hasVerifiedCompletionEvidence({ result: { completed: true, summary: "done" } } as unknown as JobRecord), false);
 });
