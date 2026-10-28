@@ -105,6 +105,7 @@ export interface BrainRunInput {
   /** Prior conversation/project context; always passed to the model as untrusted reference data. */
   context?: string;
   principalId?: string;
+  notificationTarget?: import("./types.js").NotificationTarget;
   understanding?: unknown;
   plan?: unknown;
   acceptanceCriteria?: AcceptanceCriterion[];
@@ -592,7 +593,7 @@ export class SofiaBrain {
     );
   }
 
-  private async executeStep(step: ExecutionPlan["steps"][number], principalId?: string): Promise<Observation> {
+  private async executeStep(step: ExecutionPlan["steps"][number], principalId?: string, notificationTarget?: import("./types.js").NotificationTarget): Promise<Observation> {
     this.signal.throwIfAborted();
 
     if (this.usage.steps >= this.limits.maxSteps) {
@@ -627,6 +628,7 @@ export class SofiaBrain {
         this.dependencies.tools.execute(step.call, {
           runId: this.runId,
           ...(principalId ? { principalId } : {}),
+          ...(notificationTarget ? { notificationTarget } : {}),
           signal: this.signal,
           requireApproval:
             descriptor.effects.includes("destructive") ||
@@ -968,7 +970,7 @@ export class SofiaBrain {
               }
             }
 
-            await this.executeStep(step, input.principalId);
+            await this.executeStep(step, input.principalId, input.notificationTarget);
             done.add(step.id);
             completedStepIds.add(step.id);
             await checkpointState(currentPlan);
