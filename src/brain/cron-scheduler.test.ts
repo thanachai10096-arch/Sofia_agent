@@ -133,6 +133,50 @@ test("completed scheduled jobs deliver to their trusted target and retry until a
   assert.equal(state.history[0].notificationDelivered, true);
 });
 
+test("pending cron notification delivery survives scheduler restart", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const job = { id: "restart-delivery-job", status: "completed", task: "scheduled task", result: { summary: "Scheduled result" } } as unknown as JobRecord;
+  const runtime = {
+    async submit() { return job; },
+    async get() { return job; },
+    async cancel() { return true; },
+    async list() { return [job]; },
+    async resume() { return job; },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-28T13:00:00.000Z");
+  let firstAttempts = 0;
+  const firstScheduler = new CronScheduler(runtime, {
+    store,
+    now: () => now,
+    onExecutionFinished: async () => { firstAttempts++; return false; },
+  });
+  await firstScheduler.create({
+    name: "restart delivery", task: "scheduled task", runAt: "2026-10-28T12:00:00.000Z",
+    timeZone: "UTC", ownerKeyId: "telegram:user-1", misfirePolicy: "run-once",
+    notificationTarget: { platform: "telegram", userId: "user-1", conversationId: "chat-1" },
+  }, "telegram:user-1");
+  await firstScheduler.tick();
+  for (let i = 0; i < 30 && (state.history[0]?.notificationAttempts ?? 0) < 1; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(firstAttempts, 1);
+  assert.equal(state.history[0]?.notificationDelivered, undefined);
+  assert.equal(state.history[0]?.notificationAttempts, 1);
+
+  now = new Date(now.getTime() + 3_000);
+  let restartedAttempts = 0;
+  const restartedScheduler = new CronScheduler(runtime, {
+    store,
+    now: () => now,
+    onExecutionFinished: async () => { restartedAttempts++; return true; },
+  });
+  await restartedScheduler.tick();
+  assert.equal(restartedAttempts, 1);
+  assert.equal(state.history[0]?.notificationDelivered, true);
+  assert.equal(state.history[0]?.notificationNextAttemptAt, undefined);
+});
+
 test("authorization prevents another owner from disabling a schedule", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
