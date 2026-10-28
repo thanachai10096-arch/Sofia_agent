@@ -15,7 +15,7 @@ const configPath = path.join(configDir, "config.json");
 const sessionPath = path.join(configDir, "sessions.sqlite");
 
 type LocalConfig = {
-  provider?: "openai-compatible" | "gemini" | "openrouter";
+  provider?: "openai-compatible" | "gemini" | "openrouter" | "openai" | "xai" | "mistral" | "groq" | "deepseek" | "together" | "fireworks" | "cerebras" | "perplexity" | "ollama";
   baseUrl?: string;
   apiKey?: string;
   model?: string;
