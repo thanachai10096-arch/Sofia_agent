@@ -12,8 +12,8 @@ export interface SofiaMessagingHandlerOptions {
   /** Existing access policy and atomic deduplicator from chat-adapter.ts. */
   accessPolicy: ChatAccessPolicy;
   deduplicator: ChatMessageDeduplicator;
-  /** Exact command prefix, e.g. /run or /run@SofiaBot. Defaults to /run. */
-  commandPrefix?: string;
+  /** Exact command prefix, e.g. /run or /run@SofiaBot. Set false to accept natural chat; defaults to /run for backwards compatibility. */
+  commandPrefix?: string | false;
   maxTaskCharacters?: number;
   /** Called after the API accepts a run; implementations should schedule completion reporting without blocking polling. */
   onAccepted?: (input: { runId: string; runStatus: string; message: InboundMessage }) => void;
@@ -36,9 +36,9 @@ export function createMessagingAccessCheck(policy: ChatAccessPolicy) {
  * existing command handler claims the provider/channel/message key itself.
  */
 export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOptions) {
-  const prefix = options.commandPrefix ?? "/run";
-  if (!prefix.trim() || prefix.length > 128 || /[\r\n\0]/.test(prefix)) {
-    throw new Error("commandPrefix must be a non-empty single-line command.");
+  const prefix = options.commandPrefix === false ? false : options.commandPrefix ?? "/run";
+  if (prefix !== false && (!prefix.trim() || prefix.length > 128 || /[\r\n\0]/.test(prefix))) {
+    throw new Error("commandPrefix must be false or a non-empty single-line command.");
   }
   const handleCommand = createChatCommandHandler({
     client: options.client,
@@ -49,8 +49,21 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
 
   return async function onMessage(message: InboundMessage): Promise<string | void> {
     const text = message.text.trim();
-    if (text !== prefix && !text.startsWith(prefix + " ") && !text.startsWith(prefix + "\t")) return;
-    const task = text.slice(prefix.length).trim();
+    if (!text) return;
+    let task: string;
+    if (prefix === false) {
+      // Natural mode accepts ordinary text, but keeps common slash commands out of the task queue.
+      if (text === "/run" || text.startsWith("/run ") || text.startsWith("/run\\t")) {
+        task = text.slice(4).trim();
+      } else if (text.startsWith("/")) {
+        return;
+      } else {
+        task = text;
+      }
+    } else {
+      if (text !== prefix && !text.startsWith(prefix + " ") && !text.startsWith(prefix + "\\t")) return;
+      task = text.slice(prefix.length).trim();
+    }
     const result = await handleCommand({
       platform: message.platform,
       messageId: message.messageId,
