@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, timingSafeEqual, verify } from "node:crypto";
+import { createHash, createHmac, createPublicKey, timingSafeEqual, verify } from "node:crypto";
 
 /** Verify Telegram's configured X-Telegram-Bot-Api-Secret-Token value. */
 export function verifyTelegramWebhookSecret(received: string | undefined, expected: string | undefined): boolean {
@@ -30,6 +30,28 @@ export function verifyDiscordRequest(input: {
   } catch {
     return false;
   }
+}
+
+/** Verify Slack Events API signatures over the exact raw request body. */
+export function verifySlackRequest(input: {
+  signingSecret: string | undefined;
+  signature: string | undefined;
+  timestamp: string | undefined;
+  rawBody: Uint8Array;
+  nowMs?: number;
+  maxAgeMs?: number;
+}): boolean {
+  const { signingSecret, signature, timestamp, rawBody } = input;
+  if (!signingSecret || signingSecret.length > 512 || !signature || !/^v0=[0-9a-f]{64}$/i.test(signature) ||
+      !timestamp || !/^\\d{10}$/.test(timestamp) || rawBody.byteLength > 1_000_000) return false;
+  const timestampMs = Number(timestamp) * 1000;
+  const now = input.nowMs ?? Date.now();
+  if (!Number.isFinite(timestampMs) || Math.abs(now - timestampMs) > (input.maxAgeMs ?? 5 * 60_000)) return false;
+  const base = Buffer.concat([Buffer.from("v0:" + timestamp + ":", "utf8"), Buffer.from(rawBody)]);
+  const expected = "v0=" + createHmac("sha256", signingSecret).update(base).digest("hex");
+  const a = Buffer.from(signature, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /** Safe correlation ID; never use user-provided text as a log field. */
