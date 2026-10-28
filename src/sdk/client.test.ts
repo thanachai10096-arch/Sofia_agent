@@ -226,7 +226,7 @@ test("SDK forwards signed messaging context for continuous-work chat actions", a
   assert.equal(url, "https://api.example.test/v1/continuous-work/chat");
   assert.deepEqual(requestBody, {
     signedTask: JSON.stringify({ action: "create", task: "do work" }),
-    messagingContext,
+    _messagingContext: messagingContext,
   });
   assert.deepEqual(result, { work: { id: "work-1", status: "paused" } });
 });
