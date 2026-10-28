@@ -41,7 +41,7 @@ These are foundations, not proof of measured savings or production readiness. Th
 - Separate measured provider cost from estimates; label missing prices or usage explicitly.
 - Aggregate cost and cost-per-verified-success remain unknown when any task in the comparison set has unknown cost; expose known-task counts separately rather than presenting a partial sum as a complete total.
 - Establish deterministic tests for route selection, evidence packing, budget settlement, unknown usage, cancellation, and provider failure.
-- Run the offline evidence-packing fixture in CI; treat its tokenizer estimate separately from real provider usage and verified task outcomes.
+- Run the offline evidence-packing fixture and deterministic Brain-loop benchmark in CI; the Brain-loop benchmark now reports a naive full-context baseline beside the packed prompt estimate and asserts the baseline is larger. Treat both as synthetic character-based estimates, not provider-billed usage or real-world savings.
 - Do not publish a savings percentage until the same benchmark suite has a valid baseline and comparison run.
 
 **Exit gate:** typecheck, unit tests, build, and CI results reported separately for the exact commit; no benchmark claims without stored results.
