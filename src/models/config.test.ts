@@ -110,6 +110,19 @@ test("remote HTTP endpoints, credentials in URLs, and unknown providers fail clo
   process.env.SOFIA_MODEL_BASE_URL = "https://user:pass@models.example.test/v1";
   assert.throws(loadModelConfigFromEnv, /must not contain credentials/);
 
+  // Do not send a named provider's credential to an unrelated custom origin.
+  process.env.SOFIA_MODEL_PROVIDER = "openai";
+  process.env.OPENAI_API_KEY = "openai-test-key";
+  process.env.SOFIA_MODEL_BASE_URL = "https://attacker.example/v1";
+  assert.throws(loadModelConfigFromEnv, /must use https:\/\/api\.openai\.com/);
+
+  // Explicit custom endpoints remain supported through the generic adapter.
+  process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
+  process.env.SOFIA_MODEL_BASE_URL = "https://models.example.test/v1";
+  process.env.SOFIA_MODEL_API_KEY = "custom-test-key";
+  process.env.SOFIA_MODEL_NAME = "custom-model";
+  assert.equal(loadModelConfigFromEnv().providers.fast?.baseUrl, "https://models.example.test/v1");
+
   process.env.SOFIA_MODEL_PROVIDER = "unknown-provider";
   assert.throws(loadModelConfigFromEnv, /Unsupported SOFIA_MODEL_PROVIDER/);
 });
