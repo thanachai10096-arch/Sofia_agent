@@ -2,7 +2,7 @@
 const OPEN = "<<<UNTRUSTED_TOOL_OUTPUT";
 const CLOSE = "UNTRUSTED_TOOL_OUTPUT>>>";
 const SIGNALS: ReadonlyArray<readonly [string, RegExp]> = [
- ["override-instructions",/(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|system|developer)\s+(?:instructions?|rules?|prompts?|messages?)/i],
+ ["override-instructions",/(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|system|developer)(?:\s+(?:previous|prior|above|earlier|system|developer))*\s+(?:instructions?|rules?|prompts?|messages?)/i],
  ["role-hijack",/(?:you\s+are\s+now|from\s+now\s+on\s+you|act\s+as\s+(?:an?\s+)?(?:system|admin|root|developer))/i],
  ["prompt-exfiltration",/(?:reveal|print|show|repeat|leak)\s+(?:your\s+|the\s+)?(?:system|developer|hidden)\s+(?:prompt|instructions?|message)/i],
  ["secret-exfiltration",/(?:send|upload|post|email|exfiltrate|curl)\b[^\n]{0,80}(?:\.env|credentials|secrets?|api[_-]?key|id_rsa|token)/i],
