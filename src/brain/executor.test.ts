@@ -188,7 +188,8 @@ test("Brain feeds a failed verification into a specialist and executes its valid
       assert.equal(request.context && typeof request.context === "object", true);
       return {
         role: "debugger",
-        summary: "Retry the file write.",
+        usage: { inputTokens: 7, outputTokens: 3 },
+        summary: "Retry the file write."
         output: "validated recovery proposal",
         proposedAction: {
           tool: "workspace.write_file",
