@@ -24,6 +24,8 @@ interface ActiveRun {
   result?: AgentRunResponse["result"];
   error?: string;
   controller: AbortController;
+  /** Sticky in-memory cancellation intent; late results cannot clear it. */
+  cancelRequested?: boolean;
   createdAt: number;
   updatedAt: number;
   ownerKeyId: string;
@@ -108,7 +110,7 @@ function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"])
 }
 
 function isCancellationRequested(run: ActiveRun): boolean {
-  return run.status === "cancelled" || run.controller.signal.aborted;
+  return run.cancelRequested === true || run.status === "cancelled" || run.controller.signal.aborted;
 }
 
 function integerSetting(
@@ -668,6 +670,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const run = runs.get(id);
         if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
         if (run.status === "queued" || run.status === "running") {
+          run.cancelRequested = true;
           run.controller.abort();
           run.status = "cancelled";
           run.updatedAt = Date.now();
