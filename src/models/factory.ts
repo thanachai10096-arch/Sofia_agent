@@ -53,11 +53,15 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const projectMemory=new FileProjectMemoryStore(workspace);
   const evolutionsByPrincipal = new Map<string, EvolutionEngine>();
   const learningByPrincipal = new Map<string, { skillLedger: PersistentSkillLedger; onSkillCandidate: ReturnType<typeof createManagedSkillLearningHandler> }>();
-  const principalKey = (principalId?: string) => principalId?.trim() || "local";
+  // Keep the anonymous local workspace compatible while reserving its key so a
+  // real authenticated principal literally named "local" cannot share its memory.
+  const principalKey = (principalId?: string) => principalId?.trim() === "local"
+    ? "principal:local"
+    : principalId?.trim() || "local";
   const principalHash = (principalId?: string) => createHash("sha256").update(principalKey(principalId)).digest("hex");
   const evolutionForPrincipal = (principalId?: string) => {
     const key = principalKey(principalId);
-    if (key === "local") return evolution;
+    if (!principalId?.trim()) return evolution;
     const hash = principalHash(principalId);
     let instance = evolutionsByPrincipal.get(hash);
     if (!instance) {
