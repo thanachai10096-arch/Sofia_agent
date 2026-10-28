@@ -221,6 +221,23 @@ export class SofiaClient {
     }, signal);
   }
 
+  /** Execute a chat action bound to a signed platform/user identity; intended for trusted server-side bridges only. */
+  async continuousWorkChatAction(input: {
+    signedTask: string;
+    messagingContext: {
+      platform: "telegram" | "discord" | "slack" | "line" | "whatsapp" | "matrix";
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      taskHash: string;
+      signature: string;
+    };
+  }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("/v1/continuous-work/chat", {
+      method: "POST", headers: this.headers(), body: JSON.stringify(input),
+    }, signal);
+  }
+
   /** Create a paused, owner-scoped objective that can be resumed in bounded work slices. */
   async createContinuousWork(task: string, signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord }> {
     return this.request("/v1/continuous-work", {
