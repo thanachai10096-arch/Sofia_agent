@@ -49,6 +49,7 @@ export function createMatrixClientTransport(options: MatrixClientTransportOption
   let active = false;
   let syncTask: Promise<void> | undefined;
   let since: string | undefined;
+  let firstSyncComplete = false;
   let ownUserId: string | undefined;
   const seen = new Map<string, number>();
 
@@ -77,7 +78,17 @@ export function createMatrixClientTransport(options: MatrixClientTransportOption
         const payload: unknown = await response.json();
         if (!payload || typeof payload !== "object") { notify("sync_failed"); continue; }
         const result = payload as MatrixSyncResponse;
-        if (typeof result.next_batch === "string") since = result.next_batch;
+        if (typeof result.next_batch !== "string" || !result.next_batch) {
+          notify("sync_failed");
+          await new Promise(resolve => setTimeout(resolve, 1_000));
+          continue;
+        }
+        since = result.next_batch;
+        // The first sync establishes a cursor. Do not replay timeline history as new user input.
+        if (!firstSyncComplete) {
+          firstSyncComplete = true;
+          continue;
+        }
         const joined = result.rooms?.join ?? {};
         const now = Date.now();
         for (const [eventId, expires] of seen) if (expires <= now) seen.delete(eventId);
@@ -169,6 +180,7 @@ export function createMatrixClientTransport(options: MatrixClientTransportOption
       controller = undefined;
       syncTask = undefined;
       since = undefined;
+      firstSyncComplete = false;
       ownUserId = undefined;
       seen.clear();
     },
