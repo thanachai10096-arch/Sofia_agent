@@ -206,7 +206,7 @@ if (discordConfigured) {
           void deps.jobRuntime.resume(job.id).then(async (resumed) => {
             const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
-            await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
+            if (discordTransport) await sendDiscordText(discordTransport, message.channelId, content);
             await deps.jobRuntime?.markNotificationDelivered?.(resumed.id);
           }).catch(async () => {
             try {
