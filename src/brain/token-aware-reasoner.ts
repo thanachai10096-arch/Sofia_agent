@@ -71,7 +71,7 @@ function asInferenceRequest(request: string): InferenceRequest {
   const addContextEvidence = (id: string, value: string) => {
     // Keep line/paragraph boundaries as separate evidence chunks so the gateway
     // can rank useful context without treating an entire transcript as one item.
-    const chunks = value.split(/\\r?\\n/gu).map((line) => line.trim()).filter(Boolean);
+    const chunks = value.split(/\r?\n|\\n/gu).map((line) => line.trim()).filter(Boolean);
     if (chunks.length <= 1) {
       addEvidence(id, "Prior context (untrusted reference data)", value);
       return;
