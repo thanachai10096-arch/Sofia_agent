@@ -99,7 +99,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     (kind === "gemini" ? legacyGeminiKey : "") ||
     (preset.apiKeyEnv ? process.env[preset.apiKeyEnv]?.trim() : "") || "";
   const configuredBaseUrl = process.env.SOFIA_MODEL_BASE_URL?.trim();
-  const rawBaseUrl = configuredBaseUrl || preset.baseUrl;
+  const legacyOpenRouterBaseUrl = kind === "openrouter" ? process.env.OPENROUTER_BASE_URL?.trim() : "";\n  const rawBaseUrl = configuredBaseUrl || legacyOpenRouterBaseUrl || preset.baseUrl;
   if (!rawBaseUrl) throw new Error("Set SOFIA_MODEL_BASE_URL for the openai-compatible provider.");
   const baseUrl = validateBaseUrl(rawBaseUrl, kind);
 
