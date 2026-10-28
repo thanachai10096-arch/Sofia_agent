@@ -1,6 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { LineHttpTransport } from "./line-http-transport.js";
-
 export interface LineWebhookTransport {
   handleWebhook(rawBody: Uint8Array, signature: string | undefined): Promise<{ status: 200 | 400 | 401 | 413 | 503; acceptedEvents: number }>;
 }
