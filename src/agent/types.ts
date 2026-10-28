@@ -9,7 +9,11 @@ import type { BrainRunSnapshot } from "../brain/run-state.js";
 import type { SecurityController } from "../security/controller.js";
 import type { SecurityAuditSink } from "../security/audit.js";
 import type { DesktopCapability } from "../desktop/types.js";
+export type ModelSelection = "auto" | "fast" | "coding" | "reasoning" | "vision";
+
 export interface AgentRequest {
+  /** Per-run model profile; omitted/auto lets Sofia route each phase automatically. */
+  modelSelection?: ModelSelection;
   task: string;
   context?: string;
   sessionId?: string;
@@ -39,7 +43,7 @@ export interface AgentDependencies {
  tools?:ToolRegistry;
  policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
- brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
+ brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;desktopCapabilities?:DesktopCapability[];modelSelection?:ModelSelection;onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
  jobRuntime?: JobRuntime;
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;
