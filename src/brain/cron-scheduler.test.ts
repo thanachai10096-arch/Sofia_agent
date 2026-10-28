@@ -121,7 +121,7 @@ test("completed scheduled jobs deliver to their trusted target and retry until a
   });
   await scheduler.create({
     name: "deliver result", task: "scheduled task", runAt: "2026-10-28T12:00:00.000Z",
-    timeZone: "UTC", ownerKeyId: "discord:user-1",
+    timeZone: "UTC", ownerKeyId: "discord:user-1", misfirePolicy: "run-once",
     notificationTarget: { platform: "discord", userId: "user-1", conversationId: "channel-1" },
   }, "discord:user-1");
   await scheduler.tick();
