@@ -438,7 +438,6 @@ export class SofiaBrain {
       this.usage.modelCalls += 1;
 
       const modelCallStartedAt = Date.now();
-      const modelCallStartedAt = Date.now();
       let result: Awaited<ReturnType<typeof prepared.invoke>>;
       try {
         result = await this.wait(() =>
