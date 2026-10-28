@@ -31,11 +31,24 @@ Both allowlists are required and checked together. Missing or malformed optional
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
-## Slack adapter status
+## Slack Events API integration
 
-Sofia now exports `createSlackAdapter` and its `SlackTransport` contract. The adapter normalizes verified human Slack messages into the shared gateway format, ignores unverified events and bot messages, chunks outbound replies, and returns redacted delivery error codes.
+Sofia now includes `createSlackEventsTransport`, `createSlackAdapter`, `createSlackMessagingRuntime`, and an optional `slackEventsRoute` on `createSofiaApi`. The transport verifies Slack's `X-Slack-Signature` against the exact raw request bytes, enforces a five-minute timestamp window, handles URL verification and event retry de-duplication, ignores bot/subtype messages, and sends replies through `chat.postMessage` with a server-side bot token. The API route is bounded and returns generic errors.
 
-Important: this is the adapter layer, **not yet a complete Slack installation**. The host must provide a transport that validates Slack's `X-Slack-Signature` and `X-Slack-Request-Timestamp` against the exact raw request body, handles Slack URL verification and event retries, maps stable user/channel/thread IDs, and calls `chat.postMessage` using a server-side bot token. Do not wire an unverified HTTP request directly into `VerifiedSlackMessage`. A Slack app manifest, event route, OAuth/token setup, and live workspace smoke test are still required before calling Slack end-to-end supported.
+Required environment:
+- `SOFIA_MESSAGING_ENABLED=true`
+- `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`
+- `SLACK_ALLOWED_USER_IDS`, `SLACK_ALLOWED_CHANNEL_IDS` (both required; no wildcard access)
+- `SOFIA_API_KEY`, `SOFIA_API_BASE_URL`
+
+Composition outline:
+1. Call `createSlackMessagingRuntime(process.env, workspace)`; if it returns undefined, Slack remains disabled.
+2. Pass `slackRuntime.transport` into `createSofiaApi(deps, { ...config, slackEventsRoute: { transport: slackRuntime.transport } })`.
+3. Start `slackRuntime` after the API route is mounted and stop it during graceful shutdown. The route defaults to `/v1/integrations/slack/events`.
+4. In Slack API settings, enable Event Subscriptions, use that HTTPS Request URL, subscribe to `message.channels` and/or `message.im` as appropriate, install the app, and grant only needed scopes such as `chat:write` and the relevant message history/event scopes. Do not grant broad scopes unnecessarily.
+5. Test URL verification, allowed and denied user/channel pairs, retries, duplicate events, and actual outbound replies in a non-production workspace before enabling production.
+
+This adds a signed HTTP transport and app composition path, but **live workspace installation and end-to-end validation have not been performed here**. The runtime uses a local file deduplicator by default; multi-replica deployments should inject a shared atomic deduplicator.
 
 ## Composition contract
 
