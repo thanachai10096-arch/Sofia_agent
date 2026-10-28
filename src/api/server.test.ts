@@ -166,6 +166,7 @@ test("web chat keeps API keys server-side and scopes cookie sessions to same-ori
     assert.match(setCookie, /SameSite=Strict/);
     assert.match(setCookie, /Secure/);
     const cookie = setCookie.split(";", 1)[0];
+    assert.ok(cookie);
     assert.ok(cookie.includes("="));
 
     const preference = await fetch(`${baseUrl}/v1/settings/model`, {
