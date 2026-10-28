@@ -114,8 +114,15 @@ export class VersionedSkillLifecycle {
         !result.checks.every((check) => isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
       result = { passed: false, checks: [{ name: "evaluation-result", passed: false, detail: "Evaluator returned malformed or empty evidence" }] };
     }
-    const before = clone(this.snapshot);
+    // Evaluation is asynchronous. Another caller may have evaluated and
+    // promoted this candidate while the evaluator was running. Re-read the
+    // authoritative in-memory record after await and refuse to overwrite a
+    // newer lifecycle state (for example, active -> verified).
     const record = this.requireRecord(candidateId);
+    if (record.status !== "candidate") {
+      throw new Error("Skill candidate changed state during evaluation");
+    }
+    const before = clone(this.snapshot);
     record.evaluation = {
       passed: result.passed === true && result.checks.every((check) => check.passed === true),
       checks: result.checks.map((check) => ({
