@@ -83,7 +83,7 @@ test("SofiaAgent replays bounded prior session turns into the next model request
   const agent = new SofiaAgent({
     provider: {
       generate: async ({ messages }) => {
-        observed.push(messages.map((message) => message.content));
+        observed.push(messages.map((message) => message.content ?? ""));
         return { text: "Reply with context." };
       },
     },
@@ -112,7 +112,7 @@ test("SofiaAgent retrieves explicitly saved memory only for the authenticated pr
   const agent = new SofiaAgent({
     provider: {
       generate: async ({ messages }) => {
-        observed.push(messages.map((message) => message.content).join("\\n"));
+        observed.push(messages.map((message) => message.content ?? "").join("\\n"));
         return { text: "Your project is Sofia." };
       },
     },
