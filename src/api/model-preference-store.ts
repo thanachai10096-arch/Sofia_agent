@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, renameSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, renameSync, statSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
