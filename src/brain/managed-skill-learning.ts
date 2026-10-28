@@ -7,13 +7,19 @@ import type { SkillPackage } from "../skills/platform.js";
 
 /**
  * Connects verified Brain repair candidates to the persisted skill lifecycle.
- * Approval is fail-closed: without a configured approval handler, no skill is activated.
+ * Promotion is fail-closed unless both a trusted approval handler and an
+ * authenticated principal are present.
  */
 export function createManagedSkillLearningHandler(
   lifecycle: VersionedSkillLifecycle,
   approval?: ApprovalHandler,
 ): (candidate: LearnedSkillCandidate, runId: string, principalId?: string) => Promise<boolean> {
   return async (candidate, runId, principalId) => {
+    const authenticatedPrincipalId = principalId?.trim();
+    // Never allow an approval adapter to turn an anonymous promotion into an
+    // authorized one. The identity is part of the approval request and hash.
+    if (!approval || !authenticatedPrincipalId) return false;
+
     const skillPackage: SkillPackage = {
       skill: {
         id: `learned:${candidate.name}:${candidate.category}`,
@@ -39,7 +45,6 @@ export function createManagedSkillLearningHandler(
       },
       {
         approvePromotion: async (record) => {
-          if (!approval) return false;
           const toolName = "skill.lifecycle.promote";
           const input: Record<string, unknown> = {
             candidateId: record.id,
@@ -51,10 +56,10 @@ export function createManagedSkillLearningHandler(
           };
           return approval({
             runId,
-            ...(principalId ? { principalId } : {}),
+            principalId: authenticatedPrincipalId,
             toolName,
             input,
-            actionHash: actionHash(runId, toolName, input, principalId),
+            actionHash: actionHash(runId, toolName, input, authenticatedPrincipalId),
             risk: "high",
           });
         },
