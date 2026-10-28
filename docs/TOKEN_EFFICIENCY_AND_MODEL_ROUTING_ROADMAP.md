@@ -15,6 +15,7 @@ Minimize the cost and compute used per successfully verified task while preservi
 - `src/models/config.ts`: currently configures direct Gemini routes only and intentionally does not fall back to another provider automatically.
 - `src/models/gateway.ts`: provider request timeout, concurrency gate, retry handling for selected transient errors, and circuit-breaker behavior.
 - `src/brain/executor.ts`: execution limits, trace, verification, recovery, skills, memory, and subagent integration.
+- `bench/token-efficiency.mjs`: offline synthetic-tokenizer regression benchmark for the real `TokenAwareGateway` evidence packer. It asserts high-relevance evidence survives and compares estimated input tokens against a naive unfiltered prompt; this is not a live-provider cost or end-to-end task benchmark.
 
 These are foundations, not proof of measured savings or production readiness. The current configuration should not be described as a universal multi-provider registry.
 
@@ -39,6 +40,7 @@ These are foundations, not proof of measured savings or production readiness. Th
 - Measure reported input/output usage, cached usage when the provider exposes it, model calls, retries, latency, completion result, and verified task success.
 - Separate measured provider cost from estimates; label missing prices or usage explicitly.
 - Establish deterministic tests for route selection, evidence packing, budget settlement, unknown usage, cancellation, and provider failure.
+- Run the offline evidence-packing fixture in CI; treat its tokenizer estimate separately from real provider usage and verified task outcomes.
 - Do not publish a savings percentage until the same benchmark suite has a valid baseline and comparison run.
 
 **Exit gate:** typecheck, unit tests, build, and CI results reported separately for the exact commit; no benchmark claims without stored results.
