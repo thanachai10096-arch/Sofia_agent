@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { TokenAwareGateway } from "../src/brain/token-aware-gateway.ts";
+import { TokenBudget } from "../src/brain/token-budget.ts";
 import { estimateCostUsd, readExplicitPricing } from "./estimated-cost.mjs";
 
 // Provider-agnostic harness for OpenAI-compatible chat-completions endpoints.
@@ -27,6 +29,7 @@ if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 180000) 
 const pricing = readExplicitPricing(process.env);
 
 // Small, deterministic synthetic extraction fixtures; never user content.
+// The compact variant uses Sofia's actual TokenAwareGateway packer before calling the provider.
 const tasks = [
   {
     id: "project-code",
@@ -102,15 +105,64 @@ async function callModel(task, evidence, variant) {
   }
 }
 
+function estimatePromptTokens(core, evidence) {
+  const chars = core.instructions + core.task + core.acceptanceCriteria.join("\n") +
+    JSON.stringify(core.state) + JSON.stringify(core.toolSchemas) +
+    evidence.map((item) => item.text).join("\n");
+  return Math.ceil(chars.length / 4);
+}
+
+async function packWithSofiaGateway(task) {
+  const core = {
+    instructions: "Answer only from supplied evidence. Preserve relevant facts and do not invent details.",
+    task: task.question,
+    acceptanceCriteria: ["Keep the fact needed to answer the question"],
+    state: { phase: "benchmark", status: "ready" },
+    toolSchemas: [],
+  };
+  const evidence = [{ id: task.id + "-relevant", relevance: 1, text: task.relevant }];
+  for (let index = 0; index < 64; index++) {
+    evidence.push({
+      id: task.id + "-noise-" + index,
+      relevance: 0.15 + ((index % 5) * 0.01),
+      text: "Unrelated synthetic note " + index + ": " + task.noise + " ".repeat(12),
+    });
+  }
+  let selectedEvidence = [];
+  const budget = new TokenBudget(
+    { maxTokens: 20_000, maxCostNanoUsd: 100_000_000n, maxCalls: 4, maxInFlight: 1 },
+    [{ key: "live-benchmark-fixture", limit: { maxTokens: 20_000, maxCostNanoUsd: 100_000_000n, maxCalls: 4, maxInFlight: 1 }, price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 1n } }],
+  );
+  const route = {
+    id: "live-benchmark-offline-packer", budgetKey: "live-benchmark-fixture", qualityTier: 1, capabilities: [],
+    contextWindow: 5_300, maxOutputTokens: 300, hardOutputCap: true,
+    prepare(prompt) {
+      const inputTokensUpperBound = estimatePromptTokens(prompt.core, prompt.evidence);
+      return { inputTokensUpperBound, async invoke() {
+        selectedEvidence = [...prompt.evidence];
+        return { value: { packed: true }, usage: { inputTokens: inputTokensUpperBound, outputTokens: 1 }, finishReason: "complete" };
+      } };
+    },
+  };
+  const gateway = new TokenAwareGateway(budget, [route], 5_000);
+  await gateway.generateMetered({ phase: "understand", minimumQualityTier: 1, requiredCapabilities: [], core, evidence });
+  if (!selectedEvidence.some((item) => item.id === task.id + "-relevant")) {
+    throw new Error("Sofia TokenAwareGateway discarded the high-relevance benchmark fact");
+  }
+  return selectedEvidence.map((item) => item.text).join("\n");
+}
+
 const results = [];
 for (const task of tasks) {
-  const fullEvidence = task.relevant + "\n" + task.noise.repeat(8);
+  const fullEvidence = task.relevant + "\n" +
+    Array.from({ length: 64 }, (_, index) => "Unrelated synthetic note " + index + ": " + task.noise).join("\n");
+  const packedEvidence = await packWithSofiaGateway(task);
   results.push(await callModel(task, fullEvidence, "baseline-full-evidence"));
-  results.push(await callModel(task, task.relevant, "compact-relevant-evidence"));
+  results.push(await callModel(task, packedEvidence, "sofia-token-aware-gateway"));
 }
 
 const baseline = results.filter((r) => r.variant === "baseline-full-evidence");
-const compact = results.filter((r) => r.variant === "compact-relevant-evidence");
+const compact = results.filter((r) => r.variant === "sofia-token-aware-gateway");
 const sum = (rows, field) => rows.every((r) => Number.isSafeInteger(r[field]))
   ? rows.reduce((total, r) => total + r[field], 0)
   : null;
@@ -156,7 +208,7 @@ const summary = {
   configuredPricingUsdPerMillionTokens: pricing,
   usageComplete: results.every((r) => r.usageReported),
   results,
-  caveat: "Live provider calls on three small synthetic extraction fixtures. This compares full vs manually compacted evidence, not the full Sofia agent task loop and not the TokenAwareGateway packer itself. Results are not generalizable quality or savings claims.",
+  caveat: "Live provider calls on three small synthetic extraction fixtures. The compact variant uses Sofia TokenAwareGateway, but this is not the full Sofia agent task loop. Results are not generalizable quality or savings claims.",
 };
 console.log(JSON.stringify(summary, null, 2));
 assert.equal(results.length, tasks.length * 2);
