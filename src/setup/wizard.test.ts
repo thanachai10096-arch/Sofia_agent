@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assessHostedSetup,
+  checkHostedSofiaApi,
   createHostedSetupConfig,
   validateSofiaApiBaseUrl,
 } from "./wizard.js";
@@ -53,4 +54,65 @@ test("missing API key requires attention and is never stored", () => {
   assert.equal(result.readyToTry, false);
   assert.equal(result.steps.find((step) => step.id === "credentials")?.status, "needs_attention");
   assert.ok(!JSON.stringify(createHostedSetupConfig("https://sofia.example.com")).includes("API_KEY"));
+});
+
+
+test("explicit API check verifies health and authenticated usage without running a task", async () => {
+  const calls: Array<{ url: string; authorization?: string }> = [];
+  const result = await checkHostedSofiaApi({
+    apiBaseUrl: "https://sofia.example.com",
+    apiKey: "test-key",
+    fetchImpl: async (input, init) => {
+      calls.push({
+        url: String(input),
+        authorization: new Headers(init?.headers).get("authorization") ?? undefined,
+      });
+      if (String(input).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true, service: "sofia-agent-api" }), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ used: 0 }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  assert.equal(result.reachable, true);
+  assert.equal(result.authenticated, true);
+  assert.equal(result.service, "sofia-agent-api");
+  assert.deepEqual(calls.map((call) => call.url), [
+    "https://sofia.example.com/health",
+    "https://sofia.example.com/v1/usage",
+  ]);
+  assert.equal(calls[0]?.authorization, undefined);
+  assert.equal(calls[1]?.authorization, "Bearer test-key");
+});
+
+test("explicit API check reports rejected credentials without exposing the key", async () => {
+  const result = await checkHostedSofiaApi({
+    apiBaseUrl: "https://sofia.example.com",
+    apiKey: "secret-test-key",
+    fetchImpl: async (input) => String(input).endsWith("/health")
+      ? new Response(JSON.stringify({ ok: true }), { status: 200 })
+      : new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }),
+  });
+  assert.equal(result.reachable, true);
+  assert.equal(result.authenticated, false);
+  assert.match(result.message, /HTTP 401/);
+  assert.ok(!result.message.includes("secret-test-key"));
+});
+
+test("explicit API check does not attempt authenticated requests when key is missing", async () => {
+  let requestCount = 0;
+  const result = await checkHostedSofiaApi({
+    apiBaseUrl: "https://sofia.example.com",
+    apiKey: " ",
+    fetchImpl: async () => {
+      requestCount += 1;
+      return new Response(null, { status: 200 });
+    },
+  });
+  assert.equal(requestCount, 0);
+  assert.equal(result.authenticated, false);
+  assert.match(result.message, /SOFIA_API_KEY/);
 });
