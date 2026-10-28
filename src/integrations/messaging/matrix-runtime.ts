@@ -4,8 +4,8 @@ import { FileChatMessageDeduplicator } from "../file-chat-deduplicator.js";
 import { redactSecrets } from "../../security/guard.js";
 import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
-import { createMatrixAdapter } from "./matrix.js";
-import { createMatrixClientTransport, type MatrixTransport } from "./matrix-client-transport.js";
+import { createMatrixAdapter, type MatrixTransport } from "./matrix.js";
+import { createMatrixClientTransport } from "./matrix-client-transport.js";
 
 export interface MatrixMessagingRuntime {
   transport: MatrixTransport;
