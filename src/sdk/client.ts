@@ -8,6 +8,8 @@ export interface SofiaClientOptions {
 }
 
 export interface SofiaRunInput {
+  /** "auto" lets Sofia route by task; other values pin a configured model profile for this run. */
+  modelSelection?: "auto" | "fast" | "coding" | "reasoning" | "vision";
   task: string;
   workspace?: string;
   context?: string | Record<string, unknown>;
