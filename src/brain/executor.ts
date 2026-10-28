@@ -1182,7 +1182,7 @@ export class SofiaBrain {
           .replace(/[\r\n\t]+/g, " ").trim().slice(0, 160);
         const learnedCandidate: LearnedSkillCandidate | undefined = last
           ? {
-              name: "repair-" + last.category,
+              name: "repair-" + last.category + "-" + createHash("sha256").update(last.fingerprint).digest("hex").slice(0, 10),
               trigger: last.message.slice(0, 240),
               category: last.category,
               strategy,
