@@ -144,3 +144,10 @@ These are foundations, not proof of measured savings or production readiness. Th
 - Evidence is labeled as untrusted reference data in both chunk labels and the model instructions; it is not elevated to trusted instructions. Relevance scoring uses task-term overlap to rank context before packing.
 - Added tests that assert historical/project evidence reaches the gateway and that legacy requests without memory remain compatible.
 - This closes a context-plumbing gap in the token-aware reasoner, but test/typecheck/CI results for this exact change must be confirmed before treating it as validated. It does not by itself establish end-to-end task savings.
+
+
+### Offline full Brain-loop benchmark — 2026-10-28
+
+- Added `bench/brain-loop-efficiency.mjs`, which runs a complete deterministic synthetic task through `SofiaBrain`, `TokenAwareBrainReasoner`, `TokenAwareGateway`, tool execution, and acceptance-criteria verification.
+- The benchmark emits aggregate model-call usage and verified-task telemetry without logging prompts or responses. Its synthetic route reports a deterministic character-based token estimate; it performs no network/provider calls and does not estimate provider billing.
+- Added `bench/brain-loop-efficiency.test.mjs` and wired it into Sofia Benchmark CI. This is a runtime integration regression, not evidence of live-provider token savings. Fresh CI must pass before this exact change is considered validated.
