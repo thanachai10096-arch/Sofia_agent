@@ -8,7 +8,7 @@ import { ContainerSandbox } from "../sandbox.js";
 const execFileAsync = promisify(execFile);
 const SECRET_NAME = /^(?:\.env(?:\..*)?|id_(?:rsa|ed25519)|credentials(?:\.json)?|secrets?(?:\.json|\.ya?ml)?|.*\.(?:pem|key|p12|pfx))$/i;
 const IGNORED_DIRS = new Set([".git", "node_modules", "dist", ".next", "coverage"]);
-const BLOCKED_ENV = /(?:TOKEN|SECRET|PASSWORD|PRIVATE.?KEY|API.?KEY|AUTHORIZATION|AWS_ACCESS_KEY|AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN|COOKIE|CREDENTIAL)/i;
+const BLOCKED_ENV = /(?:TOKEN|SECRET|PASSWORD|PRIVATE.?KEY|ENCRYPTION.?KEY|API.?KEY|AUTHORIZATION|AWS_ACCESS_KEY|AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN|COOKIE|CREDENTIAL)/i;
 
 function safeEnv(): NodeJS.ProcessEnv {
   return Object.fromEntries(
