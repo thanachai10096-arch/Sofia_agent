@@ -44,15 +44,7 @@ function defaultUserMemoryDirectory(): string {
     if (!path.isAbsolute(configured)) throw new Error("SOFIA_STATE_DIR must be an absolute path.");
     return path.join(configured, "sofia-agents-user-memory");
   }
-  if (process.platform === "win32") {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Sofia Agents", "user-memory");
-  }
-  if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support", "Sofia Agents", "user-memory");
-  }
-  const dataHome = process.env.XDG_DATA_HOME?.trim();
-  const root = dataHome && path.isAbsolute(dataHome) ? dataHome : path.join(os.homedir(), ".local", "share");
-  return path.join(root, "sofia-agents", "user-memory");
+  return path.join(os.homedir(), ".sofia", "sofia-agents-user-memory");
 }
 
 function userKey(userId: string): string {
