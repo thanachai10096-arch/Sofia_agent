@@ -53,7 +53,7 @@ export function createManagedSkillLearningHandler(
         verification: [...new Set(candidate.verification.map((item): SkillVerification => {
           if (item === "typecheck" || item === "test" || item === "build") return item;
           const safeId = String(item).replace(/[^A-Za-z0-9._:-]/g, "-").slice(0, 160);
-          return "acceptance:" + (safeId || "verified-check");
+          return `acceptance:${safeId || "verified-check"}`;
         }))],
       },
       source: "learned",
