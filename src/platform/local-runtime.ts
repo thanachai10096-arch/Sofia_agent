@@ -37,7 +37,7 @@ export function assertSafeGitArgs(args: readonly string[]): void {
   if (args.some((arg) => GIT_DANGEROUS_ARG.test(arg))) {
     throw new Error("Git option is not allowed by Sofia runtime policy.");
   }
-  if (sub === "restore" && !args.includes("--staged")) {
+  if (sub === "restore" && (!args.includes("--staged") || args.includes("--worktree") || args.includes("-W"))) {
     throw new Error("git restore that changes the working tree is blocked by Sofia runtime policy.");
   }
   if (args.some((arg) => GIT_FORCE_ARG.test(arg))) {
