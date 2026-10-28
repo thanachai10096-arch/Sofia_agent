@@ -230,6 +230,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
-    server.close();
+    server.close(() => {
+      void deps.closeSessionStore().catch(() => console.error("Sofia session/MCP shutdown failed."));
+    });
   });
 }
