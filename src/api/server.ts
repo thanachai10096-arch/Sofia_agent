@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { DesktopCapability } from "../desktop/types.js";
@@ -118,6 +118,22 @@ function integerSetting(
     throw new Error("Invalid Sofia API configuration: " + name + " must be an integer between " + minimum + " and " + maximum + ".");
   }
   return resolved;
+}
+
+function verifyMessagingContext(input: AgentRunInput, config: SofiaApiConfig): import("../brain/types.js").NotificationTarget | null | undefined {
+  const context = input._messagingContext;
+  if (context === undefined) return undefined;
+  const secret = config.messagingContextSecret?.trim();
+  if (!secret || !context || typeof context !== "object") return null;
+  const platforms = new Set(["telegram", "discord", "slack", "line", "whatsapp", "matrix"]);
+  if (!platforms.has(context.platform) || ![context.userId, context.conversationId, context.messageId].every(value => typeof value === "string" && value.length > 0 && value.length <= 512) ||
+      typeof context.taskHash !== "string" || !/^[a-f0-9]{64}$/.test(context.taskHash) || typeof context.signature !== "string" || !/^[a-f0-9]{64}$/.test(context.signature)) return null;
+  if (createHash("sha256").update(input.task).digest("hex") !== context.taskHash) return null;
+  const unsigned = { platform: context.platform, userId: context.userId, conversationId: context.conversationId, messageId: context.messageId, taskHash: context.taskHash };
+  const expected = createHmac("sha256", secret).update(JSON.stringify(unsigned)).digest();
+  const supplied = Buffer.from(context.signature, "hex");
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null;
+  return { platform: context.platform, userId: context.userId, conversationId: context.conversationId };
 }
 
 function pathId(url: string): string | null {
@@ -254,7 +270,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
         const result = await agent.run({
-          principalId: run.ownerKeyId,
+          principalId: input._trustedMessagingTarget ? input._trustedMessagingTarget.platform + ":" + input._trustedMessagingTarget.userId : run.ownerKeyId,
+          ...(input._trustedMessagingTarget ? { notificationTarget: input._trustedMessagingTarget } : {}),
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
           ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
@@ -484,6 +501,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
+        const trustedMessagingTarget = verifyMessagingContext(input, config);
+        if (input._messagingContext !== undefined && !trustedMessagingTarget) return json(res, 403, { error: "invalid_messaging_context" }, origin, config);
+        input._trustedMessagingTarget = trustedMessagingTarget ?? undefined;
+
+        const trustedMessagingTarget = verifyMessagingContext(input, config);
+        if (input._messagingContext !== undefined && !trustedMessagingTarget) return json(res, 403, { error: "invalid_messaging_context" }, origin, config);
+        input._trustedMessagingTarget = trustedMessagingTarget ?? undefined;
+
         try { usage.consume(auth.keyId); } catch {
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
         }
@@ -508,7 +533,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           run.status = "running";
           const result = await agent.run({
-            principalId: auth.keyId,
+            principalId: input._trustedMessagingTarget ? input._trustedMessagingTarget.platform + ":" + input._trustedMessagingTarget.userId : auth.keyId,
+            ...(input._trustedMessagingTarget ? { notificationTarget: input._trustedMessagingTarget } : {}),
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
@@ -620,7 +646,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         try {
           const result = await agent.run({
-            principalId: auth.keyId,
+            principalId: input._trustedMessagingTarget ? input._trustedMessagingTarget.platform + ":" + input._trustedMessagingTarget.userId : auth.keyId,
+            ...(input._trustedMessagingTarget ? { notificationTarget: input._trustedMessagingTarget } : {}),
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
