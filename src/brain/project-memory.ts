@@ -86,6 +86,7 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
 export class PersistentSkillLedger implements SkillLedger {
   private cache: LearnedSkillCandidate[];
   private persistChain: Promise<void> = Promise.resolve();
+  private persistError?: unknown;
   constructor(private readonly store: ProjectMemoryStore) {
     const syncStore = store as FileProjectMemoryStore;
     this.cache = typeof syncStore.readSync === "function"
@@ -123,11 +124,21 @@ export class PersistentSkillLedger implements SkillLedger {
       id, project: "skill", kind: "repair", content: JSON.stringify(merged),
       source: merged.evidenceIds.join(","), confidence: Math.min(0.99, 0.8 + Math.min(merged.evidenceIds.length, 10) * 0.015),
       createdAt: now, updatedAt: now, uses: previous ? 1 : 0,
-    })).catch(() => {
-      // Learning persistence is best-effort; it must not change task outcome.
+    })).then(() => {
+      this.persistError = undefined;
+    }).catch((error: unknown) => {
+      // Preserve the task result, but surface persistence failure to flush().
+      this.persistError = error;
     });
   }
-  async flush(): Promise<void> { await this.persistChain; }
+  async flush(): Promise<void> {
+    await this.persistChain;
+    if (this.persistError !== undefined) {
+      const error = this.persistError;
+      this.persistError = undefined;
+      throw new Error("Failed to persist learned skill", { cause: error });
+    }
+  }
   list(): readonly LearnedSkillCandidate[] { return [...this.cache]; }
 }
 
