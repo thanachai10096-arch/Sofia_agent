@@ -143,7 +143,7 @@ export function createTelegramMessagingRuntime(
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
-      client, accessPolicy, deduplicator, commandPrefix: "/run",
+      client, accessPolicy, deduplicator, commandPrefix: "/run", allowPlainText: true,
       onAccepted: ({ runId, message }) => {
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
