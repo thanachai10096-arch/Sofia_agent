@@ -580,10 +580,27 @@ export class SofiaBrain {
       );
     }
 
+    const taskType = understanding.requiredCapabilities[0] ?? "general";
+    let skills = matchSkills(
+      "unknown",
+      [input.task, understanding.objective, ...understanding.requiredCapabilities].join("\n").slice(0, 2_000),
+      5,
+      this.dependencies.skillLedger,
+    );
+    if (this.dependencies.evolution) {
+      const ranking = new Map(this.dependencies.evolution.rank(skills.map(skill => skill.id), taskType).map(item => [item.id, item.score]));
+      skills = [...skills].sort((a, b) => (ranking.get(b.id) ?? 0) - (ranking.get(a.id) ?? 0));
+    }
+    if (skills[0]) {
+      this.selectedSkillIds.add(skills[0].id);
+      this.activeSkillId = skills[0].id;
+    }
+
     const value = await this.infer("plan", {
       task: input.task,
       referenceContext: priorReferenceContext(input.context),
       understanding,
+      matchedSkills: compactSkillContext(skills),
       availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
