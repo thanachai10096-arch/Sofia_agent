@@ -24,7 +24,7 @@ Sofia should follow the same user-facing agent operating model as Hermes Agent: 
 - **Saved user memory — implemented as optional retrieval:** if a configured memory store and host-derived `principalId` are present, Sofia retrieves up to five relevant explicitly saved memories within a 2,400-character bound. Retrieval is best-effort and memory is fenced as untrusted reference data. This does not enable automatic memory writing.
 - **Learning — partially implemented:** the Brain has a verified repair-skill learning path, the EvolutionEngine records outcomes and ranks skills, and managed skill lifecycle mechanisms exist. This is not proof of autonomous general-purpose skill creation from arbitrary completed conversations or model training.
 - **Model selection — not yet exposed as a per-request provider/model preference:** current legacy routing selects an internal route by task type. Explicit user choice plus `auto` remains open work.
-- **Discord ordinary-message intake — not implemented by the Interactions HTTP transport:** that transport handles signed interactions/slash commands. Ordinary Discord messages need a separate Gateway/message-event transport with correct intents and the same authorization/deduplication path.
+- **Discord ordinary-message transport — first implementation slice added:** `createDiscordGatewayTransport` receives `MESSAGE_CREATE` events over an authenticated Discord Gateway session and implements heartbeat, resume/reconnect, optional user/channel allowlists, and message delivery through Discord REST. It is exported but is not automatically wired into a host deployment; the host must connect it to `createDiscordAdapter` and the existing `MessagingGateway`, configure the Message Content privileged intent in Discord Developer Portal, and test a private server. End-to-end chat-to-Core parity is not yet verified.
 - **Discord interaction replay protection — implemented in this branch:** the signed interaction transport tracks accepted interaction IDs for 14 minutes and rejects duplicate dispatches; a regression test covers replaying the exact signed request. This is scoped to the current process and is not a distributed cross-instance idempotency store.
 - **Background jobs — substantial existing support:** the repository already contains durable job state, checkpoint resume, cancellation, and cron scheduling tests. Remaining work is consistent chat-to-run/session correlation and accurate progress/final-state delivery.
 
@@ -36,8 +36,9 @@ These are source-level branch statements, not a claim of production deployment v
 
 - Define a normalized inbound-message contract with authenticated principal, transport, conversation/session key, message ID, text, attachments metadata, and reply target.
 - Route ordinary chat messages and optional commands into the existing Core/Tool Gateway. Keep transport adapters thin.
+- First slice: add an authenticated Discord Gateway transport for ordinary message events; remaining: wire it through the host configuration and prove end-to-end Core delivery.
 - Deduplicate inbound messages and preserve owner/channel authorization.
-- Acceptance: a natural-language message starts work without `/run`; the same request through API and chat reaches the same Core behavior; unauthorized users cannot trigger work.
+- Acceptance: a natural-language message starts work without `/run`; the same request through API and chat reaches the same Core behavior; unauthorized users cannot trigger work. The new Gateway transport alone does not satisfy this gate until host wiring and private-server smoke tests pass.
 
 ### P0 — Session context (first slice implemented)
 
