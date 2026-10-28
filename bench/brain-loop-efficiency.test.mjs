@@ -21,5 +21,8 @@ test("offline Brain-loop benchmark completes a verified task through TokenAwareG
   assert.equal(report.efficiency.unmeasuredModelCalls, 0);
   assert.equal(report.gatewayCalls.length, 2);
   assert.ok(report.gatewayCalls.some((call) => call.evidenceCount > 0), "caller context should reach the gateway on the understanding phase");
+  assert.ok(report.inputTokenEstimateComparison.naiveBaselineTotal > report.inputTokenEstimateComparison.optimizedTotal);
+  assert.ok(report.inputTokenEstimateComparison.estimatedReductionPercent > 0);
+  assert.ok(report.gatewayCalls.every((call) => call.naiveBaselineInputTokensEstimate > call.optimizedInputTokensEstimate));
   assert.match(report.caveat, /not provider-billed usage or real-world savings/);
 });
