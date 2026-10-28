@@ -170,6 +170,26 @@ export async function checkHostedSofiaApi(input: {
       };
     }
 
+    // A missing key should not hide whether the public health endpoint is reachable.
+    // Do not make an authenticated request unless a non-empty key is available.
+    if (!input.apiKey.trim()) {
+      let service: string | undefined;
+      try {
+        const payload: unknown = await health.json();
+        if (payload && typeof payload === "object" && "service" in payload && typeof payload.service === "string") {
+          service = payload.service;
+        }
+      } catch {
+        // HTTP health status is sufficient; optional metadata is intentionally ignored.
+      }
+      return {
+        reachable: true,
+        authenticated: false,
+        ...(service ? { service } : {}),
+        message: "Sofia API is reachable, but SOFIA_API_KEY is not configured.",
+      };
+    }
+
     let usage: Response;
     try {
       usage = await fetchImpl(new URL("/v1/usage", baseUrl), {
