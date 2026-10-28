@@ -105,8 +105,10 @@ export interface TelegramMessagingEnvironment {
 
 /**
  * Build the optional Telegram bridge using the existing Sofia API and command
- * dispatcher. Missing/invalid optional configuration disables Telegram without
- * taking the core API offline. Only /run commands can start agent work.
+ * dispatcher. Natural chat is the default: ordinary text from an explicitly
+ * allowed user/chat starts a task without requiring /run. Slash commands other
+ * than the configured run prefix are ignored. Missing/invalid optional
+ * configuration disables Telegram without taking the core API offline.
  */
 export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
