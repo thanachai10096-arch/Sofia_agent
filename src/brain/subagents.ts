@@ -25,6 +25,9 @@ export interface SubagentActionProposal {
 
 export interface SubagentResult {
   role: SubagentRole;
+  /** Provider-reported usage for parent-task aggregation; absent means usage is unknown. */
+  usage?: { inputTokens: number; outputTokens: number };
+  retries?: number;
   summary: string;
   output: unknown;
   proposedAction?: SubagentActionProposal;
@@ -124,6 +127,8 @@ export class InProcessSubagentRuntime implements SubagentRuntime {
 
     return {
       role: request.role,
+      ...(result.usage ? { usage: result.usage } : {}),
+      ...(typeof result.retries === "number" ? { retries: result.retries } : {}),
       summary: compact(value),
       output: value,
       proposedAction,
