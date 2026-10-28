@@ -39,6 +39,7 @@ These are foundations, not proof of measured savings or production readiness. Th
 - Record the exact commit, configuration, provider/model, and task fixture for each benchmark.
 - Measure reported input/output usage, cached usage when the provider exposes it, model calls, retries, latency, completion result, and verified task success.
 - Separate measured provider cost from estimates; label missing prices or usage explicitly.
+- Aggregate cost and cost-per-verified-success remain unknown when any task in the comparison set has unknown cost; expose known-task counts separately rather than presenting a partial sum as a complete total.
 - Establish deterministic tests for route selection, evidence packing, budget settlement, unknown usage, cancellation, and provider failure.
 - Run the offline evidence-packing fixture in CI; treat its tokenizer estimate separately from real provider usage and verified task outcomes.
 - Do not publish a savings percentage until the same benchmark suite has a valid baseline and comparison run.
