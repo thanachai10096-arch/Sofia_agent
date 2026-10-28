@@ -5,6 +5,10 @@ import type { AgentDependencies } from "../agent/types.js";
 import type { DesktopCapability } from "../desktop/types.js";
 import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } from "./types.js";
 import { UsageLimiter } from "./usage.js";
+
+// Cancellation is keyed by globally unique run IDs so late async work cannot
+// revive a cancelled run even if a run record is rehydrated or replaced.
+const cancelledRunIds = new Set<string>();
 import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { handleSlackEventsHttpRequest } from "../integrations/messaging/slack-http-route.js";
@@ -242,9 +246,6 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
-  // Keep cancellation as a sticky run-ID fact as well as an AbortSignal. This
-  // prevents late asynchronous completion from reviving a cancelled run.
-  const cancelledRunIds = new Set<string>();
   const runStore = config.runStore;
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
@@ -366,7 +367,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const prune = () => {
     const cutoff = Date.now() - retention;
     for (const [id, run] of runs) {
-      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id); }
+      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) {
+        runs.delete(id);
+        cancelledRunIds.delete(id);
+        if (runStore) void runStore.remove(id);
+      }
     }
     for (const [key, entry] of idempotency) {
       if (!runs.has(entry.runId)) idempotency.delete(key);
