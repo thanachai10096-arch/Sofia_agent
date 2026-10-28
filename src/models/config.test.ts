@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { loadModelConfigFromEnv } from "./config.js";
 
 const names = [
@@ -91,4 +94,27 @@ test("fails closed when neither generic model config nor Gemini key is configure
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
   process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
   assert.throws(loadModelConfigFromEnv, /Configure SOFIA_MODEL_BASE_URL/);
+});
+
+test("reads local .env model settings while explicit process variables take precedence", () => {
+  clear();
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-config-test-"));
+  const envPath = path.join(directory, ".env");
+  try {
+    writeFileSync(envPath, [
+      'SOFIA_MODEL_PROVIDER="local"',
+      'SOFIA_MODEL_BASE_URL="http://localhost:1234/v1"',
+      'SOFIA_MODEL_API_KEY="local-key-with-\\\\slash"',
+      'SOFIA_MODEL="local-model"',
+      "",
+    ].join("\\n"), { mode: 0o600 });
+    const fromFile = loadModelConfigFromEnv({}, envPath);
+    assert.equal(fromFile.providers.fast?.baseUrl, "http://localhost:1234/v1/");
+    assert.equal(fromFile.providers.fast?.apiKey, "local-key-with-\\slash");
+    assert.equal(fromFile.providers.fast?.model, "local-model");
+
+    process.env.SOFIA_MODEL_API_KEY = "environment-key";
+    const overridden = loadModelConfigFromEnv(process.env, envPath);
+    assert.equal(overridden.providers.fast?.apiKey, "environment-key");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
