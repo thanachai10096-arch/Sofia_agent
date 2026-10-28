@@ -23,7 +23,7 @@ export interface SofiaMessagingHandlerOptions {
 
 /** Maps the gateway identity to Sofia's existing chat authorization contract. */
 export function createMessagingAccessCheck(policy: ChatAccessPolicy) {
-  return async (input: { platform: "telegram" | "discord" | "slack" | "line" | "whatsapp"; userId: string; channelId: string }) =>
+  return async (input: { platform: "telegram" | "discord" | "slack" | "line" | "whatsapp" | "matrix"; userId: string; channelId: string }) =>
     policy.isAllowed({
       platform: input.platform,
       senderId: input.userId,
