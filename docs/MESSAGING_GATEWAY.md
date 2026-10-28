@@ -1,6 +1,6 @@
 # Messaging Gateway (incremental integration)
 
-Status: opt-in gateway, natural-chat command bridge, Telegram Bot API long polling transport, Discord interaction verification/REST transport, and a Slack adapter plus request-signature verifier. The Slack adapter maps normalized verified events and posts replies through an injected transport; a complete Slack Events API HTTP receiver and app installation flow are still required. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
+Status: opt-in gateway, natural-chat command bridge, Telegram Bot API long polling transport, Discord interaction verification/REST transport, and a Slack adapter plus signed Events API HTTP receiver (`api/slack/events.ts`). The Slack receiver handles URL verification, validates the exact raw request body and replay window, requires explicit user/channel allowlists, and forwards accepted tasks to the existing Sofia API. App creation, secret configuration, live credentials, and live smoke tests remain deployment work.
 
 ## Safety defaults
 
@@ -16,6 +16,23 @@ Status: opt-in gateway, natural-chat command bridge, Telegram Bot API long polli
 - The standalone API entrypoint requires both `DISCORD_ALLOWED_USER_IDS` and `DISCORD_ALLOWED_CHANNEL_IDS` whenever Discord is enabled. Both must be comma-separated numeric Discord IDs; empty, malformed, or duplicate entries fail startup. Do not omit the user allowlist: channel membership alone must not grant permission to execute Sofia tasks.
 - Treat attachment URLs as untrusted; do not download or open them without a separately secured downloader that blocks private/loopback/link-local destinations, re-checks redirects and DNS, caps response size/time, and avoids forwarding credentials.
 - The default gateway rate limiter is in-memory and per process. For shared deployments, `RedisMessagingRateLimiter` provides an atomic fixed-window implementation using a node-redis v4-compatible `eval(script, { keys, arguments })` client; inject it as `rateLimiter: new RedisMessagingRateLimiter({ client })`. The Lua counter operation is atomic across workers, raw scope identifiers are SHA-256 hashed before being used as Redis keys, and Redis errors fail closed (the message is rate-limited). For cross-worker message deduplication, `RedisChatMessageDeduplicator` provides atomic `SET NX PX` claims and ownership-checked release; inject it into the command handler, not twice in both layers.
+
+
+## Standalone Slack Events API receiver
+
+The optional serverless route is `POST /api/slack/events`. It disables automatic body parsing so `X-Slack-Signature` is checked against the exact raw bytes, and handles Slack's signed `url_verification` challenge before accepting events. Only ordinary human `message` events are considered; bot/subtype events and unapproved users/channels are ignored. Attachments are not downloaded.
+
+Configure these server-side environment variables on a Test/Preview deployment first:
+
+- `SLACK_SIGNING_SECRET` — Slack app signing secret.
+- `SLACK_BOT_TOKEN` — bot token with the minimum required `chat:write` scope.
+- `SLACK_ALLOWED_USER_IDS` — comma-separated Slack user IDs; an empty list denies all users.
+- `SLACK_ALLOWED_CHANNEL_IDS` — comma-separated channel IDs; an empty list denies all channels.
+- `SOFIA_API_BASE_URL` and `SOFIA_API_KEY` — existing HTTPS Sofia API endpoint and server-side key.
+
+Set the Slack Event Subscriptions Request URL to `https://<your-host>/api/slack/events` and subscribe only to the required `message.*` event types. Install the app only in the intended workspace and restrict bot access. Requests are timestamp-window checked and task creation uses a stable idempotency key derived from Slack's `event_id`, so retries do not intentionally create a second run when the Sofia API honors that key. If API acceptance is uncertain, the route returns a retryable error; check the run status before manually resubmitting. The route posts an acceptance message in the originating thread, but does not stream final run completion yet.
+
+This route follows the repository's Node serverless `api/` convention; it is not automatically mounted by the separate Railway API process unless that deployment explicitly serves the same route. Do not describe Slack as live-ready until URL verification, allowlist denial, duplicate/retry behavior, message delivery, and genuine Slack workspace smoke tests pass.
 
 ## Standalone Telegram runtime configuration
 
