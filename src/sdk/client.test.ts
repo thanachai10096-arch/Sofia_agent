@@ -129,3 +129,48 @@ test("async start forwards a validated idempotency key", async () => {
     /control characters/,
   );
 });
+
+
+test("SDK exposes owner-scoped continuous work lifecycle endpoints", async () => {
+  const requests: Array<{ url: string; method: string; body?: unknown; authorization?: string }> = [];
+  const record = {
+    id: "work-123", ownerKeyId: "principal-hash", task: "keep improving safely",
+    status: "paused", iteration: 0, maxIterationsPerActivation: 10,
+    createdAt: "2026-10-28T00:00:00.000Z", updatedAt: "2026-10-28T00:00:00.000Z",
+  };
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (input, init) => {
+      requests.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+        ...(typeof init?.body === "string" ? { body: JSON.parse(init.body) } : {}),
+        authorization: (init?.headers as Record<string, string> | undefined)?.authorization,
+      });
+      if (String(input).endsWith("/continue")) return response(202, { accepted: true, workId: "work-123", mode: "continuous" });
+      if (String(input).endsWith("/resume")) return response(202, { accepted: true, workId: "work-123", status: "active" });
+      if (String(input).endsWith("/pause") || String(input).endsWith("/stop")) {
+        return response(200, { work: { ...record, status: String(input).endsWith("/pause") ? "paused" : "stopped" } });
+      }
+      if (String(input).endsWith("/work-123")) return response(200, { work: record });
+      if (String(input).endsWith("/v1/continuous-work") && init?.method === "POST") {
+        return response(201, { work: record });
+      }
+      return response(200, { work: [record] });
+    },
+  });
+
+  assert.equal((await client.createContinuousWork("keep improving safely")).work.id, "work-123");
+  assert.equal((await client.listContinuousWork()).work.length, 1);
+  assert.equal((await client.getContinuousWork("work-123")).work.status, "paused");
+  assert.equal((await client.resumeContinuousWork("work-123")).accepted, true);
+  assert.equal((await client.continueContinuousWork("work-123")).mode, "continuous");
+  assert.equal((await client.pauseContinuousWork("work-123")).work.status, "paused");
+  assert.equal((await client.stopContinuousWork("work-123")).work.status, "stopped");
+
+  assert.deepEqual(requests.map((item) => item.method), ["POST", "GET", "GET", "POST", "POST", "POST", "POST"]);
+  assert.ok(requests.every((item) => item.authorization === "Bearer test-key"));
+  assert.deepEqual(requests[0]?.body, { task: "keep improving safely" });
+  assert.equal(requests[4]?.url, "https://api.example.test/v1/continuous-work/work-123/continue");
+});
