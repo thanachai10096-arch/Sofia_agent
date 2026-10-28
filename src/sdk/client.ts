@@ -15,6 +15,20 @@ export interface SofiaRunInput {
   acceptanceCriteria?: Array<{ id: string; description: string; probe: { tool: string; input: Record<string, unknown> } }>;
 }
 
+export type SofiaModelProvider = "openai-compatible" | "gemini" | "openrouter";
+export interface SofiaModelProfileInput {
+  provider: SofiaModelProvider;
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+}
+export interface SofiaModelProfileMetadata {
+  provider: SofiaModelProvider;
+  model: string;
+  baseUrl: string;
+  updatedAt: string;
+}
+
 export type SofiaRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface SofiaRunResponse {
@@ -154,6 +168,26 @@ export class SofiaClient {
     }
     return this.request<SofiaRunResponse>("/v1/agent/runs", {
       method: "POST", headers, body: JSON.stringify({ ...input, async: true, ...(options.messagingContext ? { _messagingContext: options.messagingContext } : {}) }),
+    }, signal);
+  }
+
+  /** Read this API key's model profile. Provider credentials are never returned. */
+  async getModelProfile(signal?: AbortSignal): Promise<{ profile: SofiaModelProfileMetadata | null }> {
+    return this.request("/v1/model-profile", {
+      headers: this.headers(),
+    }, signal);
+  }
+
+  /** Set this API key's encrypted provider/model profile. The response contains metadata only. */
+  async setModelProfile(input: SofiaModelProfileInput, signal?: AbortSignal): Promise<{ profile: SofiaModelProfileMetadata }> {
+    return this.request("/v1/model-profile", {
+      method: "PUT", headers: this.headers(), body: JSON.stringify(input),
+    }, signal);
+  }
+
+  async deleteModelProfile(signal?: AbortSignal): Promise<{ deleted: boolean }> {
+    return this.request("/v1/model-profile", {
+      method: "DELETE", headers: this.headers(),
     }, signal);
   }
 
