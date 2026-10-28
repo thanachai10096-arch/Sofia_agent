@@ -19,7 +19,7 @@ test("continuous-work API is owner-scoped and exposes create, resume, pause, and
     async create(ownerKeyId: string, task: string) {
       const now = new Date().toISOString();
       const record: ContinuousWorkRecord = {
-        id: "work-1", ownerKeyId, task, status: "paused", iteration: 0,
+        id: "work-" + (records.size + 1), ownerKeyId, task, status: "paused", iteration: 0,
         maxIterationsPerActivation: 2, createdAt: now, updatedAt: now,
       };
       records.set(record.id, record);
@@ -37,6 +37,12 @@ test("continuous-work API is owner-scoped and exposes create, resume, pause, and
       if (!record || record.ownerKeyId !== owner) throw new Error("not found");
       record.status = "active";
       return { ...record };
+    },
+    async runContinuously(id: string, owner: string) {
+      const record = records.get(id);
+      if (!record || record.ownerKeyId !== owner || ["stopped", "completed", "failed"].includes(record.status)) return false;
+      record.status = "active";
+      return true;
     },
     async pause(id: string, owner: string) {
       const record = records.get(id);
@@ -97,6 +103,13 @@ test("continuous-work API is owner-scoped and exposes create, resume, pause, and
     const stopped = await request("owner-key", "/v1/continuous-work/work-1/stop", "POST");
     assert.equal(stopped.status, 200);
     assert.equal((await stopped.json() as { work: ContinuousWorkRecord }).work.status, "stopped");
+
+    const second = await request("owner-key", "/v1/continuous-work", "POST", { task: "Keep running bounded slices until paused." });
+    assert.equal(second.status, 201);
+    const secondWork = (await second.json() as { work: ContinuousWorkRecord }).work;
+    const continuous = await request("owner-key", `/v1/continuous-work/${secondWork.id}/continue`, "POST");
+    assert.equal(continuous.status, 202);
+    assert.equal((await continuous.json() as { mode: string }).mode, "continuous");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
