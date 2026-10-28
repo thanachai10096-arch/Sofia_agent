@@ -174,3 +174,31 @@ test("SDK exposes owner-scoped continuous work lifecycle endpoints", async () =>
   assert.deepEqual(requests[0]?.body, { task: "keep improving safely" });
   assert.equal(requests[4]?.url, "https://api.example.test/v1/continuous-work/work-123/continue");
 });
+
+
+test("SDK exposes current per-key usage counters without exposing credentials", async () => {
+  let requestedUrl = "";
+  let authorization = "";
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (input, init) => {
+      requestedUrl = String(input);
+      authorization = (init?.headers as Record<string, string>).authorization ?? "";
+      return response(200, {
+        keyId: "hashed-key-id",
+        runs: 7,
+        toolCalls: 42,
+        startedAt: 1793145600000,
+      });
+    },
+  });
+  assert.deepEqual(await client.getUsage(), {
+    keyId: "hashed-key-id",
+    runs: 7,
+    toolCalls: 42,
+    startedAt: 1793145600000,
+  });
+  assert.equal(requestedUrl, "https://api.example.test/v1/usage");
+  assert.equal(authorization, "Bearer test-key");
+});
