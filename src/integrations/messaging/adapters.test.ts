@@ -33,8 +33,14 @@ test("Telegram chunking preserves emoji across message boundaries", async () => 
   assert.equal((await adapter.send({ conversationId: "chat-1", text: output })).state, "sent");
   assert.ok(chunks.every((chunk) => chunk.length <= 4_096));
   assert.equal(chunks.join(""), output);
-  assert.ok(chunks.every((chunk) => !/[\\uD800-\\uDBFF]$/.test(chunk)));
-  assert.ok(chunks.every((chunk) => !/^[\\uDC00-\\uDFFF]/.test(chunk)));
+  assert.ok(chunks.every((chunk) => {
+    const last = chunk.charCodeAt(chunk.length - 1);
+    return !(last >= 0xd800 && last <= 0xdbff);
+  }));
+  assert.ok(chunks.every((chunk) => {
+    const first = chunk.charCodeAt(0);
+    return !(first >= 0xdc00 && first <= 0xdfff);
+  }));
 });
 
 test("Discord adapter ignores unverified events and bot messages", async () => {
