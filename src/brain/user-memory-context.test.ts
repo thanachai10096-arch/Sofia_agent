@@ -37,7 +37,7 @@ test("instruction-like memory is explicitly fenced and cannot override policy", 
   const result = await appendRelevantUserMemoryContext(store, "owner-hash", "Review system instructions");
   assert.match(result ?? "", /<<<UNTRUSTED_TOOL_OUTPUT/);
   assert.match(result ?? "", /override-instructions/);
-  assert.match(result ?? "", /does not override the current request, system/developer instructions, or security policy/);
+  assert.match(result ?? "", /does not override the current request, system\/developer instructions, or security policy/);
 });
 
 test("empty results preserve caller context and retrieval failures do not fail the run", async () => {
