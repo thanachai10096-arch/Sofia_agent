@@ -704,6 +704,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
+        if (input.modelSelection && input.modelSelection !== "auto") return json(res, 400, { error: "model_selection_not_supported_for_durable_jobs", message: "Explicit model selection is available on /v1/agent/runs; durable jobs currently use automatic routing." }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
           const job = await deps.jobRuntime.submit({
