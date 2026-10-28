@@ -127,4 +127,12 @@ These are foundations, not proof of measured savings or production readiness. Th
 
 - The opt-in live benchmark can calculate **estimated** cost and estimated cost per verified success when the operator supplies both input and output prices per million tokens. It does not infer prices from provider/model names or query invoice-level billing.
 - Missing usage or missing explicit pricing keeps estimated cost `null`. A token-reduction percentage alone is not a claim of cost savings or end-to-end Sofia task quality.
-- The harness still compares synthetic tasks with manually compacted evidence; invoking `TokenAwareGateway` in a full Brain task loop remains a separate benchmark milestone.
+- The live harness now passes synthetic relevant/noise evidence through Sofia's actual `TokenAwareGateway` packer before sending the selected evidence to the configured provider. It still does not run the full Brain task loop, and its synthetic tasks cannot establish general real-workload savings.
+
+
+### Live benchmark now exercises the evidence packer — 2026-10-28
+
+- The compact arm in `bench/live-model-efficiency.mjs` now uses the actual `TokenAwareGateway` with a synthetic offline route to select evidence; the baseline arm sends the full synthetic evidence set to the same explicitly configured provider/model.
+- The live run still makes six billable-capable provider calls, requires explicit endpoint/key/model, and remains opt-in. Its packing step itself makes no provider calls.
+- The harness remains a three-task synthetic smoke benchmark, not the full Brain execution loop. Report observed usage/quality for that run only; do not generalize it to all Sofia workloads.
+- Latest workflow runs for this change are in progress; no passing result is claimed until they complete. No live provider calls or production deployment were performed during this change.
