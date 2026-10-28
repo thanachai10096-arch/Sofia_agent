@@ -38,6 +38,54 @@ const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
     defaultModel: "openai/gpt-4.1-mini",
     requiresApiKey: true,
   },
+  xai: {
+    baseUrl: "https://api.x.ai/v1",
+    apiKeyEnv: "XAI_API_KEY",
+    defaultModel: "",
+    requiresApiKey: true,
+  },
+  mistral: {
+    baseUrl: "https://api.mistral.ai/v1",
+    apiKeyEnv: "MISTRAL_API_KEY",
+    defaultModel: "",
+    requiresApiKey: true,
+  },
+  groq: {
+    baseUrl: "https://api.groq.com/openai/v1",
+    apiKeyEnv: "GROQ_API_KEY",
+    defaultModel: "",
+    requiresApiKey: true,
+  },
+  deepseek: {
+    baseUrl: "https://api.deepseek.com/v1",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    defaultModel: "",
+    requiresApiKey: true,
+  },
+  together: {
+    baseUrl: "https://api.together.xyz/v1",
+    apiKeyEnv: "TOGETHER_API_KEY",
+    defaultModel: "",
+    requiresApiKey: true,
+  },
+  fireworks: {
+    baseUrl: "https://api.fireworks.ai/inference/v1",
+    apiKeyEnv: "FIREWORKS_API_KEY",
+    defaultModel: "",
+    requiresApiKey: true,
+  },
+  cerebras: {
+    baseUrl: "https://api.cerebras.ai/v1",
+    apiKeyEnv: "CEREBRAS_API_KEY",
+    defaultModel: "",
+    requiresApiKey: true,
+  },
+  perplexity: {
+    baseUrl: "https://api.perplexity.ai",
+    apiKeyEnv: "PERPLEXITY_API_KEY",
+    defaultModel: "",
+    requiresApiKey: true,
+  },
   anthropic: {
     baseUrl: "https://api.anthropic.com/v1",
     apiKeyEnv: "ANTHROPIC_API_KEY",
@@ -82,7 +130,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
   const preset = PROVIDER_PRESETS[providerId];
   if (!preset) {
     throw new Error(
-      "Unsupported SOFIA_MODEL_PROVIDER. Supported built-in adapters: gemini, openai, anthropic, openrouter, ollama, openai-compatible.",
+      "Unsupported SOFIA_MODEL_PROVIDER. Supported built-in adapters: gemini, openai, anthropic, openrouter, xai, mistral, groq, deepseek, together, fireworks, cerebras, perplexity, ollama, openai-compatible.",
     );
   }
 
