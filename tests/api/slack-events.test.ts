@@ -96,3 +96,32 @@ test("Slack Events acknowledges only after Sofia accepts a run and posts a threa
     } finally { globalThis.fetch = original; }
   });
 });
+
+
+test("Slack retry of the same event reuses the same Sofia idempotency key", async () => {
+  await withEnv({ SLACK_SIGNING_SECRET: "test-secret", SLACK_ALLOWED_USER_IDS: "UALLOWED", SLACK_ALLOWED_CHANNEL_IDS: "CALLOWED", SOFIA_API_BASE_URL: "https://sofia.example", SOFIA_API_KEY: "test-key", SLACK_BOT_TOKEN: "xoxb-12345678901234567890" }, async () => {
+    const original = globalThis.fetch;
+    const keys: string[] = [];
+    let acceptedRuns = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === "https://sofia.example/v1/agent/runs") {
+        const key = new Headers(init?.headers).get("idempotency-key");
+        assert.ok(key);
+        keys.push(key);
+        // Model the API's idempotent response: the same event resolves to one run.
+        acceptedRuns = 1;
+        return { ok: true, status: 202, async json() { return { id: "run-idempotent-1", status: "queued" }; } } as Response;
+      }
+      return { ok: true, status: 200, async json() { return { ok: true }; } } as Response;
+    }) as typeof fetch;
+    try {
+      const body = Buffer.from(JSON.stringify({ type: "event_callback", event_id: "EvRetriedSameEvent", event: { type: "message", user: "UALLOWED", channel: "CALLOWED", text: "do one thing", ts: "1790000000.000001" } }));
+      const headers = signed(body, "test-secret");
+      assert.equal((await invoke(body, headers)).statusCode, 200);
+      assert.equal((await invoke(body, headers)).statusCode, 200);
+      assert.equal(keys.length, 2);
+      assert.equal(keys[0], keys[1]);
+      assert.equal(acceptedRuns, 1);
+    } finally { globalThis.fetch = original; }
+  });
+});
