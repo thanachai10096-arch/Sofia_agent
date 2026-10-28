@@ -36,8 +36,23 @@ function evidenceText(value: unknown): string {
   }
 }
 
+const TASK_STOP_WORDS = new Set([
+  "about", "after", "again", "also", "and", "are", "because", "been", "before",
+  "being", "between", "both", "but", "can", "could", "did", "does", "doing",
+  "down", "during", "each", "few", "for", "from", "further", "had", "has",
+  "have", "having", "here", "how", "into", "its", "just", "more", "most",
+  "not", "now", "off", "once", "only", "other", "our", "out", "over", "same",
+  "should", "some", "such", "than", "that", "the", "their", "them", "then",
+  "there", "these", "they", "this", "those", "through", "too", "under", "until",
+  "very", "was", "were", "what", "when", "where", "which", "while", "who",
+  "why", "will", "with", "would", "you", "your",
+]);
+
 function taskTermsFor(task: string): Set<string> {
-  return new Set(task.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? []);
+  return new Set(
+    (task.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? [])
+      .filter((term) => !TASK_STOP_WORDS.has(term)),
+  );
 }
 
 function relevanceFor(taskTerms: ReadonlySet<string>, text: string): number {
