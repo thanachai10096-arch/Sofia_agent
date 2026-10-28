@@ -67,10 +67,16 @@ export async function waitForDiscordTask(
   if (current.status === "completed") {
     return { id: current.id, status: "completed", summary: current.result?.summary?.trim() || "Sofia completed the task." };
   }
+
+  // Brain can return a failed result without throwing. In that path JobRuntime
+  // persists result.state/result.summary but may leave record.error empty. Prefer
+  // that bounded, secret-redacted summary so Discord reports a useful diagnosis.
+  const diagnostic = current.error?.trim() || current.result?.summary?.trim();
+  const safeDiagnostic = diagnostic ? String(redactSecrets(diagnostic)).slice(0, 1200) : "";
   return {
     id: current.id,
     status: current.status,
-    summary: current.error?.trim() || (current.status === "cancelled" ? "Sofia job was cancelled." : "Sofia job failed."),
+    summary: safeDiagnostic || (current.status === "cancelled" ? "Sofia job was cancelled." : `Sofia job failed (state: ${current.result?.state ?? "unknown"}). No failure summary was recorded.`),
   };
 }
 
