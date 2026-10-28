@@ -157,9 +157,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   if (lineRoute && (!Number.isSafeInteger(lineMaxBodyBytes) || lineMaxBodyBytes < 1 || lineMaxBodyBytes > 1_000_000)) {
     throw new Error("LINE webhook route maxBodyBytes must be between 1 and 1000000.");
   }
-  if (lineRoute && [discordRoutePath, slackRoutePath].some((routePath) =>
-    (discordRoute && routePath === discordRoutePath) || (slackRoute && routePath === slackRoutePath)
-  ) && (lineRoutePath === discordRoutePath || lineRoutePath === slackRoutePath)) {
+  if (lineRoute && ((discordRoute && lineRoutePath === discordRoutePath) ||
+      (slackRoute && lineRoutePath === slackRoutePath))) {
     throw new Error("Discord, Slack, and LINE messaging routes must use different paths.");
   }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
