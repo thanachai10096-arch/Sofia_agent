@@ -50,6 +50,24 @@ Composition outline:
 
 This adds a signed HTTP transport and app composition path, but **live workspace installation and end-to-end validation have not been performed here**. The runtime uses a local file deduplicator by default; multi-replica deployments should inject a shared atomic deduplicator.
 
+## LINE Messaging API integration
+
+Sofia also includes `createLineWebhookTransport`, `createLineAdapter`, `createLineMessagingRuntime`, and the optional `lineWebhookRoute` on `createSofiaApi`. It verifies LINE's `X-Line-Signature` against the raw request body before parsing, de-duplicates webhook event IDs, accepts text messages, and sends text through LINE's push API. Sender and conversation allowlists are mandatory.
+
+Required environment:
+- `SOFIA_MESSAGING_ENABLED=true`
+- `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`
+- `LINE_ALLOWED_USER_IDS`, `LINE_ALLOWED_CONVERSATION_IDS`
+- `SOFIA_API_KEY`, `SOFIA_API_BASE_URL`
+
+Composition outline:
+1. Call `createLineMessagingRuntime(process.env, workspace)`.
+2. Pass `lineRuntime.transport` to `createSofiaApi(deps, { ...config, lineWebhookRoute: { transport: lineRuntime.transport } })`.
+3. Start and stop the runtime with the API lifecycle. The route defaults to `/v1/integrations/line/webhook`.
+4. In LINE Developers Console, set that HTTPS webhook URL, enable webhook use, and validate the endpoint. Test only in a non-production channel first.
+
+The code and deterministic transport tests are present, but live LINE channel setup and real-account end-to-end testing have not been performed. Push messages are subject to LINE channel/account eligibility and platform limits.
+
 ## Composition contract
 
 Implementations of `MessagingAdapter` normalize incoming events only after provider authentication and identity mapping. The Telegram transport handles long polling and outbound Bot API calls. The Discord interaction transport exposes a request handler for mounting in an existing HTTPS route and uses Discord's interaction webhook token for the deferred response.
