@@ -11,9 +11,23 @@ export interface SofiaTool {
 }
 export interface ToolRegistry { get(name: string): SofiaTool | undefined; list(): SofiaTool[]; }
 export class MapToolRegistry implements ToolRegistry {
-  constructor(private readonly tools: SofiaTool[]) {}
+  constructor(private readonly tools: SofiaTool[]) {
+    const names = new Set<string>();
+    for (const tool of tools) {
+      if (names.has(tool.name)) throw new Error("Duplicate tool name: " + tool.name);
+      names.add(tool.name);
+    }
+  }
   get(name: string): SofiaTool | undefined { return this.tools.find(tool => tool.name === name); }
   list(): SofiaTool[] { return [...this.tools]; }
+  addTools(tools: readonly SofiaTool[]): void {
+    const existing = new Set(this.tools.map((tool) => tool.name));
+    for (const tool of tools) {
+      if (existing.has(tool.name)) throw new Error("Duplicate tool name: " + tool.name);
+      existing.add(tool.name);
+    }
+    this.tools.push(...tools);
+  }
 }
 
 /** Validate untrusted model-produced arguments against the supported JSON Schema subset. */
