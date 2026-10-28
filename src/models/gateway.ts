@@ -15,6 +15,8 @@ export interface GatewayProviderConfig {
   maxConcurrent?: number;
   /** One deadline for queue wait, provider attempts, and retry delays. Defaults to 45 seconds. */
   requestTimeoutMs?: number;
+  /** Native protocol; omitted means OpenAI Chat Completions-compatible. */
+  protocol?: "openai-compatible" | "anthropic";
 }
 
 interface ChatResponse {
@@ -34,6 +36,15 @@ interface ChatResponse {
     completion_tokens?: number;
     total_tokens?: number;
   };
+}
+
+interface AnthropicResponse {
+  content?: Array<
+    | { type: "text"; text?: string }
+    | { type: "tool_use"; id?: string; name?: string; input?: unknown }
+  >;
+  stop_reason?: string | null;
+  usage?: { input_tokens?: number; output_tokens?: number };
 }
 
 interface GateWaiter {
@@ -173,15 +184,67 @@ export class SofiaModelGateway implements ModelProvider {
       }
     }
 
-    const body = {
-      model: config.model,
-      messages,
-      ...(tools ? { tools, tool_choice: "auto" } : {}),
-      ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" as const } } : {}),
-      ...(options.maxOutputTokens
-        ? { max_tokens: options.maxOutputTokens }
-        : {}),
-    };
+    const isAnthropic = config.protocol === "anthropic";
+    let body: Record<string, unknown>;
+    if (isAnthropic) {
+      const systemText = messages
+        .filter((message) => message.role === "system")
+        .map((message) => message.content)
+        .join("\n\n");
+      const anthropicMessages = messages
+        .filter((message) => message.role !== "system")
+        .map((message) => {
+          if (message.role === "tool") {
+            return {
+              role: "user",
+              content: [{
+                type: "tool_result",
+                tool_use_id: message.toolCallId ?? "missing-tool-call-id",
+                content: message.content,
+              }],
+            };
+          }
+          if (message.role === "assistant" && message.toolCalls?.length) {
+            const content: Array<Record<string, unknown>> = [];
+            if (message.content.trim()) content.push({ type: "text", text: message.content });
+            for (const call of message.toolCalls) {
+              let input: unknown = {};
+              try { input = JSON.parse(call.arguments); } catch { input = {}; }
+              content.push({
+                type: "tool_use",
+                id: call.id,
+                name: call.name,
+                input: input && typeof input === "object" && !Array.isArray(input) ? input : {},
+              });
+            }
+            return { role: "assistant", content };
+          }
+          return { role: message.role === "assistant" ? "assistant" : "user", content: message.content };
+        });
+      body = {
+        model: config.model,
+        max_tokens: options.maxOutputTokens ?? 2048,
+        messages: anthropicMessages,
+        ...(systemText || brainStructuredOutput
+          ? { system: [systemText, brainStructuredOutput ? "For this internal agent operation, respond with a single valid JSON object only. Do not wrap it in Markdown fences." : ""].filter(Boolean).join("\n\n") }
+          : {}),
+        ...(tools ? {
+          tools: tools.map((tool) => ({
+            name: tool.function.name,
+            description: tool.function.description,
+            input_schema: tool.function.parameters,
+          })),
+        } : {}),
+      };
+    } else {
+      body = {
+        model: config.model,
+        messages,
+        ...(tools ? { tools, tool_choice: "auto" } : {}),
+        ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" } } : {}),
+        ...(options.maxOutputTokens ? { max_tokens: options.maxOutputTokens } : {}),
+      };
+    }
 
     const providerId = route.providerId ?? route.id;
     const timeoutMs = config.requestTimeoutMs ?? 45_000;
@@ -208,12 +271,14 @@ export class SofiaModelGateway implements ModelProvider {
         let retryableFailure = false;
         try {
           const response = await fetch(
-            config.baseUrl.replace(/\/$/, "") + "/chat/completions",
+            config.baseUrl.replace(/\/$/, "") + (isAnthropic ? "/messages" : "/chat/completions"),
             {
               method: "POST",
               headers: {
                 ...config.headers,
-                authorization: "Bearer " + config.apiKey,
+                ...(isAnthropic
+                  ? { "x-api-key": config.apiKey, "anthropic-version": "2023-06-01" }
+                  : { authorization: "Bearer " + config.apiKey }),
                 "content-type": "application/json",
               },
               body: JSON.stringify(body),
@@ -282,7 +347,37 @@ export class SofiaModelGateway implements ModelProvider {
 
     let data: ChatResponse;
     try {
-      data = (await response.json()) as ChatResponse;
+      const payload: unknown = await response.json();
+      if (isAnthropic) {
+        const anthropic = payload as AnthropicResponse;
+        const blocks = Array.isArray(anthropic.content) ? anthropic.content : [];
+        const textContent = blocks
+          .filter((block): block is { type: "text"; text?: string } => block.type === "text")
+          .map((block) => block.text ?? "")
+          .filter((part) => part.trim().length > 0)
+          .join("\n");
+        const toolCalls = blocks
+          .filter((block): block is { type: "tool_use"; id?: string; name?: string; input?: unknown } => block.type === "tool_use")
+          .map((block) => ({
+            id: block.id,
+            function: {
+              name: block.name,
+              arguments: JSON.stringify(block.input && typeof block.input === "object" && !Array.isArray(block.input) ? block.input : {}),
+            },
+          }));
+        data = {
+          choices: [{
+            finish_reason: anthropic.stop_reason ?? null,
+            message: { content: textContent, tool_calls: toolCalls },
+          }],
+          usage: {
+            prompt_tokens: anthropic.usage?.input_tokens,
+            completion_tokens: anthropic.usage?.output_tokens,
+          },
+        };
+      } else {
+        data = payload as ChatResponse;
+      }
     } catch {
       return failResponse("Model gateway returned invalid JSON.");
     }
