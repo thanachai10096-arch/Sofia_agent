@@ -57,8 +57,9 @@ function learnedToSkill(skill: LearnedSkillCandidate): SofiaSkill {
     strategy: skill.strategy,
     procedure: skill.procedure,
     verification: skill.verification.filter(
-      (item): item is "typecheck" | "test" | "build" =>
-        item === "typecheck" || item === "test" || item === "build",
+      (item): item is SkillVerification =>
+        item === "typecheck" || item === "test" || item === "build" ||
+        (item.startsWith("acceptance:") && /^[A-Za-z0-9._:-]{1,160}$/.test(item.slice("acceptance:".length))),
     ),
   };
 }
