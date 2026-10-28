@@ -1,0 +1,18 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+
+# Local credentials and generated Sofia state
+.env
+.env.*
+!.env.example
+.sofia/
+*.log
+
+# Local editor and OS files
+.DS_Store
+.vscode/
+.idea/
