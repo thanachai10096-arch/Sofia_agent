@@ -28,6 +28,7 @@ import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
 import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
+import { evaluateLearnedSkillCandidate } from "../brain/skill-evaluation.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
@@ -49,18 +50,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
-  const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
-    // Metadata validation is not evidence that a learned procedure improves a real task.
-    // Until an isolated task-fixture runner is wired into this factory, fail closed rather
-    // than marking a candidate "verified" and allowing approval to activate an untested skill.
-    const checks = [
-      { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
-      { name: "procedure", passed: candidate.skill.procedure.length >= 2 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
-      { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
-      { name: "isolated-task-fixture-evaluation", passed: false, detail: "No isolated skill task-fixture evaluator is configured; metadata checks alone cannot verify task outcomes." },
-    ];
-    return { passed: false, checks };
-  }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
+  const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), evaluateLearnedSkillCandidate, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,maxSteps,principalId,desktopCapabilities,modelSelection,onRunSnapshot,onEvent})=>{
     // Explicit selection pins the chosen configured model ID across the run while retaining
