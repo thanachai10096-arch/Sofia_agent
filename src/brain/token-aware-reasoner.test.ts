@@ -51,7 +51,10 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
       diagnoses: [{ category: "incomplete_solution", message: "the task missed provider usage" }],
       decisions: [{ strategy: "inspect-evidence", reason: "check the benchmark fixture" }],
       projectContext: "Project instructions: preserve existing public interfaces.",
-      projectMemory: [{ kind: "convention", content: "Use node:test for regression tests", confidence: 0.9 }],
+      projectMemory: [
+        { kind: "convention", content: "Use node:test for regression tests", confidence: 0.9 },
+        { kind: "note", content: "Tokenizer diagnostics are unrelated to this task." },
+      ],
     },
   }), { signal: new AbortController().signal, maxContextTokens: 8_000 });
 
@@ -64,6 +67,9 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
   assert.ok(packedEvidence.some((item) => item.id === "reference-context-2" && item.text.includes("do not remove the token budget")));
   assert.ok(packedEvidence.some((item) => item.text.includes("preserve existing public interfaces")));
   assert.ok(packedEvidence.some((item) => item.text.includes("Use node:test for regression tests")));
+  const tokenizerOnlyEvidence = packedEvidence.find((item) => item.text.includes("Tokenizer diagnostics"));
+  assert.ok(tokenizerOnlyEvidence);
+  assert.equal(tokenizerOnlyEvidence.relevance, 0.2, "whole-token matching must not treat tokenizer as token");
   assert.ok(packedEvidence.every((item) => item.text.includes("untrusted reference data")));
   assert.equal(new Set(packedEvidence.map((item) => item.id)).size, packedEvidence.length);
 });
