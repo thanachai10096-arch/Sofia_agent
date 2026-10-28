@@ -68,9 +68,16 @@ export interface ToolResult {
   error?: { category: FailureCategory; message: string };
 }
 
+export interface NotificationTarget {
+  platform: "telegram" | "discord" | "slack" | "line" | "whatsapp" | "matrix";
+  userId: string;
+  conversationId: string;
+}
+
 export interface ToolExecutionContext {
   runId: string;
   principalId?: string | undefined;
+  notificationTarget?: NotificationTarget;
   signal: AbortSignal;
   requireApproval: boolean;
   notifyApproval(waiting: boolean): void;
