@@ -18,8 +18,6 @@ export interface ContinuousWorkStore {
 }
 export interface ContinuousWorkOptions {
   maxIterationsPerActivation?: number; maxLifetimeIterations?: number; maxActivationMs?: number; pollIntervalMs?: number;
-  /** Prevent one owner from consuming all workers with many continuous objectives. */
-  maxConcurrentContinuousPerOwner?: number;
   isComplete: (record: Readonly<ContinuousWorkRecord>, job: Readonly<JobRecord>) => boolean | Promise<boolean>;
 }
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -86,8 +84,6 @@ export class ContinuousWorkSupervisor {
   private readonly active = new Map<string, AbortController>();
   private readonly starting = new Set<string>();
   private readonly continuous = new Map<string, AbortController>();
-  private readonly continuousOwnerById = new Map<string, string>();
-  private readonly maxConcurrentContinuousPerOwner: number;
   private readonly iterations: number;
   private readonly durationMs: number;
   private readonly pollMs: number;
@@ -96,7 +92,6 @@ export class ContinuousWorkSupervisor {
     this.iterations = integer(options.maxIterationsPerActivation ?? 10, "maxIterationsPerActivation", 1, 100);
     this.durationMs = integer(options.maxActivationMs ?? 900_000, "maxActivationMs", 1_000, 3_600_000);
     this.pollMs = integer(options.pollIntervalMs ?? 500, "pollIntervalMs", 50, 10_000);
-    this.maxConcurrentContinuousPerOwner = integer(options.maxConcurrentContinuousPerOwner ?? 2, "maxConcurrentContinuousPerOwner", 1, 32);
     if (options.maxLifetimeIterations !== undefined) this.lifetime = integer(options.maxLifetimeIterations, "maxLifetimeIterations", 1, 1_000_000);
   }
   async create(ownerKeyId: string, task: string): Promise<ContinuousWorkRecord> {
@@ -135,11 +130,8 @@ export class ContinuousWorkSupervisor {
     const record = await this.get(id, owner);
     if (!record || ["stopped", "completed", "failed"].includes(record.status)) return false;
     if (this.continuous.has(id)) return false;
-    const ownerContinuousCount = [...this.continuousOwnerById.values()].filter((activeOwner) => activeOwner === owner).length;
-    if (ownerContinuousCount >= this.maxConcurrentContinuousPerOwner) return false;
     const controller = new AbortController();
     this.continuous.set(id, controller);
-    this.continuousOwnerById.set(id, owner);
     void (async () => {
       try {
         while (!controller.signal.aborted) {
@@ -161,7 +153,6 @@ export class ContinuousWorkSupervisor {
       } finally {
         if (this.continuous.get(id) === controller) {
           this.continuous.delete(id);
-          this.continuousOwnerById.delete(id);
         }
       }
     })();
