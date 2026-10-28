@@ -236,6 +236,7 @@ export class SofiaModelGateway implements ModelProvider {
                 "content-type": "application/json",
               },
               body: JSON.stringify(body),
+              redirect: "error",
               signal: requestSignal,
             },
           );
