@@ -90,6 +90,8 @@ export { createLineAdapter } from "./integrations/messaging/line.js";
 export type { LineTransport, VerifiedLineMessage } from "./integrations/messaging/line.js";
 export { createLineHttpTransport, verifyLineSignature } from "./integrations/messaging/line-http-transport.js";
 export type { LineHttpTransportOptions, LineWebhookResult } from "./integrations/messaging/line-http-transport.js";
+export { handleLineWebhookHttpRequest } from "./integrations/messaging/line-http-route.js";
+export type { LineWebhookTransport } from "./integrations/messaging/line-http-route.js";
 export type { SlackTransport, VerifiedSlackMessage } from "./integrations/messaging/slack.js";
 export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
 export { createDiscordInteractionTransport } from "./integrations/messaging/discord-interaction-transport.js";
