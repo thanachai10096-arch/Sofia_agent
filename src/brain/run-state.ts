@@ -15,6 +15,7 @@ export interface BrainRunUsageSnapshot {
   providerInputTokens?: number;
   providerOutputTokens?: number;
   providerUsageCalls?: number;
+  configuredCostNanoUsd?: string;
   replans: number;
 }
 
