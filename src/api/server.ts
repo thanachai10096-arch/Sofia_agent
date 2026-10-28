@@ -12,6 +12,7 @@ import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 import { FileModelPreferenceStore, type ModelPreference } from "./model-preference-store.js";
+import { createWebChatGateway } from "../web-chat/gateway.js";
 
 interface ActiveRun {
   id: string;
@@ -147,6 +148,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
   const modelPreferences = config.modelPreferenceStore ?? new FileModelPreferenceStore();
+  const webChat = createWebChatGateway(config.apiKeys);
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
     const record: RunRecord = {
