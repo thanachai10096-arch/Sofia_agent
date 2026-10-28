@@ -36,9 +36,26 @@ function allowedNetworkUrl(raw: string): URL {
   return url;
 }
 
+function isDuckDuckGoHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  return host === "duckduckgo.com" || host.endsWith(".duckduckgo.com");
+}
+
 function decodeHtml(value: string): string {
-  return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#(\d+);/g, (_match, code: string) => String.fromCharCode(Number(code)));
+  // Decode each entity exactly once so values such as &amp;lt; cannot become markup.
+  const entities: Record<string, string> = {
+    "&amp;": "&", "&quot;": '"', "&#39;": "'", "&apos;": "'",
+    "&lt;": "<", "&gt;": ">",
+  };
+  return value.replace(/&(?:amp|quot|#39|apos|lt|gt|#\d+);/g, (entity) => {
+    if (Object.prototype.hasOwnProperty.call(entities, entity)) return entities[entity]!;
+    const code = /^&#(\d+);$/.exec(entity)?.[1];
+    if (code === undefined) return entity;
+    const numeric = Number(code);
+    return Number.isInteger(numeric) && numeric >= 0 && numeric <= 0x10ffff
+      ? String.fromCodePoint(numeric)
+      : "\uFFFD";
+  });
 }
 
 async function fetchBoundedText(url: URL): Promise<{ status: number; contentType: string; text: string }> {
@@ -77,12 +94,12 @@ export function createBuiltinTools(userMemoryStore?: UserMemoryStore): SofiaTool
           if (!link) continue;
           let target: URL;
           try { target = new URL(decodeHtml(link[1]!), url); } catch { continue; }
-          if (target.hostname.endsWith("duckduckgo.com")) {
+          if (isDuckDuckGoHost(target.hostname)) {
             const destination = target.searchParams.get("uddg");
             if (!destination) continue;
             try { target = new URL(destination); } catch { continue; }
           }
-          if (target.protocol !== "https:" || target.hostname.endsWith("duckduckgo.com") || target.username || target.password) continue;
+          if (target.protocol !== "https:" || isDuckDuckGoHost(target.hostname) || target.username || target.password) continue;
           const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/div>/i);
           results.push({
             title: decodeHtml(link[2]!.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 300),
