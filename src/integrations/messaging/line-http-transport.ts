@@ -100,6 +100,7 @@ export function createLineHttpTransport(options: LineHttpTransportOptions): Line
         return { status: 400, acceptedEvents: 0 };
       }
       let acceptedEvents = 0;
+      let deliveryFailed = false;
       for (const event of envelope.events) {
         if (stopped || activeSignal?.aborted) return { status: 503, acceptedEvents };
         if (event.type !== "message" || event.message?.type !== "text" ||
@@ -119,11 +120,13 @@ export function createLineHttpTransport(options: LineHttpTransportOptions): Line
           });
           acceptedEvents++;
         } catch {
-          // Do not expose message content, credentials, or provider response bodies.
+          // Return a retryable failure rather than acknowledging work that the
+          // shared gateway did not accept. Never expose content or credentials.
+          deliveryFailed = true;
           try { options.onWarning?.("line_payload_rejected"); } catch { /* diagnostics must not break webhook processing */ }
         }
       }
-      return { status: 200, acceptedEvents };
+      return { status: deliveryFailed ? 503 : 200, acceptedEvents };
     },
     async pushMessage(conversationId, text) {
       if (stopped || activeSignal?.aborted) throw new Error("LINE transport is stopped.");
