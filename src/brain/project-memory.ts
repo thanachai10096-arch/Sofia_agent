@@ -93,10 +93,36 @@ export class PersistentSkillLedger implements SkillLedger {
       : [];
   }
   record(candidate: LearnedSkillCandidate): void {
-    if (!this.cache.some(x=>x.name===candidate.name&&x.category===candidate.category&&x.trigger===candidate.trigger)) this.cache.push(candidate);
-    const now=new Date().toISOString();
-    const id=createHash("sha256").update(JSON.stringify({category:candidate.category,strategy:candidate.strategy,trigger:candidate.trigger,procedure:candidate.procedure})).digest("hex");
-    void this.store.save({id,project:"skill",kind:"repair",content:JSON.stringify(candidate),source:candidate.evidenceIds.join(","),confidence:0.8,createdAt:now,updatedAt:now,uses:0});
+    // A stable identity lets repeated successful work improve an existing skill
+    // instead of creating an unbounded collection of near-duplicates.
+    const existingIndex = this.cache.findIndex(item => item.name === candidate.name && item.category === candidate.category);
+    const previous = existingIndex >= 0 ? this.cache[existingIndex] : undefined;
+    const merged: LearnedSkillCandidate = previous ? {
+      ...candidate,
+      trigger: previous.trigger,
+      triggers: [...new Set([previous.trigger, ...(previous.triggers ?? []), candidate.trigger, ...(candidate.triggers ?? [])]
+        .map(value => String(redactSecrets(value)).trim()).filter(Boolean))].slice(0, 12),
+      procedure: [...new Set([...previous.procedure, ...candidate.procedure])].slice(0, 12),
+      verification: [...new Set([...previous.verification, ...candidate.verification])].filter(
+        (item): item is "typecheck" | "test" | "build" => item === "typecheck" || item === "test" || item === "build",
+      ),
+      evidenceIds: [...new Set([...previous.evidenceIds, ...candidate.evidenceIds])].slice(-50),
+    } : {
+      ...candidate,
+      trigger: String(redactSecrets(candidate.trigger)).slice(0, 240),
+      triggers: [...new Set([candidate.trigger, ...(candidate.triggers ?? [])])].slice(0, 12),
+      procedure: [...new Set(candidate.procedure)].slice(0, 12),
+      evidenceIds: [...new Set(candidate.evidenceIds)].slice(-50),
+    };
+    if (existingIndex >= 0) this.cache[existingIndex] = merged;
+    else this.cache.push(merged);
+    const now = new Date().toISOString();
+    const id = createHash("sha256").update(JSON.stringify({ name: merged.name, category: merged.category })).digest("hex");
+    void this.store.save({
+      id, project: "skill", kind: "repair", content: JSON.stringify(merged),
+      source: merged.evidenceIds.join(","), confidence: Math.min(0.99, 0.8 + Math.min(merged.evidenceIds.length, 10) * 0.015),
+      createdAt: previous ? now : now, updatedAt: now, uses: previous ? 1 : 0,
+    });
   }
   list(): readonly LearnedSkillCandidate[] { return [...this.cache]; }
 }
