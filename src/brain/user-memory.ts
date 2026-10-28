@@ -38,6 +38,16 @@ function redactMemorySecrets(content: string): string {
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED]");
 }
 
+function normalizeMemorySearchText(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+function memorySearchTerms(value: string): string[] {
+  // Preserve Thai and other scripts as chunks between whitespace; substring matching
+  // keeps Thai queries useful without adding a language-specific tokenizer dependency.
+  return value.split(/\s+/u).map((term) => term.trim()).filter((term) => term.length > 1);
+}
+
 function defaultUserMemoryDirectory(): string {
   const configured = process.env.SOFIA_STATE_DIR?.trim();
   if (configured) {
@@ -137,19 +147,32 @@ export class FileUserMemoryStore implements UserMemoryStore {
 
   async find(userId: string, query: string, limit = 8): Promise<UserMemoryEntry[]> {
     userKey(userId);
-    const terms = query.toLowerCase().split(/\s+/).filter((term) => term.length > 1).slice(0, 32);
-    if (terms.length === 0) return [];
-    const matches = (await this.read(userId)).map((entry) => {
-      const text = (entry.kind + " " + entry.content).toLowerCase();
-      const score = terms.reduce((total, term) => total + (text.includes(term) ? 1 : 0), 0);
+    const normalizedQuery = normalizeMemorySearchText(query);
+    const terms = memorySearchTerms(normalizedQuery).slice(0, 32);
+    if (!normalizedQuery || terms.length === 0) return [];
+
+    const entries = await this.read(userId);
+    const now = Date.now();
+    return entries.map((entry) => {
+      const content = normalizeMemorySearchText(entry.content);
+      const searchable = normalizeMemorySearchText(entry.kind + " " + entry.content);
+      const matchedTerms = terms.filter((term) => searchable.includes(term));
+      if (matchedTerms.length === 0) return { entry, score: 0 };
+      const coverage = matchedTerms.length / terms.length;
+      const phraseMatch = content.includes(normalizedQuery);
+      const kindMatch = normalizeMemorySearchText(entry.kind) === normalizedQuery;
+      const confidence = Math.max(0, Math.min(1, entry.confidence));
+      const ageMs = Math.max(0, now - Date.parse(entry.updatedAt));
+      const recency = Number.isFinite(ageMs) ? 1 / (1 + ageMs / (30 * 24 * 60 * 60 * 1000)) : 0;
+      const score = (phraseMatch ? 4 : 0) + coverage * 3 +
+        (matchedTerms.length / terms.length) + (kindMatch ? 0.25 : 0) +
+        confidence * 0.2 + recency * 0.1;
       return { entry, score };
     }).filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score || b.entry.updatedAt.localeCompare(a.entry.updatedAt))
       .slice(0, Math.max(1, Math.min(20, Math.floor(limit))))
       .map(({ entry }) => entry);
-    return matches;
   }
-
   async delete(userId: string, id: string): Promise<boolean> {
     userKey(userId);
     return this.withUserWriteLock(userId, async () => {
