@@ -5,20 +5,34 @@ import { runSkillLifecycleWorkflow } from "./skill-lifecycle-workflow.js";
 import type { VersionedSkillLifecycle } from "./skill-lifecycle.js";
 import type { SkillPackage } from "../skills/platform.js";
 
+export interface ManagedSkillLearningOptions {
+  /**
+   * Opt-in approval gate for skill promotion. Defaults to false so verified,
+   * metadata-only skills can be promoted automatically, like Hermes.
+   * Set SOFIA_SKILL_WRITE_APPROVAL=true to require the host approval handler.
+   */
+  requireApproval?: boolean;
+}
+
 /**
  * Connects verified Brain repair candidates to the persisted skill lifecycle.
- * Promotion is fail-closed unless both a trusted approval handler and an
- * authenticated principal are present.
+ * A trusted authenticated principal is always required. By default, promotion
+ * is automatic only after the lifecycle evaluator passes; skill instructions
+ * remain metadata and are not executed by this handler. Hosts can opt into an
+ * explicit, action-hash-bound approval gate for promotion.
  */
 export function createManagedSkillLearningHandler(
   lifecycle: VersionedSkillLifecycle,
   approval?: ApprovalHandler,
+  options: ManagedSkillLearningOptions = {},
 ): (candidate: LearnedSkillCandidate, runId: string, principalId?: string) => Promise<boolean> {
   return async (candidate, runId, principalId) => {
     const authenticatedPrincipalId = principalId?.trim();
-    // Never allow an approval adapter to turn an anonymous promotion into an
-    // authorized one. The identity is part of the approval request and hash.
-    if (!approval || !authenticatedPrincipalId) return false;
+    // Never promote skills for anonymous work, even when approval is disabled.
+    if (!authenticatedPrincipalId) return false;
+
+    const requireApproval = options.requireApproval ?? process.env.SOFIA_SKILL_WRITE_APPROVAL === "true";
+    if (requireApproval && !approval) return false;
 
     const skillPackage: SkillPackage = {
       skill: {
@@ -45,6 +59,8 @@ export function createManagedSkillLearningHandler(
       },
       {
         approvePromotion: async (record) => {
+          if (!requireApproval) return true;
+          // The guard above ensures approval is present when required.
           const toolName = "skill.lifecycle.promote";
           const input: Record<string, unknown> = {
             candidateId: record.id,
@@ -54,13 +70,13 @@ export function createManagedSkillLearningHandler(
             evidenceIds: [...record.provenance.evidenceIds],
             confidence: record.provenance.confidence,
           };
-          return approval({
+          return approval!({
             runId,
             principalId: authenticatedPrincipalId,
             toolName,
             input,
             actionHash: actionHash(runId, toolName, input, authenticatedPrincipalId),
-            risk: "high",
+            risk: "medium",
           });
         },
       },
