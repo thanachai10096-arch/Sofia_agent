@@ -9,6 +9,9 @@ import type { JobRecord } from "../brain/job-runtime.js";
 
 export interface AgentRunInput {
   task: string;
+  _messagingContext?: { platform: "telegram" | "discord" | "slack" | "line" | "whatsapp" | "matrix"; userId: string; conversationId: string; messageId: string; taskHash: string; signature: string };
+  /** Populated only after the API verifies _messagingContext; never trusted from request JSON. */
+  _trustedMessagingTarget?: import("../brain/types.js").NotificationTarget;
   workspace?: string;
   context?: string;
   maxSteps?: number;
@@ -59,6 +62,8 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** HMAC secret shared only with trusted server-side messaging bridges. */
+  messagingContextSecret?: string;
   /** Deliver a terminal cron result to its trusted origin. Return true only when the provider accepted it. */
   onCronExecutionFinished?: (schedule: CronSchedule, execution: CronExecution, job?: JobRecord) => Promise<boolean> | boolean;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
