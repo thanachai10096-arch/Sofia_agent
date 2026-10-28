@@ -45,7 +45,7 @@ function loadExplicitProviderConfig(): SofiaModelConfig | undefined {
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
       throw new Error("Provider base URL must use HTTP or HTTPS for " + id);
     }
-    providers[id] = { baseUrl: baseUrl.replace(/\\/+$/, ""), apiKey, model };
+    providers[id] = { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey, model };
   }
 
   const defaultProvider = ids[0]!;
