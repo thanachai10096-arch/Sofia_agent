@@ -184,3 +184,42 @@ test("rejects malformed configured cost estimates without mutating usage", () =>
   }), /provider-reported token metrics/);
   assert.equal(usage.get("key-a").configuredCostNanoUsd, undefined);
 });
+
+test("omits configured cost after the daily accounting window rolls over", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "sofia-usage-cost-window-"));
+  const store = path.join(dir, "usage.json");
+  try {
+    writeFileSync(store, JSON.stringify([{
+      keyId: "key-a",
+      runs: 4,
+      toolCalls: 8,
+      startedAt: Date.now() - 25 * 60 * 60 * 1000,
+      brainRuns: 2,
+      brainModelCalls: 4,
+      brainReservedOrUsedTokens: 400,
+      providerInputTokens: 300,
+      providerOutputTokens: 100,
+      providerUsageCalls: 4,
+      configuredCostNanoUsd: "987654321",
+    }]));
+    const usage = new UsageLimiter(10, 100, store);
+
+    // This report has no provider pricing provenance. The previous day's
+    // configured estimate must not leak into the new accounting window.
+    usage.recordBrainUsage("key-a", { modelCalls: 1, reservedOrUsedTokens: 20 });
+
+    const record = usage.get("key-a");
+    assert.equal(record.runs, 0);
+    assert.equal(record.toolCalls, 0);
+    assert.equal(record.brainRuns, 1);
+    assert.equal(record.brainModelCalls, 1);
+    assert.equal(record.brainReservedOrUsedTokens, 20);
+    assert.equal(record.providerInputTokens, 0);
+    assert.equal(record.providerOutputTokens, 0);
+    assert.equal(record.providerUsageCalls, 0);
+    assert.equal(record.configuredCostNanoUsd, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
