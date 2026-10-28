@@ -28,18 +28,19 @@ function fixture() {
   return { directory, platform, lifecycle };
 }
 
-test("managed skill learning activates only after explicit approval", async () => {
+test("managed skill learning activates only after explicit approval bound to a principal", async () => {
   const f = fixture();
-  const approvalCalls: Array<{ toolName: string; risk: string }> = [];
+  const approvalCalls: Array<{ toolName: string; risk: string; principalId?: string }> = [];
   try {
     const handler = createManagedSkillLearningHandler(f.lifecycle, async (request) => {
-      approvalCalls.push({ toolName: request.toolName, risk: request.risk });
+      approvalCalls.push({ toolName: request.toolName, risk: request.risk, principalId: request.principalId });
       return true;
     });
     assert.equal(await handler(candidate, "run-1", "operator-1"), true);
     assert.equal(approvalCalls.length, 1);
     assert.equal(approvalCalls[0]?.toolName, "skill.lifecycle.promote");
     assert.equal(approvalCalls[0]?.risk, "high");
+    assert.equal(approvalCalls[0]?.principalId, "operator-1");
     assert.equal(f.platform.get("learned:repair-type_error:type_error")?.source, "learned");
   } finally {
     rmSync(f.directory, { recursive: true, force: true });
@@ -50,9 +51,26 @@ test("managed skill learning fails closed when approval is absent or declined", 
   const f = fixture();
   try {
     const noApproval = createManagedSkillLearningHandler(f.lifecycle);
-    assert.equal(await noApproval(candidate, "run-2"), false);
+    assert.equal(await noApproval(candidate, "run-2", "operator-1"), false);
     const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false);
-    assert.equal(await declined(candidate, "run-3"), false);
+    assert.equal(await declined(candidate, "run-3", "operator-1"), false);
+    assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
+  } finally {
+    rmSync(f.directory, { recursive: true, force: true });
+  }
+});
+
+test("anonymous or blank-principal skill promotion never reaches the approval handler", async () => {
+  const f = fixture();
+  let approvalCalls = 0;
+  try {
+    const handler = createManagedSkillLearningHandler(f.lifecycle, async () => {
+      approvalCalls += 1;
+      return true;
+    });
+    assert.equal(await handler(candidate, "run-anonymous"), false);
+    assert.equal(await handler(candidate, "run-blank", "   "), false);
+    assert.equal(approvalCalls, 0);
     assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
   } finally {
     rmSync(f.directory, { recursive: true, force: true });
@@ -75,6 +93,7 @@ test("managed skill learning accepts verified general-workflow candidates with e
     const handler = createManagedSkillLearningHandler(f.lifecycle, async (request) => {
       assert.equal(request.toolName, "skill.lifecycle.promote");
       assert.equal(request.risk, "high");
+      assert.equal(request.principalId, "operator-1");
       return true;
     });
     assert.equal(await handler(workflowCandidate, "run-workflow-1", "operator-1"), true);
