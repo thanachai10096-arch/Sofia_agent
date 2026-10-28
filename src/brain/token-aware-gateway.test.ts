@@ -295,3 +295,41 @@ test("context packing deduplicates identical evidence text across different IDs"
 
   assert.deepEqual(packedIds, ["first-copy"]);
 });
+
+test("equal estimated costs use configured route weights instead of array order", async () => {
+  const budget = makeBudget();
+  let selected = "";
+  const expensiveRoute: InternalRoute = {
+    ...route(async () => {
+      selected = "expensive";
+      return {
+        value: { ok: true },
+        usage: { inputTokens: 10, outputTokens: 1 },
+        finishReason: "complete",
+      };
+    }),
+    id: "a-expensive",
+    costWeight: 3,
+    latencyWeight: 2,
+    qualityWeight: 8,
+  };
+  const economicalRoute: InternalRoute = {
+    ...route(async () => {
+      selected = "economical";
+      return {
+        value: { ok: true },
+        usage: { inputTokens: 10, outputTokens: 1 },
+        finishReason: "complete",
+      };
+    }),
+    id: "z-economical",
+    costWeight: 1,
+    latencyWeight: 1,
+    qualityWeight: 5,
+  };
+  const gateway = new TokenAwareGateway(budget, [expensiveRoute, economicalRoute]);
+
+  await gateway.generate(request());
+
+  assert.equal(selected, "economical");
+});
