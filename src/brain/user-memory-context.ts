@@ -11,7 +11,7 @@ function redactMemoryContent(content: string): string {
     .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, "[REDACTED]")
     .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[REDACTED]")
     .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "[REDACTED]")
-    .replace(/\bAKIA[0-9A-Z]{16}\\b/g, "[REDACTED]");
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED]");
 }
 
 /**
