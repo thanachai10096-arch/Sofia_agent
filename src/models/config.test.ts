@@ -60,7 +60,7 @@ test("Gemini route-specific model overrides the shared Gemini model", () => {
 test("explicit provider configuration supports custom OpenAI-compatible endpoints without Gemini", () => {
   clear();
   process.env.SOFIA_PROVIDER_IDS = "primary";
-  process.env.SOFIA_PROVIDER_PRIMARY_BASE_URL = "https://api.example.test/v1";
+  process.env.SOFIA_PROVIDER_PRIMARY_BASE_URL = "https://api.example.test/v1///";
   process.env.SOFIA_PROVIDER_PRIMARY_API_KEY = "explicit-test-key";
   process.env.SOFIA_PROVIDER_PRIMARY_MODEL = "example-model";
   const config = loadModelConfigFromEnv();
