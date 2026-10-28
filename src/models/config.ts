@@ -126,7 +126,11 @@ function validateBaseUrl(raw: string, provider: string): string {
 }
 
 export function loadModelConfigFromEnv(): SofiaModelConfig {
-  const providerId = (process.env.SOFIA_MODEL_PROVIDER?.trim().toLowerCase() || "gemini");
+  // Support the common BASE_URL + API_KEY + MODEL convention without
+  // changing the legacy Gemini default for existing deployments.
+  const requestedProvider = process.env.SOFIA_MODEL_PROVIDER?.trim().toLowerCase();
+  const hasGenericBaseUrl = Boolean(process.env.SOFIA_MODEL_BASE_URL?.trim() || process.env.BASE_URL?.trim());
+  const providerId = requestedProvider || (hasGenericBaseUrl ? "openai-compatible" : "gemini");
   const preset = PROVIDER_PRESETS[providerId];
   if (!preset) {
     throw new Error(
@@ -140,11 +144,13 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     "";
   const apiKey = (
     process.env.SOFIA_MODEL_API_KEY?.trim() ||
+    (providerId === "openai-compatible" ? process.env.API_KEY?.trim() : "") ||
     (providerId === "gemini" ? legacyGeminiKey : "") ||
     (preset.apiKeyEnv ? process.env[preset.apiKeyEnv]?.trim() : "") ||
     ""
   );
-  const configuredBaseUrl = process.env.SOFIA_MODEL_BASE_URL?.trim();
+  const configuredBaseUrl = process.env.SOFIA_MODEL_BASE_URL?.trim() ||
+    (providerId === "openai-compatible" ? process.env.BASE_URL?.trim() : undefined);
   const rawBaseUrl = configuredBaseUrl || preset.baseUrl;
   if (!rawBaseUrl) {
     throw new Error("Set SOFIA_MODEL_BASE_URL for the openai-compatible provider.");
@@ -172,6 +178,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
 
   const defaultModel =
     process.env.SOFIA_MODEL_NAME?.trim() ||
+    (providerId === "openai-compatible" ? process.env.MODEL?.trim() : "") ||
     (providerId === "gemini" ? process.env.GEMINI_MODEL?.trim() : "") ||
     preset.defaultModel;
   if (!defaultModel) {
