@@ -99,6 +99,7 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
         options.maxContextTokens,
         1,
       ),
+      providerReportedUsage: true,
       invoke: async (invokeOptions) => {
         const result = await this.gateway.generateMetered(
           input,
