@@ -30,7 +30,7 @@ Configure these server-side environment variables on a Test/Preview deployment f
 - `SLACK_ALLOWED_CHANNEL_IDS` — comma-separated channel IDs; an empty list denies all channels.
 - `SOFIA_API_BASE_URL` and `SOFIA_API_KEY` — existing HTTPS Sofia API endpoint and server-side key.
 
-Set the Slack Event Subscriptions Request URL to `https://<your-host>/api/slack/events` and subscribe only to the required `message.*` event types. Install the app only in the intended workspace and restrict bot access. Requests are timestamp-window checked and task creation uses a stable idempotency key derived from Slack's `event_id`, so retries do not intentionally create a second run when the Sofia API honors that key. If API acceptance is uncertain, the route returns a retryable error; check the run status before manually resubmitting. The route posts an acceptance message in the originating thread, but does not stream final run completion yet.
+Set the Slack Event Subscriptions Request URL to `https://<your-host>/api/slack/events` and subscribe only to the required `message.*` event types. Install the app only in the intended workspace and restrict bot access. Requests are timestamp-window checked and task creation uses a stable idempotency key derived from Slack's `event_id`, so retries do not intentionally create a second run when the Sofia API honors that key. The route returns a retryable 503 when the Sofia API does not confirm run creation, instead of acknowledging and silently dropping the task. If API acceptance is uncertain, the route returns a retryable error; check the run status before manually resubmitting. The route posts an acceptance message in the originating thread, but does not stream final run completion yet.
 
 This route follows the repository's Node serverless `api/` convention; it is not automatically mounted by the separate Railway API process unless that deployment explicitly serves the same route. Do not describe Slack as live-ready until URL verification, allowlist denial, duplicate/retry behavior, message delivery, and genuine Slack workspace smoke tests pass.
 
@@ -84,7 +84,7 @@ The code outline above is not a claim that the repository's API server is alread
 
 ## Production acceptance checklist
 
-- [ ] Typecheck, build, and full test suite pass on the PR head.
+- [ ] Typecheck, build, and full test suite pass on the PR head, including `tests/api/slack-events.test.ts` (signature/challenge, allowlist denial, retryable Sofia API failure).
 - [ ] Telegram test bot receives a message, rejects an unallowlisted user, and returns a long reply in bounded chunks.
 - [ ] Duplicate Telegram updates do not start duplicate runs, including after process restart when a durable dedupe store is configured.
 - [ ] Discord application command is registered; signature verification rejects invalid/stale signatures and accepts a genuine interaction.
