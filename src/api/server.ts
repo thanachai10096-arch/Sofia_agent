@@ -12,6 +12,7 @@ import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import { appendRelevantUserMemoryContext } from "../brain/user-memory-context.js";
 
 interface ActiveRun {
   id: string;
@@ -197,6 +198,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     ...(run.error ? { error: run.error } : {}),
   });
 
+  const contextForRun = async (ownerKeyId: string, input: AgentRunInput): Promise<{ context?: string }> => {
+    const provided = input.context === undefined
+      ? undefined
+      : typeof input.context === "string" ? input.context : JSON.stringify(input.context);
+    const context = await appendRelevantUserMemoryContext(deps.userMemoryStore, ownerKeyId, input.task, provided);
+    return context === undefined ? {} : { context };
+  };
+
   const startRun = (run: ActiveRun, input: AgentRunInput) => {
     void (async () => {
       run.status = "running";
@@ -209,7 +218,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
           ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
-          ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
+          ...(await contextForRun(run.ownerKeyId, input)),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
@@ -477,7 +486,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
-            ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
+            ...(await contextForRun(auth.keyId, input)),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
@@ -589,7 +598,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
-            ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
+            ...(await contextForRun(auth.keyId, input)),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
