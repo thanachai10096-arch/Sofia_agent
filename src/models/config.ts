@@ -118,11 +118,11 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
 
   for (const [id, capabilities, cost, latency, quality] of definitions) {
     const routeModel = selected.kind === "gemini"
-      ? process.env[`GEMINI_${id.toUpperCase()}_MODEL]?.trim()
+      ? process.env[`GEMINI_${id.toUpperCase()}_MODEL`]?.trim()
       : selected.kind === "openrouter"
-        ? process.env[`OPENROUTER_${id.toUpperCase()}_MODEL]?.trim()
+        ? process.env[`OPENROUTER_${id.toUpperCase()}_MODEL`]?.trim()
         : selected.kind === "openai"
-          ? process.env[`OPENAI_${id.toUpperCase()}_MODEL]?.trim()
+          ? process.env[`OPENAI_${id.toUpperCase()}_MODEL`]?.trim()
           : undefined;
     const model = routeModel ||
       process.env[`SOFIA_${id.toUpperCase()}_MODEL`]?.trim() ||
