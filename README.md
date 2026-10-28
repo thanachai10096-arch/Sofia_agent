@@ -23,7 +23,7 @@ A model-agnostic AI agent runtime with internal model routing, policy-controlled
 
 Sofia Agent is a standalone agent runtime and platform. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
 
-> **Model routing is an internal policy.** End users do not choose models; Sofia decides how requests are handled.
+> **Model routing:** Sofia currently chooses routes internally based on task classification and configured routes. Per-request user-selected provider/model and an `auto` override are a planned parity item, not yet a supported public contract.
 
 
 ## Open source and contribution
@@ -253,7 +253,7 @@ try {
 }
 ```
 
-Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Session transcript persistence does not automatically replay history into model context or add transcript retrieval endpoints. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
+Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. On the current agent-core path, a supplied `sessionId` replays a bounded set of recent turns into the next request as untrusted reference context. Explicitly saved user memories are also retrieved when a memory store and authenticated `principalId` are configured. This does not add a public transcript retrieval endpoint. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
 
 ## User memory
 
