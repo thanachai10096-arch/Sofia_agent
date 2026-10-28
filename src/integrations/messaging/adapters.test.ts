@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createTelegramAdapter, type TelegramUpdate } from "./telegram.js";
 import { createDiscordAdapter, type VerifiedDiscordMessage } from "./discord.js";
+import { createSlackAdapter, type VerifiedSlackMessage } from "./slack.js";
 
 test("Telegram adapter normalizes messages and splits oversized replies", async () => {
   let onUpdate: ((update: TelegramUpdate) => Promise<void>) | undefined;
@@ -36,7 +37,6 @@ test("Discord adapter ignores unverified events and bot messages", async () => {
   assert.equal(received, 1);
 });
 
-import { createSlackAdapter, type VerifiedSlackMessage } from "./slack.js";
 
 test("Slack adapter rejects unverified and bot events and normalizes verified human messages", async () => {
   let onEvent: ((message: VerifiedSlackMessage) => Promise<void>) | undefined;
