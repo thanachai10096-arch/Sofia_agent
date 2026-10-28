@@ -105,7 +105,8 @@ function asInferenceRequest(request: string): InferenceRequest {
       // Keep one copy, preferring the source with the stronger task relevance.
       // Do not normalize whitespace or code; only byte-for-byte source content
       // is considered duplicate.
-      if (score > evidence[existingIndex].relevance) {
+      const existing = evidence[existingIndex];
+      if (existing && score > existing.relevance) {
         evidence[existingIndex] = {
           id,
           relevance: score,
