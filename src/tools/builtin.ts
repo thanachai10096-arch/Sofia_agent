@@ -76,8 +76,13 @@ export function createBuiltinTools(userMemoryStore?: UserMemoryStore): SofiaTool
           const link = block.match(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
           if (!link) continue;
           let target: URL;
-          try { target = new URL(decodeHtml(link[1]!)); } catch { continue; }
-          if (target.protocol !== "https:" || target.hostname === "html.duckduckgo.com") continue;
+          try { target = new URL(decodeHtml(link[1]!), url); } catch { continue; }
+          if (target.hostname.endsWith("duckduckgo.com")) {
+            const destination = target.searchParams.get("uddg");
+            if (!destination) continue;
+            try { target = new URL(destination); } catch { continue; }
+          }
+          if (target.protocol !== "https:" || target.hostname.endsWith("duckduckgo.com") || target.username || target.password) continue;
           const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/div>/i);
           results.push({
             title: decodeHtml(link[2]!.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 300),
