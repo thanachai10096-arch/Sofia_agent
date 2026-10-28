@@ -24,10 +24,10 @@ function allowedNetworkUrl(raw: string): URL {
   if (url.protocol !== "https:" || url.username || url.password) {
     throw new Error("Web tools only allow HTTPS URLs without embedded credentials.");
   }
-  const host = url.hostname.toLowerCase().replace(/\\.$/, "");
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
   if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") ||
-      /^127\\./.test(host) || /^10\\./.test(host) || /^192\\.168\\./.test(host) ||
-      /^169\\.254\\./.test(host) || /^172\\.(1[6-9]|2[0-9]|3[0-1])\\./.test(host) ||
+      /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
+      /^169\.254\./.test(host) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
       host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:")) {
     throw new Error("Web tools cannot access localhost or private network addresses.");
   }
@@ -39,7 +39,7 @@ function allowedNetworkUrl(raw: string): URL {
 
 function decodeHtml(value: string): string {
   return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#(\\d+);/g, (_match, code: string) => String.fromCharCode(Number(code)));
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#(\d+);/g, (_match, code: string) => String.fromCharCode(Number(code)));
 }
 
 async function fetchBoundedText(url: URL): Promise<{ status: number; contentType: string; text: string }> {
@@ -47,7 +47,7 @@ async function fetchBoundedText(url: URL): Promise<{ status: number; contentType
   if (response.status >= 300 && response.status < 400) throw new Error("Web tool redirects are not followed; validate the destination host explicitly.");
   const contentType = response.headers.get("content-type") ?? "";
   if (!response.ok) throw new Error("Web request failed with HTTP " + response.status);
-  if (!/(text\\/html|text\\/plain|application\\/json|application\\/xml)/i.test(contentType)) throw new Error("Unsupported web response content type.");
+  if (!/(text\/html|text\/plain|application\/json|application\/xml)/i.test(contentType)) throw new Error("Unsupported web response content type.");
   const text = (await response.text()).slice(0, 1_000_000);
   return { status: response.status, contentType, text };
 }
@@ -72,18 +72,18 @@ export function createBuiltinTools(userMemoryStore?: UserMemoryStore): SofiaTool
         const url = allowedNetworkUrl("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query));
         const response = await fetchBoundedText(url);
         const results: Array<{ title: string; url: string; snippet: string }> = [];
-        const blocks = response.text.match(/<div class="result[^"]*"[^>]*>[\\s\\S]*?<\\/div>\\s*<\\/div>/gi) ?? [];
+        const blocks = response.text.match(/<div class="result[^"]*"[^>]*>[\s\\S]*?<\/div>\s*<\/div>/gi) ?? [];
         for (const block of blocks) {
-          const link = block.match(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/i);
+          const link = block.match(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\\S]*?)<\/a>/i);
           if (!link) continue;
           let target: URL;
           try { target = new URL(decodeHtml(link[1])); } catch { continue; }
           if (target.protocol !== "https:" || target.hostname === "html.duckduckgo.com") continue;
-          const snippetMatch = block.match(/class="result__snippet"[^>]*>([\\s\\S]*?)<\\/div>/i);
+          const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\\S]*?)<\/div>/i);
           results.push({
-            title: decodeHtml(link[2].replace(/<[^>]+>/g, " ")).replace(/\\s+/g, " ").trim().slice(0, 300),
+            title: decodeHtml(link[2].replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 300),
             url: target.toString(),
-            snippet: decodeHtml((snippetMatch?.[1] ?? "").replace(/<[^>]+>/g, " ")).replace(/\\s+/g, " ").trim().slice(0, 700),
+            snippet: decodeHtml((snippetMatch?.[1] ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 700),
           });
           if (results.length >= limit) break;
         }
@@ -103,9 +103,9 @@ export function createBuiltinTools(userMemoryStore?: UserMemoryStore): SofiaTool
       async execute(input) {
         const url = allowedNetworkUrl(String(input.url ?? ""));
         const response = await fetchBoundedText(url);
-        const text = response.text.replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi, " ")
-          .replace(/<style\\b[^>]*>[\\s\\S]*?<\\/style>/gi, " ")
-          .replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\\s+/g, " ").trim();
+        const text = response.text.replace(/<script\b[^>]*>[\s\\S]*?<\/script>/gi, " ")
+          .replace(/<style\b[^>]*>[\s\\S]*?<\/style>/gi, " ")
+          .replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
         return { url: url.toString(), status: response.status, contentType: response.contentType, text: decodeHtml(text).slice(0, 20_000), untrusted: true };
       },
     },
