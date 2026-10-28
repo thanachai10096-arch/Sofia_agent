@@ -60,8 +60,11 @@ test("Matrix transport sends a text event using the configured server-side token
     fetchImpl: async (url, init) => {
       if (String(url).includes("/account/whoami")) return new Response(JSON.stringify({ user_id: "@sofia:example.org" }));
       if (String(url).includes("/sync")) {
-        controller.abort();
-        return new Response(JSON.stringify({ next_batch: "s1" }));
+        return await new Promise<Response>((resolve) => {
+          init?.signal?.addEventListener("abort", () => {
+            resolve(new Response(JSON.stringify({ next_batch: "s1" })));
+          }, { once: true });
+        });
       }
       request = { url: String(url), method: init?.method, auth: new Headers(init?.headers).get("authorization"), body: String(init?.body ?? "") };
       return new Response(JSON.stringify({ event_id: "$sent" }));
