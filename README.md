@@ -121,6 +121,12 @@ npm ci\nnpx playwright install chromium
 
 Only enable browser capability in environments where its permissions and policy are configured appropriately. Playwright traffic is routed through a local egress proxy that validates DNS answers and connects to the selected numeric IP, blocks private/internal destinations, and limits web traffic to HTTP port 80 and HTTPS port 443. Chromium QUIC and non-proxied WebRTC UDP are disabled to reduce direct-network bypasses. Sites that require non-standard ports may not work. Keep host/container egress controls enabled for defense in depth.
 
+## `> Web Chat`
+
+Start the Sofia API and open `/web-chat` on the same host. The page lets users chat naturally without a `/run` prefix, select a model profile per message, and save a default preference. It uses a server-side session cookie; the API key is not bundled in frontend code or stored in browser storage.
+
+See [Web Chat setup and security](docs/WEB_CHAT_SETUP.md) before enabling it outside local development. Production use requires HTTPS, a persistent private `SOFIA_STATE_DIR`, and appropriate network access controls.
+
 ## `> API — reconnectable runs`
 
 Sofia supports long-running work for desktop and mobile browser clients:

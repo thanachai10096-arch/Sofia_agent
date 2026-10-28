@@ -126,3 +126,80 @@ test("model preferences are persisted per API key and validated at the API bound
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("web chat keeps API keys server-side and scopes cookie sessions to same-origin requests", async () => {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, {
+    apiKeys: {
+      "web-key-one": ["agent:run", "agent:read"],
+      "read-only-key": ["agent:read"],
+    },
+    modelPreferenceStore: {
+      get: () => undefined,
+      set: () => undefined,
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const origin = baseUrl;
+
+  try {
+    const page = await fetch(`${baseUrl}/web-chat`);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+    assert.match(await page.text(), /no \/run command needed/);
+
+    const login = await fetch(`${baseUrl}/web-chat/session`, {
+      method: "POST",
+      headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({ apiKey: "web-key-one" }),
+    });
+    assert.equal(login.status, 200);
+    const setCookie = login.headers.get("set-cookie") ?? "";
+    assert.match(setCookie, /HttpOnly/);
+    assert.match(setCookie, /SameSite=Strict/);
+    assert.match(setCookie, /Secure/);
+    const cookie = setCookie.split(";", 1)[0];
+    assert.ok(cookie);
+    assert.ok(cookie.includes("="));
+
+    const preference = await fetch(`${baseUrl}/v1/settings/model`, {
+      headers: { cookie, origin, "sec-fetch-site": "same-origin" },
+    });
+    assert.equal(preference.status, 200);
+    assert.deepEqual(await preference.json(), { modelSelection: "auto", source: "default" });
+
+    const crossOrigin = await fetch(`${baseUrl}/v1/settings/model`, {
+      method: "PUT",
+      headers: { cookie, origin: "https://attacker.invalid", "content-type": "application/json", "sec-fetch-site": "cross-site" },
+      body: JSON.stringify({ modelSelection: "coding" }),
+    });
+    assert.equal(crossOrigin.status, 403);
+
+    const invalidLogin = await fetch(`${baseUrl}/web-chat/session`, {
+      method: "POST",
+      headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({ apiKey: "unknown-key" }),
+    });
+    assert.equal(invalidLogin.status, 401);
+
+    const logout = await fetch(`${baseUrl}/web-chat/session`, {
+      method: "DELETE",
+      headers: { origin, cookie, "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(logout.status, 200);
+    const afterLogout = await fetch(`${baseUrl}/v1/settings/model`, {
+      headers: { cookie, origin, "sec-fetch-site": "same-origin" },
+    });
+    assert.equal(afterLogout.status, 401);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
