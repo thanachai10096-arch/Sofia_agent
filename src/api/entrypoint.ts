@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
@@ -29,6 +30,18 @@ const matrixRuntime = createMatrixMessagingRuntime(process.env, workspace);
 const slackRuntime = createSlackMessagingRuntime(process.env, workspace);
 const lineRuntime = createLineMessagingRuntime(process.env, workspace);
 const whatsAppRuntime = createWhatsAppMessagingRuntime(process.env, workspace);
+
+const continuousWorkStore = new FileContinuousWorkStore(workspace);
+const continuousWorkSupervisor = deps.jobRuntime
+  ? new ContinuousWorkSupervisor(deps.jobRuntime, continuousWorkStore, {
+      // Never infer completion from a model's summary alone. Require a completed
+      // Brain report with passing verification evidence and no remaining risks.
+      isComplete: (_record, job) => hasVerifiedCompletionEvidence(job),
+      ...(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS?.trim()
+        ? { maxLifetimeIterations: Number(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS) }
+        : {}),
+    })
+  : undefined;
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -69,6 +82,76 @@ if (discordConfigured) {
       const principalId = "discord:" + message.author.id;
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
       const argument = message.content.trim().slice(command.length).trim();
+      if (command === "/work") {
+        const [action, ...rest] = argument.split(/\s+/);
+        const value = rest.join(" ").trim();
+        const owner = "chat:" + createHash("sha256").update(JSON.stringify(["discord", message.author.id])).digest("hex");
+        const sendWorkReply = async (text: string) => {
+          await discordTransport?.sendMessage(message.channelId, text.slice(0, 1700), undefined, message.id);
+        };
+        if (!continuousWorkSupervisor) {
+          await sendWorkReply("Sofia continuous work is unavailable.");
+          return;
+        }
+        try {
+          if (action === "create" && value) {
+            const work = await continuousWorkSupervisor.create(owner, value);
+            await sendWorkReply("Sofia created a paused objective.\nWork ID: " + work.id + "\nUse /work continue " + work.id + " to keep working.");
+            return;
+          }
+          if (action === "list" && !value) {
+            const work = await continuousWorkSupervisor.list(owner);
+            await sendWorkReply(work.length
+              ? work.map((item) => item.id + " — " + item.status + " — " + item.task.slice(0, 120)).join("\n")
+              : "You have no Sofia work objectives.");
+            return;
+          }
+          const match = value.match(/^([^\s]+)(?:\s+.*)?$/);
+          const workId = match?.[1];
+          if (!workId || !["status", "continue", "resume", "pause", "stop"].includes(action ?? "")) {
+            await sendWorkReply("Usage: /work create <task> | list | status <id> | continue <id> | resume <id> | pause <id> | stop <id>");
+            return;
+          }
+          const work = await continuousWorkSupervisor.get(workId, owner);
+          if (!work) {
+            await sendWorkReply("Work objective not found or not accessible to this Discord user.");
+            return;
+          }
+          if (action === "status") {
+            await sendWorkReply("Work " + work.id + ": " + work.status + "\nIteration: " + work.iteration + "\nTask: " + work.task);
+            return;
+          }
+          if (action === "continue") {
+            const started = await continuousWorkSupervisor.runContinuously(workId, owner);
+            await sendWorkReply(started ? "Continuous work accepted for " + workId + "." : "Cannot continue objective in status " + work.status + ".");
+            return;
+          }
+          if (action === "resume") {
+            if (continuousWorkSupervisor.isContinuous(workId) || (work.status === "active" && continuousWorkSupervisor.isRunning(workId))) {
+              await sendWorkReply("This objective is already active.");
+              return;
+            }
+            if (work.status === "stopped" || work.status === "completed") {
+              await sendWorkReply("This objective is already terminal: " + work.status + ".");
+              return;
+            }
+            void continuousWorkSupervisor.resume(workId, owner).catch(() => undefined);
+            await sendWorkReply("Resume accepted for " + workId + ".");
+            return;
+          }
+          const changed = action === "pause"
+            ? await continuousWorkSupervisor.pause(workId, owner)
+            : await continuousWorkSupervisor.stop(workId, owner);
+          const latest = await continuousWorkSupervisor.get(workId, owner);
+          await sendWorkReply(changed
+            ? "Objective " + workId + " is now " + (latest?.status ?? action) + "."
+            : "Objective could not be changed; current status: " + (latest?.status ?? "unknown") + ".");
+        } catch (error) {
+          console.error("Discord continuous-work command failed:", error instanceof Error ? error.name : "UnknownError");
+          await sendWorkReply("Sofia could not process that work command. Check redacted server logs.");
+        }
+        return;
+      }
       if (command === "/status" || command === "/cancel" || command === "/resume") {
         if (!/^([0-9a-f]{8}-[0-9a-f-]{27,})$/i.test(argument)) {
           await discordTransport?.sendMessage(
@@ -220,18 +303,6 @@ if (discordConfigured) {
   }, 5_000);
   discordRecoveryTimer.unref?.();
 }
-
-const continuousWorkStore = new FileContinuousWorkStore(workspace);
-const continuousWorkSupervisor = deps.jobRuntime
-  ? new ContinuousWorkSupervisor(deps.jobRuntime, continuousWorkStore, {
-      // Never infer completion from a model's summary alone. Require a completed
-      // Brain report with passing verification evidence and no remaining risks.
-      isComplete: (_record, job) => hasVerifiedCompletionEvidence(job),
-      ...(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS?.trim()
-        ? { maxLifetimeIterations: Number(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS) }
-        : {}),
-    })
-  : undefined;
 
 const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
