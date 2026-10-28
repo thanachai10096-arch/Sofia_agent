@@ -111,6 +111,7 @@ test("Git runtime blocks destructive history and working-tree operations", () =>
   assert.throws(() => assertSafeGitArgs(["rebase", "main"]), /subcommand is not allowed/);
   assert.throws(() => assertSafeGitArgs(["checkout", "--", "src/file.ts"]), /subcommand is not allowed/);
   assert.throws(() => assertSafeGitArgs(["restore", "src/file.ts"]), /working tree is blocked/);
+  assert.throws(() => assertSafeGitArgs(["restore", "--staged", "--worktree", "src/file.ts"]), /working tree is blocked/);
 });
 
 test("Git runtime blocks force pushes and Git execution/configuration overrides", () => {
