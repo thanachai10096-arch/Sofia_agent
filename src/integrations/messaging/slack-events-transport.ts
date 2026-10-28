@@ -117,8 +117,9 @@ export function createSlackEventsTransport(options: SlackEventsTransportOptions)
           ...(event.thread_ts ? { threadTs: event.thread_ts } : {}),
         });
       } catch {
+        seenEvents.delete(envelope.event_id);
         notify("inbound_handler_failed");
-        // Slack retries failed deliveries; keep response generic.
+        // Slack retries failed deliveries; release the dedupe claim so retry can be processed.
         return { status: 503, body: { error: "Slack event handling failed." } };
       }
       return { status: 200, body: { ok: true } };
