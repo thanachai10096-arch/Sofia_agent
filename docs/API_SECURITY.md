@@ -58,4 +58,5 @@ API keys are configured through a static key-to-scope map; automated key managem
 - `GET /v1/usage` reports per-API-key request and tool-call counters for the current accounting window.
 - `brainRuns`, `brainModelCalls`, and `brainReservedOrUsedTokens` are aggregate counters from successful Brain completion reports, persisted when `usageStorePath` is configured.
 - `brainReservedOrUsedTokens` is the Brain budget's reserved-or-used token count. It is **not** guaranteed to equal provider-billed tokens. Legacy runs and failed Brain runs may not contribute a completed Brain usage report.
-- Provider-billed input/output token totals and dollar cost per account are not yet exposed by this endpoint. Do not treat the counters above as an invoice or billing ledger.
+- `providerInputTokens`, `providerOutputTokens`, and `providerUsageCalls` aggregate input/output token counts explicitly reported by the configured model provider and surfaced through the token-aware Brain route. They are omitted when provenance is not established; they do not substitute estimates for missing provider usage.
+- Dollar cost per account is not yet exposed. Provider token counts can differ from invoice totals because of provider-specific billing rules, cached tokens, image/audio usage, or pricing changes. Do not treat this endpoint as an invoice or billing ledger.
