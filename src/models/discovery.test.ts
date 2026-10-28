@@ -146,7 +146,7 @@ test("extended probe verifies accepted image input and valid JSON-object output"
       return new Response(JSON.stringify({ choices: [{ message: { content: "A tiny test image." } }] }), { status: 200 });
     }
     assert.deepEqual(body.response_format, { type: "json_object" });
-    return new Response(JSON.stringify({ choices: [{ message: { content: "{\\"ok\\":true}" } }] }), { status: 200 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] }), { status: 200 });
   };
   const { probeExtendedModelCapabilities } = await import("./discovery.js");
   const result = await probeExtendedModelCapabilities({
