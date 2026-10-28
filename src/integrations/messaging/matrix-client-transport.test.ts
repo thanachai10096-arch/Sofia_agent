@@ -107,3 +107,42 @@ test("Matrix transport reports a failed delivery exactly once with its HTTP stat
   ]);
   await transport.stop();
 });
+
+test("Matrix transport rejects DNS answers that point to private or loopback networks", async () => {
+  for (const address of ["127.0.0.1", "10.2.3.4", "192.168.1.9", "169.254.169.254", "172.20.1.2", "::1", "fd00::1"]) {
+    let fetchCalls = 0;
+    const transport = createMatrixClientTransport({
+      homeserverUrl: "https://matrix.example.org",
+      accessToken: token,
+      resolveHostname: async () => [address],
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        return new Response(JSON.stringify({ user_id: "@sofia:example.org" }));
+      },
+    });
+    await assert.rejects(
+      () => transport.start(new AbortController().signal, async () => {}),
+      /non-public address/i,
+      `should reject DNS result ${address}`,
+    );
+    assert.equal(fetchCalls, 0, `must not send the access token to ${address}`);
+  }
+});
+
+test("Matrix transport rejects mixed public/private DNS answers", async () => {
+  let fetchCalls = 0;
+  const transport = createMatrixClientTransport({
+    homeserverUrl: "https://matrix.example.org",
+    accessToken: token,
+    resolveHostname: async () => ["93.184.216.34", "10.0.0.8"],
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return new Response(JSON.stringify({ user_id: "@sofia:example.org" }));
+    },
+  });
+  await assert.rejects(
+    () => transport.start(new AbortController().signal, async () => {}),
+    /non-public address/i,
+  );
+  assert.equal(fetchCalls, 0);
+});
