@@ -210,14 +210,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     const providerInputTokens = metrics.providerInputTokens;
     const providerOutputTokens = metrics.providerOutputTokens;
     const providerUsageCalls = metrics.providerUsageCalls;
+    const configuredCostNanoUsd = metrics.configuredCostNanoUsd;
     const hasProviderUsage = Number.isSafeInteger(providerInputTokens) && (providerInputTokens as number) >= 0 &&
       Number.isSafeInteger(providerOutputTokens) && (providerOutputTokens as number) >= 0 &&
       Number.isSafeInteger(providerUsageCalls) && (providerUsageCalls as number) >= 0;
+    const hasConfiguredCost = typeof configuredCostNanoUsd === "string" &&
+      /^(0|[1-9][0-9]*)$/.test(configuredCostNanoUsd);
     try {
       usage.recordBrainUsage(keyId, {
         modelCalls: metrics.modelCalls as number,
         reservedOrUsedTokens: metrics.reservedOrUsedTokens as number,
         ...(hasProviderUsage ? { providerInputTokens: providerInputTokens as number, providerOutputTokens: providerOutputTokens as number, providerUsageCalls: providerUsageCalls as number } : {}),
+        ...(hasConfiguredCost && hasProviderUsage ? { configuredCostNanoUsd: configuredCostNanoUsd as string } : {}),
       });
     } catch {
       // Usage reporting must not turn a successful agent run into a failed run.
