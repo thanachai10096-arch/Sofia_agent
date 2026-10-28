@@ -170,7 +170,7 @@ export default async function slackEvents(req: IncomingMessage, res: ServerRespo
       body: JSON.stringify({
         task: event.text.trim(),
         async: true,
-        context: `Origin: Slack message event. Slack user ID: ${event.user}. Channel ID: ${event.channel}.`,
+        context: `Origin: Slack message event. Slack user ID: ${event.user}. Channel ID: ${event.channel}. Message timestamp: ${event.ts}.`,
       }),
       signal: controller.signal,
     });
