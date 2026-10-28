@@ -35,7 +35,7 @@ npm run cli -- setup
 npm run cli -- chat
 ```
 
-The setup wizard asks for a provider (`openai-compatible`, `gemini`, or `openrouter`), API base URL when applicable, API key, and model ID. It writes the local config to `~/.sofia/config.json` with owner-only file permissions. **Do not commit API keys or paste them into issues or chat.**
+The setup wizard supports Gemini, OpenAI, OpenRouter, xAI, Mistral, Groq, DeepSeek, Together AI, Fireworks AI, Cerebras, Perplexity, and local Ollama, plus a generic `openai-compatible` endpoint for other compatible services. Named providers use their fixed official API origins; use `openai-compatible` for a custom gateway. The wizard asks for the API key and model ID, and the base URL for generic compatible endpoints. It writes the local config to `~/.sofia/config.json` with owner-only file permissions. **Do not commit API keys or paste them into issues or chat.**
 
 In chat, type a task normally. Enter `/exit` to leave. Local conversation sessions are stored under `~/.sofia/sessions.sqlite`. This is a local single-user CLI flow; it does not configure a hosted account or connect Telegram/Discord by itself.
 
@@ -59,7 +59,7 @@ Hosted and enterprise services described in the roadmap are potential offerings,
 
 - **Self-hosted / personal instance:** `sofia setup` configures only that installation. Its local provider settings and SQLite sessions do not configure other users.
 - **Shared hosted service:** per-API-key model profiles are available through `GET/PUT/DELETE /v1/model-profile` when `SOFIA_MODEL_PROFILE_ENCRYPTION_KEY` is configured. Provider keys are encrypted at rest with AES-256-GCM, keyed by a hash of the authenticated API principal, and never returned by the profile API. Grant `model:profile:read` and `model:profile:write` scopes to use the profile endpoints.
-- **Provider support:** Gemini and OpenRouter use fixed HTTPS endpoints. OpenAI-compatible providers require HTTPS and a hostname allowed by the operator. The profile's provider/model/API key override the server default only for that authenticated API principal; users without a profile continue using the server-owned default.
+- **Provider support:** Built-in OpenAI-compatible presets include Gemini, OpenAI, OpenRouter, xAI, Mistral, Groq, DeepSeek, Together AI, Fireworks AI, Cerebras, and Perplexity; local Ollama is allowed over loopback HTTP. Named providers are pinned to their official API origin to prevent forwarding credentials to an unrelated host. Use `openai-compatible` for other compatible APIs or custom gateways; public endpoints must use HTTPS. The profile's provider/model/API key override the server default only for that authenticated API principal; users without a profile continue using the server-owned default.
 - **Still required before calling the hosted product fully multi-user/Hermes-like:** persistent per-user cost/usage budgets, a durable shared profile database for horizontal scaling, a profile-management UX for users who arrive only through a shared chat bot identity, and live tests with real provider credentials. Keep server-owned provider options separate from user-owned BYOK credentials.
 
 
