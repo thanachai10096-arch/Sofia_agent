@@ -26,8 +26,8 @@ test("Slack Events transport normalizes verified human messages and deduplicates
   const transport = createSlackEventsTransport({ signingSecret: secret, botToken: token, now: () => fixedNow });
   const received: Array<{ userId: string; channelId: string; text: string }> = [];
   await transport.start(new AbortController().signal, async (message) => {
-    received.push({ userId: message.author?.id ?? "", channelId: message.channelId, text: message.content });
-  } as never);
+    received.push({ userId: message.userId, channelId: message.channelId, text: message.text });
+  });
   const body = JSON.stringify({ type: "event_callback", event_id: "Ev-123", event: {
     type: "message", user: "U123", channel: "C123", ts: "1710000000.0001", text: "hello Sofia",
   } });
