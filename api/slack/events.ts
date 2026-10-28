@@ -176,8 +176,10 @@ export default async function slackEvents(req: IncomingMessage, res: ServerRespo
     });
     let data: { id?: unknown; status?: unknown } = {};
     try { data = await response.json() as typeof data; } catch { /* never forward provider response bodies */ }
-    if (!response.ok || typeof data.id !== "string" || data.id.length > 256) {
-      reply(res, 200, { ok: true });
+    if (!response.ok || typeof data.id !== "string" || data.id.length === 0 || data.id.length > 256) {
+      // Acknowledge only after the Sofia API confirms run creation. A retry is
+      // safe because the same Slack event reuses this stable idempotency key.
+      reply(res, 503, { error: "sofia_run_not_accepted" });
       return;
     }
     runId = data.id;
