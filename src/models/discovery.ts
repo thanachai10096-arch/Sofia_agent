@@ -242,3 +242,119 @@ export async function probeModelCapabilities(
     verifiedCapabilities: toolResult.toolCall ? ["tool-use"] : [],
   };
 }
+
+
+export interface ExtendedModelCapabilityProbeResult {
+  model: string;
+  /** The endpoint accepted an image input and returned a non-empty response. This does not certify visual accuracy. */
+  visionInput: "accepted" | "unknown";
+  /** The model returned a parseable JSON object when asked for structured output. */
+  jsonObjectOutput: "verified" | "unknown";
+}
+
+/**
+ * Opt-in, potentially billable smoke tests for image-input acceptance and JSON-object output.
+ * It sends a tiny embedded test image and never invokes tools. A successful image request
+ * verifies input compatibility only, not visual reasoning quality.
+ */
+export async function probeExtendedModelCapabilities(
+  config: ModelCapabilityProbeConfig,
+  options: DiscoverModelsOptions = {},
+): Promise<ExtendedModelCapabilityProbeResult> {
+  const baseUrl = validateDiscoveryBaseUrl(config.baseUrl);
+  const model = config.model.trim();
+  if (!model) throw new Error("A model ID is required for capability probing.");
+  if (model.length > 512) throw new Error("Model ID is too long.");
+  const timeoutMs = options.timeoutMs ?? 20_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
+    throw new Error("Invalid model capability probe timeout.");
+  }
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
+    : AbortSignal.timeout(timeoutMs);
+  const anthropic = config.protocol === "anthropic";
+  const imageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j9Z8AAAAASUVORK5CYII=";
+
+  const send = async (kind: "vision" | "json"): Promise<{ accepted: boolean; text: string }> => {
+    const headers: Record<string, string> = { accept: "application/json", "content-type": "application/json" };
+    if (config.apiKey) {
+      if (anthropic) {
+        headers["x-api-key"] = config.apiKey;
+        headers["anthropic-version"] = "2023-06-01";
+      } else {
+        headers.authorization = "Bearer " + config.apiKey;
+      }
+    }
+    const body = anthropic
+      ? {
+          model,
+          max_tokens: 64,
+          ...(kind === "json" ? { system: "Return exactly one valid JSON object with the property \"ok\" set to true. No Markdown." } : {}),
+          messages: [{
+            role: "user",
+            content: kind === "vision"
+              ? [
+                  { type: "text", text: "Briefly describe the image input. If it is blank or too small to identify, say so." },
+                  { type: "image", source: { type: "base64", media_type: "image/png", data: imageBase64 } },
+                ]
+              : "Return exactly the JSON object {\"ok\":true}.",
+          }],
+        }
+      : {
+          model,
+          max_tokens: 64,
+          ...(kind === "json" ? { response_format: { type: "json_object" } } : {}),
+          messages: [{
+            role: "user",
+            content: kind === "vision"
+              ? [
+                  { type: "text", text: "Briefly describe the image input. If it is blank or too small to identify, say so." },
+                  { type: "image_url", image_url: { url: "data:image/png;base64," + imageBase64 } },
+                ]
+              : "Return exactly the JSON object {\"ok\":true}.",
+          }],
+        };
+    let response: Response;
+    try {
+      response = await fetch(baseUrl + (anthropic ? "/messages" : "/chat/completions"), {
+        method: "POST", headers, body: JSON.stringify(body), signal, redirect: "error",
+      });
+    } catch {
+      if (options.signal?.aborted) throw options.signal.reason ?? new Error("Extended model capability probe aborted.");
+      if (signal.aborted) throw new Error("Extended model capability probe timed out.");
+      throw new Error("Unable to reach the configured extended capability probe endpoint.");
+    }
+    if (!response.ok) return { accepted: false, text: "" };
+    let payload: unknown;
+    try { payload = await response.json(); } catch { return { accepted: false, text: "" }; }
+    if (!payload || typeof payload !== "object") return { accepted: false, text: "" };
+    if (anthropic) {
+      const blocks = "content" in payload && Array.isArray(payload.content) ? payload.content : [];
+      const text = blocks.filter((block) => !!block && typeof block === "object" && "type" in block && block.type === "text" && "text" in block && typeof block.text === "string")
+        .map((block) => (block as { text: string }).text).join("\n").trim();
+      return { accepted: text.length > 0, text };
+    }
+    const choices = "choices" in payload && Array.isArray(payload.choices) ? payload.choices : [];
+    const first = choices[0];
+    const message = first && typeof first === "object" && "message" in first && first.message && typeof first.message === "object"
+      ? first.message : null;
+    const text = message && "content" in message && typeof message.content === "string" ? message.content.trim() : "";
+    return { accepted: choices.length > 0 && text.length > 0, text };
+  };
+
+  const [vision, json] = await Promise.all([send("vision"), send("json")]);
+  let jsonObjectOutput: ExtendedModelCapabilityProbeResult["jsonObjectOutput"] = "unknown";
+  if (json.accepted) {
+    try {
+      const parsed: unknown = JSON.parse(json.text);
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        jsonObjectOutput = "verified";
+      }
+    } catch { /* Leave capability unknown when output is not valid JSON. */ }
+  }
+  return {
+    model,
+    visionInput: vision.accepted ? "accepted" : "unknown",
+    jsonObjectOutput,
+  };
+}
