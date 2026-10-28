@@ -52,6 +52,8 @@ export interface SofiaApiConfig {
   requestTimeoutMs?: number;
   maxConcurrentRunsPerKey?: number;
   securityAdminScope?: string;
+  /** Optional terminal callback for trusted server-side integrations. Failures must not change run state. */
+  onRunTerminal?: (run: AgentRunResponse, input: AgentRunInput) => void | Promise<void>;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
