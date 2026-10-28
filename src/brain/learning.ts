@@ -17,6 +17,8 @@ export interface LearnedSkillCandidate {
 export interface SkillLedger {
   record(candidate: LearnedSkillCandidate): void;
   list(): readonly LearnedSkillCandidate[];
+  /** Flush durable implementations before a run reports successful learning. */
+  flush?(): Promise<void>;
 }
 
 export class InMemorySkillLedger implements SkillLedger {
