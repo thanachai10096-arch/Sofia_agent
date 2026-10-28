@@ -34,6 +34,7 @@ Sofia Agent is distributed under the [MIT License](LICENSE). Review third-party 
 - **Report security issues:** [SECURITY.md](SECURITY.md)
 - **Open-source and commercial roadmap boundaries:** [docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md](docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md)
 - **Shared access architecture:** [docs/UNIFIED_ACCESS_ARCHITECTURE.md](docs/UNIFIED_ACCESS_ARCHITECTURE.md)
+- **Web Chat and Hermes-style parity:** [docs/HERMES_STYLE_WEB_CHAT.md](docs/HERMES_STYLE_WEB_CHAT.md)
 
 Hosted and enterprise services described in the roadmap are potential offerings, not a claim that they are currently available.
 
@@ -98,6 +99,18 @@ npm run build
 ```
 
 Use the repository's package scripts as the source of truth if a command differs in your environment.
+
+### Local Web Chat
+
+Start the Sofia API, then launch the loopback-only chat interface in another terminal:
+
+```bash
+SOFIA_API_URL=http://127.0.0.1:3000 SOFIA_API_KEY='<your Sofia API key>' npm run web:chat
+```
+
+Open `http://127.0.0.1:4173`. The local Node bridge keeps the API key server-side; it is not embedded in browser JavaScript or browser storage. The chat supports natural-language runs, saved model profiles, and user-controlled memory. To use the memory panel, configure the server key with `memory:read,memory:write` in addition to the minimum scopes it already needs.
+
+This built-in bridge is **local-only** and refuses non-loopback binding. Do not expose it directly to the internet. Public multi-user hosting requires an authenticated BFF with user sessions, CSRF protection, per-user isolation, and server-side secret management. See [Web Chat and Hermes-style parity](docs/HERMES_STYLE_WEB_CHAT.md).
 
 ### Persistent local state
 
