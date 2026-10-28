@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -74,3 +74,23 @@ test("rejects aggregate usage counter overflow without partially mutating the le
   );
   assert.deepEqual(provider.get("key-a"), beforeProviderOverflow);
 });
+
+test("preserves legacy persisted usage records until Brain usage is recorded", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "sofia-usage-legacy-"));
+  const store = path.join(dir, "usage.json");
+  try {
+    writeFileSync(store, JSON.stringify([{ keyId: "legacy-key", runs: 2, toolCalls: 3, startedAt: Date.now() }]));
+    const usage = new UsageLimiter(10, 100, store);
+    // Reading a legacy record may expose zero-valued compatibility fields to callers,
+    // but must not rewrite the stored record merely by loading or consuming API usage.
+    assert.equal(usage.get("legacy-key").brainRuns, 0);
+    usage.consume("legacy-key", 1);
+    const persisted = JSON.parse(readFileSync(store, "utf8")) as Array<Record<string, unknown>>;
+    assert.deepEqual(Object.keys(persisted[0]!).sort(), ["keyId", "runs", "startedAt", "toolCalls"]);
+    assert.equal(persisted[0]!.runs, 3);
+    assert.equal(persisted[0]!.toolCalls, 4);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
