@@ -682,6 +682,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (id && req.method === "GET") {
         const run = runs.get(id);
         if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
+        // Canonicalize cancellation on every read so even an unexpected late
+        // state write cannot expose a cancelled run as failed/completed.
+        if (cancelledRunIds.has(run.id) || run.cancelRequested || run.controller.signal.aborted) {
+          run.status = "cancelled";
+          run.error ??= run.controller.signal.reason instanceof Error
+            ? run.controller.signal.reason.message
+            : "Run cancelled.";
+        }
         return json(res, 200, publicResponse(run), origin, config);
       }
 
