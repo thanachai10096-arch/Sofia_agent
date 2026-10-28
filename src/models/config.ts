@@ -52,8 +52,10 @@ function selectedProvider(): { kind: ProviderKind; baseUrl: string; apiKey: stri
     } else {
       throw new Error("SOFIA_MODEL_PROVIDER must be gemini, openai, openrouter, or openai-compatible.");
     }
-  } else if (customBaseUrl) {
+  } else if (explicitSofiaBaseUrl) {
     kind = "openai-compatible";
+  } else if (openAiBaseUrl) {
+    kind = "openai";
   } else if (geminiKey) {
     // Preserve existing deployments: Gemini remains the default when its key is configured.
     kind = "gemini";
