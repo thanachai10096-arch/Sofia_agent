@@ -9,9 +9,10 @@ test("Matrix transport requires a public HTTPS homeserver and a bounded token", 
   assert.throws(() => createMatrixClientTransport({ homeserverUrl: "https://matrix.example.org", accessToken: "bad\nvalue" }), /token/);
 });
 
-test("Matrix transport authenticates, normalizes text events and ignores its own messages", async () => {
+test("Matrix transport establishes a sync cursor before dispatching new text events", async () => {
   const controller = new AbortController();
   const requests: Array<{ url: string; auth: string | null }> = [];
+  let syncCalls = 0;
   const transport = createMatrixClientTransport({
     homeserverUrl: "https://matrix.example.org",
     accessToken: token,
@@ -19,12 +20,21 @@ test("Matrix transport authenticates, normalizes text events and ignores its own
     fetchImpl: async (url, init) => {
       requests.push({ url: String(url), auth: new Headers(init?.headers).get("authorization") });
       if (String(url).includes("/account/whoami")) return new Response(JSON.stringify({ user_id: "@sofia:example.org" }));
+      syncCalls++;
+      if (syncCalls === 1) {
+        return new Response(JSON.stringify({
+          next_batch: "baseline",
+          rooms: { join: { "!room:example.org": { timeline: { events: [
+            { event_id: "$old", sender: "@alice:example.org", type: "m.room.message", content: { msgtype: "m.text", body: "old history must not run" } },
+          ] } } } },
+        }));
+      }
       return new Response(JSON.stringify({
-        next_batch: "s1",
+        next_batch: "s2",
         rooms: { join: { "!room:example.org": { timeline: { events: [
-          { event_id: "$own", sender: "@sofia:example.org", type: "m.room.message", content: { msgtype: "m.text", body: "ignore" } },
+          { event_id: "$own", sender: "@sofia:example.org", type: "m.room.message", content: { msgtype: "m.text", body: "ignore own message" } },
           { event_id: "$human", sender: "@alice:example.org", type: "m.room.message", origin_server_ts: 123, content: { msgtype: "m.text", body: "hello" } },
-          { event_id: "$image", sender: "@alice:example.org", type: "m.room.message", content: { msgtype: "m.image", body: "ignore" } },
+          { event_id: "$image", sender: "@alice:example.org", type: "m.room.message", content: { msgtype: "m.image", body: "ignore image" } },
         ] } } } },
       }));
     },
@@ -37,6 +47,7 @@ test("Matrix transport authenticates, normalizes text events and ignores its own
   for (let i = 0; i < 20 && received.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5));
   await transport.stop();
   assert.deepEqual(received, [{ senderId: "@alice:example.org", roomId: "!room:example.org", text: "hello" }]);
+  assert.ok(syncCalls >= 2);
   assert.ok(requests.every(request => request.auth === "Bearer " + token));
 });
 
