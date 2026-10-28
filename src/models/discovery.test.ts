@@ -13,9 +13,9 @@ test("discovers OpenAI-compatible model IDs and does not invent capability metad
     authorization = new Headers(init?.headers).get("authorization") ?? "";
     return new Response(JSON.stringify({
       data: [
-        { id: "model-a", owned_by: "provider", created: 123 },
+        { id: "model-a", owned_by: "provider", created: 123, context_length: 32768 },
         { id: "model-a", owned_by: "provider" },
-        { id: "model-b" },
+        { id: "model-b", context_window: 8192 },
         { name: "malformed" },
       ],
     }), { status: 200, headers: { "content-type": "application/json" } });
@@ -28,8 +28,8 @@ test("discovers OpenAI-compatible model IDs and does not invent capability metad
   assert.equal(requestUrl, "https://models.example.test/v1/models");
   assert.equal(authorization, "Bearer test-secret");
   assert.deepEqual(models, [
-    { id: "model-a", ownedBy: "provider", created: 123, capabilities: null },
-    { id: "model-b", capabilities: null },
+    { id: "model-a", ownedBy: "provider", created: 123, contextWindow: 32768, capabilities: null },
+    { id: "model-b", contextWindow: 8192, capabilities: null },
   ]);
 });
 
