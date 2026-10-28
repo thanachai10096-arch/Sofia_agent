@@ -48,7 +48,9 @@ export class SofiaAgent {
         // Only prior user/assistant turns are replayed. Treat them as untrusted
         // reference data, cap the replay, and never let them replace system policy.
         const priorTurns = session.messages.slice(-12).join("\n").slice(-8_000);
-        session.messages.push(`user: ${request.task}`);
+        session.messages.push(`user: ${request.task.slice(0, 4_000)}`);
+        if (session.messages.length > 200) session.messages.splice(0, session.messages.length - 200);
+        session.updatedAt = Date.now();
         this.deps.sessionStore.save(session);
         if (priorTurns) {
           appendUntrustedContext(
@@ -380,6 +382,12 @@ export class SofiaAgent {
         });
 
         if (review.approved) {
+          if (session && this.deps.sessionStore) {
+            session.messages.push(`assistant: ${response.text.slice(0, 8_000)}`);
+            if (session.messages.length > 200) session.messages.splice(0, session.messages.length - 200);
+            session.updatedAt = Date.now();
+            this.deps.sessionStore.save(session);
+          }
           emit({ type: "run.completed", message: "Sofia run completed." });
           return {
             runId,
