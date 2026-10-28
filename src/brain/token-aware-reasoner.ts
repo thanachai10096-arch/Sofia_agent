@@ -68,15 +68,27 @@ function asInferenceRequest(request: string): InferenceRequest {
       text: label + ": " + text.slice(0, 12_000),
     });
   };
+  const addContextEvidence = (id: string, value: string) => {
+    // Keep line/paragraph boundaries as separate evidence chunks so the gateway
+    // can rank useful context without treating an entire transcript as one item.
+    const chunks = value.split(/\\r?\\n/gu).map((line) => line.trim()).filter(Boolean);
+    if (chunks.length <= 1) {
+      addEvidence(id, "Prior context (untrusted reference data)", value);
+      return;
+    }
+    chunks.forEach((chunk, index) =>
+      addEvidence(id + "-" + index, "Prior context (untrusted reference data)", chunk),
+    );
+  };
 
-  if (typeof payload.context === "string") addEvidence("payload-context", "Prior context (untrusted reference data)", payload.context);
+  if (typeof payload.context === "string") addContextEvidence("payload-context", payload.context);
   const referenceContext = payload.referenceContext;
   if (typeof referenceContext === "string") {
-    addEvidence("reference-context", "Prior context (untrusted reference data)", referenceContext);
+    addContextEvidence("reference-context", referenceContext);
   } else if (referenceContext && typeof referenceContext === "object") {
     const reference = referenceContext as Record<string, unknown>;
     if (typeof reference.content === "string") {
-      addEvidence("reference-context", "Prior context (untrusted reference data)", reference.content);
+      addContextEvidence("reference-context", reference.content);
     }
   }
   if (typeof memory.projectContext === "string") addEvidence("project-context", "Project context (untrusted reference data)", memory.projectContext);
