@@ -7,10 +7,10 @@ import {
   validateSofiaApiBaseUrl,
 } from "./wizard.js";
 
-test("accepts HTTPS remote Sofia API URLs and normalizes trailing slashes", () => {
+test("accepts HTTPS API origins and normalizes trailing slashes", () => {
   assert.equal(
-    validateSofiaApiBaseUrl(" https://sofia.example.com/v1/// "),
-    "https://sofia.example.com/v1",
+    validateSofiaApiBaseUrl(" https://sofia.example.com/// "),
+    "https://sofia.example.com",
   );
 });
 
@@ -20,11 +20,12 @@ test("allows HTTP only for loopback development URLs", () => {
   assert.throws(() => validateSofiaApiBaseUrl("http://sofia.example.com"), /must use HTTPS/);
 });
 
-test("rejects invalid, credential-bearing, and query-bearing URLs", () => {
+test("rejects invalid, credential-bearing, query-bearing, and path-prefixed URLs", () => {
   assert.throws(() => validateSofiaApiBaseUrl(""), /Enter the Sofia API base URL/);
   assert.throws(() => validateSofiaApiBaseUrl("not a url"), /valid absolute URL/);
   assert.throws(() => validateSofiaApiBaseUrl("https://user:pass@sofia.example.com"), /Do not include/);
   assert.throws(() => validateSofiaApiBaseUrl("https://sofia.example.com?token=secret"), /query string/);
+  assert.throws(() => validateSofiaApiBaseUrl("https://sofia.example.com/v1"), /without a path prefix/);
   assert.throws(() => validateSofiaApiBaseUrl("file:///tmp/sofia"), /must use HTTPS/);
 });
 
@@ -55,7 +56,6 @@ test("missing API key requires attention and is never stored", () => {
   assert.equal(result.steps.find((step) => step.id === "credentials")?.status, "needs_attention");
   assert.ok(!JSON.stringify(createHostedSetupConfig("https://sofia.example.com")).includes("API_KEY"));
 });
-
 
 test("explicit API check verifies health and authenticated usage without running a task", async () => {
   const calls: Array<{ url: string; authorization?: string; redirect?: RequestRedirect }> = [];
