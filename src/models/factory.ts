@@ -14,6 +14,8 @@ import type { AgentDependencies } from "../agent/types.js";
 import { Reviewer } from "../review/reviewer.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
+import { McpHttpTransport } from "../mcp/transports.js";
+import { connectManagedMcpRegistry, type ManagedMcpServerConfig } from "../mcp/registry.js";
 import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { createBrowserTools } from "../browser/tools.js";
@@ -103,12 +105,80 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
+function loadManagedMcpServerConfigs(): ManagedMcpServerConfig[] {
+  const raw = process.env.SOFIA_MCP_SERVERS_JSON?.trim();
+  if (!raw) return [];
+  if (process.env.SOFIA_ALLOW_NETWORK !== "true") {
+    throw new Error("SOFIA_ALLOW_NETWORK=true is required to connect configured MCP servers.");
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw new Error("SOFIA_MCP_SERVERS_JSON must be valid JSON."); }
+  if (!Array.isArray(parsed) || parsed.length > 10) {
+    throw new Error("SOFIA_MCP_SERVERS_JSON must be an array of at most 10 server definitions.");
+  }
+  const allowedHosts = (process.env.SOFIA_ALLOWED_HOSTS ?? "").split(",").map((host) => host.trim().toLowerCase()).filter(Boolean);
+  return parsed.map((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid MCP server config at index " + index);
+    const item = value as Record<string, unknown>;
+    if (typeof item.id !== "string" || typeof item.endpoint !== "string" ||
+        !Array.isArray(item.allowedTools) || item.allowedTools.some((name) => typeof name !== "string")) {
+      throw new Error("MCP server config requires id, HTTPS endpoint, and explicit allowedTools.");
+    }
+    let endpoint: URL;
+    try { endpoint = new URL(item.endpoint); } catch { throw new Error("MCP endpoint must be an absolute HTTPS URL."); }
+    if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) {
+      throw new Error("MCP endpoint must use HTTPS and cannot embed credentials.");
+    }
+    if (!allowedHosts.includes(endpoint.hostname.toLowerCase())) {
+      throw new Error("MCP endpoint host must be listed in SOFIA_ALLOWED_HOSTS: " + endpoint.hostname);
+    }
+    const headers: Record<string, string> = {};
+    if (item.headers !== undefined) {
+      if (!item.headers || typeof item.headers !== "object" || Array.isArray(item.headers)) throw new Error("MCP headers must be an object.");
+      for (const [key, headerValue] of Object.entries(item.headers as Record<string, unknown>)) {
+        if (!/^[A-Za-z0-9-]{1,80}$/.test(key) || typeof headerValue !== "string" || headerValue.length > 4000 || /[\\r\\n]/.test(headerValue)) {
+          throw new Error("Invalid MCP header entry.");
+        }
+        headers[key] = headerValue;
+      }
+    }
+    return {
+      transport: new McpHttpTransport({ endpoint: endpoint.toString(), headers }),
+      options: {
+        id: item.id,
+        allowedTools: item.allowedTools as string[],
+      },
+    };
+  });
+}
+
+/** Create dependencies with opt-in durable SQLite transcripts and operator-allowlisted MCP servers. */
 export async function createSofiaAgentDependenciesWithSessions(
   workspace = process.cwd(),
   approval?: AgentDependencies["approval"],
   databasePath?: string,
-): Promise<AgentDependencies & { closeSessionStore: () => void }> {
+): Promise<AgentDependencies & { closeSessionStore: () => Promise<void> }> {
   const dependencies = createSofiaAgentDependencies(workspace, approval);
   const sessionStore = await SqliteSessionStore.open(databasePath);
-  return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+  let mcpRegistry: Awaited<ReturnType<typeof connectManagedMcpRegistry>> | undefined;
+  try {
+    const mcpConfigs = loadManagedMcpServerConfigs();
+    if (mcpConfigs.length) {
+      mcpRegistry = await connectManagedMcpRegistry(dependencies.tools!.list(), mcpConfigs);
+      const mcpTools = mcpRegistry.tools.list().filter((tool) => tool.name.startsWith("mcp."));
+      const dynamicRegistry = dependencies.tools as ReturnType<typeof createToolRegistry>;
+      dynamicRegistry.addTools(mcpTools);
+    }
+  } catch (error) {
+    await mcpRegistry?.close().catch(() => undefined);
+    sessionStore.close();
+    throw error;
+  }
+  return {
+    ...dependencies,
+    sessionStore,
+    closeSessionStore: async () => {
+      try { await mcpRegistry?.close(); } finally { sessionStore.close(); }
+    },
+  };
 }
