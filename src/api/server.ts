@@ -11,6 +11,7 @@ import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import { FileModelPreferenceStore, type ModelPreference } from "./model-preference-store.js";
 
 interface ActiveRun {
   id: string;
@@ -145,6 +146,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
+  const modelPreferences = config.modelPreferenceStore ?? new FileModelPreferenceStore();
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
     const record: RunRecord = {
@@ -285,6 +287,31 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      if (requestUrl.pathname === "/v1/settings/model") {
+        if (!auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
+        }
+        if (req.method === "GET") {
+          const saved = modelPreferences.get(auth.keyId);
+          return json(res, 200, { modelSelection: saved ?? "auto", source: saved === undefined ? "default" : "saved" }, origin, config);
+        }
+        if (req.method === "PUT" || req.method === "DELETE") {
+          if (!auth.scopes.includes("agent:run")) return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
+          if (req.method === "DELETE") {
+            modelPreferences.set(auth.keyId, "auto");
+            return json(res, 200, { modelSelection: "auto", source: "saved" }, origin, config);
+          }
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_model_preference" }, origin, config);
+          const selected = (raw as Record<string, unknown>).modelSelection;
+          if (typeof selected !== "string" || !["auto", "fast", "coding", "reasoning", "vision"].includes(selected)) {
+            return json(res, 400, { error: "invalid_model_selection" }, origin, config);
+          }
+          modelPreferences.set(auth.keyId, selected as ModelPreference);
+          return json(res, 200, { modelSelection: selected, source: "saved" }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
+      }
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
         if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
@@ -421,7 +448,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (req.method === "POST" && req.url === "/v1/agent/runs/stream") {
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
-        const input = parsed.input;
+        const input = { ...parsed.input, modelSelection: parsed.input.modelSelection ?? modelPreferences.get(auth.keyId) ?? "auto" };
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch {
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
@@ -484,7 +511,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (req.method === "POST" && req.url === "/v1/agent/runs") {
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
-        const input = parsed.input;
+        const input = { ...parsed.input, modelSelection: parsed.input.modelSelection ?? modelPreferences.get(auth.keyId) ?? "auto" };
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
 
         // Async mode is the reliable path for phones: the browser may sleep,
