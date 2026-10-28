@@ -7,7 +7,7 @@ Status: opt-in gateway, command bridge, Telegram Bot API long polling transport,
 - Messaging is disabled unless `enabled: true` is explicitly supplied.
 - Unknown users/channels are denied unless an explicit `allowUser` policy permits them.
 - The gateway calls an injected message handler. Adapters never invoke tools or a separate agent runtime directly.
-- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Only explicit `/run <task>` messages (or a configured exact prefix such as `/run@SofiaBot`) start a run. Ordinary chat and attachments do not trigger execution.
+- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Verified direct messages can start a run through natural chat without `/run`; group messages require trusted transport metadata marking them as explicitly addressed to Sofia. Platform slash commands such as `/start` are ignored, and `/run <task>` remains supported.
 - Use `createMessagingAccessCheck` to adapt the existing `ChatAccessPolicy` to the gateway allowlist callback. The existing command handler performs its own authorization check too. Do not pass the same deduplicator to both `createMessagingGateway` and `createSofiaMessagingHandler`, because the existing command handler claims the provider/channel/message key itself.
 - Keep bot tokens and Sofia API keys in server-side environment variables or an approved secret provider. Never expose them in client bundles, tests, errors, or logs.
 - The Telegram HTTP transport uses HTTPS long polling against the official Telegram Bot API. Choose either polling or a separately implemented webhook deployment, not both for the same bot.
@@ -27,7 +27,7 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Only explicit `/run <task>` commands dispatch work; ordinary messages do not start runs. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Verified Telegram private-chat messages can dispatch work without `/run`; group messages remain ignored unless the transport marks them as explicitly addressed to Sofia. `/run <task>` remains supported. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
