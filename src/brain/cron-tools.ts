@@ -7,7 +7,7 @@ type ScheduleCreator = Pick<CronScheduler, "create">;
 export function createCronTools(scheduler: ScheduleCreator): SofiaTool[] {
   const scheduleTask: SofiaTool = {
     name: "schedule_task",
-    description: "Create a persistent one-time or recurring task. Requires approval because it schedules future work. The schedule belongs to the authenticated user; results currently remain in Sofia's durable job history and are not automatically delivered to a chat channel.",
+    description: "Create a persistent one-time or recurring task. Requires approval because it schedules future work. The schedule belongs to the authenticated user; when the host has a verified messaging destination, Sofia delivers the result to that conversation.",
     effects: ["write"],
     inputSchema: {
       type: "object",
