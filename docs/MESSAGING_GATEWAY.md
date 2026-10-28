@@ -1,6 +1,6 @@
 # Messaging Gateway (incremental integration)
 
-Status: opt-in gateway, command bridge, Telegram Bot API long polling transport, and Discord interaction verification/REST transport. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
+Status: opt-in gateway, shared natural-language/command bridge, Telegram Bot API long polling transport, Discord interaction verification/REST transport, and a separate Discord Gateway transport/runtime for ordinary messages. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
 
 ## Safety defaults
 
@@ -30,6 +30,20 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Natural-language messages start tasks without `/run` by default in the standalone Telegram runtime. Set `TELEGRAM_COMMANDS_ONLY=true` to retain legacy command-only behavior. Slash commands other than `/run` and attachment-only messages are ignored. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
+
+## Standalone Discord ordinary-message runtime (opt-in)
+
+The API entrypoint can start a separate Discord Gateway connection when `SOFIA_DISCORD_GATEWAY_ENABLED=true`. It uses the existing Sofia API, `MessagingGateway`, shared access policy, durable API run flow, and file-backed chat deduplicator; it does not create a second agent runtime.
+
+Required server-side variables:
+- `SOFIA_DISCORD_GATEWAY_ENABLED=true`
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_ALLOWED_USER_IDS` — comma-separated numeric Discord user IDs
+- `DISCORD_ALLOWED_CHANNEL_IDS` — comma-separated numeric channel IDs
+- `SOFIA_API_KEY`
+- `SOFIA_API_BASE_URL` (or `RAILWAY_PUBLIC_DOMAIN`)
+
+Enable the **Message Content Intent** in Discord Developer Portal before starting this runtime. It is intentionally separate from the signed Interactions HTTP adapter; the same bot token may support both. Natural-language messages are treated as tasks, and unrelated slash commands are ignored. Only allowlisted user/channel pairs can start work. Start with a private test server and keep the Gateway runtime disabled until the privileged intent and allowlists have been checked. The runtime reports the durable run result to the originating channel when the API can retrieve it.
 
 ## Composition contract
 
