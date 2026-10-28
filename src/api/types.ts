@@ -6,6 +6,7 @@ import type { LineWebhookTransport } from "../integrations/messaging/line-webhoo
 import type { WhatsAppWebhookTransport } from "../integrations/messaging/whatsapp-webhook-transport.js";
 import type { CronSchedule, CronExecution } from "../brain/cron-scheduler.js";
 import type { JobRecord } from "../brain/job-runtime.js";
+import type { ContinuousWorkSupervisor } from "../brain/continuous-work.js";
 
 export interface AgentRunInput {
   task: string;
@@ -60,6 +61,8 @@ export interface SofiaApiConfig {
   requestTimeoutMs?: number;
   maxConcurrentRunsPerKey?: number;
   securityAdminScope?: string;
+  /** Optional owner-scoped long-running objective supervisor, built on the existing durable job runtime. */
+  continuousWorkSupervisor?: ContinuousWorkSupervisor;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
   /** HMAC secret shared only with trusted server-side messaging bridges. */
