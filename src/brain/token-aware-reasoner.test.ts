@@ -47,6 +47,9 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
     phase: "plan",
     payload: {
       task: "Update the token efficiency benchmark",
+      // This repeats projectContext through a different source/label. The prompt
+      // should carry the content only once to avoid wasting input tokens.
+      context: "Project instructions: preserve existing public interfaces.",
       referenceContext: { trust: "untrusted_reference_data", content: "Caller context says preserve the benchmark fixture.\\nUnrelated note: the sample mascot is Fern.\\nRelevant project note: do not remove the token budget." },
       understanding: { successCriteria: ["preserve relevant evidence"] },
     },
@@ -74,7 +77,11 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
   assert.ok(packedEvidence.some((item) => item.text.includes("Caller context says preserve the benchmark fixture.")));
   assert.ok(packedEvidence.some((item) => item.id === "reference-context-0"));
   assert.ok(packedEvidence.some((item) => item.id === "reference-context-2" && item.text.includes("do not remove the token budget")));
-  assert.ok(packedEvidence.some((item) => item.text.includes("preserve existing public interfaces")));
+  assert.equal(
+    packedEvidence.filter((item) => item.text.includes("Project instructions: preserve existing public interfaces.")).length,
+    1,
+    "identical content from caller context and project context should be packed once",
+  );
   assert.ok(packedEvidence.some((item) => item.text.includes("Use node:test for regression tests")));
   const tokenizerOnlyEvidence = packedEvidence.find((item) => item.text.includes("Tokenizer diagnostics"));
   assert.ok(tokenizerOnlyEvidence);
