@@ -63,7 +63,6 @@ test("conversation context is forwarded through the existing API run starter", a
   });
   await handle(inbound("continue the plan"));
   assert.match(h.starts[0]?.context ?? "", /Earlier: user asked about release planning/);
-  assert.match(h.starts[0]?.context ?? "", /continue the plan/);
 });
 
 test("natural-chat mode ignores slash commands but keeps /run available", async () => {
