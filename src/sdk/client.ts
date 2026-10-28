@@ -29,6 +29,23 @@ export interface SofiaModelProfileMetadata {
   updatedAt: string;
 }
 
+export type SofiaContinuousWorkStatus = "active" | "paused" | "stopped" | "completed" | "failed";
+
+export interface SofiaContinuousWorkRecord {
+  id: string;
+  ownerKeyId: string;
+  task: string;
+  status: SofiaContinuousWorkStatus;
+  iteration: number;
+  maxIterationsPerActivation: number;
+  maxLifetimeIterations?: number;
+  currentJobId?: string;
+  lastSummary?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type SofiaRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface SofiaRunResponse {
@@ -188,6 +205,47 @@ export class SofiaClient {
   async deleteModelProfile(signal?: AbortSignal): Promise<{ deleted: boolean }> {
     return this.request("/v1/model-profile", {
       method: "DELETE", headers: this.headers(),
+    }, signal);
+  }
+
+  /** Create a paused, owner-scoped objective that can be resumed in bounded work slices. */
+  async createContinuousWork(task: string, signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord }> {
+    return this.request("/v1/continuous-work", {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ task }),
+    }, signal);
+  }
+
+  async listContinuousWork(signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord[] }> {
+    return this.request("/v1/continuous-work", { headers: this.headers() }, signal);
+  }
+
+  async getContinuousWork(id: string, signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord }> {
+    return this.request(`/v1/continuous-work/${encodeURIComponent(id)}`, { headers: this.headers() }, signal);
+  }
+
+  /** Run one bounded activation; poll getContinuousWork for progress and resume later if paused. */
+  async resumeContinuousWork(id: string, signal?: AbortSignal): Promise<{ accepted: boolean; workId: string; status: string }> {
+    return this.request(`/v1/continuous-work/${encodeURIComponent(id)}/resume`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  /** Keep resuming bounded activations server-side until completed, failed, paused, or stopped. */
+  async continueContinuousWork(id: string, signal?: AbortSignal): Promise<{ accepted: boolean; workId: string; mode: "continuous" }> {
+    return this.request(`/v1/continuous-work/${encodeURIComponent(id)}/continue`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  async pauseContinuousWork(id: string, signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord }> {
+    return this.request(`/v1/continuous-work/${encodeURIComponent(id)}/pause`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  async stopContinuousWork(id: string, signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord }> {
+    return this.request(`/v1/continuous-work/${encodeURIComponent(id)}/stop`, {
+      method: "POST", headers: this.headers(),
     }, signal);
   }
 
