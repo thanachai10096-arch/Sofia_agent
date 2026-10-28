@@ -144,3 +144,11 @@ Required environment:
 - `SOFIA_API_KEY`, `SOFIA_API_BASE_URL`
 
 Create `createMatrixMessagingRuntime(process.env, workspace)` and start/stop it with the existing application lifecycle. Messages may be submitted as plain text or with `!run <task>` in an allowlisted room. Invite the bot account only to the rooms it needs, and test with a non-production account first. The code includes deterministic transport tests; live homeserver setup and end-to-end validation have not been performed.
+
+
+## Scheduled result delivery
+
+- Set `SOFIA_MESSAGING_CONTEXT_SECRET` to a random secret of at least 32 characters in the trusted Sofia API/messaging process. Keep it server-side and never send it to the model or a client app.
+- Messaging adapters sign the normalized platform, immutable sender ID, conversation ID, message ID, and task hash. The API verifies the HMAC and binds the trusted destination and user principal before executing the task.
+- `schedule_task` stores the verified destination with the schedule. Completion notices are sent through the configured messaging adapter and retried on later scheduler ticks until the provider accepts the send. Delivery is at-least-once if the process crashes after provider acceptance but before the durable delivery marker is saved.
+- If the secret is unset or invalid, ordinary chat tasks still work, but scheduled results are not bound to a chat destination; they remain in durable schedule history.
