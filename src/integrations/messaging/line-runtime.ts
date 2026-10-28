@@ -6,12 +6,14 @@ import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia
 import { createLineAdapter } from "./line.js";
 import { createLineWebhookTransport, type LineWebhookTransport } from "./line-webhook-transport.js";
 import { redactSecrets } from "../../security/guard.js";
+import type { OutboundMessage } from "./types.js";
 
 export interface LineMessagingRuntime {
   /** Pass this transport to createSofiaApi({ lineWebhookRoute: { transport } }). */
   transport: LineWebhookTransport;
   start(): Promise<void>;
   stop(): Promise<void>;
+  send(message: OutboundMessage): Promise<boolean>;
 }
 export interface LineMessagingEnvironment {
   SOFIA_MESSAGING_ENABLED?: string;
@@ -85,7 +87,7 @@ export function createLineMessagingRuntime(
         warn: (event) => onWarning("LINE messaging warning: " + event),
       },
     });
-    return { transport, start: () => gateway!.start(), stop: () => gateway!.stop() };
+    return { transport, start: () => gateway!.start(), stop: () => gateway!.stop(), send: (message) => gateway!.send("line", message) };
   } catch (error) {
     onWarning("LINE integration disabled: " + (error instanceof Error ? error.message : "invalid configuration") + ".");
     return undefined;
