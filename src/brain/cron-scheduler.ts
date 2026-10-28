@@ -44,6 +44,8 @@ export interface CronExecution {
   attempt: number;
   error?: string;
   notificationDelivered?: boolean;
+  notificationAttempts?: number;
+  notificationNextAttemptAt?: string;
 }
 export interface CronAuditEvent {
   at: string;
@@ -321,7 +323,7 @@ export class CronScheduler {
     if (this.ticking) return;
     this.ticking = true;
     try {
-      await this.retryPendingNotifications();
+      await this.retryPendingNotifications().catch(() => undefined);
       while (this.active.size < this.maxConcurrent) {
         const claim = await this.store.transact(async state => {
           const now = this.now();
@@ -621,7 +623,8 @@ export class CronScheduler {
   private async retryPendingNotifications(): Promise<void> {
     if (!this.onExecutionFinished) return;
     const pending = await this.store.transact(state => state.history
-      .filter(item => !item.notificationDelivered && ["completed", "failed", "cancelled", "skipped"].includes(item.status))
+      .filter(item => !item.notificationDelivered && ["completed", "failed", "cancelled", "skipped"].includes(item.status) &&
+        (!item.notificationNextAttemptAt || Date.parse(item.notificationNextAttemptAt) <= this.now().getTime()))
       .map(item => ({ ...item })));
     for (const execution of pending) {
       const schedule = await this.store.transact(state => {
@@ -642,15 +645,33 @@ export class CronScheduler {
       if (delivered) {
         await this.store.transact(async state => {
           const current = state.history.find(item => item.id === execution.id);
-          if (current) current.notificationDelivered = true;
+          if (current) {
+            current.notificationDelivered = true;
+            current.notificationNextAttemptAt = undefined;
+          }
           await this.recordAudit(state, { at: this.now().toISOString(), actor: "scheduler", action: "schedule.notification.delivered", scheduleId: schedule.id, detail: execution.id });
         });
+      } else {
+        await this.deferNotificationRetry(schedule, execution);
       }
     } catch {
-      // Keep the marker unset; the scheduler retries delivery on a later tick.
+      // Keep the marker unset; the scheduler retries delivery with bounded exponential backoff.
+      await this.deferNotificationRetry(schedule, execution).catch(() => undefined);
     } finally {
       this.notificationInFlight.delete(execution.id);
     }
+  }
+
+  private async deferNotificationRetry(schedule: CronSchedule, execution: CronExecution): Promise<void> {
+    await this.store.transact(async state => {
+      const current = state.history.find(item => item.id === execution.id);
+      if (!current || current.notificationDelivered) return;
+      const attempts = (current.notificationAttempts ?? 0) + 1;
+      const delayMs = Math.min(5 * 60_000, 1_000 * 2 ** Math.min(attempts, 8));
+      current.notificationAttempts = attempts;
+      current.notificationNextAttemptAt = new Date(this.now().getTime() + delayMs).toISOString();
+      await this.recordAudit(state, { at: this.now().toISOString(), actor: "scheduler", action: "schedule.notification.retry_scheduled", scheduleId: schedule.id, detail: "attempt=" + attempts });
+    });
   }
 
   private async waitForJob(id: string, signal: AbortSignal): Promise<JobRecord> {
