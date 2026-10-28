@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
