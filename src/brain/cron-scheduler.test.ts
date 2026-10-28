@@ -35,6 +35,22 @@ test("creating a schedule cannot assign it to another owner", async () => {
   assert.equal(state.schedules.length, 0);
 });
 
+test("creating a schedule rejects a notification target owned by a different messaging identity", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const runtime = { async submit() { throw new Error("unused"); } } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store });
+  await assert.rejects(() => scheduler.create({
+    name: "spoofed target",
+    task: "task",
+    runAt: "2026-10-18T00:00:00.000Z",
+    timeZone: "UTC",
+    ownerKeyId: "telegram:alice",
+    notificationTarget: { platform: "telegram", userId: "bob", conversationId: "chat-bob" },
+  }, "telegram:alice"), /notification target must match/i);
+  assert.equal(state.schedules.length, 0);
+});
+
 test("schedule quota is enforced atomically per owner", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
