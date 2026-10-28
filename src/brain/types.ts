@@ -113,7 +113,7 @@ export interface PreparedInference {
   invoke(options: {
     signal: AbortSignal;
     maxOutputTokens: number;
-  }): Promise<{ value: unknown; usage: { inputTokens: number; outputTokens: number } }>;
+  }): Promise<{ value: unknown; usage: { inputTokens: number; outputTokens: number; configuredCostNanoUsd?: string } }>;
 }
 
 export interface BrainReasoner {
@@ -185,6 +185,8 @@ export interface CompletionReport {
     providerInputTokens?: number;
     providerOutputTokens?: number;
     providerUsageCalls?: number;
+    /** Sum of configured route-price estimates in nano-USD; not provider-billed cost. */
+    configuredCostNanoUsd?: string;
     replans: number;
   };
 }
