@@ -12,11 +12,13 @@ export interface SofiaMessagingHandlerOptions {
   /** Existing access policy and atomic deduplicator from chat-adapter.ts. */
   accessPolicy: ChatAccessPolicy;
   deduplicator: ChatMessageDeduplicator;
-  /** Exact command prefix, e.g. /run or /run@SofiaBot. Defaults to /run. */
-  commandPrefix?: string;
+  /** Exact command prefix, e.g. /run or /run@SofiaBot. Set false to accept natural chat; defaults to /run for backwards compatibility. */
+  commandPrefix?: string | false;
   maxTaskCharacters?: number;
+  /** Optional recent conversation context, usually loaded from a persistent session store. */
+  conversationContext?: (message: InboundMessage, task: string) => string | undefined;
   /** Called after the API accepts a run; implementations should schedule completion reporting without blocking polling. */
-  onAccepted?: (input: { runId: string; runStatus: string; message: InboundMessage }) => void;
+  onAccepted?: (input: { runId: string; runStatus: string; message: InboundMessage; task: string }) => void;
 }
 
 /** Maps the gateway identity to Sofia's existing chat authorization contract. */
@@ -31,14 +33,14 @@ export function createMessagingAccessCheck(policy: ChatAccessPolicy) {
 
 /**
  * Bridges normalized inbound messages to Sofia's existing command dispatcher.
- * Only explicit command messages start a run; ordinary chat and attachments do not.
+ * Natural-chat mode can route ordinary text through the same guarded dispatcher; command-only mode remains available.
  * Do not also pass this same deduplicator to createMessagingGateway, because the
  * existing command handler claims the provider/channel/message key itself.
  */
 export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOptions) {
-  const prefix = options.commandPrefix ?? "/run";
-  if (!prefix.trim() || prefix.length > 128 || /[\r\n\0]/.test(prefix)) {
-    throw new Error("commandPrefix must be a non-empty single-line command.");
+  const prefix = options.commandPrefix === false ? false : options.commandPrefix ?? "/run";
+  if (prefix !== false && (!prefix.trim() || prefix.length > 128 || /[\r\n\0]/.test(prefix))) {
+    throw new Error("commandPrefix must be false or a non-empty single-line command.");
   }
   const handleCommand = createChatCommandHandler({
     client: options.client,
@@ -49,8 +51,21 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
 
   return async function onMessage(message: InboundMessage): Promise<string | void> {
     const text = message.text.trim();
-    if (text !== prefix && !text.startsWith(prefix + " ") && !text.startsWith(prefix + "\t")) return;
-    const task = text.slice(prefix.length).trim();
+    if (!text) return;
+    let task: string;
+    if (prefix === false) {
+      // Natural mode accepts ordinary text, but keeps common slash commands out of the task queue.
+      if (text === "/run" || text.startsWith("/run ") || text.startsWith("/run\t")) {
+        task = text.slice(4).trim();
+      } else if (text.startsWith("/")) {
+        return;
+      } else {
+        task = text;
+      }
+    } else {
+      if (text !== prefix && !text.startsWith(prefix + " ") && !text.startsWith(prefix + "\t")) return;
+      task = text.slice(prefix.length).trim();
+    }
     const result = await handleCommand({
       platform: message.platform,
       messageId: message.messageId,
@@ -58,11 +73,12 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
       conversationId: message.identity.conversationId,
       command: "run",
       task,
+      ...(options.conversationContext ? { context: options.conversationContext(message, task) } : {}),
     });
     switch (result.status) {
       case "accepted":
         try {
-          options.onAccepted?.({ runId: result.runId, runStatus: result.runStatus, message });
+          options.onAccepted?.({ runId: result.runId, runStatus: result.runStatus, message, task });
         } catch {
           // Completion notifications must never prevent the normal acceptance acknowledgement.
         }
@@ -71,7 +87,7 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
         return "Access denied.";
       case "rejected":
         return result.reason === "empty_task"
-          ? `Usage: ${prefix} <task>`
+          ? `Usage: ${prefix === false ? "/run" : prefix} <task>`
           : "Task is too long. Please shorten it.";
       case "duplicate":
       case "ignored":
