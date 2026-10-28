@@ -165,6 +165,32 @@ test("persistent skill ledger retains custom acceptance checks when repeated wor
   );
 });
 
+test("persistent skill ledger does not hide a failed write after a later successful write", async () => {
+  let saves = 0;
+  const flakyStore = {
+    async save() {
+      saves += 1;
+      if (saves === 1) throw new Error("first write failed");
+    },
+    async list() { return []; },
+    async find() { return []; },
+  };
+  const ledger = new PersistentSkillLedger(flakyStore);
+  const makeCandidate = (name: string): LearnedSkillCandidate => ({
+    name,
+    trigger: "Run a verified persistence check",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect the target", "perform the check", "verify the result"],
+    verification: ["test"],
+    evidenceIds: ["trusted-check-1"],
+  });
+  ledger.record(makeCandidate("workflow-first-write"));
+  ledger.record(makeCandidate("workflow-second-write"));
+  await assert.rejects(ledger.flush(), /Failed to persist learned skill/);
+  assert.equal(saves, 2);
+});
+
 test("persistent skill ledger reports durable storage failures when flushed", async () => {
   const brokenStore = {
     async save() { throw new Error("simulated disk failure"); },
