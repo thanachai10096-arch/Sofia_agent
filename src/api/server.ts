@@ -415,7 +415,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
 
-      const continuousWorkMatch = requestUrl.pathname.match(/^\/v1\/continuous-work(?:\/([^/]+)(?:\/(resume|pause|stop))?)?$/);
+      const continuousWorkMatch = requestUrl.pathname.match(/^\/v1\/continuous-work(?:\/([^/]+)(?:\/(resume|continue|pause|stop))?)?$/);
       if (continuousWorkMatch) {
         const supervisor = config.continuousWorkSupervisor;
         if (!supervisor) return json(res, 503, { error: "continuous_work_unavailable" }, origin, config);
@@ -460,6 +460,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         const current = await supervisor.get(workId, auth.keyId);
         if (!current) return json(res, 404, { error: "continuous_work_not_found" }, origin, config);
+        if (action === "continue") {
+          const started = await supervisor.runContinuously(workId, auth.keyId);
+          return started
+            ? json(res, 202, { accepted: true, workId, mode: "continuous" }, origin, config)
+            : json(res, 409, { error: "continuous_work_not_startable", status: current.status }, origin, config);
+        }
         if (action === "resume") {
           if (current.status === "active" && supervisor.isRunning(workId)) return json(res, 409, { error: "continuous_work_already_active" }, origin, config);
           if (current.status === "stopped" || current.status === "completed") {
