@@ -347,6 +347,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       } finally {
         clearTimeout(timer);
+        // Re-assert cancellation at the final state boundary as a last-resort
+        // invariant, even if an adapter throws an unexpected late error.
+        if (cancelledRunIds.has(run.id) || run.cancelRequested || run.controller.signal.aborted) {
+          run.status = "cancelled";
+          run.error ??= run.controller.signal.reason instanceof Error
+            ? run.controller.signal.reason.message
+            : "Run cancelled.";
+        }
         run.updatedAt = Date.now();
         persist(run);
         const current = activeByKey.get(run.ownerKeyId) ?? 1;
