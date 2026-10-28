@@ -18,17 +18,17 @@ Sofia should follow the same user-facing agent operating model as Hermes Agent: 
 8. **Model choice is user-respecting.** Support an explicit provider/model choice when configured, and a Sofia-managed automatic mode. Routing considers task capability, privacy, provider availability, latency, and cost. Provider choice must never alter authorization or security policy.
 9. **Honest limits.** Report completed, partial, blocked, cancelled, and failed outcomes distinctly. Distinguish implemented, unit-tested, integration-tested, CI-verified, and deployment-validated capabilities.
 
-## Verified starting gaps from repository documentation
+## Current branch status (verified against source and tests)
 
-These are documented gaps to close, not assumptions about undocumented code:
+- **Session replay — implemented on the `SofiaAgent` path:** when a caller supplies `sessionId`, the next run receives up to 12 prior turns within a 6,000-character bound. This is not semantic search across older transcript history.
+- **Saved user memory — implemented as optional retrieval:** if a configured memory store and host-derived `principalId` are present, Sofia retrieves up to five relevant explicitly saved memories within a 2,400-character bound. Retrieval is best-effort and memory is fenced as untrusted reference data. This does not enable automatic memory writing.
+- **Learning — partially implemented:** the Brain has a verified repair-skill learning path, the EvolutionEngine records outcomes and ranks skills, and managed skill lifecycle mechanisms exist. This is not proof of autonomous general-purpose skill creation from arbitrary completed conversations or model training.
+- **Model selection — not yet exposed as a per-request provider/model preference:** current legacy routing selects an internal route by task type. Explicit user choice plus `auto` remains open work.
+- **Discord ordinary-message intake — not implemented by the Interactions HTTP transport:** that transport handles signed interactions/slash commands. Ordinary Discord messages need a separate Gateway/message-event transport with correct intents and the same authorization/deduplication path.
+- **Discord interaction replay protection — implemented in this branch:** the signed interaction transport tracks accepted interaction IDs for 14 minutes and rejects duplicate dispatches; a regression test covers replaying the exact signed request. This is scoped to the current process and is not a distributed cross-instance idempotency store.
+- **Background jobs — substantial existing support:** the repository already contains durable job state, checkpoint resume, cancellation, and cron scheduling tests. Remaining work is consistent chat-to-run/session correlation and accurate progress/final-state delivery.
 
-- `README.md` says end users do not choose models and Sofia decides all routing. This conflicts with the product requirement that users can choose a model or delegate the choice to Sofia.
-- `README.md` explicitly says SQLite transcript persistence does not replay history into model context or expose transcript retrieval endpoints.
-- `docs/USER_MEMORY.md` says user memory is opt-in by API action and is not automatically replayed into model prompts.
-- `docs/DISCORD_INTEGRATION_SETUP.md` describes slash-command-driven task submission. Natural-language message handling must be added as a separate, secure adapter capability without weakening the existing signature verification, allowlists, ownership, or rate limits.
-- Existing evolution documentation describes heuristic performance signals; those signals must not be marketed as model training or proven quality improvement.
-
-Re-check each gap against the current branch before implementation, because code and documentation may evolve independently.
+These are source-level branch statements, not a claim of production deployment validation.
 
 ## Implementation sequence
 
