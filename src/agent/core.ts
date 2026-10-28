@@ -380,6 +380,13 @@ export class SofiaAgent {
           throw new Error("Agent produced no final response.");
         }
 
+        // The single-pass route has no tools or external side effects, so a second
+        // model-based reviewer would spend tokens without validating an action.
+        if (singlePassConversation) {
+          emit({ type: "run.completed", message: "Sofia conversation completed in single pass." });
+          return { runId, output: response.text, kind, steps: step, events };
+        }
+
         emit({
           type: "review.started",
           message: "Reviewing model result.",
