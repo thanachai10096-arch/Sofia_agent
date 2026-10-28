@@ -130,3 +130,18 @@ The code outline above is not a claim that the repository's API server is alread
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+
+## Matrix Client-Server API integration
+
+Sofia includes an opt-in Matrix adapter and client-server API polling transport. It authenticates with the configured homeserver using a server-side access token, uses `/_matrix/client/v3/sync` for incoming events, ignores its own messages and non-text events, and sends replies through the Matrix send-event API. The homeserver must be a public HTTPS origin; redirects are rejected. User and room allowlists are both mandatory and there is no wildcard mode.
+
+Required environment:
+- `SOFIA_MESSAGING_ENABLED=true`
+- `MATRIX_HOMESERVER_URL` — public HTTPS origin, such as your Matrix homeserver origin
+- `MATRIX_ACCESS_TOKEN` — server-side bot account access token
+- `MATRIX_ALLOWED_USER_IDS` — comma-separated immutable Matrix user IDs beginning with `@`
+- `MATRIX_ALLOWED_ROOM_IDS` — comma-separated room IDs beginning with `!`
+- `SOFIA_API_KEY`, `SOFIA_API_BASE_URL`
+
+Create `createMatrixMessagingRuntime(process.env, workspace)` and start/stop it with the existing application lifecycle. Messages may be submitted as plain text or with `!run <task>` in an allowlisted room. Invite the bot account only to the rooms it needs, and test with a non-production account first. The code includes deterministic transport tests; live homeserver setup and end-to-end validation have not been performed.
