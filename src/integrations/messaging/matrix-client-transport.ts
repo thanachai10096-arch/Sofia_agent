@@ -31,7 +31,7 @@ function validateHomeserver(value: string): URL {
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash ||
       (url.pathname !== "/" && url.pathname !== "") || host === "localhost" ||
       host.endsWith(".localhost") || host.endsWith(".local") ||
-      /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
+      /^127\./.test(host) || /^10\./.test(host) || /^0\./.test(host) || /^169\.254\./.test(host) || /^192\.168\./.test(host) ||
       /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === "::1" || host.startsWith("[")) {
     throw new Error("Matrix homeserver must be a public HTTPS origin.");
   }
