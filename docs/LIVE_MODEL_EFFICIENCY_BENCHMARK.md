@@ -17,6 +17,11 @@ node bench/live-model-efficiency.mjs
 
 Optional setting:
 - `SOFIA_LIVE_BENCHMARK_TIMEOUT_MS`: request timeout, 1000–180000 ms; defaults to 45000.
+Optional explicit pricing inputs (both or neither):
+- `SOFIA_BENCH_INPUT_USD_PER_MILLION_TOKENS`: the selected model input-token list price in USD per 1 million tokens.
+- `SOFIA_BENCH_OUTPUT_USD_PER_MILLION_TOKENS`: the selected model output-token list price in USD per 1 million tokens.
+
+When both prices and complete usage are available, the result includes **estimated** cost and estimated cost per verified success for each variant. These are arithmetic estimates from prices you supply, not provider invoices; they may omit cached-token discounts or other fees. If prices or usage are missing, the estimate stays `null`. The script never looks up prices or infers them from the model ID.
 
 Never commit API keys or paste them into issue/PR comments. The script does not print the key or provider response bodies on HTTP errors. It does print model answers as part of the local JSON result, so review the output before sharing it.
 
@@ -35,5 +40,5 @@ The output reports provider-reported prompt/completion or input/output tokens wh
 - Three synthetic extraction fixtures are too small to support general claims about quality, task success, or savings across real workloads.
 - A valid comparison requires the same endpoint, model, and task fixtures; model output and latency can vary between calls.
 - Do not run this in CI by default: it needs a real credential and makes billable provider calls.
-- Reported token totals are provider-reported usage; actual invoiced cost remains unknown.
+- Reported token totals are provider-reported usage; actual invoiced cost remains unknown. Estimated cost-per-verified-success is only as accurate as the explicit prices and provider-reported usage supplied.
 - This harness is API-compatible rather than universal: providers with a different request/response protocol need a dedicated adapter before they can be benchmarked here.
