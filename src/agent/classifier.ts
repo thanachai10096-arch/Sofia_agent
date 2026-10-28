@@ -23,7 +23,7 @@ export function shouldUseSinglePassConversation(task: string): boolean {
   const value = task.trim().toLowerCase();
   if (!value || value.length > 1_200) return false;
   if (classifyTask(value) !== "general") return false;
-  const actionIntent = /\\b(create|build|make|write|edit|change|fix|debug|run|execute|install|deploy|delete|remove|search|research|investigate|browse|open|read file|modify|implement|refactor|test|check repo|inspect|verify|verification|compare|analy[sz]e|plan|schedule|send|post|upload|download|commit|push|pull request|book|buy)\\b/i;
+  const actionIntent = /\b(create|build|make|write|edit|change|fix|debug|run|execute|install|deploy|delete|remove|search|research|investigate|browse|open|read file|modify|implement|refactor|test|check repo|inspect|verify|verification|compare|analy[sz]e|plan|schedule|send|post|upload|download|commit|push|pull request|book|buy)\b/i;
   const thaiActionIntent = /(ทำให้|ทำมา|สร้าง|แก้ไข|แก้โค้ด|เขียนโค้ด|รัน|ติดตั้ง|ดีพลอย|ค้นหา|ตรวจสอบ|ยืนยัน|วิเคราะห์|เปรียบเทียบ|วางแผน|ส่งข้อความ|ลบไฟล์|แก้ระบบ|พัฒนา|ต่อยอด|เปิดไฟล์|อ่านไฟล์)/;
   return !actionIntent.test(value) && !thaiActionIntent.test(value);
 }
