@@ -56,6 +56,10 @@ export interface InternalRoute {
   id: string;
   budgetKey: string;
   qualityTier: number;
+  /** Configured relative weights used only to break equal estimated-cost scores. */
+  costWeight?: number;
+  latencyWeight?: number;
+  qualityWeight?: number;
   capabilities: readonly string[];
   contextWindow: number;
   maxOutputTokens: number;
@@ -328,9 +332,20 @@ export class TokenAwareGateway {
       }
     }
 
-    candidates.sort((a, b) =>
-      a.score < b.score ? -1 : a.score > b.score ? 1 : 0,
-    );
+    candidates.sort((a, b) => {
+      if (a.score !== b.score) return a.score < b.score ? -1 : 1;
+
+      // Real configured token prices always win. When prices are missing or tie,
+      // use existing route weights instead of silently choosing by array order.
+      const costDifference = (a.route.costWeight ?? 0) - (b.route.costWeight ?? 0);
+      if (costDifference !== 0) return costDifference;
+      const latencyDifference = (a.route.latencyWeight ?? 0) - (b.route.latencyWeight ?? 0);
+      if (latencyDifference !== 0) return latencyDifference;
+      const qualityDifference = (b.route.qualityWeight ?? b.route.qualityTier) -
+        (a.route.qualityWeight ?? a.route.qualityTier);
+      if (qualityDifference !== 0) return qualityDifference;
+      return a.route.id.localeCompare(b.route.id);
+    });
 
     if (candidates.length === 0) throw new GatewayError("no_eligible_route");
 
