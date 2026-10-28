@@ -246,7 +246,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const persist = (run: ActiveRun) => {
     if (!runStore) return;
     const record: RunRecord = {
-      id: run.id, status: run.status,
+      id: run.id, status: run.cancelRequested ? "cancelled" : run.status,
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
       ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
       ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
