@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { TokenAwareGateway } from "../src/brain/token-aware-gateway.ts";
 import { TokenBudget } from "../src/brain/token-budget.ts";
-import { estimateCostUsd, readExplicitPricing } from "./estimated-cost.mjs";
+import { estimateCostUsd, readExplicitPricing, readReportedUsage } from "./estimated-cost.mjs";
 
 // Provider-agnostic harness for OpenAI-compatible chat-completions endpoints.
 // No provider/model defaults and no automatic provider fallback.
@@ -83,22 +83,15 @@ async function callModel(task, evidence, variant) {
     }
     const answer = payload?.choices?.[0]?.message?.content;
     if (typeof answer !== "string") throw new Error("Provider returned no text answer");
-    const usage = payload?.usage;
-    const rawInputTokens = usage?.prompt_tokens ?? usage?.input_tokens;
-    const rawOutputTokens = usage?.completion_tokens ?? usage?.output_tokens;
-    const inputTokens = Number.isSafeInteger(rawInputTokens) ? rawInputTokens : null;
-    const outputTokens = Number.isSafeInteger(rawOutputTokens) ? rawOutputTokens : null;
+    const usage = readReportedUsage(payload?.usage);
     return {
       taskId: task.id,
       variant,
       model,
       answer: answer.trim(),
       verified: answer.trim().includes(task.expected),
-      inputTokens,
-      outputTokens,
-      totalTokens: inputTokens === null || outputTokens === null ? null : inputTokens + outputTokens,
+      ...usage,
       durationMs: Math.round(performance.now() - started),
-      usageReported: inputTokens !== null && outputTokens !== null,
     };
   } finally {
     clearTimeout(timeout);
