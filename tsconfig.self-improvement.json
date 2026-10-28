@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.verified-learning.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "src/learning/verified-loop/**/*.ts",
+    "src/brain/skill-lifecycle.ts",
+    "src/brain/skill-lifecycle-workflow.ts",
+    "src/brain/managed-skill-learning.ts",
+    "src/brain/project-memory.ts",
+    "src/brain/learning.ts",
+    "src/skills/platform.ts",
+    "src/security/**/*.ts",
+    "src/agent/approval.ts"
+  ]
+}
