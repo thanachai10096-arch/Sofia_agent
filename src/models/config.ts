@@ -42,10 +42,13 @@ function loadExplicitProviderConfig(): SofiaModelConfig | undefined {
     let parsed: URL;
     try { parsed = new URL(baseUrl); }
     catch { throw new Error("Invalid base URL for explicit provider " + id); }
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-      throw new Error("Provider base URL must use HTTP or HTTPS for " + id);
+    const localHost = parsed.hostname === "localhost" || parsed.hostname.endsWith(".localhost") || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]";
+    if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && localHost)) {
+      throw new Error("Provider base URL must use HTTPS except for localhost development endpoints (" + id + ")");
     }
-    providers[id] = { baseUrl: baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl, apiKey, model };
+    let normalizedBaseUrl = baseUrl;
+    while (normalizedBaseUrl.endsWith("/")) normalizedBaseUrl = normalizedBaseUrl.slice(0, -1);
+    providers[id] = { baseUrl: normalizedBaseUrl, apiKey, model };
   }
 
   const defaultProvider = ids[0]!;
