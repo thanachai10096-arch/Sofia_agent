@@ -69,6 +69,7 @@ export class FileContinuousWorkStore implements ContinuousWorkStore {
 export class ContinuousWorkSupervisor {
   private readonly active = new Map<string, AbortController>();
   private readonly starting = new Set<string>();
+  private readonly continuous = new Map<string, AbortController>();
   private readonly iterations: number;
   private readonly durationMs: number;
   private readonly pollMs: number;
@@ -102,17 +103,57 @@ export class ContinuousWorkSupervisor {
     for (const record of records) {
       if (record.status !== "active" || !record.ownerKeyId || this.isRunning(record.id)) continue;
       scheduled += 1;
-      void this.resume(record.id, record.ownerKeyId).catch(() => undefined);
+      void this.runContinuously(record.id, record.ownerKeyId).catch(() => undefined);
     }
     return scheduled;
   }
   async pause(id: string, owner: string) { return this.changeStatus(id, owner, "paused"); }
   async stop(id: string, owner: string) { return this.changeStatus(id, owner, "stopped"); }
+
+  /** Run bounded activations repeatedly in the background until completion or explicit pause/stop. */
+  async runContinuously(id: string, owner: string): Promise<boolean> {
+    const record = await this.get(id, owner);
+    if (!record || ["stopped", "completed", "failed"].includes(record.status)) return false;
+    if (this.continuous.has(id)) return false;
+    const controller = new AbortController();
+    this.continuous.set(id, controller);
+    void (async () => {
+      try {
+        while (!controller.signal.aborted) {
+          const latest = await this.get(id, owner);
+          if (!latest || ["stopped", "completed", "failed"].includes(latest.status)) break;
+          if (latest.status === "active" && this.isRunning(id)) {
+            await new Promise<void>((resolve) => {
+              const timer = setTimeout(resolve, 250);
+              timer.unref?.();
+            });
+            continue;
+          }
+          try { await this.resume(id, owner); }
+          catch { break; }
+          if (controller.signal.aborted) break;
+          const after = await this.get(id, owner);
+          if (!after || ["stopped", "completed", "failed"].includes(after.status)) break;
+          // Explicit pause changes status and aborts this controller. Only automatic
+          // activation yields reach this delay and continue to the next bounded slice.
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, 1_000);
+            timer.unref?.();
+            controller.signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+          });
+        }
+      } finally {
+        if (this.continuous.get(id) === controller) this.continuous.delete(id);
+      }
+    })();
+    return true;
+  }
   private async changeStatus(id: string, owner: string, status: "paused" | "stopped"): Promise<boolean> {
     const r = await this.get(id, owner); if (!r || ["stopped", "completed", "failed"].includes(r.status)) return false;
     const childJobId = r.currentJobId;
     r.status = status; r.currentJobId = undefined; r.updatedAt = new Date().toISOString(); await this.store.save(r);
     this.active.get(id)?.abort(new Error("Continuous work " + status + " by owner"));
+    this.continuous.get(id)?.abort(new Error("Continuous work " + status + " by owner"));
     if (childJobId) await this.jobs.cancel(childJobId).catch(() => false);
     return true;
   }
