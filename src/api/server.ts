@@ -299,11 +299,19 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
   const startRun = (run: ActiveRun, input: AgentRunInput) => {
     void (async () => {
-      run.status = "running";
-      run.updatedAt = Date.now();
-      persist(run);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
+        // A cancellation can race with scheduling this async worker. Never
+        // transition a queued run back to running after DELETE has cancelled it.
+        if (cancelledRunIds.has(run.id) || isCancellationRequested(run)) {
+          run.status = "cancelled";
+          run.updatedAt = Date.now();
+          persist(run);
+          return;
+        }
+        run.status = "running";
+        run.updatedAt = Date.now();
+        persist(run);
         const result = await agent.run({
           principalId: input._trustedMessagingTarget ? input._trustedMessagingTarget.platform + ":" + input._trustedMessagingTarget.userId : run.ownerKeyId,
           ...(input._trustedMessagingTarget ? { notificationTarget: input._trustedMessagingTarget } : {}),
