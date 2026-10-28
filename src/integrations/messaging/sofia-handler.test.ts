@@ -176,3 +176,45 @@ test("continuous-work chat commands fail closed when signed context is not confi
     "Continuous-work chat controls are not configured on this Sofia server.",
   );
 });
+
+test("continuous-work chat commands reject unauthorized users before dispatch", async () => {
+  const h = harness(false);
+  let calls = 0;
+  h.client.continuousWorkAction = async () => {
+    calls += 1;
+    return { work: [] };
+  };
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    messagingContextSecret: "test-messaging-context-secret-at-least-32-chars",
+  });
+  assert.equal(await handle(inbound("/work list")), "Access denied.");
+  assert.equal(calls, 0);
+  assert.equal(h.claims.size, 0);
+});
+
+test("continuous-work chat commands bind signed context to the sender and isolate replay keys", async () => {
+  const h = harness();
+  const contexts: Array<import("../chat-adapter.js").SignedMessagingContext> = [];
+  h.client.continuousWorkAction = async ({ messagingContext }) => {
+    contexts.push(messagingContext);
+    return { work: [] };
+  };
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    messagingContextSecret: "test-messaging-context-secret-at-least-32-chars",
+  });
+  await handle(inbound("/work list", {
+    messageId: "message-user-1",
+    identity: { platform: "telegram", userId: "user-1", channelId: "chat-1", conversationId: "chat-1" },
+  }));
+  await handle(inbound("/work list", {
+    messageId: "message-user-2",
+    identity: { platform: "telegram", userId: "user-2", channelId: "chat-2", conversationId: "chat-2" },
+  }));
+  assert.equal(contexts.length, 2);
+  assert.equal(contexts[0]?.userId, "user-1");
+  assert.equal(contexts[1]?.userId, "user-2");
+  assert.notEqual(contexts[0]?.signature, contexts[1]?.signature);
+  assert.equal(h.claims.size, 2);
+});
