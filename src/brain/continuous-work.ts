@@ -20,6 +20,20 @@ export interface ContinuousWorkOptions {
   maxIterationsPerActivation?: number; maxLifetimeIterations?: number; maxActivationMs?: number; pollIntervalMs?: number;
   isComplete: (record: Readonly<ContinuousWorkRecord>, job: Readonly<JobRecord>) => boolean | Promise<boolean>;
 }
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) { resolve(); return; }
+    const finish = () => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    timer.unref?.();
+    const onAbort = () => { clearTimeout(timer); finish(); };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function integer(value: number, name: string, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error(name + " must be an integer from " + min + " to " + max);
   return value;
@@ -124,10 +138,7 @@ export class ContinuousWorkSupervisor {
           const latest = await this.get(id, owner);
           if (!latest || ["stopped", "completed", "failed"].includes(latest.status)) break;
           if (latest.status === "active" && this.isRunning(id)) {
-            await new Promise<void>((resolve) => {
-              const timer = setTimeout(resolve, 250);
-              timer.unref?.();
-            });
+            await delay(250, controller.signal);
             continue;
           }
           try { await this.resume(id, owner); }
@@ -137,11 +148,7 @@ export class ContinuousWorkSupervisor {
           if (!after || ["stopped", "completed", "failed"].includes(after.status)) break;
           // Explicit pause changes status and aborts this controller. Only automatic
           // activation yields reach this delay and continue to the next bounded slice.
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, 1_000);
-            timer.unref?.();
-            controller.signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
-          });
+          await delay(1_000, controller.signal);
         }
       } finally {
         if (this.continuous.get(id) === controller) this.continuous.delete(id);
