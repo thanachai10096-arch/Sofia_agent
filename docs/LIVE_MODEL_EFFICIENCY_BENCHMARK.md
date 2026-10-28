@@ -44,4 +44,4 @@ The output reports provider-reported prompt/completion or input/output tokens wh
 - This harness is API-compatible rather than universal: providers with a different request/response protocol need a dedicated adapter before they can be benchmarked here.
 
 
-The explicit pricing arithmetic is isolated in `bench/estimated-cost.mjs` and can be tested without credentials or provider calls using `node --test bench/estimated-cost.test.mjs`.
+The evidence-packing component is shared with `bench/sofia-evidence-packing.mjs`; its regression tests run without credentials or provider calls using `node --import tsx --test bench/sofia-evidence-packing.test.mjs`. Explicit pricing arithmetic is isolated in `bench/estimated-cost.mjs` and can be tested with `node --test bench/estimated-cost.test.mjs`.
