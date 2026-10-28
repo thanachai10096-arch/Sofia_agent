@@ -11,6 +11,7 @@ import { redactSecrets } from "../../security/guard.js";
 export interface TelegramMessagingRuntime {
   start(): Promise<void>;
   stop(): Promise<void>;
+  send(message: OutboundMessage): Promise<boolean>;
 }
 
 interface TelegramRunResult {
@@ -176,6 +177,7 @@ export function createTelegramMessagingRuntime(
     return {
       start: () => gateway.start(),
       stop: () => gateway.stop(),
+      send: (message) => gateway.send("telegram", message),
     };
   } catch (error) {
     // Report only the static validation message from our own constructors. Never log
