@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { estimateCostUsd, readExplicitPricing } from "./estimated-cost.mjs";
+import { estimateCostUsd, readExplicitPricing, readReportedUsage } from "./estimated-cost.mjs";
 
 test("calculates estimated list-price cost only from explicit prices and complete usage", () => {
   const pricing = readExplicitPricing({
@@ -24,4 +24,22 @@ test("requires both explicit prices and rejects invalid values", () => {
     SOFIA_BENCH_INPUT_USD_PER_MILLION_TOKENS: "-1",
     SOFIA_BENCH_OUTPUT_USD_PER_MILLION_TOKENS: "2",
   }), /non-negative decimal/);
+});
+
+test("accepts non-negative safe provider usage and treats invalid counts as unknown", () => {
+  assert.deepEqual(readReportedUsage({ prompt_tokens: 12, completion_tokens: 4 }), {
+    inputTokens: 12, outputTokens: 4, totalTokens: 16, usageReported: true,
+  });
+  assert.deepEqual(readReportedUsage({ input_tokens: 0, output_tokens: 0 }), {
+    inputTokens: 0, outputTokens: 0, totalTokens: 0, usageReported: true,
+  });
+  for (const usage of [
+    { prompt_tokens: -1, completion_tokens: 2 },
+    { prompt_tokens: Number.MAX_SAFE_INTEGER + 1, completion_tokens: 2 },
+    { prompt_tokens: 1 },
+    null,
+  ]) {
+    assert.equal(readReportedUsage(usage).usageReported, false);
+    assert.equal(readReportedUsage(usage).totalTokens, null);
+  }
 });
