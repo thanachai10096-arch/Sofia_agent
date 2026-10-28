@@ -62,14 +62,45 @@ export async function reportTelegramRunCompletion(input: {
       (status === "failed" ? "\nCheck the Sofia run history for details." : "");
   }
 
-  try {
-    const delivered = await input.send({ conversationId: input.conversationId, text });
-    if (!delivered) input.onWarning?.("telegram_completion_delivery_failed");
-  } catch {
-    input.onWarning?.("telegram_completion_delivery_failed");
-  }
+  await sendTelegramText(text, input.send, input.conversationId, input.onWarning);
 }
 
+
+/** Telegram limits text messages to 4096 characters. Keep headroom for provider parsing and avoid splitting UTF-16 surrogate pairs. */
+function splitTelegramText(text: string, maxCharacters = 3_500): string[] {
+  if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 1 || maxCharacters > 4_096) {
+    throw new Error("Invalid Telegram message chunk size.");
+  }
+  const characters = Array.from(text);
+  const chunks: string[] = [];
+  for (let offset = 0; offset < characters.length; offset += maxCharacters) {
+    chunks.push(characters.slice(offset, offset + maxCharacters).join(""));
+  }
+  return chunks.length ? chunks : [""];
+}
+
+async function sendTelegramText(
+  text: string,
+  send: (message: OutboundMessage) => Promise<boolean>,
+  conversationId: string,
+  onWarning?: (event: string) => void,
+): Promise<void> {
+  const chunks = splitTelegramText(text);
+  for (let index = 0; index < chunks.length; index += 1) {
+    const prefix = chunks.length > 1 && index > 0
+      ? "↪️ Sofia result (continued):\\n"
+      : "";
+    try {
+      const delivered = await send({
+        conversationId,
+        text: prefix + chunks[index],
+      });
+      if (!delivered) onWarning?.("telegram_completion_delivery_failed");
+    } catch {
+      onWarning?.("telegram_completion_delivery_failed");
+    }
+  }
+}
 
 /** Parse immutable Telegram user IDs; reject empty, malformed, or duplicate entries. */
 export function parseTelegramUserAllowlist(value: string): ReadonlySet<string> {
