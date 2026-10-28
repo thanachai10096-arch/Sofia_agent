@@ -200,6 +200,7 @@ test("Brain feeds a failed verification into a specialist and executes its valid
     },
   };
 
+  let subagentMeasurement: TaskMeasurement | undefined;
   const brain = createSofiaBrain({
     dependencies: {
       reasoner: makeReasoner(),
@@ -207,6 +208,7 @@ test("Brain feeds a failed verification into a specialist and executes its valid
       subagents,
       allowShell: false,
       allowNetwork: false,
+      onEfficiencyMeasurement(value) { subagentMeasurement = value; },
       onEvent(event) {
         events.push(event.type);
       },
@@ -244,6 +246,11 @@ test("Brain feeds a failed verification into a specialist and executes its valid
   assert.ok(events.includes("brain.subagent.completed"));
   assert.equal(events.includes("brain.replan.started"), false);
   assert.ok(events.includes("brain.verification.completed"));
+  assert.ok(subagentMeasurement);
+  assert.equal(subagentMeasurement.unmeasuredModelCalls, 0);
+  assert.equal(subagentMeasurement.usageComplete, true);
+  assert.ok(subagentMeasurement.inputTokens >= 27);
+  assert.ok(subagentMeasurement.outputTokens >= 43);
 
   const trace = brain.getExecutionTrace();
   assert.ok(trace.length > 0);
