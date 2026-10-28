@@ -186,3 +186,29 @@ test("model profile API encrypts keys, scopes access, and never returns credenti
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("usage endpoint matches only its exact path and permits query parameters", async () => {
+  const apiKey = "usage-route-test-key";
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, { apiKeys: { [apiKey]: ["agent:read"] } });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const headers = { authorization: `Bearer ${apiKey}` };
+  try {
+    const exact = await fetch(`${baseUrl}/v1/usage?source=test`, { headers });
+    assert.equal(exact.status, 200);
+    const usage = await exact.json() as { keyId: string };
+    assert.equal(usage.keyId, apiKey);
+
+    const nearMatch = await fetch(`${baseUrl}/v1/usage-extra`, { headers });
+    assert.equal(nearMatch.status, 404);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
