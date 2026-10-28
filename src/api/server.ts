@@ -257,6 +257,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const server = createServer(async (req, res) => {
     const origin = req.headers.origin;
     try {
+      if (await webChat.handle(req, res)) return;
+      if (req.url?.startsWith("/v1/")) {
+        const sessionApiKey = webChat.apiKeyFor(req);
+        if (sessionApiKey) {
+          if (!webChat.sameOrigin(req)) return json(res, 403, { error: "origin_not_allowed" }, req.headers.origin, config);
+          req.headers.authorization = "Bearer " + sessionApiKey;
+        }
+      }
       if (discordRoute && req.url === discordRoutePath) {
         await handleDiscordInteractionHttpRequest(req, res, discordRoute.transport, discordMaxBodyBytes);
         return;
