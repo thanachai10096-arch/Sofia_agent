@@ -20,17 +20,20 @@ Then run:
 
 ```bash
 sofia status
+sofia check
 sofia run "your task"
 ```
 
 `SOFIA_API_URL`, when set, overrides the saved URL. Do not put API keys in URLs, command-line arguments, repository files, or shared chat messages.
 
+Run `sofia check` when you explicitly want to verify connectivity. It calls the public `GET /health` endpoint and the authenticated, non-task `GET /v1/usage` endpoint. It does not submit an agent task or call a model. It reports reachability separately from API-key acceptance; a failed check never prints the key.
+
 ## What this first slice does not do
 
 - It does not save or prompt for API keys.
-- It does not make an authenticated or billable model/provider request automatically.
+- It does not make an authenticated or billable model/provider request automatically during setup. `sofia check` is an explicit, non-model API verification.
 - It does not prove that the API is reachable or that the key is authorized.
 - It does not configure a local model provider, desktop/web UI, or messaging integrations.
 - It does not grant tools or change Sofia's policy/approval settings.
 
-The next implementation slice should add an explicit, user-triggered API health/authentication check using an existing supported endpoint, then connect the same setup coordinator to other frontends. Only show “connected” after a real check succeeds.
+This first slice still does not configure a local model provider, desktop/web UI, or messaging integrations. Those should reuse the setup core rather than create parallel configuration formats.
