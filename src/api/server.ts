@@ -9,6 +9,7 @@ import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { handleSlackEventsHttpRequest } from "../integrations/messaging/slack-http-route.js";
 import { handleLineWebhookHttpRequest } from "../integrations/messaging/line-http-route.js";
+import { handleWhatsAppWebhookHttpRequest } from "../integrations/messaging/whatsapp-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
@@ -161,6 +162,21 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       (slackRoute && lineRoutePath === slackRoutePath))) {
     throw new Error("Discord, Slack, and LINE messaging routes must use different paths.");
   }
+  const whatsAppRoute = config.whatsAppWebhookRoute;
+  const whatsAppRoutePath = whatsAppRoute?.path ?? "/v1/integrations/whatsapp/webhook";
+  const whatsAppMaxBodyBytes = whatsAppRoute?.maxBodyBytes ?? 1_000_000;
+  if (whatsAppRoute && (!whatsAppRoutePath.startsWith("/") || whatsAppRoutePath.includes("#") ||
+      whatsAppRoutePath.includes("?"))) {
+    throw new Error("WhatsApp webhook route path must be an absolute path without query or fragment.");
+  }
+  if (whatsAppRoute && (!Number.isSafeInteger(whatsAppMaxBodyBytes) || whatsAppMaxBodyBytes < 1 || whatsAppMaxBodyBytes > 1_000_000)) {
+    throw new Error("WhatsApp webhook route maxBodyBytes must be between 1 and 1000000.");
+  }
+  if (whatsAppRoute && ((discordRoute && whatsAppRoutePath === discordRoutePath) ||
+      (slackRoute && whatsAppRoutePath === slackRoutePath) ||
+      (lineRoute && whatsAppRoutePath === lineRoutePath))) {
+    throw new Error("Discord, Slack, LINE, and WhatsApp messaging routes must use different paths.");
+  }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStorePath);
@@ -296,6 +312,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
       if (lineRoute && req.url === lineRoutePath) {
         await handleLineWebhookHttpRequest(req, res, lineRoute.transport, lineMaxBodyBytes);
+        return;
+      }
+      if (whatsAppRoute && req.url && new URL(req.url, "http://localhost").pathname === whatsAppRoutePath) {
+        await handleWhatsAppWebhookHttpRequest(req, res, whatsAppRoute.transport, req.url, whatsAppMaxBodyBytes);
         return;
       }
 
