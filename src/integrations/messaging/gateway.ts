@@ -1,5 +1,6 @@
 import type { ChatPlatform, ChatMessageDeduplicator } from "../chat-adapter.js";
 import type { InboundMessage, MessagingAdapter, MessagingLogger, OutboundMessage } from "./types.js";
+import { createMessagingAdapterRegistry } from "./registry.js";
 
 /**
  * Atomic fixed-window rate-limit contract for shared stores (for example Redis
@@ -36,11 +37,7 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
   const windowMs = options.rateWindowMs ?? 60_000;
   if (!Number.isSafeInteger(max) || max < 1 || max > 10_000) throw new Error("Invalid messaging rate limit.");
   if (!Number.isSafeInteger(windowMs) || windowMs < 1_000 || windowMs > 86_400_000) throw new Error("Invalid messaging rate window.");
-  const adapters = new Map<ChatPlatform, MessagingAdapter>();
-  for (const adapter of options.adapters) {
-    if (adapters.has(adapter.platform)) throw new Error("Duplicate messaging adapter.");
-    adapters.set(adapter.platform, adapter);
-  }
+  const registry = createMessagingAdapterRegistry(options.adapters);
   const counts = new Map<string, number[]>();
   const controller = new AbortController();
   let started = false;
@@ -55,7 +52,7 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
       if (!enabled || started || stopped) return;
       started = true;
       try {
-        await Promise.all([...adapters.values()].map((adapter) => adapter.start(controller.signal, async (message) => {
+        await Promise.all([...registry.list()].map(({ platform }) => registry.get(platform)!).map((adapter) => adapter.start(controller.signal, async (message) => {
           try {
             await this.dispatch(message);
           } catch (error) {
@@ -150,7 +147,7 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
       try {
         const reply = await options.onMessage(message, controller.signal);
         if (reply?.trim()) {
-          const adapter = adapters.get(message.platform);
+          const adapter = registry.get(message.platform);
           if (adapter) {
             const receipt = await adapter.send({
               conversationId: identity.conversationId,
@@ -168,7 +165,7 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
     },
     async send(platform, message) {
       if (!enabled || stopped) return false;
-      const adapter = adapters.get(platform);
+      const adapter = registry.get(platform);
       if (!adapter) return false;
       const receipt = await adapter.send(message);
       return receipt.state === "sent";
