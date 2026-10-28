@@ -11,7 +11,13 @@ Sofia's continuous-work supervisor runs a large objective as small, verifiable w
 - A trusted `isComplete` callback decides when the actual objective is complete. Do not infer completion solely from a model saying it is done; the callback should inspect task-specific acceptance criteria or verified evidence.
 - All records are owner-scoped. Child jobs are submitted with the same owner ID, and reads/stops for another owner are denied.
 - `FileContinuousWorkStore` is for a single API process with persistent storage. It uses private directory/file permissions, credential-shaped secret redaction, and atomic replacement. It does not coordinate concurrent writers across processes; use a transactional shared `ContinuousWorkStore` implementation before running multiple workers or replicas.
-- The supervisor is exported as a library component. It is not yet exposed as a public HTTP/chat command; callers must explicitly construct it with the existing `JobRuntime`, persistent store, and a trusted completion evaluator.
+- The API entrypoint wires this into the existing `JobRuntime` and exposes authenticated owner-scoped HTTP controls:
+  - `POST /v1/continuous-work` with `{"task":"..."}` creates a paused objective (requires `agent:run`).
+  - `GET /v1/continuous-work` and `GET /v1/continuous-work/:id` list/read only the authenticated owner's records (requires `agent:read` or `agent:run`).
+  - `POST /v1/continuous-work/:id/resume`, `/pause`, and `/stop` manage the objective (requires `agent:run`).
+  - Resume returns `202`; poll the GET endpoint for progress. Each activation is bounded and returns to paused state at its cap.
+- The default API host deliberately uses a completion evaluator that never auto-declares success. This avoids treating a model's claim as verified completion; objectives must be stopped by the owner unless the host is changed to provide task-specific evidence checks. Optionally set `SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS` to a positive integer to impose a hard lifetime cap.
+- Restart recovery is not automatic yet. Records are persisted and the owner can resume them after restart, but a production-grade recovery path must reconcile any recorded child job before starting another slice.
 
 ## Example
 
@@ -41,7 +47,7 @@ await continuous.resume(work.id, authenticatedPrincipalId);
 // Later, including after a process restart, call resume again with the same store.
 ```
 
-The example's `existingJobRuntime` and `verifyObjectiveAcceptance` are host-provided dependencies, not globals exported by the package.
+The example's `existingJobRuntime` and `verifyObjectiveAcceptance` are host-provided dependencies, not globals exported by the package. The HTTP API currently uses a conservative never-complete evaluator until a host-specific verifier is configured.
 
 ## Operational guardrails
 
