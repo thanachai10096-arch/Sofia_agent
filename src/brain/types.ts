@@ -108,6 +108,8 @@ export interface ToolGateway {
 
 export interface PreparedInference {
   inputTokens: number;
+  /** True only when invoke() returns token counts supplied by the model provider. */
+  providerReportedUsage?: boolean;
   invoke(options: {
     signal: AbortSignal;
     maxOutputTokens: number;
@@ -179,6 +181,10 @@ export interface CompletionReport {
     toolCalls: number;
     modelCalls: number;
     reservedOrUsedTokens: number;
+    /** Provider-reported totals; omitted when the reasoner cannot prove provenance. */
+    providerInputTokens?: number;
+    providerOutputTokens?: number;
+    providerUsageCalls?: number;
     replans: number;
   };
 }
