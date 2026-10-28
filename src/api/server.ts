@@ -606,12 +606,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const runId = randomUUID();
         try {
+          const enrichedInput = await withRelevantMemory(auth.keyId, input);
           const result = await agent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
-            task: input.task,
-            ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
-            ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
+            task: enrichedInput.task,
+            ...(enrichedInput.sessionId !== undefined ? { sessionId: `${auth.keyId}:${enrichedInput.sessionId}` } : {}),
+            ...(enrichedInput.context !== undefined ? { context: typeof enrichedInput.context === "string" ? enrichedInput.context : JSON.stringify(enrichedInput.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
