@@ -94,3 +94,58 @@ test("preserves legacy persisted usage records until Brain usage is recorded", (
   }
 });
 
+
+test("keeps provider-reported token totals isolated per API key", () => {
+  const usage = new UsageLimiter(10, 100);
+  usage.recordBrainUsage("key-a", {
+    modelCalls: 2, reservedOrUsedTokens: 100,
+    providerInputTokens: 70, providerOutputTokens: 30, providerUsageCalls: 2,
+  });
+  usage.recordBrainUsage("key-b", {
+    modelCalls: 1, reservedOrUsedTokens: 40,
+    providerInputTokens: 11, providerOutputTokens: 9, providerUsageCalls: 1,
+  });
+
+  assert.equal(usage.get("key-a").providerInputTokens, 70);
+  assert.equal(usage.get("key-a").providerOutputTokens, 30);
+  assert.equal(usage.get("key-a").providerUsageCalls, 2);
+  assert.equal(usage.get("key-b").providerInputTokens, 11);
+  assert.equal(usage.get("key-b").providerOutputTokens, 9);
+  assert.equal(usage.get("key-b").providerUsageCalls, 1);
+});
+
+test("does not invent provider token counts for estimated-only Brain reports", () => {
+  const usage = new UsageLimiter(10, 100);
+  usage.recordBrainUsage("key-a", { modelCalls: 2, reservedOrUsedTokens: 123 });
+
+  const record = usage.get("key-a");
+  assert.equal(record.brainReservedOrUsedTokens, 123);
+  assert.equal(record.providerInputTokens, undefined);
+  assert.equal(record.providerOutputTokens, undefined);
+  assert.equal(record.providerUsageCalls, undefined);
+});
+
+test("adds provider metrics to legacy records only after provider usage is recorded", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "sofia-usage-upgrade-"));
+  const store = path.join(dir, "usage.json");
+  try {
+    writeFileSync(store, JSON.stringify([{ keyId: "legacy-key", runs: 4, toolCalls: 5, startedAt: Date.now() }]));
+    const usage = new UsageLimiter(10, 100, store);
+    usage.recordBrainUsage("legacy-key", {
+      modelCalls: 1, reservedOrUsedTokens: 17,
+      providerInputTokens: 12, providerOutputTokens: 5, providerUsageCalls: 1,
+    });
+
+    const restarted = new UsageLimiter(10, 100, store);
+    const record = restarted.get("legacy-key");
+    assert.equal(record.runs, 4);
+    assert.equal(record.toolCalls, 5);
+    assert.equal(record.brainRuns, 1);
+    assert.equal(record.providerInputTokens, 12);
+    assert.equal(record.providerOutputTokens, 5);
+    assert.equal(record.providerUsageCalls, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
