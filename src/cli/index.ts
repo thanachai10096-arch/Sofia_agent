@@ -11,7 +11,7 @@ Sofia Agent CLI
 
 Commands:
   sofia init
-  sofia run "<task>"
+  sofia run [--model auto|fast|coding|reasoning|vision] "<task>"
   sofia status
 
 Environment:
@@ -43,15 +43,26 @@ async function main() {
   }
 
   if (command === "run") {
-    const task = args.slice(1).join(" ").trim();
-    if (!task) throw new Error("Usage: sofia run \"your task\"");
+    const runArgs = args.slice(1);
+    let modelSelection: "auto" | "fast" | "coding" | "reasoning" | "vision" | undefined;
+    const modelFlag = runArgs.indexOf("--model");
+    if (modelFlag >= 0) {
+      const selected = runArgs[modelFlag + 1];
+      if (!["auto", "fast", "coding", "reasoning", "vision"].includes(selected ?? "")) {
+        throw new Error("Usage: sofia run [--model auto|fast|coding|reasoning|vision] \"your task\"");
+      }
+      modelSelection = selected as typeof modelSelection;
+      runArgs.splice(modelFlag, 2);
+    }
+    const task = runArgs.join(" ").trim();
+    if (!task) throw new Error("Usage: sofia run [--model auto|fast|coding|reasoning|vision] \"your task\"");
     const apiKey = process.env.SOFIA_API_KEY;
     if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
     const client = new SofiaClient({
       apiKey,
       baseUrl: process.env.SOFIA_API_URL ?? "http://localhost:3000",
     });
-    const result = await client.run({ task, workspace: await runtime.cwd() });
+    const result = await client.run({ task, workspace: await runtime.cwd(), ...(modelSelection ? { modelSelection } : {}) });
     console.log(result.result?.output ?? result.error ?? "No output");
     return;
   }

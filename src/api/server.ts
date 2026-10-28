@@ -207,6 +207,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
+          ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
           ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -449,6 +450,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+            ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -505,6 +507,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria !== undefined ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
             ...(input.priority !== undefined ? { priority: input.priority } : {}),
+            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
             ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
           });
           if (idempotencyId) {
@@ -701,6 +704,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
+        if (input.modelSelection && input.modelSelection !== "auto") return json(res, 400, { error: "model_selection_not_supported_for_durable_jobs", message: "Explicit model selection is available on /v1/agent/runs; durable jobs currently use automatic routing." }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
           const job = await deps.jobRuntime.submit({
