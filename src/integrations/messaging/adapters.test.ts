@@ -22,6 +22,21 @@ test("Telegram adapter normalizes messages and splits oversized replies", async 
   assert.equal((await adapter.send({ conversationId: "3", text: "x".repeat(5000) })).state, "sent");
   assert.equal(sent.length, 2);
 });
+test("Telegram chunking preserves emoji across message boundaries", async () => {
+  const chunks: string[] = [];
+  const adapter = createTelegramAdapter({
+    async start() {},
+    async sendMessage(_chatId, text) { chunks.push(text); return { messageId: String(chunks.length) }; },
+    async stop() {},
+  });
+  const output = "x".repeat(4_095) + "🙂" + "y".repeat(4_200);
+  assert.equal((await adapter.send({ conversationId: "chat-1", text: output })).state, "sent");
+  assert.ok(chunks.every((chunk) => chunk.length <= 4_096));
+  assert.equal(chunks.join(""), output);
+  assert.ok(chunks.every((chunk) => !/[\\uD800-\\uDBFF]$/.test(chunk)));
+  assert.ok(chunks.every((chunk) => !/^[\\uDC00-\\uDFFF]/.test(chunk)));
+});
+
 test("Discord adapter ignores unverified events and bot messages", async () => {
   let onEvent: ((message: VerifiedDiscordMessage) => Promise<void>) | undefined;
   const adapter = createDiscordAdapter({
