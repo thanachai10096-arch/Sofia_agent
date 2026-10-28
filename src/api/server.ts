@@ -1023,7 +1023,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      if (req.method === "GET" && req.url.startsWith("/v1/usage")) {
+      if (req.method === "GET" && new URL(req.url, "http://sofia.local").pathname === "/v1/usage") {
         return json(res, 200, usage.get(auth.keyId), origin, config);
       }
 
