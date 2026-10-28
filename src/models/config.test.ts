@@ -24,6 +24,21 @@ const names = [
   "SOFIA_CODING_MODEL",
   "SOFIA_REASONING_MODEL",
   "SOFIA_VISION_MODEL",
+  "SOFIA_MODEL_PROVIDER",
+  "SOFIA_MODEL_BASE_URL",
+  "SOFIA_MODEL_API_KEY",
+  "SOFIA_MODEL",
+  "SOFIA_MODEL_ALLOW_INSECURE_HTTP",
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "OPENAI_MODEL",
+  "OPENAI_FAST_MODEL",
+  "OPENAI_CODING_MODEL",
+  "OPENAI_REASONING_MODEL",
+  "OPENAI_VISION_MODEL",
+  "BASE_URL",
+  "API_KEY",
+  "MODEL",
 ];
 
 const original = new Map(names.map((name) => [name, process.env[name]]));
@@ -86,9 +101,55 @@ test("OpenRouter and legacy gateway credentials cannot override Gemini", () => {
   assert.equal(config.providers.fast?.model, "gemini-2.5-flash");
 });
 
-test("fails closed when no Gemini API key is configured", () => {
+test("fails closed when no supported model provider is configured", () => {
   clear();
-  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
   process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
-  assert.throws(loadModelConfigFromEnv, /GEMINI_API_KEY/);
+  assert.throws(loadModelConfigFromEnv, /Configure GEMINI_API_KEY/);
+});
+
+
+test("generic BASE_URL + API_KEY + MODEL config supports custom OpenAI-compatible providers", () => {
+  clear();
+  process.env.BASE_URL = "https://models.example/v1/";
+  process.env.API_KEY = "custom-provider-secret";
+  process.env.MODEL = "vendor/model-large";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.routes.length, 4);
+  for (const route of config.routes) {
+    assert.equal(config.providers[route.id]?.baseUrl, "https://models.example/v1");
+    assert.equal(config.providers[route.id]?.apiKey, "custom-provider-secret");
+    assert.equal(config.providers[route.id]?.model, "vendor/model-large");
+  }
+});
+
+test("OpenRouter can be selected explicitly and supports per-route model overrides", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openrouter";
+  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+  process.env.OPENROUTER_MODEL = "vendor/default-model";
+  process.env.OPENROUTER_CODING_MODEL = "vendor/coding-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(config.providers.fast?.model, "vendor/default-model");
+  assert.equal(config.providers.coding?.model, "vendor/coding-model");
+});
+
+test("explicit OpenAI provider uses OpenAI defaults and rejects insecure remote URLs", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai";
+  process.env.OPENAI_API_KEY = "openai-test-key";
+  process.env.OPENAI_MODEL = "gpt-test-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.openai.com/v1");
+  assert.equal(config.providers.fast?.model, "gpt-test-model");
+
+  process.env.OPENAI_BASE_URL = "http://models.example/v1";
+  assert.throws(loadModelConfigFromEnv, /must use HTTPS/);
+});
+
+test("custom provider URLs reject embedded credentials, query strings, and fragments", () => {
+  clear();
+  process.env.SOFIA_MODEL_BASE_URL = "https://user:password@models.example/v1";
+  process.env.SOFIA_MODEL_API_KEY = "custom-key";
+  assert.throws(loadModelConfigFromEnv, /must not contain credentials/);
 });
