@@ -109,6 +109,7 @@ export class SofiaAgent {
       ...(request.signal ? { signal: request.signal } : {}),
       ...(request.maxSteps !== undefined ? { maxSteps: request.maxSteps } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
+      ...(request.notificationTarget ? { notificationTarget: request.notificationTarget } : {}),
       ...(request.desktopCapabilities?.length ? { desktopCapabilities: request.desktopCapabilities } : {}),
       onEvent: (event) => {
         if (event.type === "brain.tool.started") {
@@ -128,6 +129,7 @@ export class SofiaAgent {
       task: request.task,
       ...(request.context !== undefined ? { context: request.context } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
+      ...(request.notificationTarget ? { notificationTarget: request.notificationTarget } : {}),
       ...(request.acceptanceCriteria
         ? { acceptanceCriteria: request.acceptanceCriteria }
         : {}),
