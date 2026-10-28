@@ -156,7 +156,7 @@ See [Discord integration setup and smoke-test guide](docs/DISCORD_INTEGRATION_SE
 
 ## `> Chat integrations`
 
-Sofia uses one normalized messaging gateway contract so additional chat platforms can be added as independent adapters without creating a second agent runtime. The current repository includes Telegram and Discord transports; the gateway contract can also host Slack, WhatsApp Business Platform, Microsoft Teams, Google Chat, Matrix, Signal, LINE, Meta messaging, Web Chat, desktop/mobile clients, and SDK integrations when their adapters are implemented and configured.
+Sofia uses one normalized messaging gateway contract so additional chat platforms can be added as independent adapters without creating a second agent runtime. The current repository includes Telegram and Discord transports plus a Slack adapter and request-signature verifier (Slack still needs a complete HTTP receiver and app setup); the gateway contract can also host WhatsApp Business Platform, Microsoft Teams, Google Chat, Matrix, Signal, LINE, Meta messaging, Web Chat, desktop/mobile clients, and SDK integrations when their adapters are implemented and configured.
 
 **A platform name in the shared type is not proof of a working connector.** Every provider still needs authenticated inbound events, trusted identity mapping, outbound delivery, retries/replay protection, access policy, and provider-specific tests. See [Messaging Gateway](docs/MESSAGING_GATEWAY.md) for the current implementation status and rollout checklist. Natural chat is the default for the shared Sofia message handler, so ordinary text can submit a task without `/run`; command-only deployments can opt into `mode: "command"`. Provider-specific commands and platform policies remain in control.
 
