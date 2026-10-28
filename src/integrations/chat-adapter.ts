@@ -33,12 +33,34 @@ export interface SignedMessagingContext {
   signature: string;
 }
 
+/** Create an HMAC-authenticated identity envelope for a trusted server-side chat bridge. */
+export function createSignedMessagingContext(input: {
+  platform: ChatPlatform;
+  userId: string;
+  conversationId: string;
+  messageId: string;
+  signedTask: string;
+}, secret: string): SignedMessagingContext {
+  const unsigned = {
+    platform: input.platform,
+    userId: input.userId,
+    conversationId: input.conversationId,
+    messageId: input.messageId,
+    taskHash: createHash("sha256").update(input.signedTask).digest("hex"),
+  };
+  return {
+    ...unsigned,
+    signature: createHmac("sha256", secret.trim()).update(JSON.stringify(unsigned)).digest("hex"),
+  };
+}
+
 export interface ChatRunStarter {
   start(input: {
     task: string;
     context?: string;
     sessionId?: string;
   }, signal?: AbortSignal, options?: { idempotencyKey?: string; messagingContext?: SignedMessagingContext }): Promise<{ id: string; status: string; error?: string }>;
+  continuousWorkAction?(input: { signedTask: string; messagingContext: SignedMessagingContext }, signal?: AbortSignal): Promise<Record<string, unknown>>;
 }
 
 export interface ChatAccessPolicy {
@@ -109,16 +131,13 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
       const sessionParts = [command.platform, command.senderId, command.conversationId];
       const sessionId = sessionParts.map((part) => `${part.length}:${part}`).join("|");
       const messagingContext = options.messagingContextSecret?.trim()
-        ? (() => {
-            const unsigned = {
-              platform: command.platform,
-              userId: command.senderId,
-              conversationId: command.conversationId,
-              messageId: command.messageId,
-              taskHash: createHash("sha256").update(task).digest("hex"),
-            };
-            return { ...unsigned, signature: createHmac("sha256", options.messagingContextSecret!.trim()).update(JSON.stringify(unsigned)).digest("hex") };
-          })()
+        ? createSignedMessagingContext({
+            platform: command.platform,
+            userId: command.senderId,
+            conversationId: command.conversationId,
+            messageId: command.messageId,
+            signedTask: task,
+          }, options.messagingContextSecret)
         : undefined;
       const run = await options.client.start({
         task,
