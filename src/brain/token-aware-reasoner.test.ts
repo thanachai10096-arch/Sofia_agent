@@ -43,6 +43,7 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
     phase: "plan",
     payload: {
       task: "Update the token efficiency benchmark",
+      referenceContext: { trust: "untrusted_reference_data", content: "Caller context says preserve the benchmark fixture." },
       understanding: { successCriteria: ["preserve relevant evidence"] },
     },
     memory: {
@@ -58,6 +59,7 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
   assert.deepEqual(result.value, { ok: true });
   assert.ok(packedEvidence.length >= 5);
   assert.ok(packedEvidence.some((item) => item.text.includes("benchmark runner reports input tokens")));
+  assert.ok(packedEvidence.some((item) => item.text.includes("Caller context says preserve the benchmark fixture.")));
   assert.ok(packedEvidence.some((item) => item.text.includes("preserve existing public interfaces")));
   assert.ok(packedEvidence.some((item) => item.text.includes("Use node:test for regression tests")));
   assert.ok(packedEvidence.every((item) => item.text.includes("untrusted reference data")));
