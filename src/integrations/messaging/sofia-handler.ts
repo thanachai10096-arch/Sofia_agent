@@ -5,6 +5,7 @@ import {
   type ChatRunStarter,
 } from "../chat-adapter.js";
 import type { InboundMessage } from "./types.js";
+import type { ChatPlatform } from "../chat-adapter.js";
 
 export interface SofiaMessagingHandlerOptions {
   /** Existing Sofia SDK/API client; credentials remain server-side. */
@@ -23,7 +24,7 @@ export interface SofiaMessagingHandlerOptions {
 
 /** Maps the gateway identity to Sofia's existing chat authorization contract. */
 export function createMessagingAccessCheck(policy: ChatAccessPolicy) {
-  return async (input: { platform: "telegram" | "discord" | "slack"; userId: string; channelId: string }) =>
+  return async (input: { platform: ChatPlatform; userId: string; channelId: string }) =>
     policy.isAllowed({
       platform: input.platform,
       senderId: input.userId,
