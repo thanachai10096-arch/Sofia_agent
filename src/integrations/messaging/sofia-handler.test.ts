@@ -70,7 +70,7 @@ test("denied user cannot start a run", async () => {
 test("empty and overlong tasks are rejected by existing dispatcher", async () => {
   const empty = harness();
   const handleEmpty = createSofiaMessagingHandler({ ...empty });
-  assert.equal(await handleEmpty(inbound("/run")), "Usage: /run <task>");
+  assert.equal(await handleEmpty(inbound("/run")), "Please send a task or message for Sofia.");
 
   const long = harness();
   const handleLong = createSofiaMessagingHandler({ ...long, maxTaskCharacters: 3 });
