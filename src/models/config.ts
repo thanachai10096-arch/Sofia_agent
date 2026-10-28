@@ -54,9 +54,6 @@ function loadExplicitProviderConfig(): SofiaModelConfig | undefined {
     if (!Object.hasOwn(providers, selectedProvider)) {
       throw new Error("Route " + id + " selects an unconfigured provider");
     }
-    const providerModel = providers[selectedProvider]!.model;
-    const routeModel = process.env[`SOFIA_${id.toUpperCase()}_MODEL`]?.trim();
-    if (routeModel) providers[selectedProvider] = { ...providers[selectedProvider]!, model: providerModel };
     return {
       id,
       providerId: selectedProvider,
