@@ -9,6 +9,10 @@ export interface VerifiedDiscordMessage {
   author: { id: string; username?: string; bot?: boolean };
   content: string;
   createdAt: number;
+  /** Must be derived from verified Discord channel metadata by the transport. */
+  directMessage?: boolean;
+  /** Must be derived from verified mentions/replies by the transport. */
+  addressedToBot?: boolean;
   attachments?: Array<{ id: string; filename?: string; contentType?: string; sizeBytes?: number; url?: string }>;
 }
 export interface DiscordTransport {
@@ -39,6 +43,8 @@ export function createDiscordAdapter(transport: DiscordTransport): MessagingAdap
             ...(attachment.url ? { url: attachment.url } : {}),
           })),
           receivedAt: event.createdAt,
+          ...(event.directMessage === true ? { directMessage: true } : {}),
+          ...(event.addressedToBot === true ? { addressedToBot: true } : {}),
         };
         await onMessage(inbound);
       });
