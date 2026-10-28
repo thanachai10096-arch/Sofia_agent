@@ -128,6 +128,7 @@ export class InProcessSubagentRuntime implements SubagentRuntime {
     return {
       role: request.role,
       ...(result.usage ? { usage: result.usage } : {}),
+      ...("retries" in result && typeof result.retries === "number" ? { retries: result.retries } : {}),
       summary: compact(value),
       output: value,
       proposedAction,
