@@ -58,7 +58,7 @@ export function createWhatsAppMessagingRuntime(
     const allowed = parseWhatsAppAllowlist(rawAllowed);
     const client = new SofiaClient({ apiKey, baseUrl });
     const accessPolicy = {
-      isAllowed(input: { platform: "telegram" | "discord" | "slack" | "line" | "whatsapp"; senderId: string; conversationId: string }) {
+      isAllowed(input: { platform: "telegram" | "discord" | "slack" | "line" | "whatsapp" | "matrix"; senderId: string; conversationId: string }) {
         return input.platform === "whatsapp" && allowed.has(input.senderId) && allowed.has(input.conversationId);
       },
     };
