@@ -3,7 +3,7 @@ import { afterEach, test } from "node:test";
 import { loadModelConfigFromEnv } from "./config.js";
 
 const names = [
-  "SOFIA_MODEL_PROVIDER", "SOFIA_MODEL_API_KEY", "SOFIA_MODEL_BASE_URL", "SOFIA_MODEL_NAME",
+  "SOFIA_MODEL_PROVIDER", "SOFIA_MODEL_API_KEY", "SOFIA_MODEL_BASE_URL", "SOFIA_MODEL_NAME", "BASE_URL", "API_KEY", "MODEL",
   "SOFIA_FAST_MODEL", "SOFIA_CODING_MODEL", "SOFIA_REASONING_MODEL", "SOFIA_VISION_MODEL",
   "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY", "DEEPSEEK_API_KEY", "TOGETHER_API_KEY", "FIREWORKS_API_KEY", "CEREBRAS_API_KEY", "PERPLEXITY_API_KEY",
   "GEMINI_API_KEY", "Gemini_API_Key", "GEMINI_MODEL",
@@ -235,4 +235,30 @@ test("credentials from an unselected provider are never reused as a fallback", (
   process.env.SOFIA_MODEL_PROVIDER = "openai";
   process.env.GEMINI_API_KEY = "gemini-only-secret";
   assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_API_KEY/);
+});
+
+
+test("generic BASE_URL, API_KEY and MODEL aliases select the compatible endpoint", () => {
+  clear();
+  process.env.BASE_URL = "https://models.example.test/v1";
+  process.env.API_KEY = "generic-endpoint-key";
+  process.env.MODEL = "generic-model-id";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://models.example.test/v1");
+  assert.equal(config.providers.fast?.apiKey, "generic-endpoint-key");
+  assert.equal(config.providers.fast?.model, "generic-model-id");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
+});
+
+test("generic API_KEY and BASE_URL aliases never override an explicitly named provider", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai";
+  process.env.BASE_URL = "https://attacker.example/v1";
+  process.env.API_KEY = "unrelated-generic-key";
+  process.env.MODEL = "unrelated-generic-model";
+  process.env.OPENAI_API_KEY = "official-openai-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.openai.com/v1");
+  assert.equal(config.providers.fast?.apiKey, "official-openai-key");
+  assert.equal(config.providers.fast?.model, "gpt-4.1-mini");
 });
