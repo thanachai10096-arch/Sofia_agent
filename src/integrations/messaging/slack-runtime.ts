@@ -5,6 +5,7 @@ import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createSlackAdapter } from "./slack.js";
 import { createSlackEventsTransport, type SlackEventsTransport } from "./slack-events-transport.js";
+import { redactSecrets } from "../../security/guard.js";
 
 export interface SlackMessagingRuntime {
   /** Supply this transport to createSofiaApi({ slackEventsRoute: { transport } }). */
@@ -75,7 +76,7 @@ export function createSlackMessagingRuntime(
       onAccepted: ({ runId, message }) => {
         void client.waitForRun(runId, { timeoutMs: 30 * 60 * 1_000, intervalMs: 1_000 }).then(async (run) => {
           const output = run.status === "completed" && typeof run.result?.output === "string"
-            ? run.result.output
+            ? String(redactSecrets(run.result.output))
             : "Sofia task " + run.status + ". Check run history for details.";
           await gateway?.send("slack", { conversationId: message.identity.conversationId, text: output });
         }).catch(() => {
