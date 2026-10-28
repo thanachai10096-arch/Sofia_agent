@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { createSofiaBrain } from "./executor.js";
 import { InMemorySkillLedger } from "./learning.js";
+import { EvolutionEngine } from "./evolution.js";
 import type { BrainReasoner, ToolGateway, ToolResult } from "./types.js";
 import type { SubagentRuntime } from "./subagents.js";
 
@@ -713,4 +714,61 @@ test("Brain proposes a general workflow skill only after successful verification
   assert.match(proposed?.name ?? "", /^workflow-/);
   assert.ok((proposed?.evidenceIds.length ?? 0) > 0, "candidate must carry trusted verification evidence");
   assert.equal(skillLedger.list().length, 1, "candidate is recorded only after the host approves it");
+});
+
+
+test("Brain reuses a learned workflow skill during initial planning and records its verified success", async () => {
+  const skillLedger = new InMemorySkillLedger();
+  const skillId = "learned:workflow-create-hello:unknown";
+  skillLedger.record({
+    name: "workflow-create-hello",
+    trigger: "Create hello.txt",
+    triggers: ["Create hello.txt"],
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["check the requested filename", "write hello.txt", "verify the file exists"],
+    verification: ["test"],
+    evidenceIds: ["prior-run-evidence"],
+  });
+  let matchedSkills: Array<{ id: string }> = [];
+  const evolution = new EvolutionEngine();
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner((request) => {
+        const parsed = JSON.parse(request) as { phase: string; payload?: { matchedSkills?: Array<{ id: string }> } };
+        if (parsed.phase === "plan") matchedSkills = parsed.payload?.matchedSkills ?? [];
+      }),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      skillLedger,
+      evolution,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.ok(matchedSkills.some((skill) => skill.id === skillId), "matching learned skill should be available to the initial planner");
+  assert.equal(evolution.getSkill(skillId)?.successes, 1, "verified completion should improve the skill's performance record");
 });
