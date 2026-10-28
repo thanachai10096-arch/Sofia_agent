@@ -86,6 +86,18 @@ Composition:
 
 This is the **WhatsApp Cloud API** path, not QR-based WhatsApp Web. The code and deterministic transport tests are present; Meta business/app setup and live end-to-end validation have not been performed. Messaging windows, template requirements, quotas, and account eligibility remain governed by Meta.
 
+## Natural-language scheduled tasks
+
+When the authenticated agent exposes the `schedule_task` tool, users can ask for simple schedules in ordinary language, for example:
+
+- "Every day at 8 am, summarize the news."
+- "Every weekday at 9:30 am, check my project status."
+- "In 30 minutes, remind me to review the build."
+
+The parser intentionally accepts a small, deterministic set of phrases (daily/morning, weekdays, named weekdays, and relative minute/hour/day delays). Ambiguous wording is rejected rather than guessed. Recurring schedules use the explicit `timeZone` supplied by the model or `SOFIA_DEFAULT_TIME_ZONE`; if neither is set, the safe documented default is UTC. Configure the timezone to the user's intended locale.
+
+A scheduled result is sent to a chat only when the originating integration supplied a verified, signed messaging identity and destination. The destination is captured by the trusted host; it cannot be selected or overridden by model-generated tool arguments. Without a verified destination, results remain available through durable schedule/job history. Live provider acceptance and real-account delivery still require platform-specific smoke tests.
+
 ## Composition contract
 
 Implementations of `MessagingAdapter` normalize incoming events only after provider authentication and identity mapping. The Telegram transport handles long polling and outbound Bot API calls. The Discord interaction transport exposes a request handler for mounting in an existing HTTPS route and uses Discord's interaction webhook token for the deferred response.
