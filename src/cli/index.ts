@@ -8,6 +8,7 @@ import { SofiaClient } from "../sdk/client.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import {
   assessHostedSetup,
+  checkHostedSofiaApi,
   createHostedSetupConfig,
   validateSofiaApiBaseUrl,
   type HostedSetupConfig,
@@ -24,6 +25,7 @@ Sofia Agent CLI
 
 Commands:
   sofia setup
+  sofia check
   sofia init
   sofia run "<task>"
   sofia status
@@ -129,6 +131,18 @@ async function main() {
 
   if (command === "setup") {
     await runSetupWizard();
+    return;
+  }
+
+  if (command === "check") {
+    const setup = await loadSetupConfig();
+    const apiKey = process.env.SOFIA_API_KEY ?? "";
+    const baseUrl = validateSofiaApiBaseUrl(
+      process.env.SOFIA_API_URL ?? setup?.apiBaseUrl ?? "http://localhost:3000",
+    );
+    const result = await checkHostedSofiaApi({ apiBaseUrl: baseUrl, apiKey });
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.reachable || !result.authenticated) process.exitCode = 1;
     return;
   }
 
