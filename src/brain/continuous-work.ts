@@ -91,6 +91,21 @@ export class ContinuousWorkSupervisor {
   async get(id: string, owner: string) { const r = await this.store.get(id); return r?.ownerKeyId === owner ? { ...r } : undefined; }
   async list(owner: string) { return (await this.store.list(owner)).map((r) => ({ ...r })); }
   isRunning(id: string): boolean { return this.active.has(id) || this.starting.has(id); }
+  /**
+   * Resume objectives left active by a process crash/restart. Each objective retains
+   * its persisted owner binding and reconciles its child job before submitting new work.
+   * Returns the number of resume attempts scheduled; failures remain persisted for inspection.
+   */
+  async resumeInterrupted(): Promise<number> {
+    const records = await this.store.list();
+    let scheduled = 0;
+    for (const record of records) {
+      if (record.status !== "active" || !record.ownerKeyId || this.isRunning(record.id)) continue;
+      scheduled += 1;
+      void this.resume(record.id, record.ownerKeyId).catch(() => undefined);
+    }
+    return scheduled;
+  }
   async pause(id: string, owner: string) { return this.changeStatus(id, owner, "paused"); }
   async stop(id: string, owner: string) { return this.changeStatus(id, owner, "stopped"); }
   private async changeStatus(id: string, owner: string, status: "paused" | "stopped"): Promise<boolean> {
