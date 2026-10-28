@@ -39,18 +39,17 @@ Re-check each gap against the current branch before implementation, because code
 - Deduplicate inbound messages and preserve owner/channel authorization.
 - Acceptance: a natural-language message starts work without `/run`; the same request through API and chat reaches the same Core behavior; unauthorized users cannot trigger work.
 
-### P0 — Make session context usable
+### P0 — Session context (first slice implemented)
 
-- Add bounded transcript retrieval/replay to the existing session store, preserving backward compatibility for callers that do not provide a session ID.
-- Include recent turns plus a compact relevant-history retrieval path; enforce per-principal/session namespaces and context-token budgets.
-- Store user and assistant turns consistently, redact secrets, and mark historical/tool content as untrusted.
-- Acceptance: a follow-up such as “continue that task” resolves to the correct session; a new user's session cannot retrieve another user's turns; context stays bounded; tests prove the retrieved context actually reaches the model.
+- Implemented bounded replay of recent turns on the existing `SofiaAgent` path; calls without a `sessionId` are unchanged.
+- Implemented regression tests proving prior turns reach the next model request.
+- Remaining: ensure every host/API/chat adapter derives an isolated session key from authenticated ownership, and add relevance search over older history without unbounded transcript injection.
 
-### P0/P1 — Retrieve user/project memory in the Core loop
+### P0/P1 — User memory (first slice implemented)
 
-- Connect existing memory search to the Core's understand/plan context assembly instead of requiring callers to manually read memory first.
-- Retrieve only relevant entries, with source, scope, freshness, and bounded size; never treat memory as authorization.
-- Acceptance: a relevant stored preference changes the next response/action; unrelated memories are omitted; deletion stops retrieval; prompt-injection content in memory cannot change tool permissions.
+- Implemented optional retrieval of explicitly saved user memories into the existing Core context assembly, scoped to the host-provided principal and bounded to five entries / 2,400 characters.
+- Retrieval errors do not fail a run; retrieved memory is fenced as untrusted reference data and cannot grant permissions.
+- Remaining: prove cross-adapter owner/session isolation, retrieval behavior after deletion, and relevance quality with end-to-end tests.
 
 ### P1 — Close the verified learning loop
 
