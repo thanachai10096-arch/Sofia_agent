@@ -13,6 +13,7 @@ import { createSlackMessagingRuntime } from "../integrations/messaging/slack-run
 import { createLineMessagingRuntime } from "../integrations/messaging/line-runtime.js";
 import { createWhatsAppMessagingRuntime } from "../integrations/messaging/whatsapp-runtime.js";
 import { redactSecrets } from "../security/guard.js";
+import { ContinuousWorkSupervisor, FileContinuousWorkStore } from "../brain/continuous-work.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -220,10 +221,22 @@ if (discordConfigured) {
   discordRecoveryTimer.unref?.();
 }
 
+const continuousWorkStore = new FileContinuousWorkStore(workspace);
+const continuousWorkSupervisor = deps.jobRuntime
+  ? new ContinuousWorkSupervisor(deps.jobRuntime, continuousWorkStore, {
+      // One activation is bounded; completion remains explicit until a trusted verifier is configured.
+      isComplete: () => false,
+      ...(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS?.trim()
+        ? { maxLifetimeIterations: Number(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS) }
+        : {}),
+    })
+  : undefined;
+
 const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(path.join(workspace, ".sofia", "api-runs")),
+  ...(continuousWorkSupervisor ? { continuousWorkSupervisor } : {}),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(process.env.SOFIA_MESSAGING_CONTEXT_SECRET?.trim() ? { messagingContextSecret: process.env.SOFIA_MESSAGING_CONTEXT_SECRET.trim() } : {}),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
