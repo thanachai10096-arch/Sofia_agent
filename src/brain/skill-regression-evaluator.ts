@@ -145,12 +145,16 @@ export function createSkillRegressionEvaluator(options: SkillRegressionEvaluator
         passed: Boolean(baselineOutcome) && !baselineError,
         detail: baselineError || (baselineOutcome ? `passed=${baselineOutcome.passed}` : "No baseline outcome"),
       });
-      const candidatePassed = Boolean(candidateOutcome?.passed) && !candidateError;
-      if (candidatePassed) candidatePasses++;
+      const candidateSucceeded = Boolean(candidateOutcome?.passed) && !candidateError;
+      if (candidateSucceeded) candidatePasses++;
+      // A candidate may fail a fixture only when baseline behavior also failed;
+      // the aggregate pass-rate gate then decides whether that is acceptable.
+      const candidateCheckPassed = Boolean(candidateOutcome) && !candidateError &&
+        (candidateSucceeded || baselineOutcome?.passed !== true);
       checks.push({
         name: `candidate:${safeId}`,
-        passed: candidatePassed,
-        detail: candidateError || (candidateOutcome?.detail ?? `passed=${candidatePassed}`),
+        passed: candidateCheckPassed,
+        detail: candidateError || (candidateOutcome?.detail ?? `passed=${candidateSucceeded}`),
       });
 
       if (baselineOutcome && candidateOutcome) {
@@ -158,7 +162,7 @@ export function createSkillRegressionEvaluator(options: SkillRegressionEvaluator
         const candidateScore = candidateOutcome.score ?? (candidateOutcome.passed ? 1 : 0);
         checks.push({
           name: `quality-regression:${safeId}`,
-          passed: candidateScore + minimumScoreDelta >= baselineScore,
+          passed: candidateScore >= baselineScore + minimumScoreDelta,
           detail: `baseline=${baselineScore}; candidate=${candidateScore}; requiredDelta=${minimumScoreDelta}`,
         });
         checks.push({
