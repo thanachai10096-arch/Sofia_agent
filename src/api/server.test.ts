@@ -204,7 +204,8 @@ test("usage endpoint matches only its exact path and permits query parameters", 
     const exact = await fetch(`${baseUrl}/v1/usage?source=test`, { headers });
     assert.equal(exact.status, 200);
     const usage = await exact.json() as { keyId: string };
-    assert.equal(usage.keyId, apiKey);
+    assert.match(usage.keyId, /^[a-f0-9]{32}$/);
+    assert.notEqual(usage.keyId, apiKey);
 
     const nearMatch = await fetch(`${baseUrl}/v1/usage-extra`, { headers });
     assert.equal(nearMatch.status, 404);
