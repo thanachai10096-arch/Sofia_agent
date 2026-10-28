@@ -42,3 +42,6 @@ The output reports provider-reported prompt/completion or input/output tokens wh
 - Do not run this in CI by default: it needs a real credential and makes billable provider calls.
 - Reported token totals are provider-reported usage; actual invoiced cost remains unknown. Estimated cost-per-verified-success is only as accurate as the explicit prices and provider-reported usage supplied.
 - This harness is API-compatible rather than universal: providers with a different request/response protocol need a dedicated adapter before they can be benchmarked here.
+
+
+The explicit pricing arithmetic is isolated in `bench/estimated-cost.mjs` and can be tested without credentials or provider calls using `node --test bench/estimated-cost.test.mjs`.
