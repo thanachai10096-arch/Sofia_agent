@@ -85,6 +85,9 @@ export type { TelegramHttpTransportOptions } from "./integrations/messaging/tele
 export { createDiscordAdapter } from "./integrations/messaging/discord.js";
 export { createSlackAdapter } from "./integrations/messaging/slack.js";
 export type { SlackTransport, VerifiedSlackMessage } from "./integrations/messaging/slack.js";
+export { createSlackEventsTransport } from "./integrations/messaging/slack-events-transport.js";
+export type { SlackEventsTransport, SlackEventsTransportOptions, SlackEventsRequest, SlackEventsResult } from "./integrations/messaging/slack-events-transport.js";
+export { handleSlackEventsHttpRequest } from "./integrations/messaging/slack-http-route.js";
 export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
 export { createDiscordInteractionTransport } from "./integrations/messaging/discord-interaction-transport.js";
 export type { DiscordInteractionTransport, DiscordInteractionTransportOptions, DiscordInteractionRequest, DiscordInteractionResult } from "./integrations/messaging/discord-interaction-transport.js";
