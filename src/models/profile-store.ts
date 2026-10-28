@@ -69,8 +69,8 @@ function profileBaseUrl(input: UserModelProfileInput, allowedHosts: ReadonlySet<
   }
   let parsed: URL;
   try { parsed = new URL(input.baseUrl); } catch { throw new Error("baseUrl must be a valid HTTPS URL."); }
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash ||
-      parsed.hostname.toLowerCase() !== parsed.hostname || !allowedHosts.has(parsed.hostname)) {
+  if (parsed.protocol !== "https:" || (parsed.port !== "" && parsed.port !== "443") || parsed.username || parsed.password || parsed.search || parsed.hash ||
+      parsed.hostname.toLowerCase() !== parsed.hostname || !allowedHosts.has(parsed.hostname) || input.baseUrl.length > 2_048) {
     throw new Error("baseUrl must use HTTPS and an operator-allowlisted hostname, without credentials, query, or fragment.");
   }
   if (!parsed.pathname.endsWith("/")) parsed.pathname += "/";
