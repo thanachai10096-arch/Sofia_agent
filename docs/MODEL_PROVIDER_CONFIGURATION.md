@@ -47,6 +47,22 @@ SOFIA_MODEL_PROVIDER=ollama
 SOFIA_MODEL_NAME=your-installed-model
 ```
 
+## Discover available models
+
+The public `discoverModels` helper can query an endpoint's `/models` route using the configured protocol and authentication. It returns model IDs and provider metadata when available.
+
+```ts
+import { discoverModels } from "sofia-agent";
+
+const models = await discoverModels({
+  baseUrl: process.env.SOFIA_MODEL_BASE_URL ?? "https://api.openai.com/v1",
+  apiKey: process.env.SOFIA_MODEL_API_KEY ?? process.env.OPENAI_API_KEY,
+});
+console.log(models.map(({ id, displayName }) => ({ id, displayName })));
+```
+
+Discovery does not send a generation request and does not prove a model supports tools, vision, structured output, or a specific context window. Capability metadata is reported as unknown until a provider exposes reliable metadata or a separate compatibility test verifies it. Requests use a timeout, refuse redirects, require HTTPS for remote hosts, and never include API keys in URLs.
+
 ## Compatibility and security notes
 
 - The gateway supports the OpenAI Chat Completions-compatible protocol and a native Anthropic Messages API path. Other native protocols need their own adapter or a compatible gateway.
