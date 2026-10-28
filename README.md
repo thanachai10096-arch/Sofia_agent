@@ -41,7 +41,7 @@ In chat, type a task normally. Enter `/exit` to leave. Local conversation sessio
 
 For contributors, run `npm run typecheck`, `npm test`, and `npm run build` before proposing changes. These checks must pass on the exact commit before the PR is considered ready.
 
-> **Model setup has two separate scopes.** A self-hosted Sofia installation can configure its own provider and model. The local `sofia setup` command writes only to that installation's `~/.sofia/config.json` and local environment; it does not configure other users. Per-user model/provider profiles for a shared hosted Sofia service (including securely stored user-supplied API keys) are not implemented yet and must not be counted as a completed end-user feature.
+> **Model setup has two separate scopes.** Local setup affects only one installation. Shared hosted accounts can configure an encrypted per-API-key model profile through the API when the server encryption key is configured; see the section below.
 
 
 ## Open source and contribution
