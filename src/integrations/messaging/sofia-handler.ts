@@ -1,5 +1,4 @@
-import {
-  createChatCommandHandler,
+import { createSignedMessagingContext, createChatCommandHandler,
   type ChatAccessPolicy,
   type ChatMessageDeduplicator,
   type ChatRunStarter,
@@ -53,6 +52,54 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
 
   return async function onMessage(message: InboundMessage): Promise<string | void> {
     const text = message.text.trim();
+    if (text === "/work" || text.startsWith("/work ") || text.startsWith("/work\t")) {
+      const allowed = await options.accessPolicy.isAllowed({
+        platform: message.platform,
+        senderId: message.identity.userId,
+        conversationId: message.identity.conversationId,
+      });
+      if (!allowed) return "Access denied.";
+      if (!options.messagingContextSecret?.trim() || !options.client.continuousWorkAction) {
+        return "Continuous-work chat controls are not configured on this Sofia server.";
+      }
+      const args = text.slice("/work".length).trim();
+      const separator = args.indexOf(" ");
+      const action = (separator < 0 ? args : args.slice(0, separator)).trim().toLowerCase();
+      const rest = separator < 0 ? "" : args.slice(separator + 1).trim();
+      let payload: { action: string; task?: string; workId?: string };
+      if (action === "create" && rest) payload = { action, task: rest };
+      else if (action === "list" && !rest) payload = { action };
+      else if (["status", "continue", "resume", "pause", "stop"].includes(action) && rest && !rest.includes(" ")) payload = { action, workId: rest };
+      else return "Usage: /work create <task> | /work list | /work status <id> | /work continue <id> | /work resume <id> | /work pause <id> | /work stop <id>";
+      const signedTask = JSON.stringify(payload);
+      const dedupeKey = "work|" + [message.platform, message.identity.conversationId, message.messageId]
+        .map((part) => `${part.length}:${part}`).join("|");
+      if (!(await options.deduplicator.claim(dedupeKey))) return;
+      try {
+        const messagingContext = createSignedMessagingContext({
+          platform: message.platform,
+          userId: message.identity.userId,
+          conversationId: message.identity.conversationId,
+          messageId: message.messageId,
+          signedTask,
+        }, options.messagingContextSecret);
+        const result = await options.client.continuousWorkAction({ signedTask, messagingContext });
+        const work = result.work as { id?: string; status?: string; iteration?: number; lastSummary?: string } | undefined;
+        if (action === "create" && work?.id) return `Created continuous task ${work.id} (paused). Use /work continue ${work.id} to start it.`;
+        if (action === "list") {
+          const items = Array.isArray(result.work) ? result.work as Array<{ id?: string; status?: string; iteration?: number; task?: string }> : [];
+          return items.length ? items.map((item) => `• ${item.id} — ${item.status}, iteration ${item.iteration}: ${(item.task ?? "").slice(0, 100)}`).join("\n") : "You have no continuous tasks yet.";
+        }
+        if (action === "status" && work) return `Task ${work.id}: ${work.status}, iteration ${work.iteration}.${work.lastSummary ? "\n" + work.lastSummary : ""}`;
+        if (action === "continue" || action === "resume") return `Sofia accepted ${action} for task ${String(result.workId ?? work?.id ?? payload.workId)}.`;
+        if ((action === "pause" || action === "stop") && work) return `Task ${work.id} is now ${work.status}.`;
+        if (result.error === "continuous_work_not_found") return "I couldn't find that task for your chat account.";
+        return "Sofia processed the continuous-work request.";
+      } catch {
+        await options.deduplicator.release(dedupeKey);
+        return "Sofia couldn't process that continuous-work request. Check the task ID and try again.";
+      }
+    }
     const explicitCommand = text === prefix || text.startsWith(prefix + " ") || text.startsWith(prefix + "\t");
     if (!explicitCommand && !options.allowPlainText) return;
     if (!explicitCommand && text.startsWith("/")) return;
