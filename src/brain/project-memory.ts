@@ -85,6 +85,7 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
 
 export class PersistentSkillLedger implements SkillLedger {
   private cache: LearnedSkillCandidate[];
+  private persistChain: Promise<void> = Promise.resolve();
   constructor(private readonly store: ProjectMemoryStore) {
     const syncStore = store as FileProjectMemoryStore;
     this.cache = typeof syncStore.readSync === "function"
@@ -118,12 +119,15 @@ export class PersistentSkillLedger implements SkillLedger {
     else this.cache.push(merged);
     const now = new Date().toISOString();
     const id = createHash("sha256").update(JSON.stringify({ name: merged.name, category: merged.category })).digest("hex");
-    void this.store.save({
+    this.persistChain = this.persistChain.then(() => this.store.save({
       id, project: "skill", kind: "repair", content: JSON.stringify(merged),
       source: merged.evidenceIds.join(","), confidence: Math.min(0.99, 0.8 + Math.min(merged.evidenceIds.length, 10) * 0.015),
-      createdAt: previous ? now : now, updatedAt: now, uses: previous ? 1 : 0,
+      createdAt: now, updatedAt: now, uses: previous ? 1 : 0,
+    })).catch(() => {
+      // Learning persistence is best-effort; it must not change task outcome.
     });
   }
+  async flush(): Promise<void> { await this.persistChain; }
   list(): readonly LearnedSkillCandidate[] { return [...this.cache]; }
 }
 
