@@ -5,6 +5,8 @@ import type { FailureCategory, Strategy } from "./types.js";
 export interface LearnedSkillCandidate {
   name: string;
   trigger: string;
+  /** Additional observed trigger phrases merged from repeated verified runs. */
+  triggers?: string[];
   category: FailureCategory;
   strategy: Strategy;
   procedure: string[];
