@@ -7,7 +7,7 @@ Status: opt-in gateway, natural-chat command bridge, Telegram Bot API long polli
 - Messaging is disabled unless `enabled: true` is explicitly supplied.
 - Unknown users/channels are denied unless an explicit `allowUser` policy permits them.
 - The gateway calls an injected message handler. Adapters never invoke tools or a separate agent runtime directly.
-- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Natural chat mode dispatches ordinary text without requiring `/run`; command-only mode remains available when explicitly configured. Attachments are metadata only and are not downloaded or executed automatically.
+- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Its default is natural chat: ordinary text from an authorized conversation is dispatched without requiring `/run`. Set `mode: "command"` to require the configured prefix. Attachments are metadata only and are not downloaded or executed automatically.
 - Use `createMessagingAccessCheck` to adapt the existing `ChatAccessPolicy` to the gateway allowlist callback. The existing command handler performs its own authorization check too. Do not pass the same deduplicator to both `createMessagingGateway` and `createSofiaMessagingHandler`, because the existing command handler claims the provider/channel/message key itself.
 - Keep bot tokens and Sofia API keys in server-side environment variables or an approved secret provider. Never expose them in client bundles, tests, errors, or logs.
 - The Telegram HTTP transport uses HTTPS long polling against the official Telegram Bot API. Choose either polling or a separately implemented webhook deployment, not both for the same bot.
@@ -117,3 +117,21 @@ Recommended implementation order: finish natural-chat behavior and Telegram/Disc
 ## Architecture contract
 
 See [Messaging Gateway Architecture](./MESSAGING_GATEWAY_ARCHITECTURE.md) for the shared adapter contract, message flow, readiness states, security requirements, implementation phases, and acceptance criteria. The architecture document is a target contract; it does not imply that every listed platform is implemented or live-tested.
+
+
+## Connector capability matrix (this branch)
+
+This matrix describes code in the repository, not a claim of live account connectivity.
+
+| Platform | Code present in this branch | Important boundary |
+|---|---|---|
+| Telegram | Adapter, Bot API long-poll transport, optional runtime | Requires bot token, Sofia API credentials, and explicit user/chat allowlists. |
+| Discord | Adapter and interaction transport/route | Requires application setup, valid signature verification, and explicit user/channel allowlists. |
+| Slack | Adapter and signed Events API receiver | Requires a Slack app, signing secret, bot token, allowlists, and a deployed HTTPS callback. |
+| LINE, WhatsApp, Signal, Matrix, Teams, Google Chat, Messenger, Instagram, WeChat, iMessage, Viber, KakaoTalk, Zalo, Mattermost, Rocket.Chat, Zulip, IRC, email, SMS | Not confirmed as end-to-end adapters by this matrix | Do not show as connected or available until a concrete adapter, authentication path, send/receive transport, tests, and setup instructions exist. |
+
+A platform string in `ChatPlatform` is only a type-level identifier. At runtime, the adapter registry lists only the concrete adapters passed to it. Unit tests and CI do not prove a real provider account has been connected; record provider smoke tests separately.
+
+## Natural chat behavior
+
+`createSofiaMessagingHandler` defaults to `mode: "natural"`: ordinary non-empty text from an authorized conversation is submitted as a task. The configured `/run` prefix is still accepted, while unrelated slash commands are ignored. Set `mode: "command"` explicitly for deployments that require the prefix. Natural chat does not bypass authorization, deduplication, rate limits, API policy, or runtime safety checks.
