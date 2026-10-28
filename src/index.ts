@@ -13,6 +13,8 @@ export { SofiaClient } from "./sdk/client.js";
 export { createNodeWorkspaceRuntime } from "./platform/local-runtime.js";
 export { detectPlatform } from "./platform/runtime.js";
 export { SofiaModelGateway } from "./models/gateway.js";
+export { discoverModels } from "./models/discovery.js";
+export type { ModelDiscoveryConfig, DiscoverModelsOptions, DiscoveredModel } from "./models/discovery.js";
 export { loadModelConfigFromEnv } from "./models/config.js";
 export { createSofiaAgentDependencies } from "./models/factory.js";
 export { createToolRegistry } from "./tools/registry.js";
