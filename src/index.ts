@@ -88,6 +88,8 @@ export type { SlackTransport, VerifiedSlackMessage } from "./integrations/messag
 export { createSlackEventsTransport } from "./integrations/messaging/slack-events-transport.js";
 export type { SlackEventsTransport, SlackEventsTransportOptions, SlackEventsRequest, SlackEventsResult } from "./integrations/messaging/slack-events-transport.js";
 export { handleSlackEventsHttpRequest } from "./integrations/messaging/slack-http-route.js";
+export { createSlackMessagingRuntime, parseSlackAllowlist } from "./integrations/messaging/slack-runtime.js";
+export type { SlackMessagingRuntime, SlackMessagingEnvironment } from "./integrations/messaging/slack-runtime.js";
 export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
 export { createDiscordInteractionTransport } from "./integrations/messaging/discord-interaction-transport.js";
 export type { DiscordInteractionTransport, DiscordInteractionTransportOptions, DiscordInteractionRequest, DiscordInteractionResult } from "./integrations/messaging/discord-interaction-transport.js";
