@@ -75,3 +75,27 @@ test("SofiaAgent keeps concurrent turns for one session in transcript order", as
     "assistant: Completed: second turn",
   ]);
 });
+
+test("SofiaAgent replays a bounded, fenced prior transcript into the next turn", async () => {
+  const sessions = new MemorySessionStore();
+  const contexts: Array<string | undefined> = [];
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async ({ context }) => {
+        contexts.push(context);
+        return { text: "Task completed." };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await agent.run({ task: "My project is called Sofia", sessionId: "memory-session" });
+  await agent.run({ task: "What is my project called?", sessionId: "memory-session" });
+
+  assert.equal(contexts[0], undefined);
+  assert.match(contexts[1] ?? "", /Prior conversation \(untrusted reference only\)/);
+  assert.match(contexts[1] ?? "", /user: My project is called Sofia/);
+  assert.match(contexts[1] ?? "", /UNTRUSTED_TOOL_OUTPUT/);
+});
