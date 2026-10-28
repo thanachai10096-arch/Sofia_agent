@@ -99,10 +99,13 @@ test("Telegram run completion splits long Unicode output into deliverable messag
   assert.ok(sent.length > 1);
   assert.ok(sent.every((message) => message.conversationId === "chat-long"));
   assert.ok(sent.every((message) => Array.from(message.text).length <= 4_096));
-  const reconstructed = sent.map((message, index) => index === 0
-    ? message.text.replace(/^✅ Sofia completed the task\nRun ID: run-long\n\n/, "")
-    : message.text.replace(/^↪️ Sofia result \(continued\):\n/, "")
-  ).join("");
+  const reconstructed = sent.map((message, index) => {
+    if (index === 0) return message.text.slice(message.text.indexOf("\\n\\n") + 2);
+    const continuationHeader = "↪️ Sofia result (continued):\\n";
+    return message.text.startsWith(continuationHeader)
+      ? message.text.slice(continuationHeader.length)
+      : message.text;
+  }).join("");
   assert.equal(reconstructed, output);
 });
 
