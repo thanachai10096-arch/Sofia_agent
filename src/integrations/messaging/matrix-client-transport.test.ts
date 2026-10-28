@@ -78,3 +78,32 @@ test("Matrix transport sends a text event using the configured server-side token
   assert.deepEqual(JSON.parse(request?.body ?? "{}"), { msgtype: "m.text", body: "hello" });
   await transport.stop();
 });
+
+
+test("Matrix transport reports a failed delivery exactly once with its HTTP status", async () => {
+  const diagnostics: Array<{ event: string; status?: number }> = [];
+  const transport = createMatrixClientTransport({
+    homeserverUrl: "https://matrix.example.org",
+    accessToken: token,
+    onError: (event, status) => diagnostics.push({ event, ...(status === undefined ? {} : { status }) }),
+    fetchImpl: async (url, init) => {
+      if (String(url).includes("/account/whoami")) {
+        return new Response(JSON.stringify({ user_id: "@sofia:example.org" }));
+      }
+      if (String(url).includes("/sync")) {
+        return await new Promise<Response>((resolve) => {
+          init?.signal?.addEventListener("abort", () => {
+            resolve(new Response(JSON.stringify({ next_batch: "s1" })));
+          }, { once: true });
+        });
+      }
+      return new Response(JSON.stringify({ errcode: "M_UNKNOWN" }), { status: 503 });
+    },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await assert.rejects(() => transport.sendMessage("!room:example.org", "hello"), /delivery failed/i);
+  assert.deepEqual(diagnostics.filter((item) => item.event === "delivery_failed"), [
+    { event: "delivery_failed", status: 503 },
+  ]);
+  await transport.stop();
+});
