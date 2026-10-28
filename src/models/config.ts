@@ -45,7 +45,7 @@ const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
   cerebras: { baseUrl: "https://api.cerebras.ai/v1", apiKeyEnv: "CEREBRAS_API_KEY", defaultModel: "", requiresApiKey: true },
   perplexity: { baseUrl: "https://api.perplexity.ai", apiKeyEnv: "PERPLEXITY_API_KEY", defaultModel: "", requiresApiKey: true },
   ollama: { baseUrl: "http://127.0.0.1:11434/v1", defaultModel: "llama3.2", requiresApiKey: false },
-  "openai-compatible": { baseUrl: "", defaultModel: "", requiresApiKey: false },
+  "openai-compatible": { baseUrl: "", defaultModel: "", requiresApiKey: true },
 };
 
 function selectedProvider(): string {
