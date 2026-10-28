@@ -460,6 +460,7 @@ export class SofiaBrain {
         inputTokens: result.usage.inputTokens,
         outputTokens: result.usage.outputTokens,
         durationMs: Math.max(0, Date.now() - modelCallStartedAt),
+        retries: result.retries ?? 0,
       });
 
       this.usage.reservedOrUsedTokens += actual;
