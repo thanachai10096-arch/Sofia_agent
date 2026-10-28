@@ -141,6 +141,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
   const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
+  // Register the agent-facing scheduler tool against the same scheduler instance that the API ticks.
+  // Keep this API-only: local CLI sessions do not run the background scheduler loop.
+  if (cronScheduler && deps.tools && !deps.tools.get("schedule_task")) {
+    (deps.tools as MapToolRegistry).addTools(createCronTools(cronScheduler));
+  }
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
