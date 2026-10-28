@@ -288,6 +288,9 @@ server.listen(port, "0.0.0.0", () => {
     console.error("WhatsApp integration failed to start:", error instanceof Error ? error.name : "UnknownError");
   });
 });
+void continuousWorkSupervisor?.resumeInterrupted().then((count) => {
+  if (count > 0) console.log("Sofia continuous-work recovery scheduled " + count + " objective(s).");
+}).catch(() => console.error("Sofia continuous-work recovery could not be initialized."));
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     discordAbort.abort();
