@@ -119,7 +119,7 @@ async function runSetupWizard(): Promise<void> {
     if (!process.env.SOFIA_API_KEY?.trim()) {
       console.log("- Set SOFIA_API_KEY in your shell or secret manager; Sofia never stores this value in setup.json.");
     }
-    console.log('- Run "sofia run \\"your task\\"" when the API key is configured.');
+    console.log('  Run: sofia run "your task" (after configuring SOFIA_API_KEY).');
     console.log("- The wizard has not made a live connection request; the API endpoint and credentials are not yet verified.");
   } finally {
     terminal.close();
