@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { JobRecord, JobRuntime } from "./job-runtime.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
+import { redactSecrets } from "../security/guard.js";
 
 export type ContinuousWorkStatus = "active" | "paused" | "stopped" | "completed" | "failed";
 export interface ContinuousWorkRecord {
@@ -29,13 +30,13 @@ export class FileContinuousWorkStore implements ContinuousWorkStore {
   private readonly file: string;
   private writes: Promise<void> = Promise.resolve();
   constructor(namespace = process.cwd(), root = sofiaStateDirectory("continuous-work")) {
-    this.file = path.join(root, Buffer.from(namespace).toString("hex").slice(0, 128) + ".json");
+    this.file = path.join(root, createHash("sha256").update(namespace).digest("hex") + ".json");
   }
   private async readAll(): Promise<ContinuousWorkRecord[]> {
     try {
       const value: unknown = JSON.parse(await fs.readFile(this.file, "utf8"));
       if (!Array.isArray(value)) throw new Error("Invalid continuous-work state file");
-      return value as ContinuousWorkRecord[];
+      return (value as ContinuousWorkRecord[]).map((record) => ({ ...record, task: String(redactSecrets(record.task)), ...(record.lastSummary ? { lastSummary: String(redactSecrets(record.lastSummary)) } : {}), ...(record.lastError ? { lastError: String(redactSecrets(record.lastError)) } : {}) }));
     } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
   }
   private async writeAll(records: ContinuousWorkRecord[]): Promise<void> {
@@ -43,7 +44,7 @@ export class FileContinuousWorkStore implements ContinuousWorkStore {
     await fs.chmod(path.dirname(this.file), 0o700);
     const temporary = this.file + "." + randomUUID() + ".tmp";
     try {
-      await fs.writeFile(temporary, JSON.stringify(records, null, 2), { encoding: "utf8", mode: 0o600 });
+      await fs.writeFile(temporary, JSON.stringify(records.map((record) => ({ ...record, task: String(redactSecrets(record.task)), ...(record.lastSummary ? { lastSummary: String(redactSecrets(record.lastSummary)) } : {}), ...(record.lastError ? { lastError: String(redactSecrets(record.lastError)) } : {}) })), null, 2), { encoding: "utf8", mode: 0o600 });
       await fs.rename(temporary, this.file);
     } finally { await fs.rm(temporary, { force: true }); }
   }
@@ -92,9 +93,10 @@ export class ContinuousWorkSupervisor {
   async stop(id: string, owner: string) { return this.changeStatus(id, owner, "stopped"); }
   private async changeStatus(id: string, owner: string, status: "paused" | "stopped"): Promise<boolean> {
     const r = await this.get(id, owner); if (!r || ["stopped", "completed", "failed"].includes(r.status)) return false;
-    r.status = status; r.updatedAt = new Date().toISOString(); await this.store.save(r);
+    const childJobId = r.currentJobId;
+    r.status = status; r.currentJobId = undefined; r.updatedAt = new Date().toISOString(); await this.store.save(r);
     this.active.get(id)?.abort(new Error("Continuous work " + status + " by owner"));
-    if (r.currentJobId) await this.jobs.cancel(r.currentJobId).catch(() => false);
+    if (childJobId) await this.jobs.cancel(childJobId).catch(() => false);
     return true;
   }
   async resume(id: string, owner: string): Promise<ContinuousWorkRecord> {
@@ -140,6 +142,7 @@ export class ContinuousWorkSupervisor {
     } catch (error) {
       const latest = await this.store.get(id);
       if (latest?.currentJobId) await this.jobs.cancel(latest.currentJobId).catch(() => false);
+      if (controller.signal.aborted && latest && ["paused", "stopped"].includes(latest.status)) return latest;
       if (latest?.status === "active") {
         const message = error instanceof Error ? error.message : "Continuous work failed";
         latest.status = controller.signal.aborted || message === "Activation deadline reached" ? "paused" : "failed";
