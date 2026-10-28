@@ -105,8 +105,13 @@ export class PersistentSkillLedger implements SkillLedger {
       triggers: [...new Set([previous.trigger, ...(previous.triggers ?? []), candidate.trigger, ...(candidate.triggers ?? [])]
         .map(value => String(redactSecrets(value)).trim()).filter(Boolean))].slice(0, 12),
       procedure: [...new Set(candidate.procedure)].slice(0, 12),
+      // Preserve real acceptance-check IDs across repeated runs and restarts.
+      // Never collapse custom checks into fabricated typecheck/test/build labels.
       verification: [...new Set([...previous.verification, ...candidate.verification])].filter(
-        (item): item is "typecheck" | "test" | "build" => item === "typecheck" || item === "test" || item === "build",
+        (item): item is string =>
+          item === "typecheck" || item === "test" || item === "build" ||
+          (typeof item === "string" && item.startsWith("acceptance:") &&
+            /^[A-Za-z0-9._:-]{1,160}$/.test(item.slice("acceptance:".length))),
       ),
       evidenceIds: [...new Set([...previous.evidenceIds, ...candidate.evidenceIds])].slice(-50),
     } : {
