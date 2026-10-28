@@ -147,3 +147,19 @@ test("requires task start before recording model calls", () => {
     durationMs: 1,
   }), /Task telemetry has not started/);
 });
+
+
+test("does not report zero cost as known when no model calls were recorded", () => {
+  const metrics = new TaskEfficiencyMetrics();
+  metrics.start(1);
+  const task = metrics.finishTask({
+    taskId: "run-no-calls",
+    completed: false,
+    acceptanceCriteria: 1,
+    passedCriteria: 0,
+    now: 2,
+  });
+  assert.equal(task.costKnown, false);
+  assert.equal(task.estimatedCostNanoUsd, undefined);
+  assert.equal(metrics.snapshot().estimatedCostNanoUsd, null);
+});
