@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
 import type { LearnedSkillCandidate } from "./learning.js";
+import { matchSkills } from "./skills.js";
 
 test("project memory survives a new store instance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-test-"));
@@ -123,6 +124,9 @@ test("persistent skill ledger merges repeated verified workflows and restores tr
   const restored = new PersistentSkillLedger(new FileProjectMemoryStore("skill-ledger-owner-a", root));
   assert.equal(restored.list().length, 1);
   assert.ok(restored.list()[0]?.triggers?.includes(repeat.trigger));
+  const reused = matchSkills("unknown", repeat.trigger, 3, restored);
+  assert.ok(reused.some((skill) => skill.id === "learned:workflow-code-review-a1b2:unknown"),
+    "a new ledger instance must make the durable skill available to the matcher after restart");
 });
 
 
