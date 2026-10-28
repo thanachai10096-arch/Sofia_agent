@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { containsPromptInjection, redactSecrets } from "../security/guard.js";
 
 export type UserMemoryKind = "preference" | "fact" | "goal" | "instruction";
