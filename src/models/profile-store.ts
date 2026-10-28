@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export type UserModelProvider = "openai-compatible" | "gemini" | "openrouter";
@@ -84,6 +84,7 @@ function metadata(profile: StoredProfile): UserModelProfileMetadata {
 export class EncryptedUserModelProfileStore implements UserModelProfileStore {
   private readonly encryptionKey: Buffer;
   private readonly allowedHosts: ReadonlySet<string>;
+  private readonly lockPath: string;
   private mutationTail: Promise<void> = Promise.resolve();
 
   constructor(
@@ -94,6 +95,7 @@ export class EncryptedUserModelProfileStore implements UserModelProfileStore {
     const key = Buffer.from(encryptionKeyBase64.trim(), "base64");
     if (key.length !== 32) throw new Error("SOFIA_MODEL_PROFILE_ENCRYPTION_KEY must be a base64-encoded 32-byte key.");
     this.encryptionKey = key;
+    this.lockPath = this.filePath + ".lock";
     this.allowedHosts = new Set([...DEFAULT_ALLOWED_HOSTS, "generativelanguage.googleapis.com", "openrouter.ai", ...additionalAllowedHosts]
       .map(host => host.trim().toLowerCase()).filter(Boolean));
   }
@@ -165,7 +167,49 @@ export class EncryptedUserModelProfileStore implements UserModelProfileStore {
     let release!: () => void;
     this.mutationTail = new Promise<void>(resolve => { release = resolve; });
     await previous;
-    try { return await operation(); } finally { release(); }
+    try {
+      return await this.withFileLock(operation);
+    } finally {
+      release();
+    }
+  }
+
+  /** Serialize read-modify-write across independent store instances sharing this filesystem. */
+  private async withFileLock<T>(operation: () => Promise<T>): Promise<T> {
+    await mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
+    const token = randomUUID();
+    const deadline = Date.now() + 10_000;
+    let acquired = false;
+    while (!acquired) {
+      try {
+        const handle = await open(this.lockPath, "wx", 0o600);
+        try {
+          await handle.writeFile(JSON.stringify({ token, pid: process.pid, createdAt: Date.now() }), "utf8");
+        } finally {
+          await handle.close();
+        }
+        acquired = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        if (Date.now() >= deadline) {
+          throw new Error("Timed out waiting for model profile store lock; verify no other writer is active before manual recovery.");
+        }
+        await new Promise<void>(resolve => setTimeout(resolve, 20));
+      }
+    }
+
+    try {
+      const owner = JSON.parse(await readFile(this.lockPath, "utf8")) as { token?: unknown };
+      if (owner.token !== token) throw new Error("Lost model profile store lock.");
+      return await operation();
+    } finally {
+      try {
+        const owner = JSON.parse(await readFile(this.lockPath, "utf8")) as { token?: unknown };
+        if (owner.token === token) await rm(this.lockPath, { force: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
   }
 
   private async readState(): Promise<ProfileState> {
