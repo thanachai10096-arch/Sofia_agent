@@ -265,6 +265,24 @@ export class TokenAwareGateway {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
       throw new Error("Invalid model timeout");
     }
+
+    const routeIds = new Set<string>();
+    for (const route of routes) {
+      if (!route.id || routeIds.has(route.id)) {
+        throw new Error("Missing or duplicate model route ID");
+      }
+      routeIds.add(route.id);
+
+      for (const [name, weight] of [
+        ["costWeight", route.costWeight],
+        ["latencyWeight", route.latencyWeight],
+        ["qualityWeight", route.qualityWeight],
+      ] as const) {
+        if (weight !== undefined && (!Number.isFinite(weight) || weight < 0)) {
+          throw new Error(`Invalid model route ${name}`);
+        }
+      }
+    }
   }
 
   async generate(
