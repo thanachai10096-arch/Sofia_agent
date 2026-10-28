@@ -307,17 +307,23 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           signal: run.controller.signal,
           onEvent: (event) => { countToolCall(run.ownerKeyId, run.controller, event); countBrainUsage(run.ownerKeyId, event); },
         });
-        if (run.controller.signal.aborted) {
+        // Cancellation is terminal: a late agent result must never overwrite it,
+        // even if the underlying agent ignores the abort signal until it returns.
+        if (run.status === "cancelled" || run.controller.signal.aborted) {
           run.status = "cancelled";
-          run.error ??= "Run cancelled.";
+          run.error ??= run.controller.signal.reason instanceof Error
+            ? run.controller.signal.reason.message
+            : "Run cancelled.";
         } else {
           run.result = result;
           run.status = "completed";
         }
       } catch (error) {
-        if (run.controller.signal.aborted) {
+        if (run.status === "cancelled" || run.controller.signal.aborted) {
           run.status = "cancelled";
-          run.error = run.controller.signal.reason instanceof Error ? run.controller.signal.reason.message : "Run cancelled.";
+          run.error ??= run.controller.signal.reason instanceof Error
+            ? run.controller.signal.reason.message
+            : "Run cancelled.";
         } else {
           run.status = "failed";
           run.error = error instanceof Error ? error.message : "Agent failed";
