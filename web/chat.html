@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101512">
+  <title>Sofia Agent — Chat</title>
+  <link rel="stylesheet" href="/chat.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">S</div><div><strong>Sofia Agent</strong><small>Personal AI workspace</small></div></div>
+      <button id="new-chat" class="new-chat">＋ New chat</button>
+      <div class="side-label">WORKSPACE</div>
+      <button class="nav active" data-panel="chat">◉ <span>Chat</span></button>
+      <button class="nav" data-panel="memory">▤ <span>Memory</span></button>
+      <div class="side-foot"><span class="status-dot"></span><span id="connection-label">Connecting to Sofia…</span></div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div><span class="eyebrow">SOFIA AGENT</span><h1 id="page-title">Chat with Sofia</h1></div>
+        <label class="model-picker"><span>MODEL</span><select id="model-select" aria-label="Default model">
+          <option value="auto">Auto · Sofia chooses</option><option value="fast">Fast</option><option value="coding">Coding</option><option value="reasoning">Reasoning</option><option value="vision">Vision</option>
+        </select><small id="model-source"></small></label>
+      </header>
+      <section id="chat-panel" class="chat-panel">
+        <div id="messages" class="messages">
+          <div class="welcome"><div class="welcome-icon">✳</div><p class="eyebrow">YOUR AGENT, NOT JUST A CHATBOT</p><h2>What are we working on?</h2><p>Talk naturally. Sofia can plan, use its tools, verify work, and remember details you explicitly save.</p>
+          <div class="suggestions"><button data-prompt="Review my project and tell me the highest-priority gaps.">Review my project</button><button data-prompt="Help me plan and implement the next step.">Plan the next step</button><button data-prompt="Explain what you can do in this workspace.">What can you do?</button></div></div>
+        </div>
+        <form id="chat-form" class="composer">
+          <textarea id="prompt" rows="1" maxlength="12000" placeholder="Message Sofia… (Enter to send, Shift+Enter for a new line)" aria-label="Message Sofia"></textarea>
+          <div class="composer-foot"><span>Runs through Sofia Core · actions still follow policy</span><button id="send" type="submit"><span>Send</span> ↗</button></div>
+        </form>
+      </section>
+      <section id="memory-panel" class="memory-panel hidden">
+        <div class="memory-intro"><h2>Memory that you control</h2><p>Sofia can recall saved preferences, facts, goals, and instructions. Only save details you want Sofia to remember.</p></div>
+        <form id="memory-form" class="memory-form"><label>Memory type<select id="memory-kind"><option value="preference">Preference</option><option value="fact">Fact</option><option value="goal">Goal</option><option value="instruction">Instruction</option></select></label><label>What should Sofia remember?<textarea id="memory-content" rows="3" maxlength="1200" required placeholder="Example: I prefer concise Thai explanations."></textarea></label><button type="submit">Save memory</button></form>
+        <form id="memory-search-form" class="search-form"><input id="memory-query" placeholder="Search saved memories"><button type="submit">Search</button><button type="button" id="memory-refresh" class="secondary">Show all</button></form>
+        <div id="memory-results" class="memory-results"><p class="muted">Loading saved memories…</p></div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite" class="toast hidden"></div>
+  <script src="/chat.js" defer></script>
+</body>
+</html>

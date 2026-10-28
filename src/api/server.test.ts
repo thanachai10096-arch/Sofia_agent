@@ -4,6 +4,7 @@ import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
 import type { ModelRoute } from "../models/types.js";
+import { createUserMemoryEntry } from "../brain/user-memory.js";
 
 const route: ModelRoute = {
   id: "api-session-test",
@@ -122,6 +123,44 @@ test("model preferences are persisted per API key and validated at the API bound
     assert.equal((await request("read-only-key", "PUT", { modelSelection: "fast" })).status, 403);
     const reset = await request("model-key-one", "DELETE");
     assert.deepEqual(await reset.json(), { modelSelection: "auto", source: "saved" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API run retrieves bounded user-scoped memories as reference context", async () => {
+  let capturedContext = "";
+  const memory = createUserMemoryEntry("preference", "Prefers TypeScript examples with concise explanations.");
+  const server = createSofiaApi({
+    provider: { generate: async (input) => { capturedContext = input.context ?? ""; return { text: "Task completed." }; } },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: {
+      save: async () => undefined,
+      list: async () => [memory],
+      find: async (userId, query, limit) => {
+        assert.equal(userId, createHash("sha256").update("memory-recall-key").digest("hex").slice(0, 32));
+        assert.match(query, /TypeScript/i);
+        assert.equal(limit, 5);
+        return [memory];
+      },
+      delete: async () => false,
+      clear: async () => undefined,
+    },
+  }, { apiKeys: { "memory-recall-key": ["agent:run", "agent:read"] } });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/agent/runs`, {
+      method: "POST",
+      headers: { authorization: "Bearer memory-recall-key", "content-type": "application/json" },
+      body: JSON.stringify({ task: "Help me with TypeScript" }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(capturedContext, /Prefers TypeScript examples/);
+    assert.match(capturedContext, /untrusted reference facts/);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
