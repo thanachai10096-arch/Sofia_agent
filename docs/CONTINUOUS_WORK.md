@@ -14,8 +14,8 @@ Sofia's continuous-work supervisor runs a large objective as small, verifiable w
 - The API entrypoint wires this into the existing `JobRuntime` and exposes authenticated owner-scoped HTTP controls:
   - `POST /v1/continuous-work` with `{"task":"..."}` creates a paused objective (requires `agent:run`).
   - `GET /v1/continuous-work` and `GET /v1/continuous-work/:id` list/read only the authenticated owner's records (requires `agent:read` or `agent:run`).
-  - `POST /v1/continuous-work/:id/resume`, `/pause`, and `/stop` manage the objective (requires `agent:run`).
-  - Resume returns `202`; poll the GET endpoint for progress. Each activation is bounded and returns to paused state at its cap.
+  - `POST /v1/continuous-work/:id/resume` runs one bounded activation; `/continue` chains bounded activations in the background until the owner pauses/stops the objective or a trusted completion check succeeds; `/pause` and `/stop` halt it (all require `agent:run`).
+  - Resume returns `202`; poll the GET endpoint for progress. Each activation is bounded; `/resume` returns to paused state at its cap, while `/continue` waits briefly and starts another bounded activation.
 - The default API host deliberately uses a completion evaluator that never auto-declares success. This avoids treating a model's claim as verified completion; objectives must be stopped by the owner unless the host is changed to provide task-specific evidence checks. Optionally set `SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS` to a positive integer to impose a hard lifetime cap.
 - Startup recovery automatically schedules objectives persisted in `active` state. It reconciles the recorded child job before creating another slice, reuses a completed child checkpoint, and pauses safely if the child is missing or ended unsuccessfully. Recovery is best-effort on a single process; multi-replica transactional coordination is not implemented.
 
@@ -47,7 +47,7 @@ await continuous.resume(work.id, authenticatedPrincipalId);
 // Later, including after a process restart, call resume again with the same store.
 ```
 
-The example's `existingJobRuntime` and `verifyObjectiveAcceptance` are host-provided dependencies, not globals exported by the package. The API entrypoint automatically invokes `resumeInterrupted()` at startup. The HTTP API currently uses a conservative never-complete evaluator until a host-specific verifier is configured.
+The example's `existingJobRuntime` and `verifyObjectiveAcceptance` are host-provided dependencies, not globals exported by the package. The API entrypoint automatically invokes `resumeInterrupted()` at startup; objectives persisted as active resume in continuous mode and reconcile their existing child job first. The HTTP API currently uses a conservative never-complete evaluator until a host-specific verifier is configured.
 
 ## Operational guardrails
 
