@@ -154,6 +154,7 @@ export function createMatrixClientTransport(options: MatrixClientTransportOption
       if (!roomId.startsWith("!") || roomId.length > 255 || /[\r\n\0]/.test(roomId)) {
         throw new Error("Matrix room ID is invalid.");
       }
+      let failureStatus: number | undefined;
       try {
         const txnId = randomUUID();
         const path = "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) +
@@ -162,13 +163,16 @@ export function createMatrixClientTransport(options: MatrixClientTransportOption
           method: "PUT",
           body: JSON.stringify({ msgtype: "m.text", body: text }),
         });
-        if (!response.ok) { notify("delivery_failed", response.status); throw new Error("Matrix delivery failed."); }
+        if (!response.ok) {
+          failureStatus = response.status;
+          throw new Error("Matrix delivery failed.");
+        }
         const result: unknown = await response.json();
         if (!result || typeof result !== "object" || !("event_id" in result) ||
             typeof result.event_id !== "string") throw new Error("Matrix delivery response is invalid.");
         return { messageId: result.event_id };
       } catch {
-        notify("delivery_failed");
+        notify("delivery_failed", failureStatus);
         throw new Error("Matrix delivery failed.");
       }
     },
