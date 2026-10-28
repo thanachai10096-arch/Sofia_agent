@@ -123,7 +123,28 @@ SDK/API example:
 await client.run({ task: "Review the design", modelSelection: "reasoning" });
 ```
 
-These values select model IDs configured for the current Sofia server; they do not let a client submit a new provider URL or API key. The current provider configuration is server-wide, so this is not yet per-user provider credential storage or a persistent account preference. If a provider/model cannot perform a required capability, the run may fail rather than silently switching away from the explicitly selected model. Model availability and capability metadata are not guaranteed by listing a model alone.
+These values select model IDs configured for the current Sofia server; they do not let a client submit a new provider URL or API key. Provider configuration and credentials remain server-wide. The API also supports a persistent model profile preference per authenticated API key (not per email/account); the key ID is derived from a hash of the presented API key. This preference selects only a profile already configured by the server and never stores user-supplied provider credentials. If a provider/model cannot perform a required capability, the run may fail rather than silently switching away from the explicitly selected model. Model availability and capability metadata are not guaranteed by listing a model alone.
 
 
-Explicit model selection is not supported for durable `/v1/jobs` yet; those jobs use automatic routing. The API rejects explicit profile values for that endpoint instead of silently ignoring the selection. User-specific persistent preferences and user-supplied provider credentials are also not implemented by this change.
+Explicit model selection is not supported for durable `/v1/jobs` yet; those jobs use automatic routing. The API rejects explicit profile values for that endpoint instead of silently ignoring the selection. The profile preference is not an account-level identity system, and user-supplied provider credentials are not supported.
+
+## Save a default model profile per API key
+
+A client can save a default profile for the API key it is authenticated with. This is useful for a future Web Chat settings menu and does not require sending provider secrets to the browser.
+
+```http
+GET /v1/settings/model
+Authorization: Bearer <SOFIA_API_KEY>
+```
+
+```http
+PUT /v1/settings/model
+Authorization: Bearer <SOFIA_API_KEY>
+Content-Type: application/json
+
+{"modelSelection":"coding"}
+```
+
+Supported values are `auto`, `fast`, `coding`, `reasoning`, and `vision`. `auto` is the default and resets the preference to automatic routing. `DELETE /v1/settings/model` also resets the saved value to `auto`. Reading requires `agent:read` or `agent:run`; changing the preference requires `agent:run`. A request-level `modelSelection` takes precedence over the saved preference. The saved preference is used by `/v1/agent/runs` and its stream endpoint; durable `/v1/jobs` continues to use automatic routing.
+
+The default file store keeps only the profile label and a derived owner identifier in a private directory under `SOFIA_STATE_DIR` (or the OS temporary directory in development). Set `SOFIA_STATE_DIR` to a persistent, access-controlled volume in hosted deployments. Different API keys have separate preferences; rotating a key creates a new preference identity. This is not provider credential isolation: all profiles still use server-configured provider credentials.
