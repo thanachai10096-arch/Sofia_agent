@@ -22,6 +22,8 @@ export interface VerifiedChatCommand {
   command: string;
   /** User-requested task text. */
   task: string;
+  /** Optional recent conversation context, derived from trusted local session storage. */
+  context?: string;
 }
 
 export interface ChatRunStarter {
@@ -96,7 +98,10 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
         .digest("hex");
       const run = await options.client.start({
         task,
-        context: `Origin: ${command.platform} chat integration. Conversation ID: ${command.conversationId}.`,
+        context: [
+          `Origin: ${command.platform} chat integration. Conversation ID: ${command.conversationId}.`,
+          command.context?.trim(),
+        ].filter(Boolean).join("\n\n"),
       }, undefined, { idempotencyKey });
       return { status: "accepted", runId: run.id, runStatus: run.status };
     } catch (error) {
