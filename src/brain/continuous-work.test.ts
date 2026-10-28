@@ -97,3 +97,23 @@ test("continuous work reconciles a persisted child job instead of submitting a d
   assert.equal(resumed?.status, "paused");
   assert.equal(submitCalls, 0);
 });
+
+
+test("continuous mode chains bounded activations and stops at the configured lifetime cap", async () => {
+  const store = new MemoryStore();
+  const supervisor = new ContinuousWorkSupervisor(fakeJobs(), store, {
+    maxIterationsPerActivation: 1,
+    maxLifetimeIterations: 2,
+    isComplete: () => false,
+  });
+  const record = await supervisor.create("owner", "Keep making verified progress");
+  assert.equal(await supervisor.runContinuously(record.id, "owner"), true);
+  let latest = await store.get(record.id);
+  for (let attempt = 0; attempt < 200 && latest?.status !== "completed"; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    latest = await store.get(record.id);
+  }
+  assert.equal(latest?.status, "completed");
+  assert.equal(latest?.iteration, 2);
+  assert.equal(supervisor.isContinuous(record.id), false);
+});
