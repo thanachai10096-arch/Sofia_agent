@@ -1,6 +1,8 @@
 import type { FailureCategory, Strategy } from "./types.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 
+export type SkillVerification = "typecheck" | "test" | "build" | `acceptance:${string}`;
+
 export interface SofiaSkill {
   id: string;
   name: string;
@@ -9,7 +11,7 @@ export interface SofiaSkill {
   categories: readonly FailureCategory[];
   strategy: Strategy;
   procedure: readonly string[];
-  verification: readonly ("typecheck" | "test" | "build")[];
+  verification: readonly SkillVerification[];
 }
 
 const BUILTIN_SKILLS: readonly SofiaSkill[] = [
