@@ -438,12 +438,16 @@ export class SofiaBrain {
       this.usage.modelCalls += 1;
 
       const modelCallStartedAt = Date.now();
-      const result = await this.wait(() =>
-        prepared.invoke({
-          signal: this.signal,
-          maxOutputTokens: this.limits.maxOutputTokens,
-        }),
-      );
+      const modelCallStartedAt = Date.now();
+      let result: Awaited<ReturnType<typeof prepared.invoke>>;
+      try {
+        result = await this.wait(() =>
+          prepared.invoke({ signal: this.signal, maxOutputTokens: this.limits.maxOutputTokens }),
+        );
+      } catch (error) {
+        this.efficiencyMetrics.recordUnmeasuredModelCall();
+        throw error;
+      }
 
       const actual = result.usage.inputTokens + result.usage.outputTokens;
 
@@ -543,14 +547,28 @@ export class SofiaBrain {
 
     this.usage.modelCalls += 1;
     const role = roleForTask(task, failureCategory);
-    const result = await this.wait(() =>
-      runtime.run({
-        role,
-        task,
-        context,
-        signal: this.signal,
-      }),
-    );
+    const modelCallStartedAt = Date.now();
+    let result: SubagentResult;
+    try {
+      result = await this.wait(() =>
+        runtime.run({ role, task, context, signal: this.signal }),
+      );
+    } catch (error) {
+      this.efficiencyMetrics.recordUnmeasuredModelCall();
+      throw error;
+    }
+    if (result.usage &&
+        Number.isSafeInteger(result.usage.inputTokens) && result.usage.inputTokens >= 0 &&
+        Number.isSafeInteger(result.usage.outputTokens) && result.usage.outputTokens >= 0) {
+      this.efficiencyMetrics.recordModelCall({
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        durationMs: Math.max(0, Date.now() - modelCallStartedAt),
+        retries: result.retries ?? 0,
+      });
+    } else {
+      this.efficiencyMetrics.recordUnmeasuredModelCall();
+    }
 
     this.emit({ type: "brain.subagent.completed" });
 
