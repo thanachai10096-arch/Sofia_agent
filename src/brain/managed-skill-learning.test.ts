@@ -110,3 +110,24 @@ test("managed skill learning accepts verified general-workflow candidates automa
     rmSync(f.directory, { recursive: true, force: true });
   }
 });
+
+
+test("managed learning preserves real acceptance criteria and rejects candidates without evidence", async () => {
+  const f = fixture();
+  try {
+    const handler = createManagedSkillLearningHandler(f.lifecycle);
+    const acceptanceCandidate: LearnedSkillCandidate = {
+      ...candidate,
+      name: "workflow-acceptance-evidence",
+      verification: ["acceptance:summary-matches-source"],
+      evidenceIds: ["trusted-evidence-42"],
+    };
+    assert.equal(await handler(acceptanceCandidate, "run-acceptance", "operator-1"), true);
+    const active = f.platform.get("learned:workflow-acceptance-evidence:type_error");
+    assert.deepEqual(active?.skill.verification, ["acceptance:summary-matches-source"]);
+    assert.deepEqual(active?.skill.triggers, [candidate.trigger]);
+    assert.equal(await handler({ ...candidate, evidenceIds: [] }, "run-no-evidence", "operator-1"), false);
+  } finally {
+    rmSync(f.directory, { recursive: true, force: true });
+  }
+});
