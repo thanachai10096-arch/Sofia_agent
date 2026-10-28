@@ -103,3 +103,24 @@ console.log(result);
 - Remote endpoints must use HTTPS. Plain HTTP is accepted only for loopback local model servers. URL credentials, query strings, and fragments are rejected.
 - API keys are read from environment variables and are not written to Sofia's setup config by this module.
 - Model capabilities differ. Configuring a model under a route name does not guarantee that the model actually supports vision, tool calls, structured output, or a given context length. Verify those features against the target endpoint before relying on them.
+
+
+## Choose a model per run
+
+The API, SDK, and CLI support a per-run `modelSelection` profile. Omit it or use `auto` to let Sofia choose the configured route for each phase. Use `fast`, `coding`, `reasoning`, or `vision` to pin the corresponding configured model ID for that run while Sofia keeps its phase/capability routing and verification behavior.
+
+CLI examples:
+
+```sh
+sofia run --model auto "Summarize this repository"
+sofia run --model coding "Fix the failing tests"
+sofia run --model reasoning "Compare these architecture options"
+```
+
+SDK/API example:
+
+```ts
+await client.run({ task: "Review the design", modelSelection: "reasoning" });
+```
+
+These values select model IDs configured for the current Sofia server; they do not let a client submit a new provider URL or API key. The current provider configuration is server-wide, so this is not yet per-user provider credential storage or a persistent account preference. If a provider/model cannot perform a required capability, the run may fail rather than silently switching away from the explicitly selected model. Model availability and capability metadata are not guaranteed by listing a model alone.
