@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createSofiaBrain } from "./executor.js";
+import type { TaskMeasurement } from "./task-efficiency-metrics.js";
 import { InMemorySkillLedger } from "./learning.js";
 import type { BrainReasoner, ToolGateway, ToolResult } from "./types.js";
 import type { SubagentRuntime } from "./subagents.js";
@@ -106,12 +107,14 @@ function makeTools(): ToolGateway {
 }
 
 test("Brain completes a coding loop only after trusted verification", async () => {
+  let measurement: TaskMeasurement | undefined;
   const brain = createSofiaBrain({
     dependencies: {
       reasoner: makeReasoner(),
       tools: makeTools(),
       allowShell: false,
       allowNetwork: false,
+      onEfficiencyMeasurement(value) { measurement = value; throw new Error("telemetry store unavailable"); },
     },
     limits: {
       maxSteps: 4,
@@ -147,6 +150,14 @@ test("Brain completes a coding loop only after trusted verification", async () =
   assert.deepEqual(report.changedFiles, ["hello.txt"]);
   assert.equal(report.verification[0]?.passed, true);
   assert.equal(report.usage.modelCalls, 2);
+  assert.ok(measurement);
+  assert.equal(measurement.completed, true);
+  assert.equal(measurement.acceptanceCriteria, 1);
+  assert.equal(measurement.passedCriteria, 1);
+  assert.equal(measurement.inputTokens, 20);
+  assert.equal(measurement.outputTokens, 40);
+  assert.equal(measurement.modelCalls, 2);
+  assert.equal("prompt" in measurement, false);
 });
 
 
