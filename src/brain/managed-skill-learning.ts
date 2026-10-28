@@ -4,6 +4,7 @@ import type { LearnedSkillCandidate } from "./learning.js";
 import { runSkillLifecycleWorkflow } from "./skill-lifecycle-workflow.js";
 import type { VersionedSkillLifecycle } from "./skill-lifecycle.js";
 import type { SkillPackage } from "../skills/platform.js";
+import type { SkillVerification } from "./skills.js";
 
 export interface ManagedSkillLearningOptions {
   /**
@@ -30,6 +31,9 @@ export function createManagedSkillLearningHandler(
     const authenticatedPrincipalId = principalId?.trim();
     // Never promote skills for anonymous work, even when approval is disabled.
     if (!authenticatedPrincipalId) return false;
+    // Promotion must be tied to real successful verification evidence; never
+    // fabricate typecheck/test/build claims for arbitrary acceptance criteria.
+    if (candidate.evidenceIds.length === 0 || candidate.procedure.length < 2 || candidate.verification.length === 0) return false;
 
     const requireApproval = options.requireApproval ?? process.env.SOFIA_SKILL_WRITE_APPROVAL === "true";
     if (requireApproval && !approval) return false;
@@ -39,11 +43,18 @@ export function createManagedSkillLearningHandler(
         id: `learned:${candidate.name}:${candidate.category}`,
         name: candidate.name,
         description: "Learned from a workflow that passed trusted verification.",
-        triggers: [candidate.trigger],
+        triggers: [...new Set([candidate.trigger, ...(candidate.triggers ?? [])])]
+          .map((trigger) => String(trigger).trim().slice(0, 500))
+          .filter(Boolean)
+          .slice(0, 12),
         categories: [candidate.category],
         strategy: candidate.strategy,
-        procedure: [...candidate.procedure],
-        verification: ["typecheck", "test", "build"],
+        procedure: [...candidate.procedure].slice(0, 12),
+        verification: [...new Set(candidate.verification.map((item): SkillVerification => {
+          if (item === "typecheck" || item === "test" || item === "build") return item;
+          const safeId = String(item).replace(/[^A-Za-z0-9._:-]/g, "-").slice(0, 160);
+          return "acceptance:" + (safeId || "verified-check");
+        }))],
       },
       source: "learned",
       version: "1.0.0",
