@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { splitMessage } from "./format.js";
 import { createTelegramAdapter, type TelegramUpdate } from "./telegram.js";
 import { createDiscordAdapter, type VerifiedDiscordMessage } from "./discord.js";
 import { createSlackAdapter, type VerifiedSlackMessage } from "./slack.js";
@@ -203,4 +204,24 @@ test("Matrix adapter chunks long outbound messages and returns safe delivery fai
     state: "failed",
     errorCode: "matrix_delivery_failed",
   });
+});
+
+test("shared message splitter preserves content and validates platform limits", () => {
+  assert.deepEqual(splitMessage("", 32), [""]);
+  assert.deepEqual(splitMessage("x".repeat(32), 32), ["x".repeat(32)]);
+  assert.throws(() => splitMessage("hello", 31), /between 32 and 100000/);
+  assert.throws(() => splitMessage("hello", Number.NaN), /between 32 and 100000/);
+
+  const source = "a".repeat(31) + "🙂" + "b".repeat(40) + "🚀".repeat(20);
+  const chunks = splitMessage(source, 32);
+  assert.ok(chunks.every((chunk) => chunk.length <= 32));
+  assert.equal(chunks.join(""), source);
+  assert.ok(chunks.every((chunk) => {
+    const last = chunk.charCodeAt(chunk.length - 1);
+    return !(last >= 0xd800 && last <= 0xdbff);
+  }));
+  assert.ok(chunks.every((chunk) => {
+    const first = chunk.charCodeAt(0);
+    return !(first >= 0xdc00 && first <= 0xdfff);
+  }));
 });
