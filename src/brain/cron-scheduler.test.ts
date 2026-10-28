@@ -93,6 +93,7 @@ test("completed scheduled jobs deliver to their trusted target and retry until a
   let attempts = 0;
   const scheduler = new CronScheduler(runtime, {
     store,
+    now: () => new Date("2026-10-28T13:00:00.000Z"),
     onExecutionFinished: async (schedule, execution, deliveredJob) => {
       attempts++;
       assert.equal(schedule.notificationTarget?.conversationId, "channel-1");
