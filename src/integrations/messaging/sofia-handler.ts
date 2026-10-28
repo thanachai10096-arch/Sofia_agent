@@ -15,8 +15,10 @@ export interface SofiaMessagingHandlerOptions {
   /** Exact command prefix, e.g. /run or /run@SofiaBot. Set false to accept natural chat; defaults to /run for backwards compatibility. */
   commandPrefix?: string | false;
   maxTaskCharacters?: number;
+  /** Optional recent conversation context, usually loaded from a persistent session store. */
+  conversationContext?: (message: InboundMessage, task: string) => string | undefined;
   /** Called after the API accepts a run; implementations should schedule completion reporting without blocking polling. */
-  onAccepted?: (input: { runId: string; runStatus: string; message: InboundMessage }) => void;
+  onAccepted?: (input: { runId: string; runStatus: string; message: InboundMessage; task: string }) => void;
 }
 
 /** Maps the gateway identity to Sofia's existing chat authorization contract. */
@@ -71,11 +73,12 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
       conversationId: message.identity.conversationId,
       command: "run",
       task,
+      ...(options.conversationContext ? { context: options.conversationContext(message, task) } : {}),
     });
     switch (result.status) {
       case "accepted":
         try {
-          options.onAccepted?.({ runId: result.runId, runStatus: result.runStatus, message });
+          options.onAccepted?.({ runId: result.runId, runStatus: result.runStatus, message, task });
         } catch {
           // Completion notifications must never prevent the normal acceptance acknowledgement.
         }
