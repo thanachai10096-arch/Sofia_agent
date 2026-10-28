@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { JobRuntime, JobRecord } from "./job-runtime.js";
+import type { NotificationTarget } from "./types.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 export type MisfirePolicy = "skip" | "run-once";
@@ -15,6 +16,8 @@ export interface CronScheduleInput {
   runAt?: string;
   timeZone: string;
   ownerKeyId: string;
+  /** Verified by the trusted host; never accepted from model tool arguments. */
+  notificationTarget?: NotificationTarget;
   enabled?: boolean;
   misfirePolicy?: MisfirePolicy;
   maxRetries?: number;
@@ -40,6 +43,7 @@ export interface CronExecution {
   jobId?: string;
   attempt: number;
   error?: string;
+  notificationDelivered?: boolean;
 }
 export interface CronAuditEvent {
   at: string;
@@ -63,6 +67,7 @@ export interface CronSchedulerOptions {
   maxConcurrent?: number;
   maxSchedulesPerOwner?: number;
   audit?: (event: CronAuditEvent) => void | Promise<void>;
+  onExecutionFinished?: (schedule: CronSchedule, execution: CronExecution, job?: JobRecord) => Promise<boolean> | boolean;
 }
 
 /** File-backed store. Exclusive lock + atomic rename serializes claims across local processes. */
@@ -204,6 +209,8 @@ export class CronScheduler {
   private readonly maxConcurrent: number;
   private readonly maxSchedulesPerOwner: number;
   private readonly auditCallback?: CronSchedulerOptions["audit"];
+  private readonly onExecutionFinished?: CronSchedulerOptions["onExecutionFinished"];
+  private readonly notificationInFlight = new Set<string>();
   private ticking = false;
   private readonly active = new Map<string, AbortController>();
 
@@ -214,6 +221,7 @@ export class CronScheduler {
     this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
     this.maxSchedulesPerOwner = Math.max(1, Math.min(10_000, Math.floor(options.maxSchedulesPerOwner ?? 100)));
     this.auditCallback = options.audit;
+    this.onExecutionFinished = options.onExecutionFinished;
   }
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
     state.audit.push(event);
@@ -313,6 +321,7 @@ export class CronScheduler {
     if (this.ticking) return;
     this.ticking = true;
     try {
+      await this.retryPendingNotifications();
       while (this.active.size < this.maxConcurrent) {
         const claim = await this.store.transact(async state => {
           const now = this.now();
@@ -589,7 +598,7 @@ export class CronScheduler {
       status = controller.signal.aborted ? "cancelled" : "failed";
     }
 
-    await this.store.transact(async state => {
+    const finishedExecution = await this.store.transact(async state => {
       const execution = state.history.find(h => h.id === executionId);
       const current = state.schedules.find(s => s.id === schedule.id);
       if (execution) {
@@ -604,9 +613,46 @@ export class CronScheduler {
         current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled" ? current.consecutiveFailures : current.consecutiveFailures + 1;
       }
       await this.recordAudit(state, { at: this.now().toISOString(), actor: "scheduler", action: "schedule.finished", scheduleId: schedule.id, detail: status });
+      return execution ? { ...execution } : undefined;
     }).catch(() => undefined);
+    if (finishedExecution) await this.deliverFinished(schedule, finishedExecution, job);
     this.active.delete(schedule.id);
   }
+  private async retryPendingNotifications(): Promise<void> {
+    if (!this.onExecutionFinished) return;
+    const pending = await this.store.transact(state => state.history
+      .filter(item => !item.notificationDelivered && ["completed", "failed", "cancelled", "skipped"].includes(item.status))
+      .map(item => ({ ...item })));
+    for (const execution of pending) {
+      const schedule = await this.store.transact(state => {
+        const item = state.schedules.find(candidate => candidate.id === execution.scheduleId);
+        return item ? { ...item } : undefined;
+      });
+      if (!schedule?.notificationTarget) continue;
+      const job = execution.jobId ? await this.runtime.get(execution.jobId).catch(() => undefined) : undefined;
+      await this.deliverFinished(schedule, execution, job);
+    }
+  }
+
+  private async deliverFinished(schedule: CronSchedule, execution: CronExecution, job?: JobRecord): Promise<void> {
+    if (!this.onExecutionFinished || !schedule.notificationTarget || execution.notificationDelivered || this.notificationInFlight.has(execution.id)) return;
+    this.notificationInFlight.add(execution.id);
+    try {
+      const delivered = await this.onExecutionFinished(schedule, execution, job);
+      if (delivered) {
+        await this.store.transact(async state => {
+          const current = state.history.find(item => item.id === execution.id);
+          if (current) current.notificationDelivered = true;
+          await this.recordAudit(state, { at: this.now().toISOString(), actor: "scheduler", action: "schedule.notification.delivered", scheduleId: schedule.id, detail: execution.id });
+        });
+      }
+    } catch {
+      // Keep the marker unset; the scheduler retries delivery on a later tick.
+    } finally {
+      this.notificationInFlight.delete(execution.id);
+    }
+  }
+
   private async waitForJob(id: string, signal: AbortSignal): Promise<JobRecord> {
     while (!signal.aborted) {
       const record = await this.runtime.get(id);
