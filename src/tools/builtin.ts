@@ -1,4 +1,4 @@
-import type { SofiaTool } from "./types.js";
+import type { SofiaTool, ToolContext } from "./types.js";
 import { applyEditPatch, createEditPatch } from "../brain/edit-engine.js";
 import { randomUUID } from "node:crypto";
 import type { UserMemoryStore, UserMemoryKind } from "../brain/user-memory.js";
@@ -72,16 +72,16 @@ export function createBuiltinTools(userMemoryStore?: UserMemoryStore): SofiaTool
         const url = allowedNetworkUrl("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query));
         const response = await fetchBoundedText(url);
         const results: Array<{ title: string; url: string; snippet: string }> = [];
-        const blocks = response.text.match(/<div class="result[^"]*"[^>]*>[\s\\S]*?<\/div>\s*<\/div>/gi) ?? [];
+        const blocks = response.text.match(/<div class="result[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi) ?? [];
         for (const block of blocks) {
-          const link = block.match(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\\S]*?)<\/a>/i);
+          const link = block.match(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
           if (!link) continue;
           let target: URL;
-          try { target = new URL(decodeHtml(link[1])); } catch { continue; }
+          try { target = new URL(decodeHtml(link[1]!)); } catch { continue; }
           if (target.protocol !== "https:" || target.hostname === "html.duckduckgo.com") continue;
-          const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\\S]*?)<\/div>/i);
+          const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/div>/i);
           results.push({
-            title: decodeHtml(link[2].replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 300),
+            title: decodeHtml(link[2]!.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 300),
             url: target.toString(),
             snippet: decodeHtml((snippetMatch?.[1] ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 700),
           });
@@ -103,8 +103,8 @@ export function createBuiltinTools(userMemoryStore?: UserMemoryStore): SofiaTool
       async execute(input) {
         const url = allowedNetworkUrl(String(input.url ?? ""));
         const response = await fetchBoundedText(url);
-        const text = response.text.replace(/<script\b[^>]*>[\s\\S]*?<\/script>/gi, " ")
-          .replace(/<style\b[^>]*>[\s\\S]*?<\/style>/gi, " ")
+        const text = response.text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+          .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
           .replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
         return { url: url.toString(), status: response.status, contentType: response.contentType, text: decodeHtml(text).slice(0, 20_000), untrusted: true };
       },
@@ -122,7 +122,8 @@ export function createBuiltinTools(userMemoryStore?: UserMemoryStore): SofiaTool
         required: ["kind", "content"],
         additionalProperties: false,
       },
-      async execute(input: Record<string, unknown>, { principalId }) {
+      async execute(input: Record<string, unknown>, context: ToolContext) {
+        const principalId = context.principalId;
         if (!principalId?.trim()) throw new Error("Saving user memory requires an authenticated principal.");
         const kind = input.kind as UserMemoryKind;
         if (kind !== "preference" && kind !== "fact" && kind !== "goal") {
