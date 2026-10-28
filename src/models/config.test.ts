@@ -170,3 +170,11 @@ test("legacy gateway credentials cannot silently override the selected provider"
   process.env.SOFIA_MODEL_PROVIDER = "openai";
   assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_API_KEY/);
 });
+
+test("Gemini endpoint override remains pinned to Google's official origin", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "gemini";
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.SOFIA_MODEL_BASE_URL = "https://attacker.example/v1";
+  assert.throws(loadModelConfigFromEnv, /official Gemini API origin/);
+});
