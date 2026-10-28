@@ -230,14 +230,26 @@ const server = createSofiaApi(deps, {
   ...(whatsAppRuntime ? { whatsAppWebhookRoute: { transport: whatsAppRuntime.transport } } : {}),
   onCronExecutionFinished: async (schedule, execution, job) => {
     const target = schedule.notificationTarget;
-    if (!target || target.platform !== "discord" || !discordTransport) return false;
-    const summary = typeof job?.result?.summary === "string" ? job.result.summary.trim() : "";
+    if (!target) return false;
+    // The Discord owner ID is independently bound to the trusted adapter identity.
+    if (target.platform === "discord" && schedule.ownerKeyId !== "discord:" + target.userId) return false;
+    const summary = typeof job?.result?.summary === "string" ? String(redactSecrets(job.result.summary)).trim() : "";
     const status = execution.status;
     const message = status === "completed"
       ? "⏰ Sofia scheduled task completed.\\nSchedule: " + schedule.name + "\\n" + (summary || "The task completed without a text summary.")
       : "⏰ Sofia scheduled task " + status + ".\\nSchedule: " + schedule.name + "\\nCheck Sofia schedule history for details.";
-    await discordTransport.sendMessage(target.conversationId, message.slice(0, 1700));
-    return true;
+    const outbound = { conversationId: target.conversationId, text: message.slice(0, 1700) };
+    switch (target.platform) {
+      case "discord":
+        if (!discordTransport) return false;
+        await discordTransport.sendMessage(target.conversationId, outbound.text);
+        return true;
+      case "telegram": return telegramRuntime ? telegramRuntime.send(outbound) : false;
+      case "matrix": return matrixRuntime ? matrixRuntime.send(outbound) : false;
+      case "slack": return slackRuntime ? slackRuntime.send(outbound) : false;
+      case "line": return lineRuntime ? lineRuntime.send(outbound) : false;
+      case "whatsapp": return whatsAppRuntime ? whatsAppRuntime.send(outbound) : false;
+    }
   },
 });
 const port = Number(process.env.PORT ?? 3000);
