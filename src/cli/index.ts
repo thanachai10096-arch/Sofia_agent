@@ -11,7 +11,7 @@ Sofia Agent CLI
 
 Commands:
   sofia init
-  sofia run "<task>"
+  sofia run [--model auto|fast|coding|reasoning|vision] "<task>"
   sofia status
 
 Environment:
