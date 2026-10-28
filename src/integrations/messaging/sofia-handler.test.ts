@@ -46,6 +46,22 @@ test("only explicit run commands start Sofia work", async () => {
   assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
 });
 
+test("natural-chat mode starts a run from ordinary text without /run", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, commandPrefix: false });
+  assert.equal(await handle(inbound("Hi Sofia, help me plan a release")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.deepEqual(h.starts.map((entry) => entry.task), ["Hi Sofia, help me plan a release"]);
+  assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
+});
+
+test("natural-chat mode ignores slash commands but keeps /run available", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, commandPrefix: false });
+  assert.equal(await handle(inbound("/help")), undefined);
+  assert.equal(await handle(inbound("/run summarize this project")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.deepEqual(h.starts.map((entry) => entry.task), ["summarize this project"]);
+});
+
 test("command prefix can be configured for a bot mention", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, commandPrefix: "/run@SofiaBot" });
