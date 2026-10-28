@@ -1,9 +1,18 @@
 import type { UserMemoryStore } from "./user-memory.js";
 import { fenceUntrustedOutput } from "../security/untrusted.js";
+import { redactSecrets } from "../security/guard.js";
 
 const MAX_MEMORIES_PER_RUN = 4;
 const MAX_MEMORY_CHARS = 1_200;
 const MAX_TASK_QUERY_CHARS = 4_000;
+
+function redactMemoryContent(content: string): string {
+  return String(redactSecrets(content))
+    .replace(/\\bsk-[A-Za-z0-9_-]{16,}\\b/g, "[REDACTED]")
+    .replace(/\\bgh[pousr]_[A-Za-z0-9]{20,}\\b/g, "[REDACTED]")
+    .replace(/\\bgithub_pat_[A-Za-z0-9_]{20,}\\b/g, "[REDACTED]")
+    .replace(/\\bAKIA[0-9A-Z]{16}\\b/g, "[REDACTED]");
+}
 
 /**
  * Add a small, owner-scoped set of relevant saved memories to a run's context.
@@ -31,7 +40,7 @@ export async function appendRelevantUserMemoryContext(
     ...memories.slice(0, MAX_MEMORIES_PER_RUN).map((memory, index) => {
       const safe = fenceUntrustedOutput(
         "saved-user-memory",
-        "[" + memory.kind + "] " + memory.content.slice(0, MAX_MEMORY_CHARS),
+        "[" + memory.kind + "] " + redactMemoryContent(memory.content).slice(0, MAX_MEMORY_CHARS),
         { maxChars: MAX_MEMORY_CHARS + 64 },
       );
       return "Memory " + (index + 1) + ":\n" + safe.text;
