@@ -47,6 +47,7 @@ export function createCronTools(scheduler: ScheduleCreator): SofiaTool[] {
         task,
         timeZone,
         ownerKeyId,
+        ...(context.notificationTarget ? { notificationTarget: context.notificationTarget } : {}),
         ...(cron !== undefined ? { cron } : {}),
         ...(runAt !== undefined ? { runAt } : {}),
         ...(input.enabled === false ? { enabled: false } : {}),
@@ -63,7 +64,7 @@ export function createCronTools(scheduler: ScheduleCreator): SofiaTool[] {
         timeZone: created.timeZone,
         ...(created.cron ? { cron: created.cron } : {}),
         ...(created.runAt ? { runAt: created.runAt } : {}),
-        note: "Scheduled work is stored durably. Automatic Telegram/Discord delivery of the result is not configured yet.",
+        note: context.notificationTarget ? "Result delivery is bound to the verified originating conversation." : "No verified messaging destination was attached; the result remains available in durable job history.",
       };
     },
   };
