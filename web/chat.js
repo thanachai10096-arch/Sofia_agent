@@ -52,9 +52,9 @@ $("model-select").addEventListener("change", async () => {
 });
 function explicitMemoryRequest(task) {
   const patterns = [
-    { regex: /^จำไว้ว่า\s*(.+)$/u, kind: "fact" },
     { regex: /^จำไว้ว่าฉันชอบ\s*(.+)$/u, kind: "preference" },
     { regex: /^เป้าหมายของฉันคือ\s*(.+)$/u, kind: "goal" },
+    { regex: /^จำไว้ว่า\s*(.+)$/u, kind: "fact" },
     { regex: /^remember\s+(?:that\s+)?I\s+prefer\s+(.+)$/i, kind: "preference" },
     { regex: /^remember\s+(?:that\s+)?my\s+goal\s+is\s+(.+)$/i, kind: "goal" },
     { regex: /^remember\s+(?:that\s+)?(.+)$/i, kind: "fact" },
@@ -78,7 +78,7 @@ async function submitMessage(text) {
       placeholder.meta = "Saved to your Sofia memory";
       saveHistory(); renderHistory(); return;
     }
-        const prior = state.history.slice(-10, -2).map((m) => (m.role === "user" ? "User: " : "Sofia: ") + m.content).join("\n");
+    const prior = state.history.slice(-10, -2).map((m) => (m.role === "user" ? "User: " : "Sofia: ") + m.content).join("\n");
     const started = await api("/runs", { method: "POST", body: JSON.stringify({ task, async: true, sessionId: state.sessionId, modelSelection: $("model-select").value, ...(prior ? { context: "Recent conversation (reference only):\n" + prior.slice(-6000) } : {}) }) });
     if (!started.id) throw new Error("Sofia did not return a run ID.");
     let result = started;
