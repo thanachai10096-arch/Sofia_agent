@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { FileProjectMemoryStore, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
+import { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
+import type { LearnedSkillCandidate } from "./learning.js";
 
 test("project memory survives a new store instance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-test-"));
@@ -86,4 +87,40 @@ test("project memory ranks entries matching more query terms ahead of weaker mat
   const results = await store.find("build test typecheck");
   assert.equal(results[0]?.id, "strong");
   assert.equal(results.some((entry) => entry.id === "weak"), true);
+});
+
+
+test("persistent skill ledger merges repeated verified workflows and restores trigger variants", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-skill-ledger-"));
+  const firstStore = new FileProjectMemoryStore("skill-ledger-owner-a", root);
+  const ledger = new PersistentSkillLedger(firstStore);
+  const first: LearnedSkillCandidate = {
+    name: "workflow-code-review-a1b2",
+    trigger: "Review this TypeScript pull request",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect changed files", "check tests and security", "summarize verified findings"],
+    verification: ["test", "build"],
+    evidenceIds: ["run-1"],
+  };
+  const repeat: LearnedSkillCandidate = {
+    ...first,
+    trigger: "Review a TypeScript PR for regressions",
+    procedure: ["inspect changed files", "check CI evidence", "summarize verified findings"],
+    evidenceIds: ["run-2"],
+  };
+  ledger.record(first);
+  ledger.record(repeat);
+  await ledger.flush();
+
+  assert.equal(ledger.list().length, 1);
+  const merged = ledger.list()[0]!;
+  assert.ok(merged.triggers?.includes(first.trigger));
+  assert.ok(merged.triggers?.includes(repeat.trigger));
+  assert.ok(merged.procedure.includes("check CI evidence"));
+  assert.deepEqual(new Set(merged.evidenceIds), new Set(["run-1", "run-2"]));
+
+  const restored = new PersistentSkillLedger(new FileProjectMemoryStore("skill-ledger-owner-a", root));
+  assert.equal(restored.list().length, 1);
+  assert.ok(restored.list()[0]?.triggers?.includes(repeat.trigger));
 });
