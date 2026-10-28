@@ -666,3 +666,51 @@ test("Brain includes prior context as bounded untrusted reference data in unders
     assert.match(prompt?.payload.referenceContext?.content ?? "", /project uses TypeScript/);
   }
 });
+
+
+test("Brain proposes a general workflow skill only after successful verification and host approval", async () => {
+  const skillLedger = new InMemorySkillLedger();
+  let proposed: import("./learning.js").LearnedSkillCandidate | undefined;
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      skillLedger,
+      onSkillCandidate: async (candidate) => {
+        proposed = candidate;
+        return true;
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create a reusable hello file workflow",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.ok(proposed, "verified general workflow should be proposed to the host approval callback");
+  assert.equal(proposed?.category, "unknown");
+  assert.match(proposed?.name ?? "", /^workflow-/);
+  assert.ok((proposed?.evidenceIds.length ?? 0) > 0, "candidate must carry trusted verification evidence");
+  assert.equal(skillLedger.list().length, 1, "candidate is recorded only after the host approves it");
+});
