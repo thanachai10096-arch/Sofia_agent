@@ -1,0 +1,61 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createMatrixClientTransport } from "./matrix-client-transport.js";
+
+const token = "matrix-test-access-token";
+test("Matrix transport requires a public HTTPS homeserver and a bounded token", () => {
+  assert.throws(() => createMatrixClientTransport({ homeserverUrl: "http://matrix.example.org", accessToken: token }), /HTTPS/);
+  assert.throws(() => createMatrixClientTransport({ homeserverUrl: "https://localhost", accessToken: token }), /HTTPS/);
+  assert.throws(() => createMatrixClientTransport({ homeserverUrl: "https://matrix.example.org", accessToken: "bad\nvalue" }), /token/);
+});
+
+test("Matrix transport authenticates, normalizes text events and ignores its own messages", async () => {
+  const controller = new AbortController();
+  const requests: Array<{ url: string; auth: string | null }> = [];
+  const transport = createMatrixClientTransport({
+    homeserverUrl: "https://matrix.example.org",
+    accessToken: token,
+    syncTimeoutMs: 1_000,
+    fetchImpl: async (url, init) => {
+      requests.push({ url: String(url), auth: new Headers(init?.headers).get("authorization") });
+      if (String(url).includes("/account/whoami")) return new Response(JSON.stringify({ user_id: "@sofia:example.org" }));
+      return new Response(JSON.stringify({
+        next_batch: "s1",
+        rooms: { join: { "!room:example.org": { timeline: { events: [
+          { event_id: "$own", sender: "@sofia:example.org", type: "m.room.message", content: { msgtype: "m.text", body: "ignore" } },
+          { event_id: "$human", sender: "@alice:example.org", type: "m.room.message", origin_server_ts: 123, content: { msgtype: "m.text", body: "hello" } },
+          { event_id: "$image", sender: "@alice:example.org", type: "m.room.message", content: { msgtype: "m.image", body: "ignore" } },
+        ] } } } },
+      }));
+    },
+  });
+  const received: Array<{ senderId: string; roomId: string; text: string }> = [];
+  await transport.start(controller.signal, async (message) => {
+    received.push({ senderId: message.senderId, roomId: message.roomId, text: message.text });
+    controller.abort();
+  });
+  for (let i = 0; i < 20 && received.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  await transport.stop();
+  assert.deepEqual(received, [{ senderId: "@alice:example.org", roomId: "!room:example.org", text: "hello" }]);
+  assert.ok(requests.every(request => request.auth === "Bearer " + token));
+});
+
+test("Matrix transport sends a text event using the configured server-side token", async () => {
+  let request: { url: string; method?: string; auth: string | null; body: string } | undefined;
+  const transport = createMatrixClientTransport({
+    homeserverUrl: "https://matrix.example.org",
+    accessToken: token,
+    fetchImpl: async (url, init) => {
+      request = { url: String(url), method: init?.method, auth: new Headers(init?.headers).get("authorization"), body: String(init?.body ?? "") };
+      if (String(url).includes("/account/whoami")) return new Response(JSON.stringify({ user_id: "@sofia:example.org" }));
+      return new Response(JSON.stringify({ event_id: "$sent" }));
+    },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  assert.deepEqual(await transport.sendMessage("!room:example.org", "hello"), { messageId: "$sent" });
+  assert.equal(request?.method, "PUT");
+  assert.equal(request?.auth, "Bearer " + token);
+  assert.match(request?.url ?? "", /rooms\/%21room%3Aexample.org\/send/);
+  assert.deepEqual(JSON.parse(request?.body ?? "{}"), { msgtype: "m.text", body: "hello" });
+  await transport.stop();
+});
