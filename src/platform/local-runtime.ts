@@ -29,6 +29,11 @@ const GIT_FORCE_ARG = /^(?:-f|-D|--force|--force-with-lease(?:=.*)?|--mirror|--d
  * local work, delete remote/local refs, or rewrite history. Use `git switch`
  * instead of `checkout`, and `git restore --staged` only when changing the index.
  */
+function isGitExecutable(command: string): boolean {
+  const basename = command.replace(/\\/g, "/").split("/").pop()?.toLowerCase();
+  return basename === "git" || basename === "git.exe";
+}
+
 export function assertSafeGitArgs(args: readonly string[]): void {
   const sub = args[0];
   if (typeof sub !== "string" || sub.startsWith("-") || !GIT_SUBCOMMANDS.has(sub)) {
@@ -122,6 +127,9 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
     const cwd = await contained(options.cwd ?? ".");
     const timeout = options.timeoutMs ?? 60_000;
     try {
+      // Keep the Git policy effective when callers use the generic process API
+      // instead of the dedicated runtime.git method.
+      if (isGitExecutable(command)) assertSafeGitArgs(args);
       if (process.env.SOFIA_SANDBOX_MODE === "docker") {
         const image = process.env.SOFIA_SANDBOX_IMAGE;
         if (!image) {
