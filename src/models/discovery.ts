@@ -324,7 +324,10 @@ export async function probeExtendedModelCapabilities(
       if (signal.aborted) throw new Error("Extended model capability probe timed out.");
       throw new Error("Unable to reach the configured extended capability probe endpoint.");
     }
-    if (!response.ok) return { accepted: false, text: "" };
+    if (!response.ok) {
+      if ([400, 404, 405, 415, 422].includes(response.status)) return { accepted: false, text: "" };
+      throw new Error("Extended model capability probe endpoint returned HTTP " + response.status + ".");
+    }
     let payload: unknown;
     try { payload = await response.json(); } catch { return { accepted: false, text: "" }; }
     if (!payload || typeof payload !== "object") return { accepted: false, text: "" };
