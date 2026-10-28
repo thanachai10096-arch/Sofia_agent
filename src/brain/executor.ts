@@ -1177,7 +1177,7 @@ export class SofiaBrain {
         // Repair candidates retain their evidence-based form. For other completed
         // workflows, learn only when a non-empty plan and trusted verification exist.
         const taskType = (understanding.requiredCapabilities[0] ?? "general")
-          .toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "general";
+          .toLowerCase().replace(/[^a-z0-9-]+/g, "-").split("-").filter(Boolean).join("-").slice(0, 48) || "general";
         const workflowTrigger = String(redactSecrets(String(understanding.objective || input.task)))
           .replace(/[\r\n\t]+/g, " ").trim().slice(0, 160);
         const learnedCandidate: LearnedSkillCandidate | undefined = last
