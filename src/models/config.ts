@@ -144,11 +144,24 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     (preset.apiKeyEnv ? process.env[preset.apiKeyEnv]?.trim() : "") ||
     ""
   );
-  const rawBaseUrl = process.env.SOFIA_MODEL_BASE_URL?.trim() || preset.baseUrl;
+  const configuredBaseUrl = process.env.SOFIA_MODEL_BASE_URL?.trim();
+  const rawBaseUrl = configuredBaseUrl || preset.baseUrl;
   if (!rawBaseUrl) {
     throw new Error("Set SOFIA_MODEL_BASE_URL for the openai-compatible provider.");
   }
   const baseUrl = validateBaseUrl(rawBaseUrl, providerId);
+  // A named provider's API key must not be sent to an unrelated endpoint due
+  // to an accidental or injected BASE_URL override. Use openai-compatible when
+  // intentionally routing credentials through a custom gateway/proxy.
+  if (configuredBaseUrl && providerId !== "openai-compatible" && providerId !== "ollama" && preset.baseUrl) {
+    const expectedOrigin = new URL(preset.baseUrl).origin;
+    const configuredOrigin = new URL(baseUrl).origin;
+    if (configuredOrigin !== expectedOrigin) {
+      throw new Error(
+        `SOFIA_MODEL_BASE_URL for provider "${providerId}" must use ${expectedOrigin}; select openai-compatible for a custom endpoint.`,
+      );
+    }
+  }
   if (preset.requiresApiKey && !apiKey) {
     throw new Error(
       providerId === "gemini"
