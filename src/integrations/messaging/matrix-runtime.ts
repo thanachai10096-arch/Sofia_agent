@@ -2,6 +2,7 @@ import path from "node:path";
 import { SofiaClient } from "../../sdk/client.js";
 import { FileChatMessageDeduplicator } from "../file-chat-deduplicator.js";
 import { redactSecrets } from "../../security/guard.js";
+import type { OutboundMessage } from "./types.js";
 import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createMatrixAdapter, type MatrixTransport } from "./matrix.js";
@@ -11,6 +12,7 @@ export interface MatrixMessagingRuntime {
   transport: MatrixTransport;
   start(): Promise<void>;
   stop(): Promise<void>;
+  send(message: OutboundMessage): Promise<boolean>;
 }
 export interface MatrixMessagingEnvironment {
   SOFIA_MESSAGING_ENABLED?: string;
@@ -90,7 +92,7 @@ export function createMatrixMessagingRuntime(
         warn: (event) => onWarning("Matrix messaging warning: " + event),
       },
     });
-    return { transport, start: () => gateway!.start(), stop: () => gateway!.stop() };
+    return { transport, start: () => gateway!.start(), stop: () => gateway!.stop(), send: (message) => gateway!.send("matrix", message) };
   } catch (error) {
     onWarning("Matrix integration disabled: " + (error instanceof Error ? error.message : "invalid configuration") + ".");
     return undefined;
