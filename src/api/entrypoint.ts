@@ -226,9 +226,6 @@ const continuousWorkSupervisor = deps.jobRuntime
   ? new ContinuousWorkSupervisor(deps.jobRuntime, continuousWorkStore, {
       // One activation is bounded; completion remains explicit until a trusted verifier is configured.
       isComplete: () => false,
-      ...(process.env.SOFIA_CONTINUOUS_WORK_MAX_CONCURRENT_PER_OWNER?.trim()
-        ? { maxConcurrentContinuousPerOwner: Number(process.env.SOFIA_CONTINUOUS_WORK_MAX_CONCURRENT_PER_OWNER) }
-        : {}),
       ...(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS?.trim()
         ? { maxLifetimeIterations: Number(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS) }
         : {}),
