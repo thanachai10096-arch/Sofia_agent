@@ -130,7 +130,7 @@ test("continuous-work API is owner-scoped and exposes create, resume, pause, and
       return request("owner-key", "/v1/continuous-work/chat", "POST", { signedTask, messagingContext });
     };
     const chatCreated = await signedAction("telegram-user-1", { action: "create", task: "Improve the project with evidence." }, "msg-1");
-    assert.equal(chatCreated.status, 201);
+    assert.equal(chatCreated.status, 201, await chatCreated.clone().text());
     const chatWork = (await chatCreated.json() as { work: ContinuousWorkRecord }).work;
     assert.ok(chatWork.ownerKeyId.startsWith("chat:"));
     const chatList = await signedAction("telegram-user-1", { action: "list" }, "msg-2");
