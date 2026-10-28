@@ -62,14 +62,13 @@ export function createMatrixClientTransport(options: MatrixClientTransportOption
   }
   async function request(path: string, init: RequestInit = {}): Promise<Response> {
     const url = new URL(path, homeserver);
+    const headers = new Headers(init.headers);
+    headers.set("authorization", "Bearer " + options.accessToken);
+    if (!headers.has("content-type")) headers.set("content-type", "application/json");
     const response = await fetchImpl(url, {
       ...init,
       redirect: "error",
-      headers: {
-        authorization: "Bearer " + options.accessToken,
-        "content-type": "application/json",
-        ...(init.headers ?? {}),
-      },
+      headers,
       signal: controller?.signal,
     });
     return response;
