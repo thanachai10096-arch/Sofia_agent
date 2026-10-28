@@ -37,7 +37,7 @@ function validatePackage(value: SkillPackage): SkillPackage {
       !Array.isArray(skill.categories) || skill.categories.length === 0 || !skill.categories.every((item) => typeof item === "string" && item.trim() && item.length <= 100) ||
       !["initial", "inspect-evidence", "fix-implementation", "fix-environment", "alternative-tool"].includes(String(skill.strategy)) ||
       !Array.isArray(skill.procedure) || skill.procedure.length < 2 || !skill.procedure.every((item) => typeof item === "string" && item.trim() && item.length <= 2000) ||
-      !Array.isArray(skill.verification) || skill.verification.length === 0 || !skill.verification.every((item) => ["typecheck", "test", "build"].includes(String(item)))) {
+      !Array.isArray(skill.verification) || skill.verification.length === 0 || !skill.verification.every((item) => ["typecheck", "test", "build"].includes(String(item)) || (typeof item === "string" && item.startsWith("acceptance:") && /^[A-Za-z0-9._:-]{1,160}$/.test(item.slice("acceptance:".length))))) {
     throw new Error("Invalid skill metadata");
   }
   if (value.publisher !== undefined && (typeof value.publisher !== "string" || value.publisher.length > 200)) throw new Error("Invalid skill publisher");
