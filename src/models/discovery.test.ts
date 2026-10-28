@@ -220,3 +220,12 @@ test("model discovery ignores invalid or non-positive context-window metadata", 
     { id: "string-context", capabilities: null },
   ]);
 });
+test("extended capability probe surfaces authentication and provider failures instead of masking them as unknown", async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
+  const { probeExtendedModelCapabilities } = await import("./discovery.js");
+  await assert.rejects(probeExtendedModelCapabilities({
+    baseUrl: "https://models.example.test/v1",
+    apiKey: "bad-key",
+    model: "test-model",
+  }), /HTTP 401/);
+});
