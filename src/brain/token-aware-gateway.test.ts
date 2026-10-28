@@ -333,3 +333,39 @@ test("equal estimated costs use configured route weights instead of array order"
 
   assert.equal(selected, "economical");
 });
+
+
+test("gateway rejects duplicate route IDs before routing", () => {
+  const budget = makeBudget();
+  const duplicate = route(async () => ({
+    value: { ok: true },
+    usage: { inputTokens: 1, outputTokens: 1 },
+    finishReason: "complete",
+  }));
+  assert.throws(
+    () => new TokenAwareGateway(budget, [duplicate, { ...duplicate }]),
+    /Missing or duplicate model route ID/,
+  );
+});
+
+test("gateway rejects non-finite or negative route weights", () => {
+  const budget = makeBudget();
+  const valid = route(async () => ({
+    value: { ok: true },
+    usage: { inputTokens: 1, outputTokens: 1 },
+    finishReason: "complete",
+  }));
+
+  assert.throws(
+    () => new TokenAwareGateway(budget, [{ ...valid, costWeight: Number.NaN }]),
+    /Invalid model route costWeight/,
+  );
+  assert.throws(
+    () => new TokenAwareGateway(budget, [{ ...valid, latencyWeight: -1 }]),
+    /Invalid model route latencyWeight/,
+  );
+  assert.throws(
+    () => new TokenAwareGateway(budget, [{ ...valid, qualityWeight: Number.POSITIVE_INFINITY }]),
+    /Invalid model route qualityWeight/,
+  );
+});
