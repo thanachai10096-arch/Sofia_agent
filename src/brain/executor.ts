@@ -1222,6 +1222,7 @@ export class SofiaBrain {
                 evidenceIds,
               }
             : undefined;
+        let learningPersisted = false;
         if (learnedCandidate) {
           // The host wires the managed lifecycle for automatic verified promotion. If no handler is configured, fail closed and do not persist a candidate.
           let mayActivate = false;
@@ -1232,7 +1233,6 @@ export class SofiaBrain {
               mayActivate = false;
             }
           }
-          let learningPersisted = false;
           if (mayActivate) {
             this.dependencies.skillLedger.record(learnedCandidate);
             try {
