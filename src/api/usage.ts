@@ -8,6 +8,12 @@ export interface UsageRecord {
   runs: number;
   toolCalls: number;
   startedAt: number;
+  /** Successful Brain runs with provider-reported token accounting. */
+  brainRuns?: number;
+  /** Model calls reported by Brain; excludes legacy runs without structured usage. */
+  brainModelCalls?: number;
+  /** Brain reserved-or-used tokens; not guaranteed to equal provider-billed tokens. */
+  brainReservedOrUsedTokens?: number;
 }
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -20,7 +26,10 @@ function validRecord(value: unknown): value is UsageRecord {
   return typeof record.keyId === "string" &&
     Number.isSafeInteger(record.runs) && (record.runs ?? -1) >= 0 &&
     Number.isSafeInteger(record.toolCalls) && (record.toolCalls ?? -1) >= 0 &&
-    Number.isSafeInteger(record.startedAt) && (record.startedAt ?? -1) >= 0;
+    Number.isSafeInteger(record.startedAt) && (record.startedAt ?? -1) >= 0 &&
+    (record.brainRuns === undefined || (Number.isSafeInteger(record.brainRuns) && record.brainRuns >= 0)) &&
+    (record.brainModelCalls === undefined || (Number.isSafeInteger(record.brainModelCalls) && record.brainModelCalls >= 0)) &&
+    (record.brainReservedOrUsedTokens === undefined || (Number.isSafeInteger(record.brainReservedOrUsedTokens) && record.brainReservedOrUsedTokens >= 0));
 }
 
 /**
@@ -139,7 +148,7 @@ export class UsageLimiter {
   private currentRecord(keyId: string, now = Date.now()): UsageRecord {
     const current = this.records.get(keyId);
     if (!current) {
-      const created = { keyId, runs: 0, toolCalls: 0, startedAt: now };
+      const created: UsageRecord = { keyId, runs: 0, toolCalls: 0, startedAt: now, brainRuns: 0, brainModelCalls: 0, brainReservedOrUsedTokens: 0 };
       this.records.set(keyId, created);
       return created;
     }
@@ -147,6 +156,9 @@ export class UsageLimiter {
       current.runs = 0;
       current.toolCalls = 0;
       current.startedAt = now;
+      current.brainRuns = 0;
+      current.brainModelCalls = 0;
+      current.brainReservedOrUsedTokens = 0;
     }
     return current;
   }
@@ -167,6 +179,20 @@ export class UsageLimiter {
       const current = this.currentRecord(keyId);
       if (current.toolCalls + amount > this.maxToolCallsPerKey) throw new Error("API usage quota exceeded.");
       current.toolCalls += amount;
+    }, true);
+  }
+
+  /** Record aggregate Brain usage only when a completed report contains valid counters. */
+  recordBrainUsage(keyId: string, usage: { modelCalls: number; reservedOrUsedTokens: number }): void {
+    if (!Number.isSafeInteger(usage.modelCalls) || usage.modelCalls < 0 ||
+        !Number.isSafeInteger(usage.reservedOrUsedTokens) || usage.reservedOrUsedTokens < 0) {
+      throw new Error("Invalid Brain usage metrics.");
+    }
+    this.transaction(() => {
+      const current = this.currentRecord(keyId);
+      current.brainRuns = (current.brainRuns ?? 0) + 1;
+      current.brainModelCalls = (current.brainModelCalls ?? 0) + usage.modelCalls;
+      current.brainReservedOrUsedTokens = (current.brainReservedOrUsedTokens ?? 0) + usage.reservedOrUsedTokens;
     }, true);
   }
 
