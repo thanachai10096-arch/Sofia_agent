@@ -220,14 +220,32 @@ export class UsageLimiter {
     }
     this.transaction(() => {
       const current = this.currentRecord(keyId);
-      current.brainRuns = (current.brainRuns ?? 0) + 1;
-      current.brainModelCalls = (current.brainModelCalls ?? 0) + usage.modelCalls;
-      current.brainReservedOrUsedTokens = (current.brainReservedOrUsedTokens ?? 0) + usage.reservedOrUsedTokens;
-      if (usage.providerInputTokens !== undefined && usage.providerOutputTokens !== undefined) {
-        current.providerInputTokens = (current.providerInputTokens ?? 0) + usage.providerInputTokens;
-        current.providerOutputTokens = (current.providerOutputTokens ?? 0) + usage.providerOutputTokens;
-        current.providerUsageCalls = (current.providerUsageCalls ?? 0) + (usage.providerUsageCalls ?? 0);
+      // Validate every prospective total before mutating any field. Without this,
+      // individually valid provider reports could overflow the persisted safe-integer
+      // counters and make the ledger unreadable after a restart.
+      const next = {
+        brainRuns: (current.brainRuns ?? 0) + 1,
+        brainModelCalls: (current.brainModelCalls ?? 0) + usage.modelCalls,
+        brainReservedOrUsedTokens: (current.brainReservedOrUsedTokens ?? 0) + usage.reservedOrUsedTokens,
+        providerInputTokens: usage.providerInputTokens === undefined
+          ? current.providerInputTokens
+          : (current.providerInputTokens ?? 0) + usage.providerInputTokens,
+        providerOutputTokens: usage.providerOutputTokens === undefined
+          ? current.providerOutputTokens
+          : (current.providerOutputTokens ?? 0) + usage.providerOutputTokens,
+        providerUsageCalls: usage.providerInputTokens === undefined
+          ? current.providerUsageCalls
+          : (current.providerUsageCalls ?? 0) + (usage.providerUsageCalls ?? 0),
+      };
+      if (Object.values(next).some((value) => value !== undefined && !Number.isSafeInteger(value))) {
+        throw new Error("Aggregated usage metrics exceed the safe integer range.");
       }
+      current.brainRuns = next.brainRuns;
+      current.brainModelCalls = next.brainModelCalls;
+      current.brainReservedOrUsedTokens = next.brainReservedOrUsedTokens;
+      if (next.providerInputTokens !== undefined) current.providerInputTokens = next.providerInputTokens;
+      if (next.providerOutputTokens !== undefined) current.providerOutputTokens = next.providerOutputTokens;
+      if (next.providerUsageCalls !== undefined) current.providerUsageCalls = next.providerUsageCalls;
     }, true);
   }
 
