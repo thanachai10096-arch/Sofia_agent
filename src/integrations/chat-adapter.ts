@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
  * This module intentionally does not implement Telegram/Discord/Slack HTTP
  * endpoints or pretend their authentication requirements are interchangeable.
  */
-export type ChatPlatform = "telegram" | "discord" | "slack";
+export type ChatPlatform = "telegram" | "discord" | "slack" | "line";
 
 export interface VerifiedChatCommand {
   platform: ChatPlatform;
