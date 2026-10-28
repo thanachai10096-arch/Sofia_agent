@@ -8,6 +8,7 @@ import { UsageLimiter } from "./usage.js";
 import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { handleSlackEventsHttpRequest } from "../integrations/messaging/slack-http-route.js";
+import { handleLineWebhookHttpRequest } from "../integrations/messaging/line-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
@@ -147,6 +148,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   if (slackRoute && discordRoute && slackRoutePath === discordRoutePath) {
     throw new Error("Discord and Slack messaging routes must use different paths.");
   }
+  const lineRoute = config.lineWebhookRoute;
+  const lineRoutePath = lineRoute?.path ?? "/v1/integrations/line/webhook";
+  const lineMaxBodyBytes = lineRoute?.maxBodyBytes ?? 1_000_000;
+  if (lineRoute && (!lineRoutePath.startsWith("/") || lineRoutePath.includes("?") || lineRoutePath.includes("#"))) {
+    throw new Error("LINE webhook route path must be an absolute path without query or fragment.");
+  }
+  if (lineRoute && (!Number.isSafeInteger(lineMaxBodyBytes) || lineMaxBodyBytes < 1 || lineMaxBodyBytes > 1_000_000)) {
+    throw new Error("LINE webhook route maxBodyBytes must be between 1 and 1000000.");
+  }
+  if (lineRoute && [discordRoutePath, slackRoutePath].some((routePath) =>
+    (discordRoute && routePath === discordRoutePath) || (slackRoute && routePath === slackRoutePath)
+  ) && (lineRoutePath === discordRoutePath || lineRoutePath === slackRoutePath)) {
+    throw new Error("Discord, Slack, and LINE messaging routes must use different paths.");
+  }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStorePath);
@@ -278,6 +293,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
       if (slackRoute && req.url === slackRoutePath) {
         await handleSlackEventsHttpRequest(req, res, slackRoute.transport, slackMaxBodyBytes);
+        return;
+      }
+      if (lineRoute && req.url === lineRoutePath) {
+        await handleLineWebhookHttpRequest(req, res, lineRoute.transport, lineMaxBodyBytes);
         return;
       }
 
