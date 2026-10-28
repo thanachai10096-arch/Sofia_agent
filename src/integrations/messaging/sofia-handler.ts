@@ -14,6 +14,8 @@ export interface SofiaMessagingHandlerOptions {
   deduplicator: ChatMessageDeduplicator;
   /** Exact command prefix, e.g. /run or /run@SofiaBot. Defaults to /run. */
   commandPrefix?: string;
+  /** Opt-in chat-first mode for integrations where plain text is a task. */
+  allowPlainText?: boolean;
   maxTaskCharacters?: number;
   /** Called after the API accepts a run; implementations should schedule completion reporting without blocking polling. */
   onAccepted?: (input: { runId: string; runStatus: string; message: InboundMessage }) => void;
@@ -31,7 +33,7 @@ export function createMessagingAccessCheck(policy: ChatAccessPolicy) {
 
 /**
  * Bridges normalized inbound messages to Sofia's existing command dispatcher.
- * Only explicit command messages start a run; ordinary chat and attachments do not.
+ * Plain-text dispatch is opt-in so existing integrations keep command-only behavior.
  * Do not also pass this same deduplicator to createMessagingGateway, because the
  * existing command handler claims the provider/channel/message key itself.
  */
@@ -49,8 +51,10 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
 
   return async function onMessage(message: InboundMessage): Promise<string | void> {
     const text = message.text.trim();
-    if (text !== prefix && !text.startsWith(prefix + " ") && !text.startsWith(prefix + "\t")) return;
-    const task = text.slice(prefix.length).trim();
+    const explicitCommand = text === prefix || text.startsWith(prefix + " ") || text.startsWith(prefix + "\t");
+    if (!explicitCommand && !options.allowPlainText) return;
+    if (!explicitCommand && text.startsWith("/")) return;
+    const task = explicitCommand ? text.slice(prefix.length).trim() : text;
     const result = await handleCommand({
       platform: message.platform,
       messageId: message.messageId,
