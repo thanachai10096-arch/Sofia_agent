@@ -97,7 +97,10 @@ async function isExclusiveFileCollision(error: unknown, file: string): Promise<b
     await fs.stat(file);
     return true;
   } catch (statError) {
-    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return false;
+    // The competing process may have released the lock between open("wx")
+    // returning EPERM and this stat. Retry the exclusive create instead of
+    // turning this normal Windows race into a failed durable job.
+    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return true;
     throw statError;
   }
 }
@@ -164,7 +167,11 @@ class FileJobStateStore {
           }
           if (!observedToken && age > 120_000 && !foreignHost) stale = true;
         } catch (readError) {
-          if ((readError as NodeJS.ErrnoException).code === "ENOENT") continue;
+          if ((readError as NodeJS.ErrnoException).code === "ENOENT") {
+            if (Date.now() >= deadline) throw new Error("Timed out waiting for durable job-state lock");
+            await new Promise<void>((resolve) => setTimeout(resolve, 10));
+            continue;
+          }
           // A newly-created lock can be observed before its JSON payload is fully
           // written. Treat malformed/partial contents as busy until the file is old.
           try {
