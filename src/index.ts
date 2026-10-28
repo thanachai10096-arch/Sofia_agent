@@ -147,3 +147,10 @@ export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHA
 export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
+
+export { createMatrixAdapter } from "./integrations/messaging/matrix.js";
+export type { MatrixTransport, VerifiedMatrixMessage } from "./integrations/messaging/matrix.js";
+export { createMatrixClientTransport } from "./integrations/messaging/matrix-client-transport.js";
+export type { MatrixClientTransportOptions } from "./integrations/messaging/matrix-client-transport.js";
+export { createMatrixMessagingRuntime, parseMatrixAllowlist } from "./integrations/messaging/matrix-runtime.js";
+export type { MatrixMessagingRuntime, MatrixMessagingEnvironment } from "./integrations/messaging/matrix-runtime.js";
