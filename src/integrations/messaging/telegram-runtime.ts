@@ -210,7 +210,13 @@ export function createTelegramMessagingRuntime(
     });
     return {
       async start() {
-        if (!sessionStore) sessionStore = await SqliteSessionStore.open(path.join(workspace, ".sofia", "telegram-sessions.sqlite"));
+        if (!sessionStore) {
+          try {
+            sessionStore = await SqliteSessionStore.open(path.join(workspace, ".sofia", "telegram-sessions.sqlite"));
+          } catch {
+            onWarning("Telegram conversation history is unavailable; messaging will continue without persistent context.");
+          }
+        }
         try {
           await gateway?.start();
         } catch (error) {
