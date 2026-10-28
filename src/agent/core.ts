@@ -236,6 +236,7 @@ export class SofiaAgent {
           {
             task: request.task,
             kind,
+            ...(request.principalId ? { principalId: request.principalId } : {}),
             context: request.context,
             step,
             messages,
