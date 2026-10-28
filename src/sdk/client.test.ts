@@ -202,3 +202,31 @@ test("SDK exposes current per-key usage counters without exposing credentials", 
   assert.equal(requestedUrl, "https://api.example.test/v1/usage");
   assert.equal(authorization, "Bearer test-key");
 });
+
+test("SDK forwards signed messaging context for continuous-work chat actions", async () => {
+  let url = "";
+  let requestBody: unknown;
+  const client = new SofiaClient({
+    apiKey: "server-only-test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (input, init) => {
+      url = String(input);
+      requestBody = JSON.parse(String(init?.body));
+      return response(201, { work: { id: "work-1", status: "paused" } });
+    },
+  });
+  const messagingContext = {
+    platform: "telegram" as const, userId: "user-1", conversationId: "chat-1",
+    messageId: "message-1", taskHash: "a".repeat(64), signature: "b".repeat(64),
+  };
+  const result = await client.continuousWorkChatAction({
+    signedTask: JSON.stringify({ action: "create", task: "do work" }),
+    messagingContext,
+  });
+  assert.equal(url, "https://api.example.test/v1/continuous-work/chat");
+  assert.deepEqual(requestBody, {
+    signedTask: JSON.stringify({ action: "create", task: "do work" }),
+    messagingContext,
+  });
+  assert.deepEqual(result, { work: { id: "work-1", status: "paused" } });
+});
