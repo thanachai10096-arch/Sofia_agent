@@ -124,3 +124,23 @@ test("persistent skill ledger merges repeated verified workflows and restores tr
   assert.equal(restored.list().length, 1);
   assert.ok(restored.list()[0]?.triggers?.includes(repeat.trigger));
 });
+
+
+test("persistent skill ledger reports durable storage failures when flushed", async () => {
+  const brokenStore = {
+    async save() { throw new Error("simulated disk failure"); },
+    async list() { return []; },
+    async find() { return []; },
+  };
+  const ledger = new PersistentSkillLedger(brokenStore);
+  ledger.record({
+    name: "workflow-persistence-test",
+    trigger: "Run a verified persistence check",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect the target", "perform the check", "verify the result"],
+    verification: ["test"],
+    evidenceIds: ["trusted-check-1"],
+  });
+  await assert.rejects(ledger.flush(), /Failed to persist learned skill/);
+});
