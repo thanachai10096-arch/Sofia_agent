@@ -26,7 +26,7 @@ sofia run "your task"
 
 `SOFIA_API_URL`, when set, overrides the saved URL. Do not put API keys in URLs, command-line arguments, repository files, or shared chat messages.
 
-Run `sofia check` when you explicitly want to verify connectivity. It calls the public `GET /health` endpoint and the authenticated, non-task `GET /v1/usage` endpoint. It does not submit an agent task or call a model. It reports reachability separately from API-key acceptance; a failed check never prints the key.
+Run `sofia check` when you explicitly want to verify connectivity. It calls the public `GET /health` endpoint first. If `SOFIA_API_KEY` is present, it then calls the authenticated, non-task `GET /v1/usage` endpoint. Without a key, it still reports whether the public health endpoint is reachable and does not send an empty or unauthenticated request to `/v1/usage`. It never submits an agent task or calls a model. It reports reachability separately from API-key acceptance; a failed check never prints the key.
 
 ## What this first slice does not do
 
