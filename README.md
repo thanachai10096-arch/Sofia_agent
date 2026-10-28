@@ -156,7 +156,7 @@ Discord is disabled unless its server-side configuration is supplied. Configure 
 
 
 
-An additive `createDiscordGatewayTransport` is also available for ordinary Discord `MESSAGE_CREATE` events. It must be explicitly wired by the host into `createDiscordAdapter` and the existing `MessagingGateway`; it is **not enabled automatically** by the Interactions HTTP adapter. The bot needs the Message Content privileged intent enabled in the Discord Developer Portal. Test it in a private server before treating natural-language Discord chat as end-to-end ready.
+The API entrypoint also has an opt-in ordinary-message runtime using `createDiscordGatewayTransport` + the existing `createDiscordAdapter`/`MessagingGateway`. Enable it with `SOFIA_DISCORD_GATEWAY_ENABLED=true` and configure `DISCORD_BOT_TOKEN`, `DISCORD_ALLOWED_USER_IDS`, `DISCORD_ALLOWED_CHANNEL_IDS`, and the existing Sofia API connection variables. The bot needs the Message Content privileged intent enabled in the Discord Developer Portal. Ordinary text enters the same authorized run handler; unrelated slash commands are ignored. This is separate from the signed Interactions HTTP adapter. Start in a private test server and verify an allowed user, a denied user, duplicate messages, and final-result delivery before treating it as deployment-ready.
 
 See [Discord integration setup and smoke-test guide](docs/DISCORD_INTEGRATION_SETUP.md) for required environment variables, command registration, and a private-server acceptance checklist.
 
