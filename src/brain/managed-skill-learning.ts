@@ -18,7 +18,7 @@ export function createManagedSkillLearningHandler(
       skill: {
         id: `learned:${candidate.name}:${candidate.category}`,
         name: candidate.name,
-        description: "Learned from a repair that passed trusted verification.",
+        description: "Learned from a workflow that passed trusted verification.",
         triggers: [candidate.trigger],
         categories: [candidate.category],
         strategy: candidate.strategy,
@@ -33,7 +33,7 @@ export function createManagedSkillLearningHandler(
       lifecycle,
       skillPackage,
       {
-        source: "verified-brain-repair",
+        source: candidate.name.startsWith("repair-") ? "verified-brain-repair" : "verified-brain-workflow",
         evidenceIds: [...candidate.evidenceIds],
         confidence: 0.8,
       },
