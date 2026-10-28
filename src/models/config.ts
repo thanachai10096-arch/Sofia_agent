@@ -2,7 +2,7 @@ import type { ModelCapability, ModelRoute } from "./types.js";
 
 export interface SofiaModelConfig {
   routes: ModelRoute[];
-  providers: Record<string, { baseUrl: string; apiKey: string; model: string }>;
+  providers: Record<string, { baseUrl: string; apiKey: string; model: string; protocol?: "openai-compatible" | "anthropic" }>;
 }
 
 function numberEnv(name: string, fallback: number) {
