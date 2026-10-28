@@ -76,7 +76,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     if (learning) return learning;
     // Keep learned skills and lifecycle versions isolated by authenticated principal.
     // The principal itself is never used as a filesystem path or stored in clear text.
-    const skillMemory = new FileProjectMemoryStore("skill:" + workspace + ":" + principalKey(principalId));
+    const skillMemory = new FileProjectMemoryStore("skill:" + workspace + ":" + hash);
     const skillLedger = new PersistentSkillLedger(skillMemory);
     const skillLifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
       const checks = [
