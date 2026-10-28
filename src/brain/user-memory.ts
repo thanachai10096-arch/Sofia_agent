@@ -10,7 +10,7 @@ export interface UserMemoryEntry {
   id: string;
   kind: UserMemoryKind;
   content: string;
-  source: "explicit-user-request";
+  source: "explicit-user-request" | "agent-observation";
   confidence: number;
   createdAt: string;
   updatedAt: string;
@@ -68,7 +68,7 @@ function validEntry(value: unknown): value is UserMemoryEntry {
   return typeof entry.id === "string" && entry.id.length > 0 &&
     typeof entry.content === "string" && entry.content.length > 0 &&
     typeof entry.kind === "string" && ALLOWED_KINDS.has(entry.kind as UserMemoryKind) &&
-    entry.source === "explicit-user-request" &&
+    (entry.source === "explicit-user-request" || entry.source === "agent-observation") &&
     typeof entry.confidence === "number" && Number.isFinite(entry.confidence) &&
     typeof entry.createdAt === "string" && typeof entry.updatedAt === "string" &&
     typeof entry.uses === "number" && Number.isFinite(entry.uses) && entry.uses >= 0;
