@@ -117,3 +117,24 @@ test("continuous mode chains bounded activations and stops at the configured lif
   assert.equal(latest?.iteration, 2);
   assert.equal(supervisor.isContinuous(record.id), false);
 });
+
+
+test("continuous mode caps concurrent objectives per owner without blocking other owners", async () => {
+  const store = new MemoryStore();
+  const supervisor = new ContinuousWorkSupervisor(fakeJobs(), store, {
+    maxConcurrentContinuousPerOwner: 1,
+    maxIterationsPerActivation: 1,
+    isComplete: () => false,
+  });
+  const first = await supervisor.create("owner-a", "first objective");
+  const second = await supervisor.create("owner-a", "second objective");
+  const other = await supervisor.create("owner-b", "other owner's objective");
+  assert.equal(await supervisor.runContinuously(first.id, "owner-a"), true);
+  assert.equal(await supervisor.runContinuously(second.id, "owner-a"), false);
+  assert.equal(await supervisor.runContinuously(other.id, "owner-b"), true);
+  assert.equal(supervisor.isContinuous(first.id), true);
+  assert.equal(supervisor.isContinuous(second.id), false);
+  assert.equal(supervisor.isContinuous(other.id), true);
+  await supervisor.stop(first.id, "owner-a");
+  await supervisor.stop(other.id, "owner-b");
+});
