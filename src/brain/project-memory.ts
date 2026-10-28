@@ -103,7 +103,7 @@ export class PersistentSkillLedger implements SkillLedger {
       trigger: previous.trigger,
       triggers: [...new Set([previous.trigger, ...(previous.triggers ?? []), candidate.trigger, ...(candidate.triggers ?? [])]
         .map(value => String(redactSecrets(value)).trim()).filter(Boolean))].slice(0, 12),
-      procedure: [...new Set([...previous.procedure, ...candidate.procedure])].slice(0, 12),
+      procedure: [...new Set(candidate.procedure)].slice(0, 12),
       verification: [...new Set([...previous.verification, ...candidate.verification])].filter(
         (item): item is "typecheck" | "test" | "build" => item === "typecheck" || item === "test" || item === "build",
       ),
