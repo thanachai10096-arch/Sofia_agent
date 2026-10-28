@@ -51,7 +51,7 @@ These are foundations, not proof of measured savings or production readiness. Th
 - Pack evidence by relevance-to-size value; reject empty evidence and duplicate IDs.
 - Rank task context using whole-token overlap rather than substring matches (for example, `token` must not match `tokenizer`) and ignore common English stop words, so generic wording is less likely to boost unrelated evidence into the input budget.
 - Avoid serializing task/context/reference-context fields twice: keep the task and acceptance criteria in the prompt core, and send prior context only through ranked evidence chunks.
-- Deduplicate byte-for-byte identical evidence text without normalizing source code or whitespace.
+- Deduplicate byte-for-byte identical evidence text before source labels are added, including repeats arriving through caller context, project context, and retrieved memory; do not normalize source code or whitespace. Prefer the duplicate source with stronger task relevance and never treat truncated-prefix matches as identical.
 - Keep phase-specific output caps and use actual usage to settle reservations.
 - When estimated prices tie or are absent, use explicit cost/latency/quality weights with deterministic tie-breaking.
 - Add regression tests for quality-preserving context selection and routing determinism.
