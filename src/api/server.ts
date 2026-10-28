@@ -10,6 +10,8 @@ import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/d
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
+import { createCronTools } from "../brain/cron-tools.js";
+import type { MapToolRegistry } from "../tools/types.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 
 interface ActiveRun {
