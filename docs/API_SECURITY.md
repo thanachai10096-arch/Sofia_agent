@@ -52,3 +52,10 @@ Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `ma
 ## Current limitations
 
 API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities until a dedicated implementation is merged. Approval behavior depends on the configured approval handler and tool gateway. Audit the exact composition used by your deployment rather than assuming every adapter has identical controls.
+
+## Usage reporting
+
+- `GET /v1/usage` reports per-API-key request and tool-call counters for the current accounting window.
+- `brainRuns`, `brainModelCalls`, and `brainReservedOrUsedTokens` are aggregate counters from successful Brain completion reports, persisted when `usageStorePath` is configured.
+- `brainReservedOrUsedTokens` is the Brain budget's reserved-or-used token count. It is **not** guaranteed to equal provider-billed tokens. Legacy runs and failed Brain runs may not contribute a completed Brain usage report.
+- Provider-billed input/output token totals and dollar cost per account are not yet exposed by this endpoint. Do not treat the counters above as an invoice or billing ledger.
