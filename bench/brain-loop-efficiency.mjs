@@ -4,6 +4,10 @@ import { TokenBudget } from "../src/brain/token-budget.ts";
 import { TokenAwareBrainReasoner } from "../src/brain/token-aware-reasoner.ts";
 
 const usageByPhase = [];
+const benchmarkContext = [
+  "Relevant project note: hello.txt must contain the word hello.",
+  ...Array.from({ length: 48 }, (_, i) => "Unrelated synthetic context " + i + ": " + "sample context ".repeat(12)),
+].join("\n");
 const budget = new TokenBudget(
   { maxTokens: 20_000, maxCostNanoUsd: 100_000_000n, maxCalls: 12, maxInFlight: 1 },
   [{ key: "offline-brain-loop", limit: { maxTokens: 20_000, maxCostNanoUsd: 100_000_000n, maxCalls: 12, maxInFlight: 1 }, price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 1n } }],
@@ -23,6 +27,15 @@ const route = {
   hardOutputCap: true,
   prepare(prompt) {
     const inputTokensUpperBound = estimateTokens(prompt);
+    // Naive baseline retains all caller context on every phase, even if the
+    // evidence packer has selected a smaller relevant subset. Synthetic only.
+    const baselineInputTokensUpperBound = estimateTokens({
+      core: prompt.core,
+      evidence: [
+        ...prompt.evidence,
+        { id: "naive-unfiltered-caller-context", text: benchmarkContext },
+      ],
+    });
     const phase = prompt.core.state?.phase;
     const value = phase === "understand"
       ? {
@@ -48,7 +61,12 @@ const route = {
     return {
       inputTokensUpperBound,
       async invoke() {
-        usageByPhase.push({ phase, inputTokensUpperBound, evidenceCount: prompt.evidence.length });
+        usageByPhase.push({
+          phase,
+          optimizedInputTokensEstimate: inputTokensUpperBound,
+          naiveBaselineInputTokensEstimate: baselineInputTokensUpperBound,
+          evidenceCount: prompt.evidence.length,
+        });
         return {
           value,
           usage: { inputTokens: inputTokensUpperBound, outputTokens: 20 },
@@ -104,10 +122,7 @@ const brain = createSofiaBrain({
 
 const report = await brain.run({
   task: "Create hello.txt and verify that it exists.",
-  context: [
-    "Relevant project note: hello.txt must contain the word hello.",
-    ...Array.from({ length: 48 }, (_, i) => "Unrelated synthetic context " + i + ": " + "sample context ".repeat(12)),
-  ].join("\n"),
+  context: benchmarkContext,
   acceptanceCriteria: [{
     id: "file-exists",
     description: "hello.txt exists",
@@ -139,9 +154,25 @@ const output = {
     durationMs: measurement.durationMs,
   } : null,
   gatewayCalls: usageByPhase,
-  caveat: "Synthetic token estimates and deterministic responses validate Brain-to-gateway wiring only; they are not provider-billed usage or real-world savings.",
+  inputTokenEstimateComparison: {
+    naiveBaselineTotal: usageByPhase.reduce((sum, call) => sum + call.naiveBaselineInputTokensEstimate, 0),
+    optimizedTotal: usageByPhase.reduce((sum, call) => sum + call.optimizedInputTokensEstimate, 0),
+    estimatedReductionPercent: (() => {
+      const baseline = usageByPhase.reduce((sum, call) => sum + call.naiveBaselineInputTokensEstimate, 0);
+      const optimized = usageByPhase.reduce((sum, call) => sum + call.optimizedInputTokensEstimate, 0);
+      return baseline > 0 ? Math.round(((baseline - optimized) / baseline) * 1000) / 10 : null;
+    })(),
+  },
+  caveat: "Synthetic token estimates and deterministic responses validate Brain-to-gateway wiring only; the naive baseline repeats full caller context per phase. These are not provider-billed usage or real-world savings.",
 };
 console.log(JSON.stringify(output, null, 2));
-if (!report.completed || !measurement || !measurement.usageComplete || measurement.passedCriteria !== measurement.acceptanceCriteria) {
+const comparison = output.inputTokenEstimateComparison;
+if (
+  !report.completed ||
+  !measurement ||
+  !measurement.usageComplete ||
+  measurement.passedCriteria !== measurement.acceptanceCriteria ||
+  comparison.naiveBaselineTotal <= comparison.optimizedTotal
+) {
   process.exitCode = 1;
 }
