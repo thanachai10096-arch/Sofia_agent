@@ -4,6 +4,7 @@ import { createTelegramAdapter, type TelegramUpdate } from "./telegram.js";
 import { createDiscordAdapter, type VerifiedDiscordMessage } from "./discord.js";
 import { createSlackAdapter, type VerifiedSlackMessage } from "./slack.js";
 import { createLineAdapter, type VerifiedLineMessage } from "./line.js";
+import { createWhatsAppAdapter, type VerifiedWhatsAppMessage } from "./whatsapp.js";
 
 test("Telegram adapter normalizes messages and splits oversized replies", async () => {
   let onUpdate: ((update: TelegramUpdate) => Promise<void>) | undefined;
@@ -103,5 +104,24 @@ test("LINE adapter normalizes verified events and safely splits outbound replies
   await onEvent!({ ...base, signatureVerified: true });
   assert.equal((received as { platform: string }).platform, "line");
   assert.equal((await adapter.send({ conversationId: "C1", text: "x".repeat(6_000) })).state, "sent");
+  assert.equal(sent.length, 2);
+});
+
+test("WhatsApp adapter normalizes verified messages and safely chunks replies", async () => {
+  let onEvent: ((message: VerifiedWhatsAppMessage) => Promise<void>) | undefined;
+  const sent: string[] = [];
+  const adapter = createWhatsAppAdapter({
+    async start(_signal, callback) { onEvent = callback; },
+    async sendMessage(_to, text) { sent.push(text); return { messageId: String(sent.length) }; },
+    async stop() {},
+  });
+  let received: unknown;
+  await adapter.start(new AbortController().signal, async (message) => { received = message; });
+  assert.ok(onEvent);
+  const base = { messageId: "wamid.1", phoneNumberId: "123456789012345", senderPhoneId: "66812345678", text: "hello", createdAt: 1 };
+  await onEvent!({ ...base, signatureVerified: false } as unknown as VerifiedWhatsAppMessage);
+  await onEvent!({ ...base, signatureVerified: true });
+  assert.equal((received as { platform: string }).platform, "whatsapp");
+  assert.equal((await adapter.send({ conversationId: "66812345678", text: "x".repeat(5_000) })).state, "sent");
   assert.equal(sent.length, 2);
 });
