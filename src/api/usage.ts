@@ -209,7 +209,7 @@ export class UsageLimiter {
     if (providerValues.some((value) => value !== undefined && (!Number.isSafeInteger(value) || value < 0)) ||
         ((usage.providerInputTokens === undefined) !== (usage.providerOutputTokens === undefined)) ||
         (usage.providerUsageCalls !== undefined && usage.providerInputTokens === undefined) ||
-        (usage.configuredCostNanoUsd !== undefined && (typeof usage.configuredCostNanoUsd !== "string" || !/^(0|[1-9][0-9]*)$/.test(usage.configuredCostNanoUsd)))) {
+        (usage.configuredCostNanoUsd !== undefined && (usage.providerInputTokens === undefined || typeof usage.configuredCostNanoUsd !== "string" || !/^(0|[1-9][0-9]*)$/.test(usage.configuredCostNanoUsd)))) {
       throw new Error("Invalid provider-reported token metrics.");
     }
     this.transaction(() => {
