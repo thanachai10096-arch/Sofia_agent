@@ -17,7 +17,7 @@ Sofia's continuous-work supervisor runs a large objective as small, verifiable w
   - `POST /v1/continuous-work/:id/resume`, `/pause`, and `/stop` manage the objective (requires `agent:run`).
   - Resume returns `202`; poll the GET endpoint for progress. Each activation is bounded and returns to paused state at its cap.
 - The default API host deliberately uses a completion evaluator that never auto-declares success. This avoids treating a model's claim as verified completion; objectives must be stopped by the owner unless the host is changed to provide task-specific evidence checks. Optionally set `SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS` to a positive integer to impose a hard lifetime cap.
-- Restart recovery is not automatic yet. Records are persisted and the owner can resume them after restart, but a production-grade recovery path must reconcile any recorded child job before starting another slice.
+- Restart recovery is owner-triggered, not automatic: after restart the owner can call `resume`; the supervisor reconciles a persisted child job before creating another slice, reuses a completed child checkpoint, and pauses safely if the child is missing or ended unsuccessfully. Automatic startup resume and multi-replica transactional coordination are not implemented.
 
 ## Example
 
