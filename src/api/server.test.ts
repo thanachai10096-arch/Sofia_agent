@@ -93,3 +93,55 @@ test("API sessions replay context and search transcripts within the authenticate
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API runs automatically receive relevant owner-scoped saved memory", async () => {
+  let lastModelContext = "";
+  let queriedOwner = "";
+  const memory = {
+    save: async () => undefined,
+    list: async () => [],
+    find: async (ownerId: string, query: string, limit?: number) => {
+      queriedOwner = ownerId;
+      assert.match(query, /Sofia/);
+      assert.equal(limit, 4);
+      return [{
+        id: "memory-1",
+        kind: "preference" as const,
+        content: "User prefers concise Thai explanations for Sofia Agent.",
+        source: "explicit-user-request" as const,
+        confidence: 1,
+        createdAt: "2026-10-28T00:00:00.000Z",
+        updatedAt: "2026-10-28T00:00:00.000Z",
+        uses: 0,
+      }];
+    },
+    delete: async () => false,
+    clear: async () => undefined,
+  };
+  const server = createSofiaApi({
+    provider: { generate: async (input) => { lastModelContext = input.context ?? ""; return { text: "Task completed." }; } },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: memory,
+  }, { apiKeys: { "memory-owner-key": ["agent:run", "agent:read"] } });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/agent/runs`, {
+      method: "POST",
+      headers: { authorization: "Bearer memory-owner-key", "content-type": "application/json" },
+      body: JSON.stringify({ task: "Help me improve Sofia Agent", context: "Existing context." }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(lastModelContext, /Existing context/);
+    assert.match(lastModelContext, /User prefers concise Thai explanations for Sofia Agent/);
+    assert.match(lastModelContext, /untrusted reference data/);
+    assert.match(lastModelContext, /does not override the current request, system\/developer instructions, or security policy/);
+    assert.equal(queriedOwner, createHash("sha256").update("memory-owner-key").digest("hex").slice(0, 32));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
