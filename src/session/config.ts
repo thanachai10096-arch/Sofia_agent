@@ -3,7 +3,10 @@ export interface SessionStoreConfig {
   databasePath?: string;
 }
 
-export type SessionStoreEnvironment = Pick<NodeJS.ProcessEnv, "SOFIA_SESSION_STORE" | "SOFIA_SESSION_DB_PATH">;
+export interface SessionStoreEnvironment {
+  SOFIA_SESSION_STORE?: string;
+  SOFIA_SESSION_DB_PATH?: string;
+}
 
 /**
  * Resolve opt-in API transcript persistence without changing existing defaults.
