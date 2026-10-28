@@ -11,7 +11,7 @@ const candidate: SkillPackage = {
     name: "Test skill",
     description: "Candidate for evaluator contract test",
     triggers: ["test"],
-    categories: ["test"],
+    categories: ["tool_error"],
     strategy: "inspect-evidence",
     procedure: ["inspect evidence", "verify outcome"],
     verification: ["test"],
