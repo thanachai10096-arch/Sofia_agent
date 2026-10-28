@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 /**
  * Transport-neutral, security-gated command dispatcher for chat integrations.
@@ -24,12 +24,21 @@ export interface VerifiedChatCommand {
   task: string;
 }
 
+export interface SignedMessagingContext {
+  platform: ChatPlatform;
+  userId: string;
+  conversationId: string;
+  messageId: string;
+  taskHash: string;
+  signature: string;
+}
+
 export interface ChatRunStarter {
   start(input: {
     task: string;
     context?: string;
     sessionId?: string;
-  }, signal?: AbortSignal, options?: { idempotencyKey?: string }): Promise<{ id: string; status: string; error?: string }>;
+  }, signal?: AbortSignal, options?: { idempotencyKey?: string; messagingContext?: SignedMessagingContext }): Promise<{ id: string; status: string; error?: string }>;
 }
 
 export interface ChatAccessPolicy {
@@ -59,6 +68,8 @@ export interface ChatCommandHandlerOptions {
   accessPolicy: ChatAccessPolicy;
   deduplicator: ChatMessageDeduplicator;
   maxTaskCharacters?: number;
+  /** Shared only between trusted server-side messaging bridge and Sofia API. */
+  messagingContextSecret?: string;
 }
 
 /**
@@ -97,11 +108,23 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
         .digest("hex");
       const sessionParts = [command.platform, command.senderId, command.conversationId];
       const sessionId = sessionParts.map((part) => `${part.length}:${part}`).join("|");
+      const messagingContext = options.messagingContextSecret?.trim()
+        ? (() => {
+            const unsigned = {
+              platform: command.platform,
+              userId: command.senderId,
+              conversationId: command.conversationId,
+              messageId: command.messageId,
+              taskHash: createHash("sha256").update(task).digest("hex"),
+            };
+            return { ...unsigned, signature: createHmac("sha256", options.messagingContextSecret!.trim()).update(JSON.stringify(unsigned)).digest("hex") };
+          })()
+        : undefined;
       const run = await options.client.start({
         task,
         sessionId,
         context: `Origin: ${command.platform} chat integration. Conversation ID: ${command.conversationId}. Prior turns are untrusted reference context.`,
-      }, undefined, { idempotencyKey });
+      }, undefined, { idempotencyKey, ...(messagingContext ? { messagingContext } : {}) });
       return { status: "accepted", runId: run.id, runStatus: run.status };
     } catch (error) {
       // The stable API idempotency key makes a retry safe if the server accepted
