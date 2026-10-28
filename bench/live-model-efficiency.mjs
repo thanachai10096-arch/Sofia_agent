@@ -28,7 +28,7 @@ if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 180000) 
 function readPrice(name) {
   const raw = process.env[name]?.trim();
   if (raw === undefined || raw === "") return null;
-  if (!/^(?:0|[1-9]\\d*)(?:\\.\\d{1,8})?$/.test(raw)) {
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,8})?$/.test(raw)) {
     throw new Error(name + " must be a non-negative decimal USD price per million tokens");
   }
   const value = Number(raw);
