@@ -46,7 +46,11 @@ async function withServer(
 
 test("cancelled async run cannot be overwritten as completed by a late agent result", async () => {
   const gate = deferred<unknown>();
-  await withServer(makeDependencies(() => gate.promise), {
+  const agentStarted = deferred<void>();
+  await withServer(makeDependencies(() => {
+    agentStarted.resolve();
+    return gate.promise;
+  }), {
     apiKeys: { "test-key": ["agent:run"] },
     requestTimeoutMs: 5_000,
   }, async (baseUrl) => {
@@ -57,10 +61,15 @@ test("cancelled async run cannot be overwritten as completed by a late agent res
         "content-type": "application/json",
         "idempotency-key": "cancel-race",
       },
-      body: JSON.stringify({ task: "wait for controlled completion", async: true }),
+      body: JSON.stringify({ task: "inspect and verify controlled completion", async: true }),
     });
     assert.equal(started.status, 202);
     const run = await started.json() as { id: string; status: string };
+
+    // Wait until the fake Brain is definitely blocked on the controlled promise.
+    // This makes the test exercise a late result after cancellation, not a
+    // scheduling race before the agent has entered its work path.
+    await agentStarted.promise;
 
     const cancelled = await fetch(`${baseUrl}/v1/agent/runs/${run.id}`, {
       method: "DELETE",
@@ -78,17 +87,16 @@ test("cancelled async run cannot be overwritten as completed by a late agent res
       usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 1, replans: 0 },
     });
 
-    let finalStatus = "unknown";
+    let finalResponse: { status?: string; error?: string } = {};
     for (let attempt = 0; attempt < 50; attempt += 1) {
       const response = await fetch(`${baseUrl}/v1/agent/runs/${run.id}`, {
         headers: { authorization: "Bearer test-key" },
       });
-      const current = await response.json() as { status: string };
-      finalStatus = current.status;
-      if (finalStatus === "cancelled") break;
+      finalResponse = await response.json() as { status?: string; error?: string };
+      if (finalResponse.status === "cancelled") break;
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
-    assert.equal(finalStatus, "cancelled");
+    assert.equal(finalResponse.status, "cancelled", `Unexpected terminal run state: ${JSON.stringify(finalResponse)}`);
   });
 });
 
