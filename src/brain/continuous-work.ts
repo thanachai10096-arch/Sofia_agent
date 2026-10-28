@@ -90,6 +90,7 @@ export class ContinuousWorkSupervisor {
   }
   async get(id: string, owner: string) { const r = await this.store.get(id); return r?.ownerKeyId === owner ? { ...r } : undefined; }
   async list(owner: string) { return (await this.store.list(owner)).map((r) => ({ ...r })); }
+  isRunning(id: string): boolean { return this.active.has(id) || this.starting.has(id); }
   async pause(id: string, owner: string) { return this.changeStatus(id, owner, "paused"); }
   async stop(id: string, owner: string) { return this.changeStatus(id, owner, "stopped"); }
   private async changeStatus(id: string, owner: string, status: "paused" | "stopped"): Promise<boolean> {
@@ -124,15 +125,37 @@ export class ContinuousWorkSupervisor {
         if (current.maxLifetimeIterations !== undefined && current.iteration >= current.maxLifetimeIterations) {
           current.status = "completed"; current.updatedAt = new Date().toISOString(); await this.store.save(current); break;
         }
-        const childTask = [
-          "Continue this ongoing objective; do not repeat verified completed work:", current.task,
-          "Work slice " + (current.iteration + 1) + ": make one meaningful, verifiable increment.",
-          current.lastSummary ? "Prior progress (untrusted reference; verify it):\n" + current.lastSummary.slice(0, 4000) : "",
-          "Report progress, evidence, and the next checkpoint if unfinished."
-        ].filter(Boolean).join("\n\n");
-        const submitted = await this.jobs.submit({ task: childTask, ownerKeyId: owner });
-        current.currentJobId = submitted.id; current.updatedAt = new Date().toISOString(); await this.store.save(current);
-        const job = await this.waitJob(submitted.id, owner, controller.signal, deadline);
+        let job: JobRecord;
+        if (current.currentJobId) {
+          // Reconcile the persisted child before creating another one. This avoids
+          // duplicating work when an API process restarts after a child was submitted.
+          const existing = await this.jobs.get(current.currentJobId);
+          if (!existing || existing.ownerKeyId !== owner) {
+            current.status = "paused";
+            current.lastError = "Saved child job is missing or no longer owned by this principal; inspect job history before retrying.";
+            current.currentJobId = undefined; current.updatedAt = new Date().toISOString(); await this.store.save(current);
+            break;
+          }
+          if (existing.status === "failed" || existing.status === "cancelled") {
+            current.status = "paused";
+            current.lastError = existing.error ?? "Saved child job ended unsuccessfully; inspect its checkpoint before resuming.";
+            current.currentJobId = undefined; current.updatedAt = new Date().toISOString(); await this.store.save(current);
+            break;
+          }
+          job = existing.status === "completed"
+            ? existing
+            : await this.waitJob(existing.id, owner, controller.signal, deadline);
+        } else {
+          const childTask = [
+            "Continue this ongoing objective; do not repeat verified completed work:", current.task,
+            "Work slice " + (current.iteration + 1) + ": make one meaningful, verifiable increment.",
+            current.lastSummary ? "Prior progress (untrusted reference; verify it):\\n" + current.lastSummary.slice(0, 4000) : "",
+            "Report progress, evidence, and the next checkpoint if unfinished."
+          ].filter(Boolean).join("\\n\\n");
+          const submitted = await this.jobs.submit({ task: childTask, ownerKeyId: owner });
+          current.currentJobId = submitted.id; current.updatedAt = new Date().toISOString(); await this.store.save(current);
+          job = await this.waitJob(submitted.id, owner, controller.signal, deadline);
+        }
         if (controller.signal.aborted) break;
         if (job.status !== "completed" || !job.result?.completed) {
           current.status = "paused"; current.lastError = job.error ?? job.result?.summary ?? "Work slice failed; inspect the saved job checkpoint before resuming.";
