@@ -88,7 +88,7 @@ async function sendTelegramText(
   const chunks = splitTelegramText(text);
   for (let index = 0; index < chunks.length; index += 1) {
     const prefix = chunks.length > 1 && index > 0
-      ? "↪️ Sofia result (continued):\\n"
+      ? "↪️ Sofia result (continued):\n"
       : "";
     try {
       const delivered = await send({
