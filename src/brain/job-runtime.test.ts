@@ -988,3 +988,34 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("DurableJobRuntime uses redacted context and keeps it private in job records", async () => {
+  const namespace = "job-runtime-context-" + randomUUID();
+  let observedContext = "";
+  const brain = {
+    run: async (input: { context?: string }) => {
+      observedContext = input.context ?? "";
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain;
+
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({
+    task: "use saved user context",
+    context: "User prefers Thai. API key sk-abcdefghijklmnopqrstuvwxyz",
+  });
+  assert.equal("runContext" in submitted, false);
+
+  for (let attempt = 0; attempt < 100 && (await runtime.get(submitted.id))?.status !== "completed"; attempt++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  assert.match(observedContext, /User prefers Thai/);
+  assert.doesNotMatch(observedContext, /sk-abcdefghijklmnopqrstuvwxyz/);
+  const publicRecord = await runtime.get(submitted.id);
+  assert.equal("runContext" in (publicRecord ?? {}), false);
+
+  const restartedRuntime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const afterRestart = await restartedRuntime.get(submitted.id);
+  assert.equal("runContext" in (afterRestart ?? {}), false);
+});
