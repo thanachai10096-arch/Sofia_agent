@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { verifySlackRequest } from "../../src/integrations/messaging/platform-security.js";
 
 export const config = { api: { bodyParser: false } };
@@ -154,6 +154,10 @@ export default async function slackEvents(req: IncomingMessage, res: ServerRespo
     return;
   }
 
+  const callbackSecret = process.env.SOFIA_SLACK_CALLBACK_SECRET?.trim();
+  const callbackProof = callbackSecret && callbackSecret.length >= 32
+    ? createHmac("sha256", callbackSecret).update(`${event.user}|${event.channel}|${event.ts}`).digest("hex")
+    : undefined;
   const idempotencyKey = "slack_" + createHash("sha256").update(envelope.event_id).digest("hex");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
@@ -170,7 +174,7 @@ export default async function slackEvents(req: IncomingMessage, res: ServerRespo
       body: JSON.stringify({
         task: event.text.trim(),
         async: true,
-        context: `Origin: Slack message event. Slack user ID: ${event.user}. Channel ID: ${event.channel}. Message timestamp: ${event.ts}.`,
+        context: `Origin: Slack message event. Slack user ID: ${event.user}. Channel ID: ${event.channel}. Message timestamp: ${event.ts}.${callbackProof ? ` Callback signature: ${callbackProof}.` : ""}` ,
       }),
       signal: controller.signal,
     });
