@@ -107,7 +107,7 @@ test("reads local .env model settings while explicit process variables take prec
       'SOFIA_MODEL_API_KEY="local-key-with-\\\\slash"',
       'SOFIA_MODEL="local-model"',
       "",
-    ].join("\\n"), { mode: 0o600 });
+    ].join("\n"), { mode: 0o600 });
     const fromFile = loadModelConfigFromEnv({}, envPath);
     assert.equal(fromFile.providers.fast?.baseUrl, "http://localhost:1234/v1/");
     assert.equal(fromFile.providers.fast?.apiKey, "local-key-with-\\slash");
