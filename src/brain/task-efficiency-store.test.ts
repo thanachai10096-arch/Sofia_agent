@@ -43,13 +43,13 @@ test("reads legacy aggregate records without usage completeness fields", async (
   try {
     const workspace = "/workspace/legacy";
     const principal = "legacy-user";
-    const namespace = createHash("sha256").update(workspace).update("\\0").update(principal).digest("hex");
+    const namespace = createHash("sha256").update(workspace).update("\0").update(principal).digest("hex");
     const legacy = {
       taskId: "legacy-run", completed: true, acceptanceCriteria: 1, passedCriteria: 1,
       inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, modelCalls: 1, retries: 0,
       durationMs: 50, costKnown: false,
     };
-    await fs.writeFile(path.join(root, namespace + ".jsonl"), JSON.stringify(legacy) + "\\n", { mode: 0o600 });
+    await fs.writeFile(path.join(root, namespace + ".jsonl"), JSON.stringify(legacy) + "\n", { mode: 0o600 });
     const store = new FileTaskEfficiencyStore(workspace, principal, root);
     const [measurement] = await store.readAll();
     assert.equal(measurement?.unmeasuredModelCalls, 0);
