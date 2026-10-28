@@ -12,12 +12,20 @@ Set these variables in the server process or your secret manager. Do not commit 
 | OpenAI | `openai` | `OPENAI_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.openai.com/v1` |
 | Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.anthropic.com/v1` (native Messages API) |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://openrouter.ai/api/v1` |
+| xAI | `xai` | `XAI_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.x.ai/v1` |
+| Mistral | `mistral` | `MISTRAL_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.mistral.ai/v1` |
+| Groq | `groq` | `GROQ_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.groq.com/openai/v1` |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.deepseek.com/v1` |
+| Together AI | `together` | `TOGETHER_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.together.xyz/v1` |
+| Fireworks AI | `fireworks` | `FIREWORKS_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.fireworks.ai/inference/v1` |
+| Cerebras | `cerebras` | `CEREBRAS_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.cerebras.ai/v1` |
+| Perplexity | `perplexity` | `PERPLEXITY_API_KEY` or `SOFIA_MODEL_API_KEY` | `https://api.perplexity.ai` |
 | Ollama | `ollama` | Usually none for local use | `http://127.0.0.1:11434/v1` |
 | Any OpenAI-compatible endpoint | `openai-compatible` | Depends on endpoint | Set `SOFIA_MODEL_BASE_URL` |
 
 Common settings:
 
-- `SOFIA_MODEL_NAME`: default model identifier for the selected endpoint.
+- `SOFIA_MODEL_NAME`: model identifier for the selected endpoint. It is required for providers whose available model IDs change frequently.
 - `SOFIA_MODEL_API_KEY`: provider-neutral API key override.
 - `SOFIA_MODEL_BASE_URL`: endpoint override for a compatible server.
 - `SOFIA_FAST_MODEL`, `SOFIA_CODING_MODEL`, `SOFIA_REASONING_MODEL`, `SOFIA_VISION_MODEL`: optional route-specific model IDs. If omitted, each route uses `SOFIA_MODEL_NAME`.
