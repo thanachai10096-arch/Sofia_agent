@@ -127,7 +127,7 @@ test("continuous-work API is owner-scoped and exposes create, resume, pause, and
         signature: createHmac("sha256", "test-messaging-context-secret-at-least-32-chars")
           .update(JSON.stringify(unsigned)).digest("hex"),
       };
-      return request("owner-key", "/v1/continuous-work/chat", "POST", { signedTask, messagingContext });
+      return request("owner-key", "/v1/continuous-work/chat", "POST", { signedTask, _messagingContext: messagingContext });
     };
     const chatCreated = await signedAction("telegram-user-1", { action: "create", task: "Improve the project with evidence." }, "msg-1");
     assert.equal(chatCreated.status, 201, await chatCreated.clone().text());
@@ -139,7 +139,7 @@ test("continuous-work API is owner-scoped and exposes create, resume, pause, and
     assert.equal((await isolatedList.json() as { work: ContinuousWorkRecord[] }).work.length, 0);
     const invalidSignature = await request("owner-key", "/v1/continuous-work/chat", "POST", {
       signedTask: JSON.stringify({ action: "list" }),
-      messagingContext: { platform: "telegram", userId: "telegram-user-1", conversationId: "chat-telegram-user-1", messageId: "msg-4", taskHash: "0".repeat(64), signature: "0".repeat(64) },
+      _messagingContext: { platform: "telegram", userId: "telegram-user-1", conversationId: "chat-telegram-user-1", messageId: "msg-4", taskHash: "0".repeat(64), signature: "0".repeat(64) },
     });
     assert.equal(invalidSignature.status, 401);
 
