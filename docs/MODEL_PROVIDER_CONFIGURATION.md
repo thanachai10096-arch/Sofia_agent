@@ -63,6 +63,24 @@ console.log(models.map(({ id, displayName }) => ({ id, displayName })));
 
 Discovery does not send a generation request and does not prove a model supports tools, vision, structured output, or a specific context window. Capability metadata is reported as unknown until a provider exposes reliable metadata or a separate compatibility test verifies it. Requests use a timeout, refuse redirects, require HTTPS for remote hosts, and never include API keys in URLs.
 
+### Verify a model's real capabilities
+
+Model discovery lists IDs; it does not prove the model can generate responses or call tools. For an explicit, opt-in smoke test, use \`probeModelCapabilities\`:
+
+\`\`\`ts
+import { probeModelCapabilities } from "sofia-agent";
+
+const result = await probeModelCapabilities({
+  baseUrl: process.env.SOFIA_MODEL_BASE_URL ?? "https://api.openai.com/v1",
+  apiKey: process.env.SOFIA_MODEL_API_KEY ?? process.env.OPENAI_API_KEY,
+  model: process.env.SOFIA_MODEL_NAME ?? "your-model-id",
+  // Set protocol: "anthropic" for the native Anthropic Messages API.
+});
+console.log(result);
+\`\`\`
+
+This sends a small ordinary chat request and a second request that asks for a named tool call. It never executes the returned tool. These requests may incur provider charges and may be logged by that provider, so call this helper only when the operator explicitly wants to test a configured endpoint. A model is marked as supporting tool use only when a tool-call response is actually observed; rejected or ambiguous tool requests remain \`unknown\`. The probe does not certify vision, reasoning quality, structured output, or context-window size.
+
 ## Compatibility and security notes
 
 - The gateway supports the OpenAI Chat Completions-compatible protocol and a native Anthropic Messages API path. Other native protocols need their own adapter or a compatible gateway.
