@@ -14,6 +14,10 @@ export interface UsageRecord {
   brainModelCalls?: number;
   /** Brain reserved-or-used tokens; not guaranteed to equal provider-billed tokens. */
   brainReservedOrUsedTokens?: number;
+  /** Tokens reported by model providers, excluding estimates/reservations. */
+  providerInputTokens?: number;
+  providerOutputTokens?: number;
+  providerUsageCalls?: number;
 }
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -29,7 +33,10 @@ function validRecord(value: unknown): value is UsageRecord {
     Number.isSafeInteger(record.startedAt) && (record.startedAt ?? -1) >= 0 &&
     (record.brainRuns === undefined || (Number.isSafeInteger(record.brainRuns) && record.brainRuns >= 0)) &&
     (record.brainModelCalls === undefined || (Number.isSafeInteger(record.brainModelCalls) && record.brainModelCalls >= 0)) &&
-    (record.brainReservedOrUsedTokens === undefined || (Number.isSafeInteger(record.brainReservedOrUsedTokens) && record.brainReservedOrUsedTokens >= 0));
+    (record.brainReservedOrUsedTokens === undefined || (Number.isSafeInteger(record.brainReservedOrUsedTokens) && record.brainReservedOrUsedTokens >= 0)) &&
+    (record.providerInputTokens === undefined || (Number.isSafeInteger(record.providerInputTokens) && record.providerInputTokens >= 0)) &&
+    (record.providerOutputTokens === undefined || (Number.isSafeInteger(record.providerOutputTokens) && record.providerOutputTokens >= 0)) &&
+    (record.providerUsageCalls === undefined || (Number.isSafeInteger(record.providerUsageCalls) && record.providerUsageCalls >= 0));
 }
 
 /**
@@ -173,6 +180,9 @@ export class UsageLimiter {
       if (current.brainRuns !== undefined) current.brainRuns = 0;
       if (current.brainModelCalls !== undefined) current.brainModelCalls = 0;
       if (current.brainReservedOrUsedTokens !== undefined) current.brainReservedOrUsedTokens = 0;
+      if (current.providerInputTokens !== undefined) current.providerInputTokens = 0;
+      if (current.providerOutputTokens !== undefined) current.providerOutputTokens = 0;
+      if (current.providerUsageCalls !== undefined) current.providerUsageCalls = 0;
     }
     return current;
   }
@@ -197,7 +207,7 @@ export class UsageLimiter {
   }
 
   /** Record aggregate Brain usage only when a completed report contains valid counters. */
-  recordBrainUsage(keyId: string, usage: { modelCalls: number; reservedOrUsedTokens: number }): void {
+  recordBrainUsage(keyId: string, usage: { modelCalls: number; reservedOrUsedTokens: number; providerInputTokens?: number; providerOutputTokens?: number; providerUsageCalls?: number }): void {
     if (!Number.isSafeInteger(usage.modelCalls) || usage.modelCalls < 0 ||
         !Number.isSafeInteger(usage.reservedOrUsedTokens) || usage.reservedOrUsedTokens < 0) {
       throw new Error("Invalid Brain usage metrics.");
@@ -207,6 +217,11 @@ export class UsageLimiter {
       current.brainRuns = (current.brainRuns ?? 0) + 1;
       current.brainModelCalls = (current.brainModelCalls ?? 0) + usage.modelCalls;
       current.brainReservedOrUsedTokens = (current.brainReservedOrUsedTokens ?? 0) + usage.reservedOrUsedTokens;
+      if (usage.providerInputTokens !== undefined && usage.providerOutputTokens !== undefined) {
+        current.providerInputTokens = (current.providerInputTokens ?? 0) + usage.providerInputTokens;
+        current.providerOutputTokens = (current.providerOutputTokens ?? 0) + usage.providerOutputTokens;
+        current.providerUsageCalls = (current.providerUsageCalls ?? 0) + (usage.providerUsageCalls ?? 0);
+      }
     }, true);
   }
 
