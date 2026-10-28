@@ -27,6 +27,21 @@ Set these as server-side secrets/environment variables on the **Test** service f
 
 The user and chat allowlists are both required. A missing or invalid setting disables Telegram rather than opening access. Do not put bot/API tokens in source control or chat messages.
 
+## Continuous-work controls in text-based chat bridges
+
+When the bridge has `SOFIA_MESSAGING_CONTEXT_SECRET` configured to the same server-only value as the API (at least 32 characters), authorized users can control their own long-running objectives with:
+
+- `/work create <task>` — create a paused objective
+- `/work list` — list objectives belonging to this chat user
+- `/work status <id>` — inspect one objective
+- `/work continue <id>` — keep running bounded activations in the background
+- `/work resume <id>` — resume one bounded activation
+- `/work pause <id>` and `/work stop <id>` — pause or permanently stop the objective
+
+These controls use a separate signed action envelope: the signature covers the full action payload and verified platform/user/conversation/message identity. The API derives an owner principal from the verified platform and immutable user ID, not the shared bot API key. A chat user therefore cannot read or control another user's objective merely because both messages use the same server API key. Invalid or missing signatures fail closed. The existing API-key-scoped `/v1/continuous-work` endpoints remain unchanged for SDK/API clients.
+
+This command is supported only by text-based adapters that pass `/work ...` messages through the shared Sofia message handler. The current Discord HTTP Interactions transport is slash-command-only and does not yet expose these `/work` actions as registered Discord application commands.
+
 ## Important platform distinction
 
 The current Discord integration is an **HTTP Interactions / slash-command transport**. It accepts registered Discord application commands such as `/run`; it does not receive arbitrary channel messages. Plain-text Discord chat requires a separate Discord Gateway/message-event transport and the appropriate Discord Message Content intent, plus explicit allowlists and tests. Do not describe Discord as chat-first until that transport exists and is validated.
