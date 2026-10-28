@@ -131,3 +131,43 @@ test("rejects unsafe URLs, bad response shapes, and non-success discovery respon
   globalThis.fetch = async () => new Response("denied", { status: 403 });
   await assert.rejects(discoverModels({ baseUrl: "https://models.example.test/v1" }), /HTTP 403/);
 });
+
+
+test("extended probe verifies accepted image input and valid JSON-object output", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  globalThis.fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    bodies.push(body);
+    const messages = body.messages as Array<{ content: unknown }>;
+    const isVision = Array.isArray(messages[0]?.content);
+    if (isVision) {
+      const parts = messages[0]?.content as Array<Record<string, unknown>>;
+      assert.equal(parts.some((part) => part.type === "image_url"), true);
+      return new Response(JSON.stringify({ choices: [{ message: { content: "A tiny test image." } }] }), { status: 200 });
+    }
+    assert.deepEqual(body.response_format, { type: "json_object" });
+    return new Response(JSON.stringify({ choices: [{ message: { content: "{\\"ok\\":true}" } }] }), { status: 200 });
+  };
+  const { probeExtendedModelCapabilities } = await import("./discovery.js");
+  const result = await probeExtendedModelCapabilities({
+    baseUrl: "https://models.example.test/v1",
+    model: "multimodal-test-model",
+  });
+  assert.equal(bodies.length, 2);
+  assert.deepEqual(result, {
+    model: "multimodal-test-model",
+    visionInput: "accepted",
+    jsonObjectOutput: "verified",
+  });
+});
+
+test("extended probe leaves capabilities unknown when the endpoint rejects them", async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: "not supported" }), { status: 400 });
+  const { probeExtendedModelCapabilities } = await import("./discovery.js");
+  const result = await probeExtendedModelCapabilities({
+    baseUrl: "https://models.example.test/v1",
+    model: "text-only-model",
+  });
+  assert.equal(result.visionInput, "unknown");
+  assert.equal(result.jsonObjectOutput, "unknown");
+});
