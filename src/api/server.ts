@@ -742,6 +742,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const job = await deps.jobRuntime.submit({
             task: input.task,
             ownerKeyId: auth.keyId,
+            ...(await contextForRun(auth.keyId, input)),
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });
           return json(res, 202, job, origin, config);
