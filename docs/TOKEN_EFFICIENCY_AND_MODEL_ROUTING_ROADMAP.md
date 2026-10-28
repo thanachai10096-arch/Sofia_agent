@@ -13,7 +13,7 @@ Minimize the cost and compute used per successfully verified task while preservi
 - `src/brain/task-efficiency-metrics.ts`: privacy-safe in-memory aggregation for per-task token usage, model-call counts, duration percentiles, verification outcomes, and estimated cost when explicitly supplied. `SofiaBrain` records successful model-call usage/duration and emits a per-run measurement through the optional `onEfficiencyMeasurement` host callback. Durable JSONL persistence is opt-in with `SOFIA_EFFICIENCY_METRICS_ENABLED=true`; records are namespaced by workspace and principal, and contain only aggregate usage/verification metadata. A dashboard and benchmark savings claim are not included yet. Pricing, cached-token counts, and failed-call usage remain unknown unless an integration supplies them. The authoritative budget remains `TokenBudget`.
 - `src/brain/model-route-adapter.ts`: adapts existing model routes into the token-aware Brain gateway.
 - `src/models/config.ts`: now supports an explicit registry of OpenAI-compatible provider endpoints via `SOFIA_PROVIDER_IDS` and per-provider base URL/API key/model variables, with optional per-route provider/model selection. Existing Gemini environment configuration remains backward compatible. The registry does not silently fall back across providers; providers using a different API protocol still need a dedicated adapter and tests.
-- `src/models/gateway.ts`: provider request timeout, concurrency gate, retry handling for selected transient errors, and circuit-breaker behavior. Successful Brain-call telemetry includes retries before a successful response; calls that fail without a response are not yet included in per-task usage totals.
+- `src/models/gateway.ts`: provider request timeout, concurrency gate, retry handling for selected transient errors, and circuit-breaker behavior. Successful Brain-call telemetry includes retries before a successful response; failed calls without returned usage are counted as unmeasured rather than assigned fabricated tokens.
 - `src/brain/executor.ts`: execution limits, trace, verification, recovery, skills, memory, and subagent integration.
 - `bench/token-efficiency.mjs`: offline synthetic-tokenizer regression benchmark for the real `TokenAwareGateway` evidence packer. It asserts high-relevance evidence survives and compares estimated input tokens against a naive unfiltered prompt; this is not a live-provider cost or end-to-end task benchmark.
 
@@ -121,3 +121,10 @@ These are foundations, not proof of measured savings or production readiness. Th
 - Model invocations that fail before returning provider usage are recorded as unmeasured calls. Their presence marks usageComplete=false and prevents cost totals from being presented as complete/known; partial token counts remain visible as partial counts.
 - The same marker is used when a custom subagent does not report usage. Custom subagent implementations should return aggregate usage to participate in complete accounting.
 - This is observational telemetry only. It does not replace or change authoritative TokenBudget reservations/settlements. Provider billing for failed attempts may remain unknowable unless the provider returns usage for those attempts.
+
+
+### Live benchmark pricing and attribution update
+
+- The opt-in live benchmark can calculate **estimated** cost and estimated cost per verified success when the operator supplies both input and output prices per million tokens. It does not infer prices from provider/model names or query invoice-level billing.
+- Missing usage or missing explicit pricing keeps estimated cost `null`. A token-reduction percentage alone is not a claim of cost savings or end-to-end Sofia task quality.
+- The harness still compares synthetic tasks with manually compacted evidence; invoking `TokenAwareGateway` in a full Brain task loop remains a separate benchmark milestone.
