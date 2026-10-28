@@ -144,7 +144,7 @@ export default async function slackEvents(req: IncomingMessage, res: ServerRespo
   const apiBaseValue = process.env.SOFIA_API_BASE_URL;
   const apiKey = process.env.SOFIA_API_KEY;
   const botToken = process.env.SLACK_BOT_TOKEN;
-  if (!apiBaseValue || !apiKey || !botToken || !/^[xobp]-[A-Za-z0-9-]{10,512}$/.test(botToken)) {
+  if (!apiBaseValue || !apiKey || !botToken || !/^xox[baprs]-[A-Za-z0-9-]{10,512}$/.test(botToken)) {
     reply(res, 503, { error: "slack_integration_not_configured" });
     return;
   }
@@ -163,14 +163,14 @@ export default async function slackEvents(req: IncomingMessage, res: ServerRespo
     const response = await fetch(new URL("/v1/agent/runs", base), {
       method: "POST",
       headers: {
-        authorization: \`Bearer \${apiKey}\`,
+        authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
         "idempotency-key": idempotencyKey,
       },
       body: JSON.stringify({
         task: event.text.trim(),
         async: true,
-        context: \`Origin: Slack message event. Slack user ID: \${event.user}. Channel ID: \${event.channel}.\`,
+        context: `Origin: Slack message event. Slack user ID: ${event.user}. Channel ID: ${event.channel}.`,
       }),
       signal: controller.signal,
     });
@@ -196,11 +196,11 @@ export default async function slackEvents(req: IncomingMessage, res: ServerRespo
   try {
     await fetch("https://slack.com/api/chat.postMessage", {
       method: "POST",
-      headers: { authorization: \`Bearer \${botToken}\`, "content-type": "application/json; charset=utf-8" },
+      headers: { authorization: `Bearer ${botToken}`, "content-type": "application/json; charset=utf-8" },
       body: JSON.stringify({
         channel: event.channel,
         thread_ts: event.ts,
-        text: \`Sofia accepted your task. Run ID: \${runId} (status: \${runStatus}).\`,
+        text: `Sofia accepted your task. Run ID: ${runId} (status: ${runStatus}).`,
       }),
       signal: replyController.signal,
     });
