@@ -31,7 +31,7 @@ export class InMemorySkillLedger implements SkillLedger {
       ...candidate,
       trigger: previous.trigger,
       triggers: [...new Set([previous.trigger, ...(previous.triggers ?? []), candidate.trigger, ...(candidate.triggers ?? [])])].slice(0, 12),
-      procedure: [...new Set([...previous.procedure, ...candidate.procedure])].slice(0, 12),
+      procedure: [...new Set(candidate.procedure)].slice(0, 12),
       verification: [...new Set([...previous.verification, ...candidate.verification])],
       evidenceIds: [...new Set([...previous.evidenceIds, ...candidate.evidenceIds])].slice(-50),
     } : {
