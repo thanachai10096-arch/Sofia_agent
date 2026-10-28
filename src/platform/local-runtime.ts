@@ -45,6 +45,9 @@ export function assertSafeGitArgs(args: readonly string[]): void {
   }
   const tail = args.slice(1);
   const hasAny = (values: readonly string[]) => tail.some((arg) => values.includes(arg));
+  if (sub === "push" && tail.some((arg) => arg.startsWith(":") || arg.startsWith("+:"))) {
+    throw new Error("Deleting remote refs via Git push refspecs is blocked by Sofia runtime policy.");
+  }
   if (
     (sub === "branch" && hasAny(["-d", "-D", "--delete"])) ||
     (sub === "tag" && hasAny(["-d", "--delete"])) ||
