@@ -285,10 +285,16 @@ test("recovery reconciles persisted jobs and suppresses indeterminate resubmissi
     async cancel() { return true; }, async list() { return []; }, async resume() { throw new Error("unused"); },
   } as unknown as JobRuntime;
   const now = new Date("2026-10-17T00:00:00.000Z");
-  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const deliveredStatuses: string[] = [];
+  const scheduler = new CronScheduler(runtime, {
+    store, now: () => now,
+    onExecutionFinished: async (_schedule, execution) => { deliveredStatuses.push(execution.status); return true; },
+  });
   const schedule = await scheduler.create({
-    name: "recover", task: "recovery task", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice",
-  }, "alice");
+    name: "recover", task: "recovery task", cron: "* * * * *", timeZone: "UTC",
+    ownerKeyId: "telegram:user-1",
+    notificationTarget: { platform: "telegram", userId: "user-1", conversationId: "chat-1" },
+  }, "telegram:user-1");
   state.history.push(
     { id: "lost-claim", scheduleId: schedule.id, scheduledFor: "2026-10-16T23:58:00.000Z",
       startedAt: "2026-10-16T23:58:00.000Z", status: "claimed", attempt: 0 },
@@ -301,6 +307,9 @@ test("recovery reconciles persisted jobs and suppresses indeterminate resubmissi
   assert.equal(state.history.find((item: any) => item.id === "lost-claim").status, "failed");
   assert.match(state.history.find((item: any) => item.id === "lost-claim").error, /indeterminate/i);
   assert.equal(state.history.find((item: any) => item.id === "known-job").status, "completed");
+  assert.deepEqual(deliveredStatuses.sort(), ["completed", "failed"]);
+  assert.equal(state.history.find((item: any) => item.id === "lost-claim").notificationDelivered, true);
+  assert.equal(state.history.find((item: any) => item.id === "known-job").notificationDelivered, true);
 });
 
 
