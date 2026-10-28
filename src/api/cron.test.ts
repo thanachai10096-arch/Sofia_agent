@@ -80,6 +80,22 @@ test("cron API enforces scopes and isolates schedules by authenticated owner", a
     await new Promise<void>(resolve => server.close(() => resolve()));
     if (previousStateDir === undefined) delete process.env.SOFIA_STATE_DIR;
     else process.env.SOFIA_STATE_DIR = previousStateDir;
-    await rm(root, { recursive: true, force: true });
+    // Windows can briefly keep newly-created scheduler files visible after the HTTP
+    // server closes. Retry transient directory-not-empty/handle errors instead of
+    // making the cross-platform suite fail on cleanup timing alone.
+    let cleanupError: unknown;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+        cleanupError = undefined;
+        break;
+      } catch (error) {
+        cleanupError = error;
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOTEMPTY" && code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") throw error;
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+      }
+    }
+    if (cleanupError) throw cleanupError;
   }
 });
