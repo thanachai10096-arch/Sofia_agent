@@ -8,7 +8,7 @@ Sofia learns reusable workflow skills from successful work by default. This is t
 2. A candidate captures a bounded task trigger, the verified plan's procedure, strategy, verification evidence IDs, and task category.
 3. The managed lifecycle validates the skill metadata and persists a versioned candidate.
 4. Promotion happens automatically when the lifecycle evaluator and confidence gate pass. Set `SOFIA_SKILL_WRITE_APPROVAL=true` to require the configured host approval handler.
-5. The learned skill is persisted and made available to future planning. Trigger variants, procedures, and evidence from repeat successful work are merged into the existing skill rather than creating a duplicate each time.
+5. The learned skill is persisted and made available to future planning. Trigger variants and evidence accumulate across repeat successes; the latest verified procedure replaces stale steps so old instructions do not linger.
 6. The Evolution Engine records success/failure history and ranks skills from observed outcomes. Failed use is penalized; a later verified success can improve the ranking again.
 7. Lifecycle versions support rollback to the previous managed version.
 
