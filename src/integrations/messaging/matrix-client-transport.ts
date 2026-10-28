@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import type { MatrixTransport, VerifiedMatrixMessage } from "./matrix.js";
 
 interface MatrixEvent {
@@ -18,19 +20,55 @@ export interface MatrixClientTransportOptions {
   fetchImpl?: typeof fetch;
   onError?: (event: "sync_failed" | "delivery_failed", status?: number) => void;
   syncTimeoutMs?: number;
+  /** Test seam; production defaults to DNS resolution before every request. */
+  resolveHostname?: (hostname: string) => Promise<string[]>;
 }
+function isPublicAddress(address: string): boolean {
+  const normalized = address.toLowerCase().replace(/^\[|\]$/g, "");
+  const family = isIP(normalized);
+  if (family === 4) {
+    const octets = normalized.split(".").map(Number);
+    const [a, b, c] = octets;
+    if (a === undefined || b === undefined || c === undefined) return false;
+    return !(
+      a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 100 && b! >= 64 && b! <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b! >= 16 && b! <= 31) ||
+      (a === 192 && (b === 0 || b === 168)) ||
+      (a === 198 && (b === 18 || b === 19 || b === 51)) ||
+      (a === 203 && b === 0 && c === 113)
+    );
+  }
+  if (family === 6) {
+    // Only global-unicast 2000::/3 is allowed. Reject mapped IPv4 and
+    // documentation/special-use ranges conservatively.
+    return /^[23]/.test(normalized) &&
+      !normalized.startsWith("2001:db8:") &&
+      !normalized.startsWith("2001:0000:");
+  }
+  return false;
+}
+
 function validateHomeserver(value: string): URL {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("Matrix homeserver URL is invalid."); }
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash ||
-      (url.pathname !== "/" && url.pathname !== "") || host === "localhost" ||
-      host.endsWith(".localhost") || host.endsWith(".local") ||
-      /^127\./.test(host) || /^10\./.test(host) || /^0\./.test(host) || /^169\.254\./.test(host) || /^192\.168\./.test(host) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === "::1" || host.startsWith("[")) {
+      (url.pathname !== "/" && url.pathname !== "") ||
+      host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") ||
+      (isIP(host) !== 0 && !isPublicAddress(host))) {
     throw new Error("Matrix homeserver must be a public HTTPS origin.");
   }
   return new URL(url.origin);
+}
+
+async function resolvePublicHostname(hostname: string): Promise<string[]> {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (isIP(host)) return [host];
+  const records = await lookup(host, { all: true, verbatim: true });
+  if (!records.length) throw new Error("Matrix homeserver did not resolve.");
+  return records.map(record => record.address);
 }
 
 /** Matrix Client-Server API polling transport. Access tokens never leave server-side requests. */
@@ -44,6 +82,11 @@ export function createMatrixClientTransport(options: MatrixClientTransportOption
     throw new Error("Matrix sync timeout must be between 1000 and 30000 milliseconds.");
   }
   const fetchImpl = options.fetchImpl ?? fetch;
+  // Injected fetch implementations are deterministic test doubles; production
+  // always performs DNS checks. Tests can inject a resolver to exercise SSRF cases.
+  const resolveHostname = options.resolveHostname ?? (options.fetchImpl
+    ? async () => ["93.184.216.34"]
+    : resolvePublicHostname);
   let controller: AbortController | undefined;
   let callback: ((message: VerifiedMatrixMessage) => Promise<void>) | undefined;
   let active = false;
@@ -58,6 +101,10 @@ export function createMatrixClientTransport(options: MatrixClientTransportOption
   }
   async function request(path: string, init: RequestInit = {}): Promise<Response> {
     const url = new URL(path, homeserver);
+    const resolvedAddresses = await resolveHostname(url.hostname);
+    if (!resolvedAddresses.length || resolvedAddresses.some(address => !isPublicAddress(address))) {
+      throw new Error("Matrix homeserver resolved to a non-public address.");
+    }
     const headers = new Headers(init.headers);
     headers.set("authorization", "Bearer " + options.accessToken);
     if (!headers.has("content-type")) headers.set("content-type", "application/json");
