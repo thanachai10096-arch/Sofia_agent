@@ -72,6 +72,9 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
     expiresAt: number;
     originalResponded: boolean;
   }>();
+  // Discord may retry webhook deliveries. Remember accepted interaction IDs so
+  // a replay cannot dispatch the same task twice during the token lifetime.
+  const processedInteractions = new Map<string, number>();
 
   function notify(event: "inbound_handler_failed" | "delivery_failed", status?: number): void {
     try { options.onError?.(event, status); } catch { /* logging must not alter transport behavior */ }
@@ -153,6 +156,9 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
       for (const [id, pending] of pendingInteractions) {
         if (pending.expiresAt <= now) pendingInteractions.delete(id);
       }
+      for (const [id, expiresAt] of processedInteractions) {
+        if (expiresAt <= now) processedInteractions.delete(id);
+      }
       if (pendingInteractions.size >= 5_000) {
         return { status: 503, body: { error: "Discord interaction capacity reached." } };
       }
@@ -170,6 +176,12 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
           (allowedChannels && (!allowedChannels.length || !allowedChannels.includes(interaction.channel_id)))) {
         return { status: 200, body: { type: 4, data: { content: "You are not authorized to use Sofia in this channel.", flags: 64 } } };
       }
+      if (processedInteractions.has(interaction.id)) {
+        return { status: 200, body: { type: 4, data: { content: "This interaction was already received.", flags: 64 } } };
+      }
+      if (processedInteractions.size >= 5_000) {
+        return { status: 503, body: { error: "Discord interaction deduplication capacity reached." } };
+      }
       const optionName = incomingCommand === commandName ? taskOptionName : "job_id";
       const optionValue = interaction.data?.options?.find((option) => option.name === optionName)?.value;
       const argument = typeof optionValue === "string" ? optionValue : "";
@@ -184,6 +196,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
         createdAt: now,
         attachments: [],
       };
+      processedInteractions.set(event.id, now + 14 * 60_000);
       pendingInteractions.set(event.id, {
         applicationId: interaction.application_id,
         token: interaction.token,
@@ -255,6 +268,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
       controller?.abort();
       controller = undefined;
       pendingInteractions.clear();
+      processedInteractions.clear();
     },
   };
   return transport;
