@@ -67,9 +67,9 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
   const routes: ModelRoute[] = [];
   const providers: SofiaModelConfig["providers"] = {};
   for (const [id, capabilities, cost, latency, quality] of definitions) {
-    const routeOverride = process.env[`SOFIA_${id.toUpperCase()}_MODEL]?.trim();
-    const legacyGeminiOverride = kind === "gemini" ? process.env[`GEMINI_${id.toUpperCase()}_MODEL]?.trim() : "";
-    const legacyOpenRouterOverride = kind === "openrouter" ? process.env[`OPENROUTER_${id.toUpperCase()}_MODEL]?.trim() : "";
+    const routeOverride = process.env[`SOFIA_${id.toUpperCase()}_MODEL`]?.trim();
+    const legacyGeminiOverride = kind === "gemini" ? process.env[`GEMINI_${id.toUpperCase()}_MODEL`]?.trim() : "";
+    const legacyOpenRouterOverride = kind === "openrouter" ? process.env[`OPENROUTER_${id.toUpperCase()}_MODEL`]?.trim() : "";
     const model = routeOverride || legacyGeminiOverride || legacyOpenRouterOverride || defaultModel;
 
     routes.push({
