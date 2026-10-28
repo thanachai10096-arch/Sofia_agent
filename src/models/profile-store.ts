@@ -127,7 +127,7 @@ export class EncryptedUserModelProfileStore implements UserModelProfileStore {
     if (typeof input.model !== "string" || !input.model.trim() || input.model.length > 200 || /[\x00-\x1f\x7f]/.test(input.model)) {
       throw new Error("model must be a non-empty string of at most 200 characters.");
     }
-    if (typeof input.apiKey !== "string" || input.apiKey.trim().length < 8 || input.apiKey.length > 8_192 || /[\r\n\x00]/.test(input.apiKey)) {
+    if (typeof input.apiKey !== "string" || input.apiKey.trim().length < 8 || input.apiKey.length > 8_192 || /[\x00-\x1f\x7f]/.test(input.apiKey)) {
       throw new Error("apiKey must be a non-empty provider key without control characters.");
     }
     const baseUrl = profileBaseUrl(input, this.allowedHosts);
