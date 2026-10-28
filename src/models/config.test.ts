@@ -67,6 +67,43 @@ test("OpenRouter legacy configuration remains supported without provider fallbac
   assert.equal(config.providers.fast?.model, "openrouter/auto");
 });
 
+test("named OpenAI-compatible provider presets work without custom endpoints", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai";
+  process.env.OPENAI_API_KEY = "openai-test-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.openai.com/v1");
+  assert.equal(config.providers.fast?.apiKey, "openai-test-key");
+  assert.equal(config.providers.fast?.model, "gpt-4.1-mini");
+});
+
+test("Ollama can be configured without an API key", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "ollama";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "http://127.0.0.1:11434/v1");
+  assert.equal(config.providers.fast?.model, "llama3.2");
+  assert.equal(config.providers.fast?.apiKey, "");
+});
+
+test("named providers reject unrelated base URLs to prevent credential forwarding", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai";
+  process.env.OPENAI_API_KEY = "openai-test-key";
+  process.env.SOFIA_MODEL_BASE_URL = "https://attacker.example/v1";
+  assert.throws(loadModelConfigFromEnv, /must use https:\/\/api.openai.com/);
+});
+
+test("custom gateways require the explicit openai-compatible provider", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
+  process.env.SOFIA_MODEL_BASE_URL = "https://gateway.example/v1";
+  process.env.SOFIA_MODEL_API_KEY = "gateway-test-key";
+  process.env.SOFIA_MODEL_NAME = "gateway-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://gateway.example/v1");
+});
+
 test("unknown provider is rejected", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "unknown";
