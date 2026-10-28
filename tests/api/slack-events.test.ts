@@ -68,7 +68,7 @@ test("Slack Events returns retryable error when Sofia does not confirm run creat
 
 
 test("Slack Events acknowledges only after Sofia accepts a run and posts a thread receipt", async () => {
-  await withEnv({ SLACK_SIGNING_SECRET: "test-secret", SLACK_ALLOWED_USER_IDS: "UALLOWED", SLACK_ALLOWED_CHANNEL_IDS: "CALLOWED", SOFIA_API_BASE_URL: "https://sofia.example", SOFIA_API_KEY: "test-key", SLACK_BOT_TOKEN: "xoxb-12345678901234567890" }, async () => {
+  await withEnv({ SLACK_SIGNING_SECRET: "test-secret", SOFIA_SLACK_CALLBACK_SECRET: "test-callback-secret-at-least-32-chars", SLACK_ALLOWED_USER_IDS: "UALLOWED", SLACK_ALLOWED_CHANNEL_IDS: "CALLOWED", SOFIA_API_BASE_URL: "https://sofia.example", SOFIA_API_KEY: "test-key", SLACK_BOT_TOKEN: "xoxb-12345678901234567890" }, async () => {
     const original = globalThis.fetch;
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -86,7 +86,8 @@ test("Slack Events acknowledges only after Sofia accepts a run and posts a threa
       assert.equal(calls[0]?.url, "https://sofia.example/v1/agent/runs");
       assert.equal(calls[1]?.url, "https://slack.com/api/chat.postMessage");
       const runRequest = JSON.parse(String(calls[0]?.init?.body)) as { task: string; async: boolean };
-      assert.deepEqual(runRequest, { task: "do the task", async: true, context: "Origin: Slack message event. Slack user ID: UALLOWED. Channel ID: CALLOWED. Message timestamp: 1790000000.000001." });
+      const callbackSignature = createHmac("sha256", "test-callback-secret-at-least-32-chars").update("UALLOWED|CALLOWED|1790000000.000001").digest("hex");
+      assert.deepEqual(runRequest, { task: "do the task", async: true, context: `Origin: Slack message event. Slack user ID: UALLOWED. Channel ID: CALLOWED. Message timestamp: 1790000000.000001. Callback signature: ${callbackSignature}.` });
       const receipt = JSON.parse(String(calls[1]?.init?.body)) as { channel: string; thread_ts: string; text: string };
       assert.equal(receipt.channel, "CALLOWED");
       assert.equal(receipt.thread_ts, "1790000000.000001");
