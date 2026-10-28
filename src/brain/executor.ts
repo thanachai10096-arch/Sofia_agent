@@ -1232,7 +1232,16 @@ export class SofiaBrain {
               mayActivate = false;
             }
           }
-          if (mayActivate) this.dependencies.skillLedger.record(learnedCandidate);
+          let learningPersisted = false;
+          if (mayActivate) {
+            this.dependencies.skillLedger.record(learnedCandidate);
+            try {
+              await this.dependencies.skillLedger.flush?.();
+              learningPersisted = true;
+            } catch {
+              // Do not fail the user's completed task if learning storage is unavailable.
+            }
+          }
         }
         if (last && this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
@@ -1241,7 +1250,7 @@ export class SofiaBrain {
           await this.wait(() => this.dependencies.projectMemory!.save(entry));
           this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
         }
-        if (learnedCandidate) this.emit({ type: "brain.learning.recorded" });
+        if (learnedCandidate && learningPersisted) this.emit({ type: "brain.learning.recorded" });
       }
 
       return this.report(
