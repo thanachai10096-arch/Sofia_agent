@@ -24,6 +24,8 @@ export interface TaskMeasurement {
   outputTokens: number;
   cachedInputTokens: number;
   modelCalls: number;
+  unmeasuredModelCalls: number;
+  usageComplete: boolean;
   retries: number;
   durationMs: number;
   estimatedCostNanoUsd?: string;
@@ -39,6 +41,8 @@ export interface EfficiencySnapshot {
   outputTokens: number;
   cachedInputTokens: number;
   modelCalls: number;
+  unmeasuredModelCalls: number;
+  usageComplete: boolean;
   retries: number;
   medianDurationMs: number | null;
   p95DurationMs: number | null;
@@ -62,6 +66,7 @@ function percentile(values: readonly number[], fraction: number): number | null 
 export class TaskEfficiencyMetrics {
   private readonly calls: ModelCallMeasurement[] = [];
   private readonly completedTasks: TaskMeasurement[] = [];
+  private unmeasuredModelCalls = 0;
   private startedAt?: number;
 
   start(now = Date.now()): void {
@@ -87,6 +92,11 @@ export class TaskEfficiencyMetrics {
     this.calls.push({ ...call });
   }
 
+  recordUnmeasuredModelCall(): void {
+    if (this.startedAt === undefined) throw new Error("Task telemetry has not started");
+    this.unmeasuredModelCalls += 1;
+  }
+
   finishTask(input: {
     taskId: string;
     completed: boolean;
@@ -105,7 +115,7 @@ export class TaskEfficiencyMetrics {
       throw new Error("Passed criteria exceed acceptance criteria");
     }
 
-    const allCostsKnown = this.calls.length > 0 && this.calls.every((call) => call.estimatedCostNanoUsd !== undefined);
+    const allCostsKnown = this.calls.length > 0 && this.unmeasuredModelCalls === 0 && this.calls.every((call) => call.estimatedCostNanoUsd !== undefined);
     const estimatedCost = allCostsKnown
       ? this.calls.reduce((sum, call) => sum + call.estimatedCostNanoUsd!, 0n)
       : undefined;
@@ -121,7 +131,9 @@ export class TaskEfficiencyMetrics {
       inputTokens: this.calls.reduce((sum, call) => sum + call.inputTokens, 0),
       outputTokens: this.calls.reduce((sum, call) => sum + call.outputTokens, 0),
       cachedInputTokens: this.calls.reduce((sum, call) => sum + (call.cachedInputTokens ?? 0), 0),
-      modelCalls: this.calls.length,
+      modelCalls: this.calls.length + this.unmeasuredModelCalls,
+      unmeasuredModelCalls: this.unmeasuredModelCalls,
+      usageComplete: this.unmeasuredModelCalls === 0,
       retries: this.calls.reduce((sum, call) => sum + (call.retries ?? 0), 0),
       durationMs: end - this.startedAt,
       estimatedCostNanoUsd: estimatedCost?.toString(),
@@ -133,6 +145,7 @@ export class TaskEfficiencyMetrics {
 
     this.completedTasks.push(measurement);
     this.calls.length = 0;
+    this.unmeasuredModelCalls = 0;
     this.startedAt = undefined;
     return { ...measurement };
   }
@@ -165,6 +178,8 @@ export class TaskEfficiencyMetrics {
       outputTokens: tasks.reduce((sum, task) => sum + task.outputTokens, 0),
       cachedInputTokens: tasks.reduce((sum, task) => sum + task.cachedInputTokens, 0),
       modelCalls: tasks.reduce((sum, task) => sum + task.modelCalls, 0),
+      unmeasuredModelCalls: tasks.reduce((sum, task) => sum + task.unmeasuredModelCalls, 0),
+      usageComplete: tasks.every((task) => task.usageComplete),
       retries: tasks.reduce((sum, task) => sum + task.retries, 0),
       medianDurationMs: percentile(tasks.map((task) => task.durationMs), 0.5),
       p95DurationMs: percentile(tasks.map((task) => task.durationMs), 0.95),
