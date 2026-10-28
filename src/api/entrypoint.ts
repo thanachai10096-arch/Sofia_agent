@@ -141,6 +141,7 @@ if (discordConfigured) {
         : task;
       const handle = await submitDiscordTask(deps.jobRuntime, taskWithMemory, principalId, discordAbort.signal, {
         channelId: message.channelId,
+        userId: message.author.id,
         sessionKey,
         sessionTask: task,
       });
@@ -227,6 +228,17 @@ const server = createSofiaApi(deps, {
   ...(slackRuntime ? { slackEventsRoute: { transport: slackRuntime.transport } } : {}),
   ...(lineRuntime ? { lineWebhookRoute: { transport: lineRuntime.transport } } : {}),
   ...(whatsAppRuntime ? { whatsAppWebhookRoute: { transport: whatsAppRuntime.transport } } : {}),
+  onCronExecutionFinished: async (schedule, execution, job) => {
+    const target = schedule.notificationTarget;
+    if (!target || target.platform !== "discord" || !discordTransport) return false;
+    const summary = typeof job?.result?.summary === "string" ? job.result.summary.trim() : "";
+    const status = execution.status;
+    const message = status === "completed"
+      ? "⏰ Sofia scheduled task completed.\\nSchedule: " + schedule.name + "\\n" + (summary || "The task completed without a text summary.")
+      : "⏰ Sofia scheduled task " + status + ".\\nSchedule: " + schedule.name + "\\nCheck Sofia schedule history for details.";
+    await discordTransport.sendMessage(target.conversationId, message.slice(0, 1700));
+    return true;
+  },
 });
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
