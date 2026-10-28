@@ -49,7 +49,7 @@ async function loadSetupConfig(): Promise<HostedSetupConfig | undefined> {
   try {
     value = JSON.parse(raw);
   } catch {
-    throw new Error("Sofia setup file is invalid JSON. Back it up before replacing it with 'sofia setup'.");
+    throw new Error("Sofia setup file is invalid JSON. Inspect or move it aside before rerunning 'sofia setup'.");
   }
 
   if (
@@ -62,7 +62,7 @@ async function loadSetupConfig(): Promise<HostedSetupConfig | undefined> {
     !("apiBaseUrl" in value) ||
     typeof value.apiBaseUrl !== "string"
   ) {
-    throw new Error("Sofia setup file has an unsupported format. Back it up before replacing it.");
+    throw new Error("Sofia setup file has an unsupported format. Inspect or move it aside before rerunning setup.");
   }
 
   return createHostedSetupConfig(value.apiBaseUrl);
