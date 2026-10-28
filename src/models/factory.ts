@@ -78,7 +78,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       const checks = [
         { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
         { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
-        { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
+        { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item) || (item.startsWith("acceptance:") && /^[A-Za-z0-9._:-]{1,160}$/.test(item.slice("acceptance:".length)))) },
       ];
       return { passed: checks.every((check) => check.passed), checks };
     }, { file: path.join(workspace, ".sofia", "users", hash, "skill-lifecycle.json") });
