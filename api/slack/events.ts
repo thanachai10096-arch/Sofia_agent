@@ -155,8 +155,10 @@ export default async function slackEvents(req: IncomingMessage, res: ServerRespo
   }
 
   const callbackSecret = process.env.SOFIA_SLACK_CALLBACK_SECRET?.trim();
+  const task = event.text.trim();
+  const taskDigest = createHash("sha256").update(task).digest("hex");
   const callbackProof = callbackSecret && callbackSecret.length >= 32
-    ? createHmac("sha256", callbackSecret).update(`${event.user}|${event.channel}|${event.ts}`).digest("hex")
+    ? createHmac("sha256", callbackSecret).update(`${event.user}|${event.channel}|${event.ts}|${taskDigest}`).digest("hex")
     : undefined;
   const idempotencyKey = "slack_" + createHash("sha256").update(envelope.event_id).digest("hex");
   const controller = new AbortController();
@@ -172,7 +174,7 @@ export default async function slackEvents(req: IncomingMessage, res: ServerRespo
         "idempotency-key": idempotencyKey,
       },
       body: JSON.stringify({
-        task: event.text.trim(),
+        task,
         async: true,
         context: `Origin: Slack message event. Slack user ID: ${event.user}. Channel ID: ${event.channel}. Message timestamp: ${event.ts}.${callbackProof ? ` Callback signature: ${callbackProof}.` : ""}` ,
       }),
