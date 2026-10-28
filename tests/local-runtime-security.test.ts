@@ -130,3 +130,19 @@ test("Git runtime blocks force pushes and Git execution/configuration overrides"
   assert.throws(() => assertSafeGitArgs(["push", "origin", "+:refs/heads/main"]), /Deleting remote refs via Git push refspecs/);
   assert.throws(() => assertSafeGitArgs(["commit", "--amend", "--no-edit"]), /ref deletion, stash deletion/);
 });
+
+
+test("generic process execution cannot bypass the Git argument policy", async () => {
+  const f = await fixture();
+  try {
+    const blocked = await f.runtime.run("git", ["reset", "--hard", "HEAD"]);
+    assert.notEqual(blocked.code, 0);
+    assert.match(blocked.stderr, /Git subcommand is not allowed/);
+
+    const windowsPathBlocked = await f.runtime.run("C:\\Program Files\\Git\\git.exe", ["clean", "-fd"]);
+    assert.notEqual(windowsPathBlocked.code, 0);
+    assert.match(windowsPathBlocked.stderr, /Git subcommand is not allowed/);
+  } finally {
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});
