@@ -74,3 +74,55 @@ test("API sessions are persisted and scoped to the authenticated API key", async
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("model preferences are persisted per API key and validated at the API boundary", async () => {
+  const preferences = new Map<string, "auto" | "fast" | "coding" | "reasoning" | "vision">();
+  const modelPreferenceStore = {
+    get: (ownerKeyId: string) => preferences.get(ownerKeyId),
+    set: (ownerKeyId: string, selection: "auto" | "fast" | "coding" | "reasoning" | "vision") => { preferences.set(ownerKeyId, selection); },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, {
+    apiKeys: {
+      "model-key-one": ["agent:run", "agent:read"],
+      "model-key-two": ["agent:run", "agent:read"],
+      "read-only-key": ["agent:read"],
+    },
+    modelPreferenceStore,
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const request = (key: string, method = "GET", body?: unknown) => fetch(`${baseUrl}/v1/settings/model`, {
+    method,
+    headers: { authorization: `Bearer ${key}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+
+  try {
+    const initial = await request("model-key-one");
+    assert.equal(initial.status, 200);
+    assert.deepEqual(await initial.json(), { modelSelection: "auto", source: "default" });
+
+    const saved = await request("model-key-one", "PUT", { modelSelection: "coding" });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(await saved.json(), { modelSelection: "coding", source: "saved" });
+
+    const own = await request("model-key-one");
+    assert.deepEqual(await own.json(), { modelSelection: "coding", source: "saved" });
+    const other = await request("model-key-two");
+    assert.deepEqual(await other.json(), { modelSelection: "auto", source: "default" });
+
+    assert.equal((await request("model-key-one", "PUT", { modelSelection: "arbitrary-model" })).status, 400);
+    assert.equal((await request("read-only-key", "PUT", { modelSelection: "fast" })).status, 403);
+    const reset = await request("model-key-one", "DELETE");
+    assert.deepEqual(await reset.json(), { modelSelection: "auto", source: "saved" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});

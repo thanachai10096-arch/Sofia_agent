@@ -1,6 +1,7 @@
 import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import type { ModelPreferenceStore } from "./model-preference-store.js";
 
 export interface AgentRunInput {
   task: string;
@@ -56,6 +57,8 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Optional per-API-key model preference store; defaults to private local file storage. */
+  modelPreferenceStore?: ModelPreferenceStore;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;

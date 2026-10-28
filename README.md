@@ -23,7 +23,7 @@ A model-agnostic AI agent runtime with internal model routing, policy-controlled
 
 Sofia Agent is a standalone agent runtime and platform. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
 
-> **Model routing is an internal policy.** End users do not choose models; Sofia decides how requests are handled.
+> **Model routing supports both modes.** Users can let Sofia choose automatically or select a configured profile per run; authenticated API keys can save a default profile. Provider credentials remain server-side.
 
 
 ## Open source and contribution

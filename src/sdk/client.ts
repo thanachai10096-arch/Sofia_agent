@@ -19,6 +19,9 @@ export interface SofiaRunInput {
 
 export type SofiaRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
+export type SofiaModelSelection = "auto" | "fast" | "coding" | "reasoning" | "vision";
+export interface SofiaModelPreferenceResponse { modelSelection: SofiaModelSelection; source: "default" | "saved"; }
+
 export interface SofiaRunResponse {
   id: string;
   status: SofiaRunStatus;
@@ -137,6 +140,27 @@ export class SofiaClient {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", onAbort);
     }
+  }
+
+  /** Read the model profile saved for this authenticated API key. */
+  async getModelPreference(signal?: AbortSignal): Promise<SofiaModelPreferenceResponse> {
+    return this.request<SofiaModelPreferenceResponse>("/v1/settings/model", {
+      headers: { authorization: "Bearer " + this.options.apiKey },
+    }, signal);
+  }
+
+  /** Save a default profile for this API key; "auto" delegates routing to Sofia. */
+  async setModelPreference(modelSelection: SofiaModelSelection, signal?: AbortSignal): Promise<SofiaModelPreferenceResponse> {
+    return this.request<SofiaModelPreferenceResponse>("/v1/settings/model", {
+      method: "PUT", headers: this.headers(), body: JSON.stringify({ modelSelection }),
+    }, signal);
+  }
+
+  /** Reset the saved profile to Sofia's automatic routing. */
+  async resetModelPreference(signal?: AbortSignal): Promise<SofiaModelPreferenceResponse> {
+    return this.request<SofiaModelPreferenceResponse>("/v1/settings/model", {
+      method: "DELETE", headers: { authorization: "Bearer " + this.options.apiKey },
+    }, signal);
   }
 
   async run(input: SofiaRunInput, signal?: AbortSignal): Promise<SofiaRunResponse> {
