@@ -170,6 +170,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
           (allowedChannels && (!allowedChannels.length || !allowedChannels.includes(interaction.channel_id)))) {
         return { status: 200, body: { type: 4, data: { content: "You are not authorized to use Sofia in this channel.", flags: 64 } } };
       }
+      // `/work` carries its action/task string through the same configured task option; the host must register that application command.
       const optionName = incomingCommand === commandName || incomingCommand === "work" ? taskOptionName : "job_id";
       const optionValue = interaction.data?.options?.find((option) => option.name === optionName)?.value;
       const argument = typeof optionValue === "string" ? optionValue : "";
