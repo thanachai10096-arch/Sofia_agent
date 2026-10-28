@@ -78,6 +78,18 @@ function asInferenceRequest(request: string): InferenceRequest {
   const understanding = payload.understanding as Record<string, unknown> | undefined;
   const task = typeof payload.task === "string" ? payload.task : "Execute the requested Brain phase.";
   const taskTerms = taskTermsFor(task);
+  // Context and task fields are represented separately in the prompt core/evidence.
+  // Keeping their original copies inside state would send the same content twice.
+  const state: Record<string, unknown> = { ...payload };
+  delete state.task;
+  delete state.context;
+  delete state.referenceContext;
+  if (understanding) {
+    const compactUnderstanding = { ...understanding };
+    delete compactUnderstanding.successCriteria;
+    if (Object.keys(compactUnderstanding).length > 0) state.understanding = compactUnderstanding;
+    else delete state.understanding;
+  }
   const evidence: EvidenceChunk[] = [];
   const addEvidence = (id: string, label: string, value: unknown, relevance?: number) => {
     const text = evidenceText(value);
@@ -150,7 +162,7 @@ function asInferenceRequest(request: string): InferenceRequest {
             (value): value is string => typeof value === "string",
           )
         : [],
-      state: payload,
+      state,
       toolSchemas: [],
     },
     evidence,
