@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash, createHmac } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import type { ContinuousWorkRecord, ContinuousWorkSupervisor } from "../brain/continuous-work.js";
@@ -70,6 +71,7 @@ test("continuous-work API is owner-scoped and exposes create, resume, pause, and
       "read-only-key": ["agent:read"],
     },
     continuousWorkSupervisor: supervisor,
+    messagingContextSecret: "test-messaging-context-secret-at-least-32-chars",
   });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -111,6 +113,36 @@ test("continuous-work API is owner-scoped and exposes create, resume, pause, and
     const continuous = await request("owner-key", `/v1/continuous-work/${secondWork.id}/continue`, "POST");
     assert.equal(continuous.status, 202);
     assert.equal((await continuous.json() as { mode: string }).mode, "continuous");
+    const signedAction = async (userId: string, action: Record<string, unknown>, messageId: string) => {
+      const signedTask = JSON.stringify(action);
+      const unsigned = {
+        platform: "telegram" as const,
+        userId,
+        conversationId: "chat-" + userId,
+        messageId,
+        taskHash: createHash("sha256").update(signedTask).digest("hex"),
+      };
+      const messagingContext = {
+        ...unsigned,
+        signature: createHmac("sha256", "test-messaging-context-secret-at-least-32-chars")
+          .update(JSON.stringify(unsigned)).digest("hex"),
+      };
+      return request("owner-key", "/v1/continuous-work/chat", "POST", { signedTask, messagingContext });
+    };
+    const chatCreated = await signedAction("telegram-user-1", { action: "create", task: "Improve the project with evidence." }, "msg-1");
+    assert.equal(chatCreated.status, 201);
+    const chatWork = (await chatCreated.json() as { work: ContinuousWorkRecord }).work;
+    assert.ok(chatWork.ownerKeyId.startsWith("chat:"));
+    const chatList = await signedAction("telegram-user-1", { action: "list" }, "msg-2");
+    assert.equal((await chatList.json() as { work: ContinuousWorkRecord[] }).work.length, 1);
+    const isolatedList = await signedAction("telegram-user-2", { action: "list" }, "msg-3");
+    assert.equal((await isolatedList.json() as { work: ContinuousWorkRecord[] }).work.length, 0);
+    const invalidSignature = await request("owner-key", "/v1/continuous-work/chat", "POST", {
+      signedTask: JSON.stringify({ action: "list" }),
+      messagingContext: { platform: "telegram", userId: "telegram-user-1", conversationId: "chat-telegram-user-1", messageId: "msg-4", taskHash: "0".repeat(64), signature: "0".repeat(64) },
+    });
+    assert.equal(invalidSignature.status, 401);
+
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
