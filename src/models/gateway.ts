@@ -190,7 +190,7 @@ export class SofiaModelGateway implements ModelProvider {
       const systemText = messages
         .filter((message) => message.role === "system")
         .map((message) => message.content)
-        .join("\\n\\n");
+        .join("\n\n");
       const anthropicMessages = messages
         .filter((message) => message.role !== "system")
         .map((message) => {
@@ -226,7 +226,7 @@ export class SofiaModelGateway implements ModelProvider {
         max_tokens: options.maxOutputTokens ?? 2048,
         messages: anthropicMessages,
         ...(systemText || brainStructuredOutput
-          ? { system: [systemText, brainStructuredOutput ? "For this internal agent operation, respond with a single valid JSON object only. Do not wrap it in Markdown fences." : ""].filter(Boolean).join("\\n\\n") }
+          ? { system: [systemText, brainStructuredOutput ? "For this internal agent operation, respond with a single valid JSON object only. Do not wrap it in Markdown fences." : ""].filter(Boolean).join("\n\n") }
           : {}),
         ...(tools ? {
           tools: tools.map((tool) => ({
@@ -355,7 +355,7 @@ export class SofiaModelGateway implements ModelProvider {
           .filter((block): block is { type: "text"; text?: string } => block.type === "text")
           .map((block) => block.text ?? "")
           .filter((part) => part.trim().length > 0)
-          .join("\\n");
+          .join("\n");
         const toolCalls = blocks
           .filter((block): block is { type: "tool_use"; id?: string; name?: string; input?: unknown } => block.type === "tool_use")
           .map((block) => ({
