@@ -46,7 +46,7 @@ export function validateSofiaApiBaseUrl(input: string): string {
   if (url.search || url.hash) {
     throw new Error("The Sofia API URL must not contain a query string or fragment.");
   }
-  if (url.pathname !== "/") {
+  if (url.pathname.replace(/\/+$/, "") !== "") {
     throw new Error("Use the Sofia API origin only, without a path prefix; API routes are rooted at '/'.");
   }
 
