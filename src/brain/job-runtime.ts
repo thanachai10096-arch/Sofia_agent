@@ -601,14 +601,27 @@ export class DurableJobRuntime implements JobRuntime {
     // Register cancellation before the first await so cancel() cannot miss startup.
     const controller = new AbortController();
     this.controllers.set(record.id, controller);
+    let heartbeatInFlight: Promise<void> = Promise.resolve();
+    let heartbeatStopped = false;
     const heartbeat = setInterval(() => {
-      void this.state.heartbeat(record.id, leaseToken, leaseMs).then((ok) => {
+      if (heartbeatStopped) return;
+      heartbeatInFlight = this.state.heartbeat(record.id, leaseToken, leaseMs).then((ok) => {
         if (!ok) controller.abort(new Error("Job execution lease was lost"));
       }).catch(() => {
         // A transient store error is not proof of lease loss; a later heartbeat retries.
       });
     }, Math.floor(leaseMs / 3));
     heartbeat.unref?.();
+    const stopHeartbeat = async (): Promise<void> => {
+      if (!heartbeatStopped) {
+        heartbeatStopped = true;
+        clearInterval(heartbeat);
+      }
+      // Do not publish a terminal job state while a heartbeat still owns an
+      // in-flight file-lock operation. Readers may otherwise observe completion,
+      // clean up temporary state, and race that final heartbeat.
+      await heartbeatInFlight;
+    };
     let onExternalAbort: (() => void) | undefined;
     if (externalSignal) {
       onExternalAbort = () => controller.abort(externalSignal.reason);
@@ -671,6 +684,7 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = result.completed ? "completed" : "failed";
       }
       record.updatedAt = new Date().toISOString();
+      await stopHeartbeat();
       await this.state.save(record);
     } catch (error) {
       if (record.status !== "cancelled") {
@@ -678,9 +692,10 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = controller.signal.aborted ? "cancelled" : "failed";
         record.updatedAt = new Date().toISOString();
       }
+      await stopHeartbeat();
       await this.state.save(record);
     } finally {
-      clearInterval(heartbeat);
+      await stopHeartbeat();
       if (externalSignal && onExternalAbort) {
         externalSignal.removeEventListener("abort", onExternalAbort);
       }
