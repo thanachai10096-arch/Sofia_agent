@@ -13,7 +13,7 @@ import { createSlackMessagingRuntime } from "../integrations/messaging/slack-run
 import { createLineMessagingRuntime } from "../integrations/messaging/line-runtime.js";
 import { createWhatsAppMessagingRuntime } from "../integrations/messaging/whatsapp-runtime.js";
 import { redactSecrets } from "../security/guard.js";
-import { ContinuousWorkSupervisor, FileContinuousWorkStore } from "../brain/continuous-work.js";
+import { ContinuousWorkSupervisor, FileContinuousWorkStore, hasVerifiedCompletionEvidence } from "../brain/continuous-work.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -224,8 +224,9 @@ if (discordConfigured) {
 const continuousWorkStore = new FileContinuousWorkStore(workspace);
 const continuousWorkSupervisor = deps.jobRuntime
   ? new ContinuousWorkSupervisor(deps.jobRuntime, continuousWorkStore, {
-      // One activation is bounded; completion remains explicit until a trusted verifier is configured.
-      isComplete: () => false,
+      // Never infer completion from a model's summary alone. Require a completed
+      // Brain report with passing verification evidence and no remaining risks.
+      isComplete: (_record, job) => hasVerifiedCompletionEvidence(job),
       ...(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS?.trim()
         ? { maxLifetimeIterations: Number(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS) }
         : {}),
