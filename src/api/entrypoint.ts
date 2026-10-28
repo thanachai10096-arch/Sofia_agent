@@ -8,6 +8,7 @@ import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allow
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { createDiscordGatewayMessagingRuntime } from "../integrations/messaging/discord-gateway-runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -18,6 +19,8 @@ mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0
 const deps = createSofiaAgentDependencies(workspace);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
+// Ordinary Discord messages are a separate opt-in Gateway connection; slash interactions remain on the signed HTTP transport.
+const discordGatewayRuntime = createDiscordGatewayMessagingRuntime(process.env, workspace);
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -223,6 +226,9 @@ server.listen(port, "0.0.0.0", () => {
   void telegramRuntime?.start().catch((error) => {
     console.error("Telegram integration failed to start:", error instanceof Error ? error.name : "UnknownError");
   });
+  void discordGatewayRuntime?.start().catch((error) => {
+    console.error("Discord Gateway integration failed to start:", error instanceof Error ? error.name : "UnknownError");
+  });
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
@@ -230,6 +236,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
+    void discordGatewayRuntime?.stop().catch(() => console.error("Discord Gateway integration shutdown failed."));
     server.close();
   });
 }
