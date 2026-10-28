@@ -122,7 +122,7 @@ test("Matrix transport rejects DNS answers that point to private or loopback net
     });
     await assert.rejects(
       () => transport.start(new AbortController().signal, async () => {}),
-      /non-public address/i,
+      /could not authenticate/i,
       `should reject DNS result ${address}`,
     );
     assert.equal(fetchCalls, 0, `must not send the access token to ${address}`);
@@ -142,7 +142,7 @@ test("Matrix transport rejects mixed public/private DNS answers", async () => {
   });
   await assert.rejects(
     () => transport.start(new AbortController().signal, async () => {}),
-    /non-public address/i,
+    /could not authenticate/i,
   );
   assert.equal(fetchCalls, 0);
 });
