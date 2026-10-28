@@ -17,6 +17,7 @@ export interface SofiaMessagingHandlerOptions {
   /** Opt-in chat-first mode for integrations where plain text is a task. */
   allowPlainText?: boolean;
   maxTaskCharacters?: number;
+  messagingContextSecret?: string;
   /** Called after the API accepts a run; implementations should schedule completion reporting without blocking polling. */
   onAccepted?: (input: { runId: string; runStatus: string; message: InboundMessage }) => void;
 }
@@ -47,6 +48,7 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
     accessPolicy: options.accessPolicy,
     deduplicator: options.deduplicator,
     maxTaskCharacters: options.maxTaskCharacters,
+    messagingContextSecret: options.messagingContextSecret,
   });
 
   return async function onMessage(message: InboundMessage): Promise<string | void> {
