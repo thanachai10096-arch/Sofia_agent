@@ -222,3 +222,76 @@ test("gateway classifies unknown provider errors without exposing their messages
     return true;
   });
 });
+
+test("context packing prefers compact relevant evidence when the token budget is tight", async () => {
+  const budget = makeBudget();
+  let packedIds: string[] = [];
+  const compactRoute: InternalRoute = {
+    ...route(async () => ({
+      value: { ok: true },
+      usage: { inputTokens: 10, outputTokens: 1 },
+      finishReason: "complete",
+    })),
+    contextWindow: 90,
+    prepare(prompt) {
+      const evidenceIds = prompt.evidence.map((chunk) => chunk.id);
+      return {
+        inputTokensUpperBound: 10 + prompt.evidence.reduce((sum, chunk) => sum + chunk.text.length, 0),
+        invoke: async () => {
+          packedIds = evidenceIds;
+          return {
+            value: { ok: true },
+            usage: { inputTokens: 10, outputTokens: 1 },
+            finishReason: "complete",
+          };
+        },
+      };
+    },
+  };
+  const gateway = new TokenAwareGateway(budget, [compactRoute]);
+  const input = request();
+  input.evidence = [
+    { id: "verbose", relevance: 0.9, text: "v".repeat(30) },
+    { id: "compact", relevance: 0.6, text: "short" },
+  ];
+
+  await gateway.generate(input);
+
+  assert.deepEqual(packedIds, ["compact"]);
+});
+
+test("context packing deduplicates identical evidence text across different IDs", async () => {
+  const budget = makeBudget();
+  let packedIds: string[] = [];
+  const deduplicatingRoute: InternalRoute = {
+    ...route(async () => ({
+      value: { ok: true },
+      usage: { inputTokens: 10, outputTokens: 1 },
+      finishReason: "complete",
+    })),
+    prepare(prompt) {
+      const evidenceIds = prompt.evidence.map((chunk) => chunk.id);
+      return {
+        inputTokensUpperBound: 10 + prompt.evidence.reduce((sum, chunk) => sum + chunk.text.length, 0),
+        invoke: async () => {
+          packedIds = evidenceIds;
+          return {
+            value: { ok: true },
+            usage: { inputTokens: 10, outputTokens: 1 },
+            finishReason: "complete",
+          };
+        },
+      };
+    },
+  };
+  const gateway = new TokenAwareGateway(budget, [deduplicatingRoute]);
+  const input = request();
+  input.evidence = [
+    { id: "first-copy", relevance: 0.8, text: "same evidence" },
+    { id: "second-copy", relevance: 0.7, text: "same evidence" },
+  ];
+
+  await gateway.generate(input);
+
+  assert.deepEqual(packedIds, ["first-copy"]);
+});
