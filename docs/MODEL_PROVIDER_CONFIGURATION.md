@@ -107,7 +107,7 @@ console.log(result);
 
 ## Choose a model per run
 
-The API, SDK, and CLI support a per-run `modelSelection` profile. Omit it or use `auto` to let Sofia choose the configured route for each phase. Use `fast`, `coding`, `reasoning`, or `vision` to pin the corresponding configured model ID for that run while Sofia keeps its phase/capability routing and verification behavior.
+The `/v1/agent/runs` API, SDK `run()`/`start()`, and CLI support a per-run `modelSelection` profile. Omit it or use `auto` to let Sofia choose among the configured routes for each phase. Use `fast`, `coding`, `reasoning`, or `vision` to pin that profile’s configured model ID for the run while Sofia keeps its phase/capability routing and verification behavior.
 
 CLI examples:
 
@@ -124,3 +124,6 @@ await client.run({ task: "Review the design", modelSelection: "reasoning" });
 ```
 
 These values select model IDs configured for the current Sofia server; they do not let a client submit a new provider URL or API key. The current provider configuration is server-wide, so this is not yet per-user provider credential storage or a persistent account preference. If a provider/model cannot perform a required capability, the run may fail rather than silently switching away from the explicitly selected model. Model availability and capability metadata are not guaranteed by listing a model alone.
+
+
+Explicit model selection is not supported for durable `/v1/jobs` yet; those jobs use automatic routing. The API rejects explicit profile values for that endpoint instead of silently ignoring the selection. User-specific persistent preferences and user-supplied provider credentials are also not implemented by this change.
