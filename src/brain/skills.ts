@@ -50,7 +50,7 @@ function learnedToSkill(skill: LearnedSkillCandidate): SofiaSkill {
     id: `learned:${skill.name}:${skill.category}`,
     name: skill.name,
     description: "Learned from a previously verified workflow or repair.",
-    triggers: [skill.trigger],
+    triggers: [...new Set([skill.trigger, ...(skill.triggers ?? [])])].slice(0, 12),
     categories: [skill.category],
     strategy: skill.strategy,
     procedure: skill.procedure,
