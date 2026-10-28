@@ -79,7 +79,21 @@ const result = await probeModelCapabilities({
 console.log(result);
 \`\`\`
 
-This sends a small ordinary chat request and a second request that asks for a named tool call. It never executes the returned tool. These requests may incur provider charges and may be logged by that provider, so call this helper only when the operator explicitly wants to test a configured endpoint. A model is marked as supporting tool use only when a tool-call response is actually observed; rejected or ambiguous tool requests remain \`unknown\`. The probe does not certify vision, reasoning quality, structured output, or context-window size.
+This sends a small ordinary chat request and a second request that asks for a named tool call. It never executes the returned tool. These requests may incur provider charges and may be logged by that provider, so call this helper only when the operator explicitly wants to test a configured endpoint. A model is marked as supporting tool use only when a tool-call response is actually observed; rejected or ambiguous tool requests remain \`unknown\`. The probe does not certify vision, reasoning quality, structured output, or context-window size. For a separate opt-in check of image-input acceptance and JSON-object output, use `probeExtendedModelCapabilities`. It makes two additional potentially billable requests and never executes tools:
+
+```ts
+import { probeExtendedModelCapabilities } from "sofia-agent";
+
+const result = await probeExtendedModelCapabilities({
+  baseUrl: process.env.SOFIA_MODEL_BASE_URL ?? "https://api.openai.com/v1",
+  apiKey: process.env.SOFIA_MODEL_API_KEY ?? process.env.OPENAI_API_KEY,
+  model: process.env.SOFIA_MODEL_NAME ?? "your-model-id",
+  // Set protocol: "anthropic" for the native Anthropic Messages API.
+});
+console.log(result);
+```
+
+`visionInput: "accepted"` means the endpoint accepted a tiny image input and returned text; it does not measure visual accuracy. `jsonObjectOutput: "verified"` means the returned content parsed as a JSON object. Context-window size is exposed as `contextWindow` only when the model-list endpoint reports a positive integer field such as `context_length`, `context_window`, or `max_context_length`; Sofia does not guess a model maximum or run expensive context-overflow tests automatically.
 
 ## Compatibility and security notes
 
