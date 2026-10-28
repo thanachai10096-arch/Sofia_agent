@@ -124,7 +124,7 @@ function verifyMessagingContext(input: AgentRunInput, config: SofiaApiConfig): i
   const context = input._messagingContext;
   if (context === undefined) return undefined;
   const secret = config.messagingContextSecret?.trim();
-  if (!secret || !context || typeof context !== "object") return null;
+  if (!secret || secret.length < 32 || !context || typeof context !== "object") return null;
   const platforms = new Set(["telegram", "discord", "slack", "line", "whatsapp", "matrix"]);
   if (!platforms.has(context.platform) || ![context.userId, context.conversationId, context.messageId].every(value => typeof value === "string" && value.length > 0 && value.length <= 512) ||
       typeof context.taskHash !== "string" || !/^[a-f0-9]{64}$/.test(context.taskHash) || typeof context.signature !== "string" || !/^[a-f0-9]{64}$/.test(context.signature)) return null;
@@ -505,10 +505,6 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (input._messagingContext !== undefined && !trustedMessagingTarget) return json(res, 403, { error: "invalid_messaging_context" }, origin, config);
         input._trustedMessagingTarget = trustedMessagingTarget ?? undefined;
 
-        const trustedMessagingTarget = verifyMessagingContext(input, config);
-        if (input._messagingContext !== undefined && !trustedMessagingTarget) return json(res, 403, { error: "invalid_messaging_context" }, origin, config);
-        input._trustedMessagingTarget = trustedMessagingTarget ?? undefined;
-
         try { usage.consume(auth.keyId); } catch {
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
         }
@@ -572,6 +568,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
+        const trustedMessagingTarget = verifyMessagingContext(input, config);
+        if (input._messagingContext !== undefined && !trustedMessagingTarget) return json(res, 403, { error: "invalid_messaging_context" }, origin, config);
+        input._trustedMessagingTarget = trustedMessagingTarget ?? undefined;
 
         // Async mode is the reliable path for phones: the browser may sleep,
         // change networks, or be backgrounded while Sofia continues server-side.
