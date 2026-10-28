@@ -31,7 +31,7 @@ export function createMessagingAccessCheck(policy: ChatAccessPolicy) {
 
 /**
  * Bridges normalized inbound messages to Sofia's existing command dispatcher.
- * Only explicit command messages start a run; ordinary chat and attachments do not.
+ * Natural-chat mode can route ordinary text through the same guarded dispatcher; command-only mode remains available.
  * Do not also pass this same deduplicator to createMessagingGateway, because the
  * existing command handler claims the provider/channel/message key itself.
  */
@@ -53,7 +53,7 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
     let task: string;
     if (prefix === false) {
       // Natural mode accepts ordinary text, but keeps common slash commands out of the task queue.
-      if (text === "/run" || text.startsWith("/run ") || text.startsWith("/run\\t")) {
+      if (text === "/run" || text.startsWith("/run ") || text.startsWith("/run\t")) {
         task = text.slice(4).trim();
       } else if (text.startsWith("/")) {
         return;
@@ -61,7 +61,7 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
         task = text;
       }
     } else {
-      if (text !== prefix && !text.startsWith(prefix + " ") && !text.startsWith(prefix + "\\t")) return;
+      if (text !== prefix && !text.startsWith(prefix + " ") && !text.startsWith(prefix + "\t")) return;
       task = text.slice(prefix.length).trim();
     }
     const result = await handleCommand({
@@ -84,7 +84,7 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
         return "Access denied.";
       case "rejected":
         return result.reason === "empty_task"
-          ? `Usage: ${prefix} <task>`
+          ? `Usage: ${prefix === false ? "/run" : prefix} <task>`
           : "Task is too long. Please shorten it.";
       case "duplicate":
       case "ignored":
