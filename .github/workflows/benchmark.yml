@@ -23,3 +23,4 @@ jobs:
       - run: node bench/run.mjs --selftest
       - run: node bench/run.mjs --agent noop
       - run: node bench/run.mjs --agent reference
+      - run: node --import tsx bench/token-efficiency.mjs
