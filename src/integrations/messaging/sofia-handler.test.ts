@@ -94,3 +94,32 @@ test("invalid command prefixes are rejected at configuration time", () => {
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: " " }), /commandPrefix/);
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: "/run\nadmin" }), /commandPrefix/);
 });
+
+test("natural-language mode starts ordinary text without requiring /run", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, naturalLanguageMode: "natural-language" });
+  assert.equal(await handle(inbound("Please explain this error and suggest a fix.")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.deepEqual(h.starts.map((entry) => entry.task), ["Please explain this error and suggest a fix."]);
+  assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
+});
+
+test("natural-language mode does not reinterpret unrelated slash commands as task text", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, naturalLanguageMode: "natural-language" });
+  assert.equal(await handle(inbound("/status run-123")), undefined);
+  assert.equal(await handle(inbound("/cancel run-123")), undefined);
+  assert.equal(h.starts.length, 0);
+});
+
+test("natural-language mode still applies the existing user authorization and deduplication", async () => {
+  const denied = harness(false);
+  const deniedHandler = createSofiaMessagingHandler({ ...denied, naturalLanguageMode: "natural-language" });
+  assert.equal(await deniedHandler(inbound("Please edit my project")), "Access denied.");
+  assert.equal(denied.starts.length, 0);
+
+  const allowed = harness();
+  const allowedHandler = createSofiaMessagingHandler({ ...allowed, naturalLanguageMode: "natural-language" });
+  await allowedHandler(inbound("Check this task"));
+  await allowedHandler(inbound("Check this task"));
+  assert.equal(allowed.starts.length, 1);
+});
