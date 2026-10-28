@@ -28,7 +28,8 @@ function phaseFromRequest(request: string): BrainPhase {
 function evidenceText(value: unknown): string {
   if (typeof value === "string") return value.trim();
   try {
-    return JSON.stringify(value);
+    const encoded = JSON.stringify(value);
+    return typeof encoded === "string" ? encoded : "";
   } catch {
     return "";
   }
