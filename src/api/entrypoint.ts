@@ -18,7 +18,7 @@ const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
-const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read,model:profile:read,model:profile:write").split(",").map((s) => s.trim()).filter(Boolean);
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
 const deps = await createSofiaAgentDependenciesWithSessions(workspace, undefined, process.env.SOFIA_SESSION_DB_PATH?.trim() || undefined);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
