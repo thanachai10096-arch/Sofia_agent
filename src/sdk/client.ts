@@ -48,12 +48,18 @@ export interface SofiaContinuousWorkRecord {
 
 export type SofiaRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
-/** Per-API-key usage counters for the current rolling 24-hour window. */
+/** Per-API-key counters for the current 24-hour accounting window. */
 export interface SofiaUsageSnapshot {
   keyId: string;
   runs: number;
   toolCalls: number;
   startedAt: number;
+  /** Completed Brain runs with structured usage reports; excludes legacy runs. */
+  brainRuns?: number;
+  /** Model calls reported by completed Brain runs. */
+  brainModelCalls?: number;
+  /** Reserved-or-used token estimate reported by Brain; not provider-billed usage. */
+  brainReservedOrUsedTokens?: number;
 }
 
 export interface SofiaRunResponse {
