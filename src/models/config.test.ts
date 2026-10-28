@@ -5,7 +5,7 @@ import { loadModelConfigFromEnv } from "./config.js";
 const names = [
   "SOFIA_MODEL_PROVIDER", "SOFIA_MODEL_API_KEY", "SOFIA_MODEL_BASE_URL", "SOFIA_MODEL_NAME",
   "SOFIA_FAST_MODEL", "SOFIA_CODING_MODEL", "SOFIA_REASONING_MODEL", "SOFIA_VISION_MODEL",
-  "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+  "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY",
   "GEMINI_API_KEY", "Gemini_API_Key", "GEMINI_MODEL",
   "GEMINI_FAST_MODEL", "GEMINI_CODING_MODEL", "GEMINI_REASONING_MODEL", "GEMINI_VISION_MODEL",
   "SOFIA_AI_GATEWAY_API_KEY", "AI_GATEWAY_API_KEY", "SOFIA_AI_GATEWAY_URL",
@@ -57,6 +57,19 @@ test("OpenAI provider uses its own credential and model", () => {
   assert.equal(config.providers.fast?.baseUrl, "https://api.openai.com/v1");
   assert.equal(config.providers.fast?.apiKey, "openai-test-key");
   assert.equal(config.providers.fast?.model, "gpt-test-model");
+});
+
+
+test("Anthropic selects the native Messages API protocol", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "anthropic";
+  process.env.ANTHROPIC_API_KEY = "anthropic-test-key";
+  process.env.SOFIA_MODEL_NAME = "claude-test-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.anthropic.com/v1");
+  assert.equal(config.providers.fast?.apiKey, "anthropic-test-key");
+  assert.equal(config.providers.fast?.model, "claude-test-model");
+  assert.equal(config.providers.fast?.protocol, "anthropic");
 });
 
 test("OpenRouter and Ollama presets are supported without changing core routing", () => {
