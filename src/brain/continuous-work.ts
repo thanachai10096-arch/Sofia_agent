@@ -20,6 +20,22 @@ export interface ContinuousWorkOptions {
   maxIterationsPerActivation?: number; maxLifetimeIterations?: number; maxActivationMs?: number; pollIntervalMs?: number;
   isComplete: (record: Readonly<ContinuousWorkRecord>, job: Readonly<JobRecord>) => boolean | Promise<boolean>;
 }
+
+/**
+ * Conservative default completion check for continuous objectives.
+ * A successful child job alone is not enough: require a completed Brain report,
+ * at least one passing verification result, no failed criteria, and no declared risks.
+ */
+export function hasVerifiedCompletionEvidence(job: Readonly<JobRecord>): boolean {
+  const report = job.result;
+  if (!report || report.completed !== true || report.state !== "completed") return false;
+  if (!Array.isArray(report.verification) || report.verification.length === 0) return false;
+  if (!report.verification.every((item) => item.passed === true &&
+      typeof item.criterionId === "string" && item.criterionId.length > 0 &&
+      Array.isArray(item.evidenceIds) && item.evidenceIds.length > 0 &&
+      typeof item.workspaceRevision === "string" && item.workspaceRevision.length > 0)) return false;
+  return Array.isArray(report.remainingRisks) && report.remainingRisks.length === 0;
+}
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal?.aborted) { resolve(); return; }
