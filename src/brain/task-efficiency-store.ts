@@ -27,13 +27,15 @@ export class FileTaskEfficiencyStore {
       ["output tokens", value.outputTokens],
       ["cached input tokens", value.cachedInputTokens],
       ["model calls", value.modelCalls],
+      ["unmeasured model calls", value.unmeasuredModelCalls],
       ["retries", value.retries],
       ["duration", value.durationMs],
     ] as const) {
       if (!Number.isSafeInteger(count) || count < 0) throw new Error("Invalid telemetry " + key);
     }
     if (value.passedCriteria > value.acceptanceCriteria || value.cachedInputTokens > value.inputTokens ||
-        typeof value.completed !== "boolean" || typeof value.costKnown !== "boolean") {
+        typeof value.completed !== "boolean" || typeof value.costKnown !== "boolean" ||
+        typeof value.usageComplete !== "boolean" || value.usageComplete !== (value.unmeasuredModelCalls === 0)) {
       throw new Error("Invalid efficiency measurement");
     }
     const clean: TaskMeasurement = {
@@ -41,6 +43,7 @@ export class FileTaskEfficiencyStore {
       acceptanceCriteria: value.acceptanceCriteria, passedCriteria: value.passedCriteria,
       inputTokens: value.inputTokens, outputTokens: value.outputTokens,
       cachedInputTokens: value.cachedInputTokens, modelCalls: value.modelCalls,
+      unmeasuredModelCalls: value.unmeasuredModelCalls, usageComplete: value.usageComplete,
       retries: value.retries, durationMs: value.durationMs, costKnown: value.costKnown,
     };
     if (value.estimatedCostNanoUsd !== undefined) {
