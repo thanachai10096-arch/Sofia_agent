@@ -15,6 +15,8 @@ export interface JobRecord {
   createdAt: string;
   updatedAt: string;
   task: string;
+  /** Bounded, redacted context used by the job and preserved across resume. */
+  context?: string;
   ownerKeyId?: string;
   /** Destination used only for post-restart Discord job recovery notices. */
   notificationChannelId?: string;
@@ -57,6 +59,7 @@ function redactJobRecord(record: JobRecord): JobRecord {
     // Preserve leaseOwnerToken and lease timestamps in storage: these are runtime
     // fencing metadata, not user content, and redacting them would break worker claims.
     task: String(redactSecrets(record.task)),
+    ...(record.context !== undefined ? { context: String(redactSecrets(record.context)) } : {}),
     ...(record.sessionTask ? { sessionTask: String(redactSecrets(record.sessionTask)) } : {}),
     ...(record.snapshot ? { snapshot: redactSecrets(record.snapshot) as BrainRunSnapshot } : {}),
     ...(record.result ? { result: redactSecrets(record.result) as JobRecord["result"] } : {}),
@@ -430,6 +433,7 @@ export class DurableJobRuntime implements JobRuntime {
     const now = new Date().toISOString();
     const record: JobRecord = {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
+      ...(input.context !== undefined ? { context: String(redactSecrets(input.context)) } : {}),
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
       ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
       ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
@@ -519,7 +523,7 @@ export class DurableJobRuntime implements JobRuntime {
       record.notificationDelivered = false;
       const saved = await this.state.save(record);
       if (!saved) throw new Error("Job state changed before resume could be scheduled");
-      await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
+      await this.execute(record, { task: record.task, ...(record.context !== undefined ? { context: record.context } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
       return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);
