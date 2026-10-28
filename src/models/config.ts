@@ -153,7 +153,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
   // A named provider's API key must not be sent to an unrelated endpoint due
   // to an accidental or injected BASE_URL override. Use openai-compatible when
   // intentionally routing credentials through a custom gateway/proxy.
-  if (configuredBaseUrl && providerId !== "openai-compatible" && providerId !== "ollama" && preset.baseUrl) {
+  if (configuredBaseUrl && providerId !== "openai-compatible" && preset.baseUrl) {
     const expectedOrigin = new URL(preset.baseUrl).origin;
     const configuredOrigin = new URL(baseUrl).origin;
     if (configuredOrigin !== expectedOrigin) {
