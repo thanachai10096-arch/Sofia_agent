@@ -80,7 +80,9 @@ export class SofiaAgent {
         request.useBrain !== false;
       const result = shouldUseBrain ? await this.runBrain(activeRequest) : await this.runLegacy(activeRequest);
       if (session && this.deps.sessionStore) {
-        session.messages.push(`assistant: ${result.output}`);
+        session.messages.push(`assistant: ${result.output.slice(0, 8_000)}`);
+        if (session.messages.length > 200) session.messages.splice(0, session.messages.length - 200);
+        session.updatedAt = Date.now();
         this.deps.sessionStore.save(session);
       }
       return result;
@@ -382,12 +384,6 @@ export class SofiaAgent {
         });
 
         if (review.approved) {
-          if (session && this.deps.sessionStore) {
-            session.messages.push(`assistant: ${response.text.slice(0, 8_000)}`);
-            if (session.messages.length > 200) session.messages.splice(0, session.messages.length - 200);
-            session.updatedAt = Date.now();
-            this.deps.sessionStore.save(session);
-          }
           emit({ type: "run.completed", message: "Sofia run completed." });
           return {
             runId,
