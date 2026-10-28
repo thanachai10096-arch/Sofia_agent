@@ -46,6 +46,9 @@ test("UsageLimiter returns defensive copies so callers cannot mutate quota count
     runs: 1,
     toolCalls: 2,
     startedAt: limiter.get("key").startedAt,
+    brainRuns: 0,
+    brainModelCalls: 0,
+    brainReservedOrUsedTokens: 0,
   });
   assert.throws(() => limiter.consume("key"), /API usage quota exceeded/);
 });
@@ -67,6 +70,9 @@ test("UsageLimiter counts tool-call attempts without incrementing run count", ()
     runs: 1,
     toolCalls: 1,
     startedAt: limiter.get("key").startedAt,
+    brainRuns: 0,
+    brainModelCalls: 0,
+    brainReservedOrUsedTokens: 0,
   });
   limiter.consumeToolCall("key");
   assert.throws(() => limiter.consumeToolCall("key"), /API usage quota exceeded/);
