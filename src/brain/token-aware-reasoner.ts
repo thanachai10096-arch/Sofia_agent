@@ -2,6 +2,7 @@ import type { BrainReasoner, PreparedInference } from "./types.js";
 import {
   TokenAwareGateway,
   type BrainPhase,
+  type EvidenceChunk,
   type InferenceRequest,
 } from "./token-aware-gateway.js";
 
@@ -56,7 +57,7 @@ function asInferenceRequest(request: string): InferenceRequest {
   const memory = parsed.memory ?? {};
   const understanding = payload.understanding as Record<string, unknown> | undefined;
   const task = typeof payload.task === "string" ? payload.task : "Execute the requested Brain phase.";
-  const evidence: InferenceRequest["evidence"] = [];
+  const evidence: EvidenceChunk[] = [];
   const addEvidence = (id: string, label: string, value: unknown, relevance?: number) => {
     const text = evidenceText(value);
     if (!text) return;
