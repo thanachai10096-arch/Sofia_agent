@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createSofiaBrain } from "./executor.js";
+import type { TaskMeasurement } from "./task-efficiency-metrics.js";
 import { InMemorySkillLedger } from "./learning.js";
 import type { BrainReasoner, ToolGateway, ToolResult } from "./types.js";
 import type { SubagentRuntime } from "./subagents.js";
@@ -106,12 +107,14 @@ function makeTools(): ToolGateway {
 }
 
 test("Brain completes a coding loop only after trusted verification", async () => {
+  let measurement: TaskMeasurement | undefined;
   const brain = createSofiaBrain({
     dependencies: {
       reasoner: makeReasoner(),
       tools: makeTools(),
       allowShell: false,
       allowNetwork: false,
+      onEfficiencyMeasurement(value) { measurement = value; throw new Error("telemetry store unavailable"); },
     },
     limits: {
       maxSteps: 4,
@@ -147,6 +150,14 @@ test("Brain completes a coding loop only after trusted verification", async () =
   assert.deepEqual(report.changedFiles, ["hello.txt"]);
   assert.equal(report.verification[0]?.passed, true);
   assert.equal(report.usage.modelCalls, 2);
+  assert.ok(measurement);
+  assert.equal(measurement.completed, true);
+  assert.equal(measurement.acceptanceCriteria, 1);
+  assert.equal(measurement.passedCriteria, 1);
+  assert.equal(measurement.inputTokens, 20);
+  assert.equal(measurement.outputTokens, 40);
+  assert.equal(measurement.modelCalls, 2);
+  assert.equal("prompt" in measurement, false);
 });
 
 
@@ -177,6 +188,7 @@ test("Brain feeds a failed verification into a specialist and executes its valid
       assert.equal(request.context && typeof request.context === "object", true);
       return {
         role: "debugger",
+        usage: { inputTokens: 7, outputTokens: 3 },
         summary: "Retry the file write.",
         output: "validated recovery proposal",
         proposedAction: {
@@ -188,6 +200,7 @@ test("Brain feeds a failed verification into a specialist and executes its valid
     },
   };
 
+  let subagentMeasurement: TaskMeasurement | undefined;
   const brain = createSofiaBrain({
     dependencies: {
       reasoner: makeReasoner(),
@@ -195,6 +208,7 @@ test("Brain feeds a failed verification into a specialist and executes its valid
       subagents,
       allowShell: false,
       allowNetwork: false,
+      onEfficiencyMeasurement(value) { subagentMeasurement = value; },
       onEvent(event) {
         events.push(event.type);
       },
@@ -232,6 +246,11 @@ test("Brain feeds a failed verification into a specialist and executes its valid
   assert.ok(events.includes("brain.subagent.completed"));
   assert.equal(events.includes("brain.replan.started"), false);
   assert.ok(events.includes("brain.verification.completed"));
+  assert.ok(subagentMeasurement);
+  assert.equal(subagentMeasurement.unmeasuredModelCalls, 0);
+  assert.equal(subagentMeasurement.usageComplete, true);
+  assert.ok(subagentMeasurement.inputTokens >= 27);
+  assert.ok(subagentMeasurement.outputTokens >= 43);
 
   const trace = brain.getExecutionTrace();
   assert.ok(trace.length > 0);

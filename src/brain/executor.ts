@@ -23,6 +23,7 @@ import { reviewCodeChange } from "../review/code-review.js";
 import type { RunStore } from "./run-store.js";
 import type { ProjectMemoryEntry, ProjectMemoryStore } from "./project-memory.js";
 import type { EvolutionEngine } from "./evolution.js";
+import { TaskEfficiencyMetrics, type TaskMeasurement } from "./task-efficiency-metrics.js";
 
 import type {
   AcceptanceCriterion,
@@ -97,6 +98,8 @@ interface Dependencies {
   runStore?: RunStore;
   projectMemory?: ProjectMemoryStore;
   evolution?: EvolutionEngine;
+  /** Optional host hook for privacy-safe aggregate run telemetry. Callback failures never affect execution. */
+  onEfficiencyMeasurement?: (measurement: TaskMeasurement) => void | Promise<void>;
 }
 
 export interface BrainRunInput {
@@ -239,6 +242,7 @@ export class SofiaBrain {
   private signal!: AbortSignal;
   private readonly limits: BrainLimits;
   private readonly trace = new ExecutionTrace();
+  private readonly efficiencyMetrics = new TaskEfficiencyMetrics();
 
   private readonly usage = {
     steps: 0,
@@ -433,12 +437,16 @@ export class SofiaBrain {
       // Brain keeps only telemetry here to avoid double-reserving tokens.
       this.usage.modelCalls += 1;
 
-      const result = await this.wait(() =>
-        prepared.invoke({
-          signal: this.signal,
-          maxOutputTokens: this.limits.maxOutputTokens,
-        }),
-      );
+      const modelCallStartedAt = Date.now();
+      let result: Awaited<ReturnType<typeof prepared.invoke>>;
+      try {
+        result = await this.wait(() =>
+          prepared.invoke({ signal: this.signal, maxOutputTokens: this.limits.maxOutputTokens }),
+        );
+      } catch (error) {
+        this.efficiencyMetrics.recordUnmeasuredModelCall();
+        throw error;
+      }
 
       const actual = result.usage.inputTokens + result.usage.outputTokens;
 
@@ -448,8 +456,16 @@ export class SofiaBrain {
         result.usage.inputTokens < 0 ||
         result.usage.outputTokens < 0
       ) {
+        this.efficiencyMetrics.recordUnmeasuredModelCall();
         throw new Stop("Invalid inference usage");
       }
+
+      this.efficiencyMetrics.recordModelCall({
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        durationMs: Math.max(0, Date.now() - modelCallStartedAt),
+        retries: ("retries" in result && typeof result.retries === "number") ? result.retries : 0,
+      });
 
       this.usage.reservedOrUsedTokens += actual;
 
@@ -531,14 +547,28 @@ export class SofiaBrain {
 
     this.usage.modelCalls += 1;
     const role = roleForTask(task, failureCategory);
-    const result = await this.wait(() =>
-      runtime.run({
-        role,
-        task,
-        context,
-        signal: this.signal,
-      }),
-    );
+    const modelCallStartedAt = Date.now();
+    let result: SubagentResult;
+    try {
+      result = await this.wait(() =>
+        runtime.run({ role, task, context, signal: this.signal }),
+      );
+    } catch (error) {
+      this.efficiencyMetrics.recordUnmeasuredModelCall();
+      throw error;
+    }
+    if (result.usage &&
+        Number.isSafeInteger(result.usage.inputTokens) && result.usage.inputTokens >= 0 &&
+        Number.isSafeInteger(result.usage.outputTokens) && result.usage.outputTokens >= 0) {
+      this.efficiencyMetrics.recordModelCall({
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        durationMs: Math.max(0, Date.now() - modelCallStartedAt),
+        retries: result.retries ?? 0,
+      });
+    } else {
+      this.efficiencyMetrics.recordUnmeasuredModelCall();
+    }
 
     this.emit({ type: "brain.subagent.completed" });
 
@@ -860,6 +890,8 @@ export class SofiaBrain {
     const resumed = input.resume;
     let understanding: TaskUnderstanding | undefined;
     let completedStepIds = new Set<string>();
+
+    this.efficiencyMetrics.start();
 
     const checkpointState = async (plan: ExecutionPlan | undefined): Promise<void> => {
       if (!plan || !checkpointId || !understanding) return;
@@ -1257,6 +1289,17 @@ export class SofiaBrain {
         remainingRisks,
       );
     } finally {
+      try {
+        const measurement = this.efficiencyMetrics.finishTask({
+          taskId: this.runId,
+          completed: this.state === "completed",
+          acceptanceCriteria: verification.length,
+          passedCriteria: verification.filter((item) => item.passed).length,
+        });
+        await this.dependencies.onEfficiencyMeasurement?.(measurement);
+      } catch {
+        // Telemetry is best-effort and must never change task execution semantics.
+      }
       clearTimeout(timer);
       this.signal.removeEventListener("abort", onAbort);
       this.signal = originalSignal;

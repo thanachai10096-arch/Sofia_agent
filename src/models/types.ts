@@ -5,7 +5,7 @@ export interface ChatMessage { role:"system"|"user"|"assistant"|"tool"; content:
 export interface ToolDefinition { type:"function"; function:{name:string;description:string;parameters:Record<string,unknown>}; }
 export interface ModelRequest { task:string; kind:TaskKind; context?:string; step:number; messages?:ChatMessage[]; tools?:ToolDefinition[]; }
 export interface ModelUsage { inputTokens: number; outputTokens: number; }
-export interface ModelResponse { text:string; confidence?:number; toolCalls?:ToolCall[]; assistantMessage?:ChatMessage; usage?:ModelUsage; }
+export interface ModelResponse { text:string; confidence?:number; toolCalls?:ToolCall[]; assistantMessage?:ChatMessage; usage?:ModelUsage; retries?:number; }
 export interface ToolCall { id:string; name:string; input:Record<string,unknown>; }
 export interface ModelProvider {
   generate(

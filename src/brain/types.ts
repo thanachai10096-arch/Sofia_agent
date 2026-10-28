@@ -104,7 +104,12 @@ export interface PreparedInference {
   invoke(options: {
     signal: AbortSignal;
     maxOutputTokens: number;
-  }): Promise<{ value: unknown; usage: { inputTokens: number; outputTokens: number } }>;
+  }): Promise<{
+    value: unknown;
+    usage: { inputTokens: number; outputTokens: number };
+    /** Transient provider retries before a successful response, when available. */
+    retries?: number;
+  }>;
 }
 
 export interface BrainReasoner {

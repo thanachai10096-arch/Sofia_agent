@@ -96,6 +96,25 @@ test("gateway meters actual provider usage exactly once", async () => {
   assert.equal(budget.snapshot().reservedTokens, 0);
 });
 
+test("metered inference preserves successful provider retry counts", async () => {
+  const gateway = new TokenAwareGateway(
+    makeBudget(),
+    [route(async () => ({
+      value: { ok: true },
+      usage: { inputTokens: 12, outputTokens: 4 },
+      retries: 2,
+      finishReason: "complete",
+    }))],
+  );
+
+  const result = await gateway.generateMetered(request());
+  assert.deepEqual(result, {
+    value: { ok: true },
+    usage: { inputTokens: 12, outputTokens: 4 },
+    retries: 2,
+  });
+});
+
 test("gateway rejects incomplete provider output without retrying", async () => {
   const budget = makeBudget();
   let calls = 0;
@@ -221,4 +240,151 @@ test("gateway classifies unknown provider errors without exposing their messages
     assert.doesNotMatch(error.message, /private-token/);
     return true;
   });
+});
+
+test("context packing prefers compact relevant evidence when the token budget is tight", async () => {
+  const budget = makeBudget();
+  let packedIds: string[] = [];
+  const compactRoute: InternalRoute = {
+    ...route(async () => ({
+      value: { ok: true },
+      usage: { inputTokens: 10, outputTokens: 1 },
+      finishReason: "complete",
+    })),
+    contextWindow: 90,
+    prepare(prompt) {
+      const evidenceIds = prompt.evidence.map((chunk) => chunk.id);
+      return {
+        inputTokensUpperBound: 10 + prompt.evidence.reduce((sum, chunk) => sum + chunk.text.length, 0),
+        invoke: async () => {
+          packedIds = evidenceIds;
+          return {
+            value: { ok: true },
+            usage: { inputTokens: 10, outputTokens: 1 },
+            finishReason: "complete",
+          };
+        },
+      };
+    },
+  };
+  const gateway = new TokenAwareGateway(budget, [compactRoute]);
+  const input = request();
+  input.evidence = [
+    { id: "verbose", relevance: 0.9, text: "v".repeat(30) },
+    { id: "compact", relevance: 0.6, text: "short" },
+  ];
+
+  await gateway.generate(input);
+
+  assert.deepEqual(packedIds, ["compact"]);
+});
+
+test("context packing deduplicates identical evidence text across different IDs", async () => {
+  const budget = makeBudget();
+  let packedIds: string[] = [];
+  const deduplicatingRoute: InternalRoute = {
+    ...route(async () => ({
+      value: { ok: true },
+      usage: { inputTokens: 10, outputTokens: 1 },
+      finishReason: "complete",
+    })),
+    prepare(prompt) {
+      const evidenceIds = prompt.evidence.map((chunk) => chunk.id);
+      return {
+        inputTokensUpperBound: 10 + prompt.evidence.reduce((sum, chunk) => sum + chunk.text.length, 0),
+        invoke: async () => {
+          packedIds = evidenceIds;
+          return {
+            value: { ok: true },
+            usage: { inputTokens: 10, outputTokens: 1 },
+            finishReason: "complete",
+          };
+        },
+      };
+    },
+  };
+  const gateway = new TokenAwareGateway(budget, [deduplicatingRoute]);
+  const input = request();
+  input.evidence = [
+    { id: "first-copy", relevance: 0.8, text: "same evidence" },
+    { id: "second-copy", relevance: 0.7, text: "same evidence" },
+  ];
+
+  await gateway.generate(input);
+
+  assert.deepEqual(packedIds, ["first-copy"]);
+});
+
+test("equal estimated costs use configured route weights instead of array order", async () => {
+  const budget = makeBudget();
+  let selected = "";
+  const expensiveRoute: InternalRoute = {
+    ...route(async () => {
+      selected = "expensive";
+      return {
+        value: { ok: true },
+        usage: { inputTokens: 10, outputTokens: 1 },
+        finishReason: "complete",
+      };
+    }),
+    id: "a-expensive",
+    costWeight: 3,
+    latencyWeight: 2,
+    qualityWeight: 8,
+  };
+  const economicalRoute: InternalRoute = {
+    ...route(async () => {
+      selected = "economical";
+      return {
+        value: { ok: true },
+        usage: { inputTokens: 10, outputTokens: 1 },
+        finishReason: "complete",
+      };
+    }),
+    id: "z-economical",
+    costWeight: 1,
+    latencyWeight: 1,
+    qualityWeight: 5,
+  };
+  const gateway = new TokenAwareGateway(budget, [expensiveRoute, economicalRoute]);
+
+  await gateway.generate(request());
+
+  assert.equal(selected, "economical");
+});
+
+
+test("gateway rejects duplicate route IDs before routing", () => {
+  const budget = makeBudget();
+  const duplicate = route(async () => ({
+    value: { ok: true },
+    usage: { inputTokens: 1, outputTokens: 1 },
+    finishReason: "complete",
+  }));
+  assert.throws(
+    () => new TokenAwareGateway(budget, [duplicate, { ...duplicate }]),
+    /Missing or duplicate model route ID/,
+  );
+});
+
+test("gateway rejects non-finite or negative route weights", () => {
+  const budget = makeBudget();
+  const valid = route(async () => ({
+    value: { ok: true },
+    usage: { inputTokens: 1, outputTokens: 1 },
+    finishReason: "complete",
+  }));
+
+  assert.throws(
+    () => new TokenAwareGateway(budget, [{ ...valid, costWeight: Number.NaN }]),
+    /Invalid model route costWeight/,
+  );
+  assert.throws(
+    () => new TokenAwareGateway(budget, [{ ...valid, latencyWeight: -1 }]),
+    /Invalid model route latencyWeight/,
+  );
+  assert.throws(
+    () => new TokenAwareGateway(budget, [{ ...valid, qualityWeight: Number.POSITIVE_INFINITY }]),
+    /Invalid model route qualityWeight/,
+  );
 });

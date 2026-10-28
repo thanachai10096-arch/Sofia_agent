@@ -20,6 +20,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: npm ci
       - run: node bench/run.mjs --selftest
       - run: node bench/run.mjs --agent noop
       - run: node bench/run.mjs --agent reference
+      - run: node --import tsx bench/token-efficiency.mjs
+      - run: node --import tsx --test bench/brain-loop-efficiency.test.mjs
+      - run: node --import tsx --test bench/sofia-evidence-packing.test.mjs
+      - run: node --test bench/estimated-cost.test.mjs
+      - run: node --check bench/live-model-efficiency.mjs
+      - run: node --check bench/estimated-cost.mjs

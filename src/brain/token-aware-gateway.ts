@@ -39,6 +39,8 @@ export interface PackedPrompt {
 export interface ProviderReply {
   value: unknown;
   usage: TokenUsage;
+  /** Number of transient provider retries before this successful response. */
+  retries?: number;
   finishReason: "complete" | "length";
 }
 
@@ -56,6 +58,10 @@ export interface InternalRoute {
   id: string;
   budgetKey: string;
   qualityTier: number;
+  /** Configured relative weights used only to break equal estimated-cost scores. */
+  costWeight?: number;
+  latencyWeight?: number;
+  qualityWeight?: number;
   capabilities: readonly string[];
   contextWindow: number;
   maxOutputTokens: number;
@@ -171,6 +177,7 @@ function packContext(
   if (prepared.inputTokensUpperBound > inputLimit) throw new ContextTooLarge();
 
   const seen = new Set<string>();
+  const seenText = new Set<string>();
   const candidates = request.evidence
     .filter(
       (chunk) =>
@@ -178,14 +185,26 @@ function packContext(
         Number.isFinite(chunk.relevance) &&
         chunk.relevance > 0 &&
         chunk.relevance <= 1 &&
+        chunk.text.trim().length > 0 &&
         chunk.text.length <= 12_000,
     )
-    .sort((a, b) => b.relevance - a.relevance)
+    // Prefer evidence with a stronger relevance-to-size trade-off. The logarithmic
+    // size penalty nudges the packer toward compact evidence without letting a tiny,
+    // weakly relevant chunk automatically outrank a much more relevant one.
+    .sort((a, b) => {
+      const aScore = a.relevance / Math.log2(a.text.length + 2);
+      const bScore = b.relevance / Math.log2(b.text.length + 2);
+      return bScore - aScore || b.relevance - a.relevance || a.text.length - b.text.length;
+    })
     .slice(0, 64);
 
   for (const chunk of candidates) {
     if (seen.has(chunk.id)) continue;
     seen.add(chunk.id);
+    // Avoid paying for the same evidence twice when different IDs contain
+    // byte-for-byte identical text. Do not normalize code or whitespace.
+    if (seenText.has(chunk.text)) continue;
+    seenText.add(chunk.text);
     const candidate = prepare([...selected, chunk]);
     if (candidate.inputTokensUpperBound <= inputLimit) {
       selected.push(chunk);
@@ -248,6 +267,24 @@ export class TokenAwareGateway {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
       throw new Error("Invalid model timeout");
     }
+
+    const routeIds = new Set<string>();
+    for (const route of routes) {
+      if (!route.id || routeIds.has(route.id)) {
+        throw new Error("Missing or duplicate model route ID");
+      }
+      routeIds.add(route.id);
+
+      for (const [name, weight] of [
+        ["costWeight", route.costWeight],
+        ["latencyWeight", route.latencyWeight],
+        ["qualityWeight", route.qualityWeight],
+      ] as const) {
+        if (weight !== undefined && (!Number.isFinite(weight) || weight < 0)) {
+          throw new Error(`Invalid model route ${name}`);
+        }
+      }
+    }
   }
 
   async generate(
@@ -261,7 +298,7 @@ export class TokenAwareGateway {
   async generateMetered(
     request: InferenceRequest,
     callerSignal?: AbortSignal,
-  ): Promise<{ value: unknown; usage: TokenUsage }> {
+  ): Promise<{ value: unknown; usage: TokenUsage; retries: number }> {
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, timeout])
@@ -315,9 +352,20 @@ export class TokenAwareGateway {
       }
     }
 
-    candidates.sort((a, b) =>
-      a.score < b.score ? -1 : a.score > b.score ? 1 : 0,
-    );
+    candidates.sort((a, b) => {
+      if (a.score !== b.score) return a.score < b.score ? -1 : 1;
+
+      // The configured token-price estimate always wins. When estimates tie,
+      // use existing route weights instead of silently choosing by array order.
+      const costDifference = (a.route.costWeight ?? 0) - (b.route.costWeight ?? 0);
+      if (costDifference !== 0) return costDifference;
+      const latencyDifference = (a.route.latencyWeight ?? 0) - (b.route.latencyWeight ?? 0);
+      if (latencyDifference !== 0) return latencyDifference;
+      const qualityDifference = (b.route.qualityWeight ?? b.route.qualityTier) -
+        (a.route.qualityWeight ?? a.route.qualityTier);
+      if (qualityDifference !== 0) return qualityDifference;
+      return a.route.id.localeCompare(b.route.id);
+    });
 
     if (candidates.length === 0) throw new GatewayError("no_eligible_route");
 
@@ -344,7 +392,7 @@ export class TokenAwareGateway {
     const selection = chosen;
     const lease = reservation;
 
-    const work = (async (): Promise<{ value: unknown; usage: TokenUsage }> => {
+    const work = (async (): Promise<{ value: unknown; usage: TokenUsage; retries: number }> => {
       if (signal.aborted) {
         lease.settle({ inputTokens: 0, outputTokens: 0 });
         throw new GatewayError("cancelled_or_timed_out");
@@ -363,7 +411,7 @@ export class TokenAwareGateway {
         if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
         if (reply.finishReason !== "complete") throw new GatewayError("incomplete_output");
 
-        return { value: reply.value, usage: reply.usage };
+        return { value: reply.value, usage: reply.usage, retries: reply.retries ?? 0 };
       } catch (error: unknown) {
         lease.settle(error instanceof MeteredProviderError ? error.usage : undefined);
 

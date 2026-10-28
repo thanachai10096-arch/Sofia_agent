@@ -201,6 +201,7 @@ export class SofiaModelGateway implements ModelProvider {
       circuit.probeInFlight = true;
     }
 
+    let retryCount = 0;
     const execute = async () => {
       const maxAttempts = 3;
       let lastError: unknown;
@@ -229,6 +230,7 @@ export class SofiaModelGateway implements ModelProvider {
           const detail = await response.text();
           lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
           if (!retryable || attempt === maxAttempts || options.signal?.aborted) throw lastError;
+          retryCount++;
           const retryAfter = Number(response.headers.get("retry-after") ?? "");
           const delay = Number.isFinite(retryAfter) && retryAfter > 0
             ? Math.min(retryAfter * 1000, 5_000)
@@ -241,6 +243,7 @@ export class SofiaModelGateway implements ModelProvider {
               (error instanceof Error && error.message.startsWith("Model gateway request failed (") && !retryableFailure)) {
             throw requestSignal.aborted && requestSignal.reason instanceof Error ? requestSignal.reason : error;
           }
+          retryCount++;
           await abortableDelay(Math.min(250 * 2 ** (attempt - 1), 2_000), requestSignal);
         }
       }
@@ -367,6 +370,7 @@ export class SofiaModelGateway implements ModelProvider {
         })),
       },
       ...(usage ? { usage } : {}),
+      retries: retryCount,
     };
   }
 }

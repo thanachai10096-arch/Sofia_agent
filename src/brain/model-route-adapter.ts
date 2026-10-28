@@ -71,6 +71,9 @@ export function createInternalRoute(
     id: route.id,
     budgetKey: route.providerId ?? route.id,
     qualityTier: Math.max(1, Math.round(route.qualityWeight)),
+    costWeight: route.costWeight,
+    latencyWeight: route.latencyWeight,
+    qualityWeight: route.qualityWeight,
     capabilities: route.capabilities,
     contextWindow: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_CONTEXT"] ?? 32_000),
     maxOutputTokens: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT"] ?? 4_096),
@@ -108,6 +111,7 @@ export function createInternalRoute(
           return {
             value: parseStructured(response.text),
             usage: response.usage,
+            retries: response.retries ?? 0,
             finishReason: "complete",
           };
         },
