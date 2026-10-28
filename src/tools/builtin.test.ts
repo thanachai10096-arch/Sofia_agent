@@ -55,3 +55,39 @@ test("memory.save rejects unsupported kinds and oversized content", async () => 
   await assert.rejects(tool.execute({ kind: "fact", content: "x".repeat(1201) }, h.context("user-1")), /1200 characters/);
   assert.equal(h.entries.size, 0);
 });
+
+
+test("web tools reject private destinations before making network requests", async () => {
+  const tools = createBuiltinTools();
+  const fetchTool = tools.find((item) => item.name === "web.fetch");
+  assert.ok(fetchTool);
+  await assert.rejects(
+    fetchTool.execute({ url: "https://127.0.0.1/admin" }, { runtime: {} as ToolContext["runtime"] }),
+    /private network/,
+  );
+});
+
+test("web tools require network opt-in and an explicit host allowlist", async () => {
+  const previousNetwork = process.env.SOFIA_ALLOW_NETWORK;
+  const previousHosts = process.env.SOFIA_ALLOWED_HOSTS;
+  try {
+    process.env.SOFIA_ALLOW_NETWORK = "false";
+    process.env.SOFIA_ALLOWED_HOSTS = "example.com";
+    const fetchTool = createBuiltinTools().find((item) => item.name === "web.fetch");
+    assert.ok(fetchTool);
+    await assert.rejects(
+      fetchTool.execute({ url: "https://example.com/" }, { runtime: {} as ToolContext["runtime"] }),
+      /Network access is disabled/,
+    );
+    process.env.SOFIA_ALLOW_NETWORK = "true";
+    await assert.rejects(
+      fetchTool.execute({ url: "https://not-allowed.example/" }, { runtime: {} as ToolContext["runtime"] }),
+      /SOFIA_ALLOWED_HOSTS/,
+    );
+  } finally {
+    if (previousNetwork === undefined) delete process.env.SOFIA_ALLOW_NETWORK;
+    else process.env.SOFIA_ALLOW_NETWORK = previousNetwork;
+    if (previousHosts === undefined) delete process.env.SOFIA_ALLOWED_HOSTS;
+    else process.env.SOFIA_ALLOWED_HOSTS = previousHosts;
+  }
+});
