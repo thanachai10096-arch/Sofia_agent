@@ -9,7 +9,7 @@ Minimize the cost and compute used per successfully verified task while preservi
 ## Current foundation verified in the repository
 
 - `src/brain/token-budget.ts`: per-run and per-model token/cost/call/concurrency reservations, settlement against reported usage, and fail-closed behavior when usage is unknown.
-- `src/brain/token-aware-gateway.ts`: phase-specific input/output caps, evidence packing, capability/quality eligibility, estimated-cost routing, cancellation, and safe provider error categories.
+- `src/brain/token-aware-gateway.ts`: phase-specific input/output caps, evidence packing, capability/quality eligibility, estimated-cost routing, cancellation, and safe provider error categories.\n- `src/brain/task-efficiency-metrics.ts`: opt-in in-memory aggregation for per-task token usage, cached tokens, model-call/retry counts, duration percentiles, verification outcomes, and estimated cost. It deliberately stores no prompts or model output. It is a measurement primitive, **not yet wired into the Brain/API persistence or user-facing dashboard**.
 - `src/brain/model-route-adapter.ts`: adapts existing model routes into the token-aware Brain gateway.
 - `src/models/config.ts`: currently configures direct Gemini routes only and intentionally does not fall back to another provider automatically.
 - `src/models/gateway.ts`: provider request timeout, concurrency gate, retry handling for selected transient errors, and circuit-breaker behavior.
