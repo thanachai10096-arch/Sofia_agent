@@ -35,3 +35,53 @@ test("Discord adapter ignores unverified events and bot messages", async () => {
   await onEvent!({ ...base, signatureVerified: true });
   assert.equal(received, 1);
 });
+
+import { createSlackAdapter, type VerifiedSlackMessage } from "./slack.js";
+
+test("Slack adapter rejects unverified and bot events and normalizes verified human messages", async () => {
+  let onEvent: ((message: VerifiedSlackMessage) => Promise<void>) | undefined;
+  const adapter = createSlackAdapter({
+    async start(_signal, callback) { onEvent = callback; },
+    async postMessage() { return { messageId: "slack-ts-1" }; },
+    async stop() {},
+  });
+  const received: Array<{ platform: string; userId: string; channelId: string; text: string }> = [];
+  await adapter.start(new AbortController().signal, async (message) => {
+    received.push({
+      platform: message.platform,
+      userId: message.identity.userId,
+      channelId: message.identity.channelId,
+      text: message.text,
+    });
+  });
+  assert.ok(onEvent);
+  const base = {
+    eventId: "Ev1", messageId: "1710000000.0001", channelId: "C123", userId: "U123",
+    text: "hello Sofia", createdAt: 1710000000000,
+  };
+  await onEvent!({ ...base, signatureVerified: false } as unknown as VerifiedSlackMessage);
+  await onEvent!({ ...base, signatureVerified: true, botId: "B123" });
+  await onEvent!({ ...base, signatureVerified: true });
+  assert.deepEqual(received, [{
+    platform: "slack", userId: "U123", channelId: "C123", text: "hello Sofia",
+  }]);
+});
+
+test("Slack adapter chunks long outbound replies and fails with a safe error code", async () => {
+  const chunks: string[] = [];
+  const adapter = createSlackAdapter({
+    async start() {},
+    async postMessage(_channel, text) { chunks.push(text); return { messageId: String(chunks.length) }; },
+    async stop() {},
+  });
+  assert.equal((await adapter.send({ conversationId: "C123", text: "x".repeat(40_000) })).state, "sent");
+  assert.equal(chunks.length, 2);
+  const failing = createSlackAdapter({
+    async start() {},
+    async postMessage() { throw new Error("secret provider detail"); },
+    async stop() {},
+  });
+  assert.deepEqual(await failing.send({ conversationId: "C123", text: "hello" }), {
+    state: "failed", errorCode: "slack_delivery_failed",
+  });
+});
