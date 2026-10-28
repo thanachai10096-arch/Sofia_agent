@@ -23,7 +23,7 @@ test("records aggregate Brain usage without conflating it with API runs and tool
     providerOutputTokens: 30,
     providerUsageCalls: 2,
   });
-  assert.equal(usage.get("key-b").brainReservedOrUsedTokens, undefined);
+  assert.equal(usage.get("key-b").brainReservedOrUsedTokens, 0);
 });
 
 test("persists Brain usage counters across limiter restarts", () => {
@@ -46,5 +46,5 @@ test("rejects invalid Brain usage counters without mutating the ledger", () => {
   assert.throws(() => usage.recordBrainUsage("key-a", { modelCalls: -1, reservedOrUsedTokens: 1 }));
   assert.throws(() => usage.recordBrainUsage("key-a", { modelCalls: 1, reservedOrUsedTokens: Number.MAX_SAFE_INTEGER + 1 }));
   assert.throws(() => usage.recordBrainUsage("key-a", { modelCalls: 1, reservedOrUsedTokens: 1, providerInputTokens: -1, providerOutputTokens: 1, providerUsageCalls: 1 }));
-  assert.equal(usage.get("key-a").brainRuns, undefined);
+  assert.equal(usage.get("key-a").brainRuns, 0);
 });
