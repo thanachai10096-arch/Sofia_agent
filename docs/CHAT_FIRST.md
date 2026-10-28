@@ -40,7 +40,7 @@ When the bridge has `SOFIA_MESSAGING_CONTEXT_SECRET` configured to the same serv
 
 These controls use a separate signed action envelope: the signature covers the full action payload and verified platform/user/conversation/message identity. The API derives an owner principal from the verified platform and immutable user ID, not the shared bot API key. A chat user therefore cannot read or control another user's objective merely because both messages use the same server API key. Invalid or missing signatures fail closed. The existing API-key-scoped `/v1/continuous-work` endpoints remain unchanged for SDK/API clients.
 
-This command is supported only by text-based adapters that pass `/work ...` messages through the shared Sofia message handler. The current Discord HTTP Interactions transport is slash-command-only and does not yet expose these `/work` actions as registered Discord application commands.
+The shared handler supports `/work ...` on text-based adapters. The Discord HTTP Interactions transport also accepts a `work` slash command with a string option named `task` and forwards it to the same handler; the Discord application command itself must still be registered in the Discord Developer Portal (registration is not performed automatically by the API). Until that registration is done and smoke-tested, do not assume `/work` is visible in a Discord server.
 
 ## Important platform distinction
 
