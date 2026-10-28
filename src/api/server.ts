@@ -672,7 +672,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      if (isCronRequest && cronScheduler) {
+      if ((isCronRequest && cronScheduler) || requestUrl.pathname === "/v1/model-profile") {
         if (requestUrl.pathname === "/v1/model-profile") {
           const profileStore = deps.modelProfileStore;
           if (!profileStore) return json(res, 503, { error: "model_profile_storage_not_configured" }, origin, config);
