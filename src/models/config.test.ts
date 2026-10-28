@@ -47,7 +47,7 @@ test("existing Gemini_API_Key and route-specific model overrides remain supporte
 
 test("any OpenAI-compatible provider can be configured explicitly", () => {
   clear();
-  process.env.SOFIA_MODEL_PROVIDER = "openrouter";
+  process.env.SOFIA_MODEL_PROVIDER = "open-ai";
   process.env.SOFIA_MODEL_BASE_URL = "https://openrouter.ai/api/v1";
   process.env.SOFIA_MODEL_API_KEY = "openrouter-test-key";
   process.env.SOFIA_MODEL = "openai/gpt-4.1-mini";
