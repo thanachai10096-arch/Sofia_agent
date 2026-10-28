@@ -207,10 +207,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     const metrics = event.metadata.usage as Record<string, unknown>;
     if (!Number.isSafeInteger(metrics.modelCalls) || !Number.isSafeInteger(metrics.reservedOrUsedTokens) ||
         (metrics.modelCalls as number) < 0 || (metrics.reservedOrUsedTokens as number) < 0) return;
+    const providerInputTokens = metrics.providerInputTokens;
+    const providerOutputTokens = metrics.providerOutputTokens;
+    const providerUsageCalls = metrics.providerUsageCalls;
+    const hasProviderUsage = Number.isSafeInteger(providerInputTokens) && (providerInputTokens as number) >= 0 &&
+      Number.isSafeInteger(providerOutputTokens) && (providerOutputTokens as number) >= 0 &&
+      Number.isSafeInteger(providerUsageCalls) && (providerUsageCalls as number) >= 0;
     try {
       usage.recordBrainUsage(keyId, {
         modelCalls: metrics.modelCalls as number,
         reservedOrUsedTokens: metrics.reservedOrUsedTokens as number,
+        ...(hasProviderUsage ? { providerInputTokens: providerInputTokens as number, providerOutputTokens: providerOutputTokens as number, providerUsageCalls: providerUsageCalls as number } : {}),
       });
     } catch {
       // Usage reporting must not turn a successful agent run into a failed run.
