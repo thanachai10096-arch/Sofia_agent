@@ -18,7 +18,7 @@ export async function submitDiscordTask(
   task: string,
   principalId: string,
   signal?: AbortSignal,
-  metadata: { channelId?: string; sessionKey?: string; sessionTask?: string } = {},
+  metadata: { channelId?: string; sessionKey?: string; sessionTask?: string; userId?: string } = {},
 ): Promise<DiscordDurableJobHandle> {
   if (!task.trim()) throw new Error("Discord task is required.");
   if (!principalId.trim()) throw new Error("Discord principal is required.");
@@ -28,6 +28,7 @@ export async function submitDiscordTask(
     principalId,
     ownerKeyId: principalId,
     ...(metadata.channelId ? { notificationChannelId: metadata.channelId } : {}),
+    ...(metadata.channelId && metadata.userId ? { notificationTarget: { platform: "discord" as const, userId: metadata.userId, conversationId: metadata.channelId } } : {}),
     ...(metadata.sessionKey ? { sessionKey: metadata.sessionKey } : {}),
     ...(metadata.sessionTask ? { sessionTask: metadata.sessionTask } : {}),
   });
