@@ -60,6 +60,12 @@ export interface SofiaUsageSnapshot {
   brainModelCalls?: number;
   /** Reserved-or-used token estimate reported by Brain; not provider-billed usage. */
   brainReservedOrUsedTokens?: number;
+  /** Provider-reported input tokens; absent if the provider did not supply usage. */
+  providerInputTokens?: number;
+  /** Provider-reported output tokens; absent if the provider did not supply usage. */
+  providerOutputTokens?: number;
+  /** Number of model calls contributing provider-reported token counts. */
+  providerUsageCalls?: number;
 }
 
 export interface SofiaRunResponse {
