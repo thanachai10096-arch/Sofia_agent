@@ -14,7 +14,7 @@ const names = [
   "SOFIA_PROVIDER_IDS",
   "SOFIA_PROVIDER_PRIMARY_BASE_URL", "SOFIA_PROVIDER_PRIMARY_API_KEY", "SOFIA_PROVIDER_PRIMARY_MODEL",
   "SOFIA_PROVIDER_SECONDARY_BASE_URL", "SOFIA_PROVIDER_SECONDARY_API_KEY", "SOFIA_PROVIDER_SECONDARY_MODEL",
-  "SOFIA_FAST_PROVIDER", "SOFIA_CODING_PROVIDER",
+  "SOFIA_FAST_PROVIDER", "SOFIA_CODING_PROVIDER", "SOFIA_REASONING_PROVIDER", "SOFIA_VISION_PROVIDER",
 ];
 
 const original = new Map(names.map((name) => [name, process.env[name]]));
@@ -69,6 +69,17 @@ test("explicit provider configuration supports custom OpenAI-compatible endpoint
   assert.equal(config.providers.primary?.baseUrl, "https://api.example.test/v1");
   assert.equal(config.providers.primary?.apiKey, "explicit-test-key");
   assert.equal(config.providers.primary?.model, "example-model");
+});
+
+test("allows HTTP only for localhost development endpoints", () => {
+  clear();
+  process.env.SOFIA_PROVIDER_IDS = "primary";
+  process.env.SOFIA_PROVIDER_PRIMARY_BASE_URL = "http://localhost:1234/v1";
+  process.env.SOFIA_PROVIDER_PRIMARY_API_KEY = "local-test-key";
+  process.env.SOFIA_PROVIDER_PRIMARY_MODEL = "local-model";
+  assert.equal(loadModelConfigFromEnv().providers.primary?.baseUrl, "http://localhost:1234/v1");
+  process.env.SOFIA_PROVIDER_PRIMARY_BASE_URL = "http://api.example.test/v1";
+  assert.throws(loadModelConfigFromEnv, /must use HTTPS except for localhost/);
 });
 
 test("routes can explicitly select different configured providers and models", () => {
