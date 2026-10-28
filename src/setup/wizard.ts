@@ -110,3 +110,104 @@ export function createHostedSetupConfig(apiBaseUrl: string): HostedSetupConfig {
     apiBaseUrl: validateSofiaApiBaseUrl(apiBaseUrl),
   };
 }
+
+
+export interface HostedApiCheckResult {
+  reachable: boolean;
+  authenticated: boolean;
+  service?: string;
+  message: string;
+}
+
+/**
+ * Explicit, non-billable connection check: public health plus authenticated
+ * usage endpoint. It never submits an agent task or prints/sends the key
+ * anywhere except the Authorization header to the configured HTTPS endpoint.
+ */
+export async function checkHostedSofiaApi(input: {
+  apiBaseUrl: string;
+  apiKey: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<HostedApiCheckResult> {
+  const baseUrl = validateSofiaApiBaseUrl(input.apiBaseUrl);
+  if (!input.apiKey.trim()) {
+    return { reachable: false, authenticated: false, message: "SOFIA_API_KEY is not configured." };
+  }
+
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const timeoutMs = Math.max(1, Math.min(input.timeoutMs ?? 8_000, 30_000));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    let health: Response;
+    try {
+      health = await fetchImpl(new URL("/health", baseUrl), {
+        method: "GET",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      });
+    } catch {
+      return {
+        reachable: false,
+        authenticated: false,
+        message: controller.signal.aborted
+          ? "Sofia API health check timed out."
+          : "Could not reach the Sofia API health endpoint.",
+      };
+    }
+
+    if (!health.ok) {
+      return {
+        reachable: true,
+        authenticated: false,
+        message: `Health endpoint returned HTTP ${health.status}.`,
+      };
+    }
+
+    let usage: Response;
+    try {
+      usage = await fetchImpl(new URL("/v1/usage", baseUrl), {
+        method: "GET",
+        headers: { authorization: `Bearer ${input.apiKey}`, accept: "application/json" },
+        signal: controller.signal,
+      });
+    } catch {
+      return {
+        reachable: true,
+        authenticated: false,
+        message: controller.signal.aborted
+          ? "Sofia API authentication check timed out."
+          : "Health succeeded, but the authenticated API check could not complete.",
+      };
+    }
+
+    if (usage.status === 401) {
+      return { reachable: true, authenticated: false, message: "API reachable, but the API key was rejected (HTTP 401)." };
+    }
+    if (usage.status === 403) {
+      return { reachable: true, authenticated: false, message: "API reachable, but this API key lacks permission (HTTP 403)." };
+    }
+    if (!usage.ok) {
+      return { reachable: true, authenticated: false, message: `API reachable, but verification returned HTTP ${usage.status}.` };
+    }
+
+    let service: string | undefined;
+    try {
+      const payload: unknown = await health.json();
+      if (payload && typeof payload === "object" && "service" in payload && typeof payload.service === "string") {
+        service = payload.service;
+      }
+    } catch {
+      // HTTP health status is sufficient; optional metadata is intentionally ignored.
+    }
+    return {
+      reachable: true,
+      authenticated: true,
+      ...(service ? { service } : {}),
+      message: "Sofia API is reachable and the API key was accepted.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
