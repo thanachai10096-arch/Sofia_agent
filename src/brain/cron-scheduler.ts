@@ -420,6 +420,8 @@ export class CronScheduler {
             scheduleId: execution.scheduleId, detail: execution.id,
           });
         });
+        const finished = await this.store.transact(state => state.history.find(item => item.id === execution.id));
+        if (finished) await this.deliverFinished(schedule, finished);
         indeterminate++;
         reconciled++;
         continue;
@@ -448,6 +450,8 @@ export class CronScheduler {
             scheduleId: execution.scheduleId, detail: execution.jobId,
           });
         });
+        const finished = await this.store.transact(state => state.history.find(item => item.id === execution.id));
+        if (finished) await this.deliverFinished(schedule, finished);
         reconciled++;
         continue;
       }
@@ -474,6 +478,8 @@ export class CronScheduler {
             scheduleId: execution.scheduleId, detail: recoveredStatus,
           });
         });
+        const finished = await this.store.transact(state => state.history.find(item => item.id === execution.id));
+        if (finished) await this.deliverFinished(schedule, finished, job);
         reconciled++;
         continue;
       }
@@ -526,6 +532,8 @@ export class CronScheduler {
         scheduleId: schedule.id, detail: status,
       });
     }).catch(() => undefined);
+    const finished = await this.store.transact(state => state.history.find(item => item.id === executionId)).catch(() => undefined);
+    if (finished) await this.deliverFinished(schedule, finished, await this.runtime.get(jobId).catch(() => undefined));
     this.active.delete(schedule.id);
   }
 
