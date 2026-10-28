@@ -175,7 +175,9 @@ export class UsageLimiter {
       if (current.providerInputTokens !== undefined) current.providerInputTokens = 0;
       if (current.providerOutputTokens !== undefined) current.providerOutputTokens = 0;
       if (current.providerUsageCalls !== undefined) current.providerUsageCalls = 0;
-      if (current.configuredCostNanoUsd !== undefined) current.configuredCostNanoUsd = "0";
+      // Cost is optional provenance-backed reporting: after the window rolls over,
+      // omit it until a call with configured prices and provider-reported usage is recorded.
+      delete current.configuredCostNanoUsd;
     }
     return current;
   }
