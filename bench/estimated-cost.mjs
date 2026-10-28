@@ -27,3 +27,17 @@ export function estimateCostUsd(rows, pricing) {
     total + row.inputTokens * pricing.inputUsdPerMillion / 1_000_000
       + row.outputTokens * pricing.outputUsdPerMillion / 1_000_000, 0).toFixed(10));
 }
+
+/** Normalize common OpenAI-compatible usage fields; invalid counts remain unknown. */
+export function readReportedUsage(usage) {
+  const rawInputTokens = usage?.prompt_tokens ?? usage?.input_tokens;
+  const rawOutputTokens = usage?.completion_tokens ?? usage?.output_tokens;
+  const inputTokens = Number.isSafeInteger(rawInputTokens) && rawInputTokens >= 0 ? rawInputTokens : null;
+  const outputTokens = Number.isSafeInteger(rawOutputTokens) && rawOutputTokens >= 0 ? rawOutputTokens : null;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens === null || outputTokens === null ? null : inputTokens + outputTokens,
+    usageReported: inputTokens !== null && outputTokens !== null,
+  };
+}
