@@ -22,6 +22,8 @@ export interface JobRecord {
   sessionKey?: string;
   /** Original user task before historical session context is appended. */
   sessionTask?: string;
+  /** Internal, redacted context used by durable runs; omitted from public job records. */
+  runContext?: string;
   notificationDelivered?: boolean;
   leaseOwnerToken?: string;
   leaseExpiresAt?: string;
@@ -58,6 +60,7 @@ function redactJobRecord(record: JobRecord): JobRecord {
     // fencing metadata, not user content, and redacting them would break worker claims.
     task: String(redactSecrets(record.task)),
     ...(record.sessionTask ? { sessionTask: String(redactSecrets(record.sessionTask)) } : {}),
+    ...(record.runContext ? { runContext: String(redactSecrets(record.runContext)) } : {}),
     ...(record.snapshot ? { snapshot: redactSecrets(record.snapshot) as BrainRunSnapshot } : {}),
     ...(record.result ? { result: redactSecrets(record.result) as JobRecord["result"] } : {}),
     ...(record.error ? { error: String(redactSecrets(record.error)) } : {}),
@@ -69,6 +72,7 @@ function publicJobRecord(record: JobRecord): JobRecord {
   // Lease ownership is an internal concurrency capability and must never be returned
   // to API/Discord clients, even though it remains in the durable store.
   delete safe.leaseOwnerToken;
+  delete safe.runContext;
   return safe;
 }
 
@@ -93,7 +97,10 @@ async function isExclusiveFileCollision(error: unknown, file: string): Promise<b
     await fs.stat(file);
     return true;
   } catch (statError) {
-    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return false;
+    // The competing process may have released the lock between open("wx")
+    // returning EPERM and this stat. Retry the exclusive create instead of
+    // turning this normal Windows race into a failed durable job.
+    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return true;
     throw statError;
   }
 }
@@ -160,7 +167,11 @@ class FileJobStateStore {
           }
           if (!observedToken && age > 120_000 && !foreignHost) stale = true;
         } catch (readError) {
-          if ((readError as NodeJS.ErrnoException).code === "ENOENT") continue;
+          if ((readError as NodeJS.ErrnoException).code === "ENOENT") {
+            if (Date.now() >= deadline) throw new Error("Timed out waiting for durable job-state lock");
+            await new Promise<void>((resolve) => setTimeout(resolve, 10));
+            continue;
+          }
           // A newly-created lock can be observed before its JSON payload is fully
           // written. Treat malformed/partial contents as busy until the file is old.
           try {
@@ -434,11 +445,13 @@ export class DurableJobRuntime implements JobRuntime {
       ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
       ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
       ...(input.sessionTask ? { sessionTask: input.sessionTask } : {}),
+      ...(input.context ? { runContext: String(redactSecrets(input.context)) } : {}),
       notificationDelivered: false,
     };
     this.jobs.set(id, record);
     await this.state.save(record);
-    void this.execute(record, input);
+    // Do not let the first execution use an unsanitized copy of persisted context.
+    void this.execute(record, { ...input, ...(record.runContext ? { context: record.runContext } : {}) });
     return publicJobRecord(record);
   }
 
@@ -519,7 +532,11 @@ export class DurableJobRuntime implements JobRuntime {
       record.notificationDelivered = false;
       const saved = await this.state.save(record);
       if (!saved) throw new Error("Job state changed before resume could be scheduled");
-      await this.execute(record, { task: record.task, acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
+      await this.execute(record, {
+        task: record.task,
+        ...(record.runContext ? { context: record.runContext } : {}),
+        acceptanceCriteria: record.snapshot.acceptanceCriteria,
+      }, signal, record.snapshot);
       return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);

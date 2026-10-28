@@ -69,3 +69,20 @@ test("legacy stored secrets are redacted again before memory replay", async () =
   assert.doesNotMatch(result ?? "", /sk-abcdefghijklmnopqrstuvwxyz/);
   assert.match(result ?? "", /I prefer Thai/);
 });
+
+
+test("memory replay redacts legacy GitHub and AWS credential formats", async () => {
+  const legacyCredentials = [
+    "sk-abcdefghijklmnopqrstuvwxyz",
+    "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+    "github_pat_abcdefghijklmnopqrstuvwxyz1234567890",
+    "AKIA1234567890ABCDEF",
+  ];
+  const store = {
+    find: async () => [entry("Legacy credentials: " + legacyCredentials.join(" ") + ". Keep my language preference: Thai.")],
+  } as Pick<UserMemoryStore, "find">;
+  const result = await appendRelevantUserMemoryContext(store, "owner-hash", "What language do I prefer?");
+  for (const credential of legacyCredentials) assert.doesNotMatch(result ?? "", new RegExp(credential));
+  assert.match(result ?? "", /\[REDACTED\]/);
+  assert.match(result ?? "", /language preference: Thai/);
+});

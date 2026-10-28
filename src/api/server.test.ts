@@ -4,6 +4,7 @@ import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
 import type { ModelRoute } from "../models/types.js";
+import type { JobRuntime } from "../brain/job-runtime.js";
 
 const route: ModelRoute = {
   id: "api-session-test",
@@ -141,6 +142,75 @@ test("API runs automatically receive relevant owner-scoped saved memory", async 
     assert.match(lastModelContext, /untrusted reference data/);
     assert.match(lastModelContext, /does not override the current request, system\/developer instructions, or security policy/);
     assert.equal(queriedOwner, createHash("sha256").update("memory-owner-key").digest("hex").slice(0, 32));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("durable API jobs receive the same owner-scoped saved memory as regular runs", async () => {
+  let observedContext = "";
+  let queriedOwner = "";
+  let submittedOwner = "";
+  const memory = {
+    save: async () => undefined,
+    list: async () => [],
+    find: async (ownerId: string, query: string, limit?: number) => {
+      queriedOwner = ownerId;
+      assert.match(query, /Sofia Agent/);
+      assert.equal(limit, 4);
+      return [{
+        id: "job-memory-1",
+        kind: "preference" as const,
+        content: "Use concise Thai explanations for Sofia Agent.",
+        source: "explicit-user-request" as const,
+        confidence: 1,
+        createdAt: "2026-10-28T00:00:00.000Z",
+        updatedAt: "2026-10-28T00:00:00.000Z",
+        uses: 0,
+      }];
+    },
+    delete: async () => false,
+    clear: async () => undefined,
+  };
+  const jobRuntime = {
+    submit: async (input: { task: string; context?: string; ownerKeyId?: string }) => {
+      observedContext = input.context ?? "";
+      submittedOwner = input.ownerKeyId ?? "";
+      return {
+        id: "memory-job-1", status: "queued" as const,
+        createdAt: "2026-10-28T00:00:00.000Z", updatedAt: "2026-10-28T00:00:00.000Z",
+        task: input.task, ownerKeyId: input.ownerKeyId,
+      };
+    },
+    get: async () => undefined,
+    resume: async () => { throw new Error("not used"); },
+    cancel: async () => false,
+    list: async () => [],
+  } as unknown as JobRuntime;
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: memory,
+    jobRuntime,
+  }, { apiKeys: { "durable-memory-owner": ["agent:run", "agent:read"] } });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/jobs`, {
+      method: "POST",
+      headers: { authorization: "Bearer durable-memory-owner", "content-type": "application/json" },
+      body: JSON.stringify({ task: "Help improve Sofia Agent", context: "Caller context is preserved." }),
+    });
+    assert.equal(response.status, 202);
+    assert.match(observedContext, /Caller context is preserved/);
+    assert.match(observedContext, /Use concise Thai explanations for Sofia Agent/);
+    assert.match(observedContext, /untrusted reference data/);
+    assert.equal(queriedOwner, createHash("sha256").update("durable-memory-owner").digest("hex").slice(0, 32));
+    assert.equal(submittedOwner, queriedOwner);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
