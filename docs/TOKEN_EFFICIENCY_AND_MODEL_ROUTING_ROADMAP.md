@@ -113,3 +113,11 @@ These are foundations, not proof of measured savings or production readiness. Th
 - Do not change production deployments or merge this work without review and evidence.
 - If usage is missing or invalid, do not claim precise cost or savings.
 - Report tests only when actually run; distinguish local checks, CI, provider smoke tests, and live channel tests.
+
+
+### Usage attribution update
+
+- Parent-task efficiency telemetry aggregates provider-reported usage from the built-in in-process subagent when available.
+- Model invocations that fail before returning provider usage are recorded as unmeasured calls. Their presence marks usageComplete=false and prevents cost totals from being presented as complete/known; partial token counts remain visible as partial counts.
+- The same marker is used when a custom subagent does not report usage. Custom subagent implementations should return aggregate usage to participate in complete accounting.
+- This is observational telemetry only. It does not replace or change authoritative TokenBudget reservations/settlements. Provider billing for failed attempts may remain unknowable unless the provider returns usage for those attempts.
