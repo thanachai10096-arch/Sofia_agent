@@ -3,6 +3,7 @@ import test from "node:test";
 import { createTelegramAdapter, type TelegramUpdate } from "./telegram.js";
 import { createDiscordAdapter, type VerifiedDiscordMessage } from "./discord.js";
 import { createSlackAdapter, type VerifiedSlackMessage } from "./slack.js";
+import { createLineAdapter, type VerifiedLineMessage } from "./line.js";
 
 test("Telegram adapter normalizes messages and splits oversized replies", async () => {
   let onUpdate: ((update: TelegramUpdate) => Promise<void>) | undefined;
@@ -84,4 +85,23 @@ test("Slack adapter chunks long outbound replies and fails with a safe error cod
   assert.deepEqual(await failing.send({ conversationId: "C123", text: "hello" }), {
     state: "failed", errorCode: "slack_delivery_failed",
   });
+});
+
+test("LINE adapter normalizes verified events and safely splits outbound replies", async () => {
+  let onEvent: ((message: VerifiedLineMessage) => Promise<void>) | undefined;
+  const sent: string[] = [];
+  const adapter = createLineAdapter({
+    async start(_signal, callback) { onEvent = callback; },
+    async pushMessage(_to, text) { sent.push(text); return { messageId: String(sent.length) }; },
+    async stop() {},
+  });
+  let received: unknown;
+  await adapter.start(new AbortController().signal, async (message) => { received = message; });
+  assert.ok(onEvent);
+  const base = { eventId: "ev1", messageId: "m1", userId: "U1", conversationId: "C1", text: "hello", createdAt: 1 };
+  await onEvent!({ ...base, signatureVerified: false } as unknown as VerifiedLineMessage);
+  await onEvent!({ ...base, signatureVerified: true });
+  assert.equal((received as { platform: string }).platform, "line");
+  assert.equal((await adapter.send({ conversationId: "C1", text: "x".repeat(6_000) })).state, "sent");
+  assert.equal(sent.length, 2);
 });
