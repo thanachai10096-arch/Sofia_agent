@@ -42,6 +42,7 @@ export function createTelegramAdapter(transport: TelegramTransport): MessagingAd
           identity: { platform: "telegram", userId, channelId, conversationId: channelId,
             ...(msg.from.username ? { displayName: msg.from.username } : {}) },
           text: msg.text ?? "", attachments, receivedAt: msg.date * 1000,
+          directMessage: msg.chat.type === "private",
         };
         await onMessage(inbound);
       });
