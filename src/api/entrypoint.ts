@@ -8,6 +8,7 @@ import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allow
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { createMatrixMessagingRuntime } from "../integrations/messaging/matrix-runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -18,6 +19,8 @@ mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0
 const deps = await createSofiaAgentDependenciesWithSessions(workspace, undefined, process.env.SOFIA_SESSION_DB_PATH?.trim() || undefined);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
+// Matrix polling bridge reuses the existing Sofia API and shared messaging gateway.
+const matrixRuntime = createMatrixMessagingRuntime(process.env, workspace);
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -223,6 +226,9 @@ server.listen(port, "0.0.0.0", () => {
   void telegramRuntime?.start().catch((error) => {
     console.error("Telegram integration failed to start:", error instanceof Error ? error.name : "UnknownError");
   });
+  void matrixRuntime?.start().catch((error) => {
+    console.error("Matrix integration failed to start:", error instanceof Error ? error.name : "UnknownError");
+  });
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
@@ -230,6 +236,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
+    void matrixRuntime?.stop().catch(() => console.error("Matrix integration shutdown failed."));
     server.close(() => {
       void deps.closeSessionStore().catch(() => console.error("Sofia session/MCP shutdown failed."));
     });
