@@ -461,7 +461,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const current = await supervisor.get(workId, auth.keyId);
         if (!current) return json(res, 404, { error: "continuous_work_not_found" }, origin, config);
         if (action === "resume") {
-          if (current.status === "active") return json(res, 409, { error: "continuous_work_already_active" }, origin, config);
+          if (current.status === "active" && supervisor.isRunning(workId)) return json(res, 409, { error: "continuous_work_already_active" }, origin, config);
           if (current.status === "stopped" || current.status === "completed") {
             return json(res, 409, { error: "continuous_work_terminal", status: current.status }, origin, config);
           }
