@@ -31,7 +31,7 @@ Each of three fixed synthetic extraction tasks runs twice, sequentially, on the 
 1. Baseline: relevant evidence plus repeated irrelevant evidence.
 2. Compact: synthetic relevant/noise evidence is passed through Sofia's `TokenAwareGateway`; the selected evidence is then sent to the same provider/model.
 
-The output reports provider-reported prompt/completion or input/output tokens when available, wall-clock latency, and a simple expected-answer substring check. It never estimates actual billing from token counts. If usage fields are missing, it labels usage incomplete and exits non-zero.
+The output reports provider-reported prompt/completion or input/output tokens when available, wall-clock latency, and a simple expected-answer substring check. It never estimates actual billing from token counts. If usage fields are missing, negative, or outside JavaScript's safe-integer range, it labels usage incomplete and exits non-zero; invalid counts are not included in totals.
 
 ## Limitations
 
