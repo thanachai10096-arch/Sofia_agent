@@ -6,12 +6,14 @@ import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia
 import { createWhatsAppAdapter } from "./whatsapp.js";
 import { createWhatsAppWebhookTransport, type WhatsAppWebhookTransport } from "./whatsapp-webhook-transport.js";
 import { redactSecrets } from "../../security/guard.js";
+import type { OutboundMessage } from "./types.js";
 
 export interface WhatsAppMessagingRuntime {
   /** Pass this transport to createSofiaApi({ whatsAppWebhookRoute: { transport } }). */
   transport: WhatsAppWebhookTransport;
   start(): Promise<void>;
   stop(): Promise<void>;
+  send(message: OutboundMessage): Promise<boolean>;
 }
 export interface WhatsAppMessagingEnvironment {
   SOFIA_MESSAGING_ENABLED?: string;
@@ -89,7 +91,7 @@ export function createWhatsAppMessagingRuntime(
         warn: (event) => onWarning("WhatsApp messaging warning: " + event),
       },
     });
-    return { transport, start: () => gateway!.start(), stop: () => gateway!.stop() };
+    return { transport, start: () => gateway!.start(), stop: () => gateway!.stop(), send: (message) => gateway!.send("whatsapp", message) };
   } catch (error) {
     onWarning("WhatsApp integration disabled: " + (error instanceof Error ? error.message : "invalid configuration") + ".");
     return undefined;
