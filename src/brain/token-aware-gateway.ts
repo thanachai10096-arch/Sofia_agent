@@ -261,7 +261,7 @@ export class TokenAwareGateway {
   async generateMetered(
     request: InferenceRequest,
     callerSignal?: AbortSignal,
-  ): Promise<{ value: unknown; usage: TokenUsage }> {
+  ): Promise<{ value: unknown; usage: TokenUsage & { configuredCostNanoUsd?: string } }> {
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, timeout])
@@ -344,7 +344,7 @@ export class TokenAwareGateway {
     const selection = chosen;
     const lease = reservation;
 
-    const work = (async (): Promise<{ value: unknown; usage: TokenUsage }> => {
+    const work = (async (): Promise<{ value: unknown; usage: TokenUsage & { configuredCostNanoUsd?: string } }> => {
       if (signal.aborted) {
         lease.settle({ inputTokens: 0, outputTokens: 0 });
         throw new GatewayError("cancelled_or_timed_out");
@@ -363,7 +363,16 @@ export class TokenAwareGateway {
         if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
         if (reply.finishReason !== "complete") throw new GatewayError("incomplete_output");
 
-        return { value: reply.value, usage: reply.usage };
+        // This is a configured-price estimate, not a provider invoice. Omit it when
+        // route pricing is unset (zero) so callers never interpret a default as free usage.
+        const configuredCostNanoUsd = this.budget.estimate(selection.route.budgetKey, reply.usage);
+        return {
+          value: reply.value,
+          usage: {
+            ...reply.usage,
+            ...(configuredCostNanoUsd > 0n ? { configuredCostNanoUsd: configuredCostNanoUsd.toString() } : {}),
+          },
+        };
       } catch (error: unknown) {
         lease.settle(error instanceof MeteredProviderError ? error.usage : undefined);
 
