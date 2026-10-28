@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, renameSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, renameSync, lstatSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
@@ -29,8 +29,8 @@ export class FileModelPreferenceStore implements ModelPreferenceStore {
   get(ownerKeyId: string): ModelPreference | undefined {
     const file = this.file(ownerKeyId);
     try {
-      const stat = statSync(file);
-      if (!stat.isFile()) return undefined;
+      const stat = lstatSync(file);
+      if (!stat.isFile() || stat.isSymbolicLink()) return undefined;
       const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
       const record = raw as Record<string, unknown>;
