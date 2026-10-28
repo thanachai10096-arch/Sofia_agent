@@ -47,6 +47,7 @@ test("gateway retries transient provider status and then succeeds", async () => 
     });
     const result = await gateway.generate(request, makeRoute());
     assert.equal(result.text, "hello back");
+    assert.equal(result.retries, 1);
     assert.equal(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
