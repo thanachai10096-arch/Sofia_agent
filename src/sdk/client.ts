@@ -144,7 +144,7 @@ export class SofiaClient {
   }
 
   /** Starts a durable async run so a mobile client can reconnect and poll by ID. */
-  async start(input: SofiaRunInput, signal?: AbortSignal, options: { idempotencyKey?: string } = {}): Promise<SofiaRunResponse> {
+  async start(input: SofiaRunInput, signal?: AbortSignal, options: { idempotencyKey?: string; messagingContext?: import("../integrations/chat-adapter.js").SignedMessagingContext } = {}): Promise<SofiaRunResponse> {
     const headers: Record<string, string> = this.headers();
     if (options.idempotencyKey) {
       if (options.idempotencyKey.length > 128 || /[\x00-\x1f\x7f]/.test(options.idempotencyKey)) {
@@ -153,7 +153,7 @@ export class SofiaClient {
       headers["idempotency-key"] = options.idempotencyKey;
     }
     return this.request<SofiaRunResponse>("/v1/agent/runs", {
-      method: "POST", headers, body: JSON.stringify({ ...input, async: true }),
+      method: "POST", headers, body: JSON.stringify({ ...input, async: true, ...(options.messagingContext ? { _messagingContext: options.messagingContext } : {}) }),
     }, signal);
   }
 
