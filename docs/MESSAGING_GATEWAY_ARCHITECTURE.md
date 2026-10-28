@@ -65,13 +65,15 @@ By default, separate sessions by platform/account/conversation. Any optional cro
 
 ## Rollout order
 
-1. Verify existing Telegram and Discord transport paths with unit and integration tests.
+1. Verify Telegram and Discord transport paths with unit and integration tests; keep provider smoke-test evidence separate.
 2. Finish Slack receiver configuration and real test-workspace smoke tests without touching production.
 3. Add per-adapter health/configuration reporting and explicit account/session binding.
-4. Add LINE and WhatsApp after reviewing current official API access, business-account requirements, and provider terms.
+4. Add LINE and WhatsApp as separate concrete adapters after reviewing official API access, business-account requirements, and provider terms.
 5. Add Google Chat, Microsoft Teams, Matrix, Signal, Messenger, WeChat, and other requested channels as separate adapters when supported APIs and deployment models are confirmed.
-6. Add a setup UI/wizard that can configure multiple accounts, validate credentials without exposing them, and report real connection state.
+6. Extend the setup wizard to configure multiple accounts, validate credentials without exposing them, and report real connection state.
 7. Expand attachment/media support only with secured download and storage paths.
+
+A platform must not be reported as connected merely because it appears in `ChatPlatform`; capability reporting must be derived from the concrete adapter registry and actual transport health.
 
 ## Definition of done for each adapter
 
