@@ -18,12 +18,17 @@ function safeEnv(): NodeJS.ProcessEnv {
 
 const GIT_SUBCOMMANDS = new Set([
   "status", "diff", "log", "show", "rev-parse", "ls-files", "blame", "branch", "tag",
-  "add", "commit", "restore", "switch", "checkout", "stash", "reset", "clean", "merge",
-  "rebase", "remote", "fetch", "pull", "push", "clone", "apply",
+  "add", "commit", "restore", "switch", "stash", "merge",
+  "remote", "fetch", "pull", "push", "clone", "apply",
 ]);
-const GIT_DANGEROUS_ARG = /^--(?:upload-pack|receive-pack|exec|exec-path|ext-diff|textconv|config-env|unsafe-paths)(?:=|$)/i;
+const GIT_DANGEROUS_ARG = /^(?:-c|-C|--config-env|--exec-path|--git-dir|--work-tree|--namespace|--upload-pack|--receive-pack|--exec|--ext-diff|--textconv|--unsafe-paths)(?:=|$)/i;
+const GIT_FORCE_ARG = /^(?:-f|--force|--force-with-lease(?:=.*)?|--mirror|--discard-changes|--merge)$/i;
 
-/** Only allow known Git subcommands; reject global options that can alter execution/configuration. */
+/**
+ * Allow known Git subcommands, but fail closed for operations that can discard
+ * local work or rewrite published history. Use `git switch` instead of
+ * `checkout`, and `git restore --staged` only when changing the index.
+ */
 export function assertSafeGitArgs(args: readonly string[]): void {
   const sub = args[0];
   if (typeof sub !== "string" || sub.startsWith("-") || !GIT_SUBCOMMANDS.has(sub)) {
@@ -31,6 +36,12 @@ export function assertSafeGitArgs(args: readonly string[]): void {
   }
   if (args.some((arg) => GIT_DANGEROUS_ARG.test(arg))) {
     throw new Error("Git option is not allowed by Sofia runtime policy.");
+  }
+  if (sub === "restore" && !args.includes("--staged")) {
+    throw new Error("git restore that changes the working tree is blocked by Sofia runtime policy.");
+  }
+  if (args.some((arg) => GIT_FORCE_ARG.test(arg))) {
+    throw new Error("Destructive or force Git options are blocked by Sofia runtime policy.");
   }
 }
 
