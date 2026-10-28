@@ -61,3 +61,34 @@ test("continuous work validates activation and lifetime limits", async () => {
   assert.equal(completed.status, "completed");
   assert.equal(completed.iteration, 1);
 });
+
+
+test("continuous work reconciles a persisted child job instead of submitting a duplicate after restart", async () => {
+  const store = new MemoryStore();
+  const now = new Date().toISOString();
+  const child = {
+    id: "persisted-child", status: "completed", createdAt: now, updatedAt: now,
+    task: "previous slice", ownerKeyId: "owner",
+    result: { completed: true, state: "completed", summary: "Recovered verified checkpoint" },
+  } as unknown as JobRecord;
+  let submitCalls = 0;
+  const jobs: JobRuntime = {
+    async submit() { submitCalls += 1; throw new Error("must not submit duplicate work"); },
+    async get(id) { return id === child.id ? { ...child } : undefined; },
+    async resume() { return { ...child }; },
+    async cancel() { return true; },
+    async list() { return [{ ...child }]; },
+  };
+  const record: ContinuousWorkRecord = {
+    id: "objective-1", ownerKeyId: "owner", task: "Continue the long-running objective",
+    status: "active", iteration: 0, maxIterationsPerActivation: 1, currentJobId: child.id,
+    createdAt: now, updatedAt: now,
+  };
+  await store.save(record);
+  const supervisor = new ContinuousWorkSupervisor(jobs, store, { isComplete: () => false });
+  const resumed = await supervisor.resume(record.id, "owner");
+  assert.equal(resumed.iteration, 1);
+  assert.equal(resumed.lastSummary, "Recovered verified checkpoint");
+  assert.equal(resumed.status, "paused");
+  assert.equal(submitCalls, 0);
+});
