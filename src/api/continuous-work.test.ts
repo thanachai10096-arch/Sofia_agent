@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, createHmac } from "node:crypto";
+import { createSignedMessagingContext } from "../integrations/chat-adapter.js";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import type { ContinuousWorkRecord, ContinuousWorkSupervisor } from "../brain/continuous-work.js";
@@ -115,18 +115,13 @@ test("continuous-work API is owner-scoped and exposes create, resume, pause, and
     assert.equal((await continuous.json() as { mode: string }).mode, "continuous");
     const signedAction = async (userId: string, action: Record<string, unknown>, messageId: string) => {
       const signedTask = JSON.stringify(action);
-      const unsigned = {
-        platform: "telegram" as const,
+      const messagingContext = createSignedMessagingContext({
+        platform: "telegram",
         userId,
         conversationId: "chat-" + userId,
         messageId,
-        taskHash: createHash("sha256").update(signedTask).digest("hex"),
-      };
-      const messagingContext = {
-        ...unsigned,
-        signature: createHmac("sha256", "test-messaging-context-secret-at-least-32-chars")
-          .update(JSON.stringify(unsigned)).digest("hex"),
-      };
+        signedTask,
+      }, "test-messaging-context-secret-at-least-32-chars");
       return request("owner-key", "/v1/continuous-work/chat", "POST", { signedTask, _messagingContext: messagingContext });
     };
     const chatCreated = await signedAction("telegram-user-1", { action: "create", task: "Improve the project with evidence." }, "msg-1");
