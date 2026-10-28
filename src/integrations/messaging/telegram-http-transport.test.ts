@@ -125,6 +125,64 @@ test("Telegram HTTP 409 stops duplicate polling instead of retrying forever", as
   await transport.stop();
 });
 
+test("Telegram transport can restart after the duplicate poller is removed", async () => {
+  let conflicting = true;
+  let updateReturned = false;
+  let pollCount = 0;
+  const events: Array<{ event: string; status?: number }> = [];
+  let conflictResolve!: () => void;
+  const conflict = new Promise<void>((resolve) => { conflictResolve = resolve; });
+  let updateResolve!: () => void;
+  const received = new Promise<void>((resolve) => { updateResolve = resolve; });
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/deleteWebhook")) return ok(true);
+    if (url.endsWith("/getUpdates")) {
+      pollCount += 1;
+      if (conflicting) {
+        return new Response(JSON.stringify({ ok: false, description: "Conflict: another getUpdates request is active" }), { status: 409 });
+      }
+      if (!updateReturned) {
+        updateReturned = true;
+        return ok([{ update_id: 99, message: { message_id: 100 } }]);
+      }
+      return await new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) { reject(new Error("aborted")); return; }
+        signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event, status) {
+      events.push({ event, status });
+      if (event === "poll_conflict") conflictResolve();
+    },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await Promise.race([
+    conflict,
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for 409 conflict handling")), 1_000)),
+  ]);
+  await transport.stop();
+
+  conflicting = false;
+  await transport.start(new AbortController().signal, async (update) => {
+    if (update.update_id === 99) updateResolve();
+  });
+  await Promise.race([
+    received,
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for update after restart")), 1_000)),
+  ]);
+  await transport.stop();
+
+  assert.equal(pollCount, 3);
+  assert.deepEqual(events, [{ event: "poll_conflict", status: 409 }]);
+});
+
 test("Telegram transport rejects malformed tokens and poll timeouts", () => {
   assert.throws(() => createTelegramHttpTransport({ token: "not-a-token" }), /token/);
   assert.throws(() => createTelegramHttpTransport({ token, pollTimeoutSeconds: 51 }), /timeout/);
