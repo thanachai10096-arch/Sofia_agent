@@ -22,7 +22,7 @@ const GIT_SUBCOMMANDS = new Set([
   "remote", "fetch", "pull", "push", "clone", "apply",
 ]);
 const GIT_DANGEROUS_ARG = /^(?:-c|-C|--config-env|--exec-path|--git-dir|--work-tree|--namespace|--upload-pack|--receive-pack|--exec|--ext-diff|--textconv|--unsafe-paths)(?:=|$)/i;
-const GIT_FORCE_ARG = /^(?:-f|-D|--force|--force-with-lease(?:=.*)?|--mirror|--discard-changes|--merge)$/i;
+const GIT_FORCE_ARG = /^(?:-f|-D|--force|--force-with-lease(?:=.*)?|--mirror|--discard-changes|--merge)$/;
 
 /**
  * Allow known Git subcommands, but fail closed for operations that can discard
