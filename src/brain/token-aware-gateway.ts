@@ -39,6 +39,8 @@ export interface PackedPrompt {
 export interface ProviderReply {
   value: unknown;
   usage: TokenUsage;
+  /** Number of transient provider retries before this successful response. */
+  retries?: number;
   finishReason: "complete" | "length";
 }
 
