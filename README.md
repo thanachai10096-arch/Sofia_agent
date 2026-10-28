@@ -144,7 +144,7 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 
 ## `> Discord integration (opt-in)`
 
-The Discord interaction adapter supports allowlisted slash commands for durable background work:
+The Discord Interactions HTTP adapter supports allowlisted slash commands for durable background work:
 
 - `/run` submits a task and returns a job ID.
 - `/status` and `/cancel` are restricted to jobs owned by the invoking Discord user.
@@ -153,6 +153,10 @@ The Discord interaction adapter supports allowlisted slash commands for durable 
 - Restart recovery can notify the configured channel about interrupted jobs and whether a checkpoint is available.
 
 Discord is disabled unless its server-side configuration is supplied. Configure explicit user and channel ID allowlists, use HTTPS, keep the bot token/API key in a secret store, and use persistent storage for restart recovery. **CI does not replace a live Discord test.**
+
+
+
+An additive `createDiscordGatewayTransport` is also available for ordinary Discord `MESSAGE_CREATE` events. It must be explicitly wired by the host into `createDiscordAdapter` and the existing `MessagingGateway`; it is **not enabled automatically** by the Interactions HTTP adapter. The bot needs the Message Content privileged intent enabled in the Discord Developer Portal. Test it in a private server before treating natural-language Discord chat as end-to-end ready.
 
 See [Discord integration setup and smoke-test guide](docs/DISCORD_INTEGRATION_SETUP.md) for required environment variables, command registration, and a private-server acceptance checklist.
 
