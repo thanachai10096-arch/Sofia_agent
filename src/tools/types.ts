@@ -1,6 +1,6 @@
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import type { ToolEffect } from "../security/policy.js";
-export interface ToolContext { runtime: WorkspaceRuntime; signal?: AbortSignal; }
+export interface ToolContext { runtime: WorkspaceRuntime; signal?: AbortSignal; principalId?: string; }
 export interface SofiaTool {
   name: string;
   description: string;
