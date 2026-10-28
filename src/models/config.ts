@@ -96,7 +96,7 @@ export function loadModelConfigFromEnv(env: Environment = process.env, localEnvP
   }
 
   const providerPrefix = generic ? (merged.SOFIA_MODEL_PROVIDER?.trim() || "custom").toUpperCase() : "GEMINI";
-  if (!/^[A-Z][A-Z0-9_]{0,31}$/.test(providerPrefix)) {
+  if (!/^[A-Z][A-Z0-9_-]{0,31}$/.test(providerPrefix)) {
     throw new Error("SOFIA_MODEL_PROVIDER must contain only letters, numbers, and underscores and start with a letter.");
   }
 
