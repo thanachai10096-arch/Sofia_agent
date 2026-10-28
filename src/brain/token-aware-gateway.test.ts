@@ -96,6 +96,25 @@ test("gateway meters actual provider usage exactly once", async () => {
   assert.equal(budget.snapshot().reservedTokens, 0);
 });
 
+test("metered inference preserves successful provider retry counts", async () => {
+  const gateway = new TokenAwareGateway(
+    makeBudget(),
+    [route(async () => ({
+      value: { ok: true },
+      usage: { inputTokens: 12, outputTokens: 4 },
+      retries: 2,
+      finishReason: "complete",
+    }))],
+  );
+
+  const result = await gateway.generateMetered(request());
+  assert.deepEqual(result, {
+    value: { ok: true },
+    usage: { inputTokens: 12, outputTokens: 4 },
+    retries: 2,
+  });
+});
+
 test("gateway rejects incomplete provider output without retrying", async () => {
   const budget = makeBudget();
   let calls = 0;
