@@ -108,7 +108,7 @@ function normalizeAcceptanceCriteria(input: AgentRunInput["acceptanceCriteria"])
 }
 
 function isCancellationRequested(run: ActiveRun): boolean {
-  return isCancellationRequested(run);
+  return run.status === "cancelled" || run.controller.signal.aborted;
 }
 
 function integerSetting(
