@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
+import { EncryptedUserModelProfileStore } from "../models/profile-store.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { MemorySessionStore } from "../session/store.js";
 import type { ModelRoute } from "../models/types.js";
 
@@ -128,5 +132,57 @@ test("API accepts only a valid signed messaging origin and binds user principal"
     assert.deepEqual(principals, ["telegram:user-7"]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("model profile API encrypts keys, scopes access, and never returns credentials", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-model-profile-api-test-"));
+  const modelProfileStore = new EncryptedUserModelProfileStore(
+    path.join(directory, "profiles.json"),
+    Buffer.alloc(32, 4).toString("base64"),
+  );
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    modelProfileStore,
+  }, {
+    apiKeys: {
+      "key-profile-owner": ["agent:run", "model:profile:read", "model:profile:write"],
+      "key-other-owner": ["model:profile:read", "model:profile:write"],
+      "key-no-profile-scope": ["agent:run"],
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const request = (key: string, method: string, body?: unknown) => fetch(`${baseUrl}/v1/model-profile`, {
+    method,
+    headers: { authorization: `Bearer ${key}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  try {
+    const saved = await request("key-profile-owner", "PUT", {
+      provider: "gemini", model: "gemini-2.5-flash", apiKey: "secret-provider-key-12345",
+    });
+    assert.equal(saved.status, 200);
+    const savedBody = await saved.json() as { profile: Record<string, unknown> };
+    assert.equal(savedBody.profile.model, "gemini-2.5-flash");
+    assert.equal("apiKey" in savedBody.profile, false);
+    assert.equal(JSON.stringify(savedBody).includes("secret-provider-key-12345"), false);
+
+    const other = await request("key-other-owner", "GET");
+    assert.equal(other.status, 200);
+    assert.deepEqual(await other.json(), { profile: null });
+
+    const forbidden = await request("key-no-profile-scope", "PUT", {
+      provider: "gemini", model: "gemini-2.5-flash", apiKey: "secret-provider-key-12345",
+    });
+    assert.equal(forbidden.status, 403);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
   }
 });
