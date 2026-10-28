@@ -98,6 +98,8 @@ export interface TelegramMessagingEnvironment {
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
+  /** Set to "true" to keep legacy /run-only behavior. Natural-language mode is the default. */
+  TELEGRAM_COMMANDS_ONLY?: string;
   SOFIA_API_KEY?: string;
   SOFIA_API_BASE_URL?: string;
   RAILWAY_PUBLIC_DOMAIN?: string;
@@ -144,6 +146,7 @@ export function createTelegramMessagingRuntime(
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
+      naturalLanguageMode: env.TELEGRAM_COMMANDS_ONLY === "true" ? "commands-only" : "natural-language",
       onAccepted: ({ runId, message }) => {
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
