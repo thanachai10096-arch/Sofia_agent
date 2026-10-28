@@ -39,9 +39,10 @@ Hosted and enterprise services described in the roadmap are potential offerings,
 
 ### Self-hosted configuration vs. shared hosted accounts
 
-- **Self-hosted / personal instance:** each user or operator configures their own provider credentials and model on their own machine/server. `sofia setup` is local-only convenience, and its SQLite sessions are local to that installation.
-- **Shared hosted service:** one server-side environment currently supplies the model configuration to its runtime. The API does not yet provide an isolated per-user provider profile or encrypted BYOK secret vault. Do not enter a personal provider key into a shared deployment expecting it to affect only your account.
-- **Product requirement before calling Sofia multi-user/Hermes-like:** add authenticated per-user model profiles, encrypted secret storage backed by a deployment-managed encryption key, provider/model validation, usage/cost limits, and tests proving users cannot read or use another user's credentials. Keep server-owned provider options separate from user-owned BYOK credentials.
+- **Self-hosted / personal instance:** `sofia setup` configures only that installation. Its local provider settings and SQLite sessions do not configure other users.
+- **Shared hosted service:** per-API-key model profiles are available through `GET/PUT/DELETE /v1/model-profile` when `SOFIA_MODEL_PROFILE_ENCRYPTION_KEY` is configured. Provider keys are encrypted at rest with AES-256-GCM, keyed by a hash of the authenticated API principal, and never returned by the profile API. Grant `model:profile:read` and `model:profile:write` scopes to use the profile endpoints.
+- **Provider support:** Gemini and OpenRouter use fixed HTTPS endpoints. OpenAI-compatible providers require HTTPS and a hostname allowed by the operator. The profile's provider/model/API key override the server default only for that authenticated API principal; users without a profile continue using the server-owned default.
+- **Still required before calling the hosted product fully multi-user/Hermes-like:** persistent per-user cost/usage budgets, a durable shared profile database for horizontal scaling, a profile-management UX for users who arrive only through a shared chat bot identity, and live tests with real provider credentials. Keep server-owned provider options separate from user-owned BYOK credentials.
 
 
 
