@@ -36,12 +36,14 @@ function selectedProvider(): { kind: ProviderKind; baseUrl: string; apiKey: stri
   const geminiKey = process.env.GEMINI_API_KEY?.trim() || process.env.Gemini_API_Key?.trim() || "";
   const openRouterKey = process.env.OPENROUTER_API_KEY?.trim() || "";
   const openAiKey = process.env.OPENAI_API_KEY?.trim() || "";
-  const customBaseUrl = process.env.SOFIA_MODEL_BASE_URL?.trim() ||
-    process.env.OPENAI_BASE_URL?.trim() ||
-    process.env.BASE_URL?.trim() || "";
+  const explicitSofiaBaseUrl = process.env.SOFIA_MODEL_BASE_URL?.trim() || process.env.BASE_URL?.trim() || "";
+  const openAiBaseUrl = process.env.OPENAI_BASE_URL?.trim() || "";
+  const customBaseUrl = explicitSofiaBaseUrl || openAiBaseUrl;
+  // Do not accidentally send an unrelated OPENAI_API_KEY to a custom BASE_URL.
   const customApiKey = process.env.SOFIA_MODEL_API_KEY?.trim() ||
-    process.env.OPENAI_API_KEY?.trim() ||
-    (customBaseUrl ? process.env.API_KEY?.trim() : "") || "";
+    (explicitSofiaBaseUrl ? process.env.API_KEY?.trim() : "") ||
+    (openAiBaseUrl ? openAiKey : "") ||
+    (!explicitSofiaBaseUrl ? openAiKey : "") || "";
 
   let kind: ProviderKind;
   if (requested) {
