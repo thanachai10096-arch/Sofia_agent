@@ -344,3 +344,36 @@ test("execution timeout cancels the runtime job and records failure", async () =
   assert.equal(state.history[0].status, "failed");
   assert.match(state.history[0].error, /timed out/i);
 });
+
+
+test("scheduled jobs receive owner-scoped reference context and preserve it across retries", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const submittedContexts: string[] = [];
+  let resolverCalls = 0;
+  const runtime = {
+    async submit(input: { task: string; ownerKeyId?: string; context?: string }) {
+      submittedContexts.push(input.context ?? "");
+      return { id: "cron-context-job-" + submittedContexts.length, status: "completed", task: input.task } as JobRecord;
+    },
+    async get(id: string) { return { id, status: "completed", task: "context task" } as JobRecord; },
+    async cancel() { return true; }, async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, {
+    store, now: () => now,
+    contextForRun: async (ownerKeyId, task) => {
+      resolverCalls++;
+      assert.equal(ownerKeyId, "alice");
+      assert.equal(task, "summarize my project");
+      return "Fenced user memory reference for alice";
+    },
+  });
+  await scheduler.create({ name: "memory-cron", task: "summarize my project", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice", maxRetries: 1 }, "alice");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  await scheduler.tick();
+  for (let i = 0; i < 40 && state.history[0]?.status !== "completed"; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(state.history[0]?.status, "completed");
+  assert.equal(resolverCalls, 1);
+  assert.deepEqual(submittedContexts, ["Fenced user memory reference for alice"]);
+});

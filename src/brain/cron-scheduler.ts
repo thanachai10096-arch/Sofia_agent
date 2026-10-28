@@ -63,6 +63,8 @@ export interface CronSchedulerOptions {
   maxConcurrent?: number;
   maxSchedulesPerOwner?: number;
   audit?: (event: CronAuditEvent) => void | Promise<void>;
+  /** Resolve owner-scoped reference context when a scheduled execution is dispatched. */
+  contextForRun?: (ownerKeyId: string, task: string) => Promise<string | undefined>;
 }
 
 /** File-backed store. Exclusive lock + atomic rename serializes claims across local processes. */
@@ -204,6 +206,7 @@ export class CronScheduler {
   private readonly maxConcurrent: number;
   private readonly maxSchedulesPerOwner: number;
   private readonly auditCallback?: CronSchedulerOptions["audit"];
+  private readonly contextForRun?: CronSchedulerOptions["contextForRun"];
   private ticking = false;
   private readonly active = new Map<string, AbortController>();
 
@@ -214,6 +217,7 @@ export class CronScheduler {
     this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
     this.maxSchedulesPerOwner = Math.max(1, Math.min(10_000, Math.floor(options.maxSchedulesPerOwner ?? 100)));
     this.auditCallback = options.audit;
+    this.contextForRun = options.contextForRun;
   }
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
     state.audit.push(event);
@@ -521,6 +525,8 @@ export class CronScheduler {
     let status: CronExecution["status"] = "failed";
     const maxAttempts = Math.max(1, Math.min(11, (schedule.maxRetries ?? 0) + 1));
     try {
+      // Resolve once per claimed occurrence so retries use the same reference context.
+      const context = await this.contextForRun?.(schedule.ownerKeyId, schedule.task);
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         if (controller.signal.aborted) {
           status = "cancelled";
@@ -528,7 +534,7 @@ export class CronScheduler {
           break;
         }
         try {
-          const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId });
+          const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId, ...(context ? { context } : {}) });
           job = submitted;
           if (controller.signal.aborted) {
             await this.runtime.cancel(submitted.id).catch(() => false);
