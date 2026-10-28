@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHmac } from "node:crypto";
 import { createLineHttpTransport, verifyLineSignature } from "./line-http-transport.js";
-import { createLineAdapter } from "./line.js";
+import { createLineAdapter, type VerifiedLineMessage } from "./line.js";
 
 const secret = "test-channel-secret";
 const signed = (body: string) => createHmac("sha256", secret).update(body).digest("base64");
@@ -46,7 +46,7 @@ test("LINE webhook maps verified text events to trusted user and conversation ID
 test("LINE adapter sends replies through the shared adapter contract", async () => {
   const sent: Array<{ conversationId: string; text: string }> = [];
   const transport = {
-    async start(_signal: AbortSignal, onMessage: (event: any) => Promise<void>) {
+    async start(_signal: AbortSignal, onMessage: (event: VerifiedLineMessage) => Promise<void>) {
       await onMessage({ signatureVerified: true, webhookEventId: "evt", messageId: "msg", userId: "u1", conversationId: "c1", text: "hi", timestamp: 1 });
     },
     async pushMessage(conversationId: string, text: string) {
