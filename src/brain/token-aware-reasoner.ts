@@ -108,6 +108,7 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
         return {
           value: result.value,
           usage: result.usage,
+          retries: result.retries,
         };
       },
     };
