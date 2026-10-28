@@ -23,9 +23,14 @@ async function notifySlackRunTerminal(
 ): Promise<void> {
   const context = input.context;
   if (typeof context !== "string") return;
-  const match = context.match(/^Origin: Slack message event\. Slack user ID: ([A-Z0-9]{1,32})\. Channel ID: ([A-Z0-9]{1,32})\. Message timestamp: (\d{1,16}(?:\.\d{1,9})?)\.$/);
+  const match = context.match(/^Origin: Slack message event\. Slack user ID: ([A-Z0-9]{1,32})\. Channel ID: ([A-Z0-9]{1,32})\. Message timestamp: (\d{1,16}(?:\.\d{1,9})?)\. Callback signature: ([a-f0-9]{64})\.$/);
   if (!match) return;
-  const [, userId, channelId, threadTs] = match;
+  const [, userId, channelId, threadTs, signature] = match;
+  const callbackSecret = process.env.SOFIA_SLACK_CALLBACK_SECRET?.trim();
+  if (!callbackSecret || callbackSecret.length < 32) return;
+  const expected = createHmac("sha256", callbackSecret).update(`${userId}|${channelId}|${threadTs}`).digest();
+  const supplied = Buffer.from(signature!, "hex");
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return;
   if (!parseSlackAllowlist(process.env.SLACK_ALLOWED_USER_IDS).has(userId!) ||
       !parseSlackAllowlist(process.env.SLACK_ALLOWED_CHANNEL_IDS).has(channelId!)) return;
   const token = process.env.SLACK_BOT_TOKEN;
