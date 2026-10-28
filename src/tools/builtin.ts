@@ -1,6 +1,7 @@
 import type { SofiaTool, ToolContext } from "./types.js";
 import { applyEditPatch, createEditPatch } from "../brain/edit-engine.js";
 import { randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import type { UserMemoryStore, UserMemoryKind } from "../brain/user-memory.js";
 
 const str = (description: string) => ({ type: "string", description });
@@ -25,10 +26,8 @@ function allowedNetworkUrl(raw: string): URL {
     throw new Error("Web tools only allow HTTPS URLs without embedded credentials.");
   }
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
-  if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") ||
-      /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
-      /^169\.254\./.test(host) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
-      host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:")) {
+  if (!host || isIP(host.replace(/^\[|\]$/g, "")) !== 0 ||
+      host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
     throw new Error("Web tools cannot access localhost or private network addresses.");
   }
   if (process.env.SOFIA_ALLOW_NETWORK !== "true") throw new Error("Network access is disabled by SOFIA_ALLOW_NETWORK.");
