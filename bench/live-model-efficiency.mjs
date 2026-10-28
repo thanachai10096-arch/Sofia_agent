@@ -23,6 +23,23 @@ const timeoutMs = Number(process.env.SOFIA_LIVE_BENCHMARK_TIMEOUT_MS || 45000);
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 180000) {
   throw new Error("SOFIA_LIVE_BENCHMARK_TIMEOUT_MS must be an integer from 1000 to 180000");
 }
+// Optional explicit list pricing (USD per one million tokens). These are estimates,
+// not invoice data; never infer pricing from model names or provider defaults.
+function readPrice(name) {
+  const raw = process.env[name]?.trim();
+  if (raw === undefined || raw === "") return null;
+  if (!/^(?:0|[1-9]\\d*)(?:\\.\\d{1,8})?$/.test(raw)) {
+    throw new Error(name + " must be a non-negative decimal USD price per million tokens");
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new Error(name + " is not a finite number");
+  return value;
+}
+const inputPricePerMillionUsd = readPrice("SOFIA_BENCH_INPUT_USD_PER_MILLION_TOKENS");
+const outputPricePerMillionUsd = readPrice("SOFIA_BENCH_OUTPUT_USD_PER_MILLION_TOKENS");
+if ((inputPricePerMillionUsd === null) !== (outputPricePerMillionUsd === null)) {
+  throw new Error("Set both SOFIA_BENCH_INPUT_USD_PER_MILLION_TOKENS and SOFIA_BENCH_OUTPUT_USD_PER_MILLION_TOKENS, or neither");
+}
 
 // Small, deterministic synthetic extraction fixtures; never user content.
 const tasks = [
@@ -117,6 +134,17 @@ const compactTokens = sum(compact, "totalTokens");
 const reductionPercent = baselineTokens && compactTokens !== null
   ? Number(((1 - compactTokens / baselineTokens) * 100).toFixed(2))
   : null;
+function estimatedCostUsd(rows) {
+  if (inputPricePerMillionUsd === null || outputPricePerMillionUsd === null ||
+      !rows.every((r) => r.usageReported)) return null;
+  return Number(rows.reduce((total, row) =>
+    total + row.inputTokens * inputPricePerMillionUsd / 1_000_000
+      + row.outputTokens * outputPricePerMillionUsd / 1_000_000, 0).toFixed(10));
+}
+const baselineVerified = baseline.filter((r) => r.verified).length;
+const compactVerified = compact.filter((r) => r.verified).length;
+const baselineEstimatedCostUsd = estimatedCostUsd(baseline);
+const compactEstimatedCostUsd = estimatedCostUsd(compact);
 const summary = {
   benchmark: "live-model-context-efficiency",
   endpointType: "OpenAI-compatible chat completions",
@@ -124,14 +152,20 @@ const summary = {
   taskCount: tasks.length,
   providerCalls: results.length,
   baseline: {
-    verifiedTasks: baseline.filter((r) => r.verified).length,
+    verifiedTasks: baselineVerified,
+    estimatedCostUsd: baselineEstimatedCostUsd,
+    estimatedCostPerVerifiedSuccessUsd: baselineVerified > 0 && baselineEstimatedCostUsd !== null
+      ? Number((baselineEstimatedCostUsd / baselineVerified).toFixed(10)) : null,
     inputTokens: sum(baseline, "inputTokens"),
     outputTokens: sum(baseline, "outputTokens"),
     totalTokens: baselineTokens,
     durationMs: sum(baseline, "durationMs"),
   },
   compact: {
-    verifiedTasks: compact.filter((r) => r.verified).length,
+    verifiedTasks: compactVerified,
+    estimatedCostUsd: compactEstimatedCostUsd,
+    estimatedCostPerVerifiedSuccessUsd: compactVerified > 0 && compactEstimatedCostUsd !== null
+      ? Number((compactEstimatedCostUsd / compactVerified).toFixed(10)) : null,
     inputTokens: sum(compact, "inputTokens"),
     outputTokens: sum(compact, "outputTokens"),
     totalTokens: compactTokens,
@@ -139,7 +173,11 @@ const summary = {
   },
   totalTokenReductionPercent: reductionPercent,
   actualCost: null,
-  actualCostNote: "Cost is not inferred. Provider pricing and invoice-level billing are not queried.",
+  actualCostNote: "Invoice-level actual cost is not queried. Estimated cost is emitted only when explicit input/output prices are configured.",
+  configuredPricingUsdPerMillionTokens: inputPricePerMillionUsd === null ? null : {
+    input: inputPricePerMillionUsd,
+    output: outputPricePerMillionUsd,
+  },
   usageComplete: results.every((r) => r.usageReported),
   results,
   caveat: "Live provider calls on three small synthetic extraction fixtures. This compares full vs manually compacted evidence, not the full Sofia agent task loop and not the TokenAwareGateway packer itself. Results are not generalizable quality or savings claims.",
