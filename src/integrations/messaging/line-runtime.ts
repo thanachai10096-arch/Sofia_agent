@@ -21,6 +21,7 @@ export interface LineMessagingEnvironment {
   LINE_CHANNEL_ACCESS_TOKEN?: string;
   LINE_ALLOWED_USER_IDS?: string;
   LINE_ALLOWED_CONVERSATION_IDS?: string;
+  SOFIA_MESSAGING_CONTEXT_SECRET?: string;
   SOFIA_API_KEY?: string;
   SOFIA_API_BASE_URL?: string;
 }
@@ -67,7 +68,7 @@ export function createLineMessagingRuntime(
     });
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
-      client, accessPolicy, deduplicator, commandPrefix: "/run", allowPlainText: true,
+      client, accessPolicy, deduplicator, messagingContextSecret: env.SOFIA_MESSAGING_CONTEXT_SECRET?.trim(), commandPrefix: "/run", allowPlainText: true,
       onAccepted: ({ runId, message }) => {
         void client.waitForRun(runId, { timeoutMs: 30 * 60 * 1_000, intervalMs: 1_000 }).then(async (run) => {
           const output = run.status === "completed" && typeof run.result?.output === "string"
