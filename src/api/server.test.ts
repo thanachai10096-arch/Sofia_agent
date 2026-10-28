@@ -213,3 +213,76 @@ test("usage endpoint matches only its exact path and permits query parameters", 
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("usage endpoint exposes provider token and configured-cost totals isolated per API key", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-usage-api-ledger-"));
+  const usageStorePath = path.join(directory, "usage.json");
+  const report = {
+    completed: true,
+    state: "completed" as const,
+    summary: "Verified task.",
+    changedFiles: [],
+    changedFilesKnown: true,
+    verification: [],
+    remainingRisks: [],
+    usage: {
+      steps: 1,
+      toolCalls: 0,
+      modelCalls: 2,
+      reservedOrUsedTokens: 30,
+      providerInputTokens: 20,
+      providerOutputTokens: 10,
+      providerUsageCalls: 2,
+      configuredCostNanoUsd: "123",
+      replans: 0,
+    },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    brainFactory: (() => ({ run: async () => report })) as never,
+  }, {
+    apiKeys: {
+      "usage-owner-one": ["agent:run", "agent:read"],
+      "usage-owner-two": ["agent:run", "agent:read"],
+    },
+    usageStorePath,
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const request = (key: string, url: string, init?: RequestInit) => fetch(baseUrl + url, {
+    ...init,
+    headers: { authorization: `Bearer ${key}`, ...(init?.headers ?? {}) },
+  });
+
+  try {
+    for (const key of ["usage-owner-one", "usage-owner-two"]) {
+      const run = await request(key, "/v1/agent/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ task: "verify usage ledger" }),
+      });
+      assert.equal(run.status, 200);
+    }
+
+    const first = await request("usage-owner-one", "/v1/usage").then((response) => response.json()) as Record<string, unknown>;
+    const second = await request("usage-owner-two", "/v1/usage").then((response) => response.json()) as Record<string, unknown>;
+    for (const record of [first, second]) {
+      assert.equal(record.providerInputTokens, 20);
+      assert.equal(record.providerOutputTokens, 10);
+      assert.equal(record.providerUsageCalls, 2);
+      assert.equal(record.configuredCostNanoUsd, "123");
+      assert.equal(record.brainModelCalls, 2);
+      assert.equal(record.brainReservedOrUsedTokens, 30);
+    }
+    assert.notEqual(first.keyId, second.keyId);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
