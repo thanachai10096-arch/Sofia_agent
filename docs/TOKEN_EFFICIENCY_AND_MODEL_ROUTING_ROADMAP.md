@@ -136,3 +136,11 @@ These are foundations, not proof of measured savings or production readiness. Th
 - The live run still makes six billable-capable provider calls, requires explicit endpoint/key/model, and remains opt-in. Its packing step itself makes no provider calls.
 - The harness remains a three-task synthetic smoke benchmark, not the full Brain execution loop. Report observed usage/quality for that run only; do not generalize it to all Sofia workloads.
 - Latest workflow runs for this change are in progress; no passing result is claimed until they complete. No live provider calls or production deployment were performed during this change.
+
+
+### Brain context now enters token-aware evidence packing — 2026-10-28
+
+- `TokenAwareBrainReasoner` now converts the Brain request's recent tool observations, failure diagnoses, execution decisions, compact project context, and retrieved project memory into evidence chunks for the existing `TokenAwareGateway`.
+- Evidence is labeled as untrusted reference data in both chunk labels and the model instructions; it is not elevated to trusted instructions. Relevance scoring uses task-term overlap to rank context before packing.
+- Added tests that assert historical/project evidence reaches the gateway and that legacy requests without memory remain compatible.
+- This closes a context-plumbing gap in the token-aware reasoner, but test/typecheck/CI results for this exact change must be confirmed before treating it as validated. It does not by itself establish end-to-end task savings.
