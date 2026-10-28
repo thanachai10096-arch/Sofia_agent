@@ -104,7 +104,7 @@ export class PersistentSkillLedger implements SkillLedger {
       trigger: previous.trigger,
       triggers: [...new Set([previous.trigger, ...(previous.triggers ?? []), candidate.trigger, ...(candidate.triggers ?? [])]
         .map(value => String(redactSecrets(value)).trim()).filter(Boolean))].slice(0, 12),
-      procedure: [...new Set(candidate.procedure)].slice(0, 12),
+      procedure: [...new Set(candidate.procedure.map(value => String(redactSecrets(value)).slice(0, 2000)))].slice(0, 12),
       // Preserve real acceptance-check IDs across repeated runs and restarts.
       // Never collapse custom checks into fabricated typecheck/test/build labels.
       verification: [...new Set([...previous.verification, ...candidate.verification])].filter(
@@ -117,8 +117,9 @@ export class PersistentSkillLedger implements SkillLedger {
     } : {
       ...candidate,
       trigger: String(redactSecrets(candidate.trigger)).slice(0, 240),
-      triggers: [...new Set([candidate.trigger, ...(candidate.triggers ?? [])])].slice(0, 12),
-      procedure: [...new Set(candidate.procedure)].slice(0, 12),
+      triggers: [...new Set([candidate.trigger, ...(candidate.triggers ?? [])]
+        .map(value => String(redactSecrets(value)).trim().slice(0, 500)).filter(Boolean))].slice(0, 12),
+      procedure: [...new Set(candidate.procedure.map(value => String(redactSecrets(value)).slice(0, 2000)))].slice(0, 12),
       evidenceIds: [...new Set(candidate.evidenceIds)].slice(-50),
     };
     if (existingIndex >= 0) this.cache[existingIndex] = merged;
