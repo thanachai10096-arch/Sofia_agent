@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -34,5 +35,24 @@ test("rejects invalid measurements rather than writing malformed records", async
     const store = new FileTaskEfficiencyStore("/workspace/a", "principal-a", root);
     await assert.rejects(store.append({ ...sample, passedCriteria: 2 }), /Invalid efficiency measurement/);
     assert.deepEqual(await store.readAll(), []);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test("reads legacy aggregate records without usage completeness fields", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "sofia-efficiency-legacy-"));
+  try {
+    const workspace = "/workspace/legacy";
+    const principal = "legacy-user";
+    const namespace = createHash("sha256").update(workspace).update("\\0").update(principal).digest("hex");
+    const legacy = {
+      taskId: "legacy-run", completed: true, acceptanceCriteria: 1, passedCriteria: 1,
+      inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, modelCalls: 1, retries: 0,
+      durationMs: 50, costKnown: false,
+    };
+    await fs.writeFile(path.join(root, namespace + ".jsonl"), JSON.stringify(legacy) + "\\n", { mode: 0o600 });
+    const store = new FileTaskEfficiencyStore(workspace, principal, root);
+    const [measurement] = await store.readAll();
+    assert.equal(measurement?.unmeasuredModelCalls, 0);
+    assert.equal(measurement?.usageComplete, true);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
