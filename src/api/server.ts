@@ -185,7 +185,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try { usage.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
-  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
+  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime, { onExecutionFinished: config.onCronExecutionFinished }) : undefined;
   // Register the agent-facing scheduler tool against the same scheduler instance that the API ticks.
   // Keep this API-only: local CLI sessions do not run the background scheduler loop.
   if (cronScheduler && deps.tools && !deps.tools.get("schedule_task")) {
