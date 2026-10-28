@@ -229,3 +229,10 @@ test("loopback Ollama HTTP is allowed while remote HTTP remains rejected", () =>
   process.env.SOFIA_MODEL_NAME = "remote-model";
   assert.throws(loadModelConfigFromEnv, /HTTPS/);
 });
+
+test("credentials from an unselected provider are never reused as a fallback", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai";
+  process.env.GEMINI_API_KEY = "gemini-only-secret";
+  assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_API_KEY/);
+});
