@@ -202,6 +202,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try { usage.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
+  const countBrainUsage = (keyId: string, event: { type: string; metadata?: Record<string, unknown> }): void => {
+    if (event.type !== "model.completed" || !event.metadata?.usage || typeof event.metadata.usage !== "object") return;
+    const metrics = event.metadata.usage as Record<string, unknown>;
+    if (!Number.isSafeInteger(metrics.modelCalls) || !Number.isSafeInteger(metrics.reservedOrUsedTokens) ||
+        (metrics.modelCalls as number) < 0 || (metrics.reservedOrUsedTokens as number) < 0) return;
+    try {
+      usage.recordBrainUsage(keyId, {
+        modelCalls: metrics.modelCalls as number,
+        reservedOrUsedTokens: metrics.reservedOrUsedTokens as number,
+      });
+    } catch {
+      // Usage reporting must not turn a successful agent run into a failed run.
+    }
+  };
   const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime, { onExecutionFinished: config.onCronExecutionFinished }) : undefined;
   // Register the agent-facing scheduler tool against the same scheduler instance that the API ticks.
   // Keep this API-only: local CLI sessions do not run the background scheduler loop.
@@ -280,7 +294,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
-          onEvent: (event) => { countToolCall(run.ownerKeyId, run.controller, event); },
+          onEvent: (event) => { countToolCall(run.ownerKeyId, run.controller, event); countBrainUsage(run.ownerKeyId, event); },
         });
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
@@ -685,6 +699,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             signal: controller.signal,
             onEvent: (event) => {
               if (!countToolCall(auth.keyId, controller, event)) return;
+              countBrainUsage(auth.keyId, event);
               send({ type: "event", runId, event });
             },
           });
@@ -799,7 +814,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
-            onEvent: (event) => { countToolCall(auth.keyId, controller, event); },
+            onEvent: (event) => { countToolCall(auth.keyId, controller, event); countBrainUsage(auth.keyId, event); },
           });
           if (controller.signal.aborted) {
             const reason = controller.signal.reason instanceof Error ? controller.signal.reason.message : "Request timed out or was cancelled.";
