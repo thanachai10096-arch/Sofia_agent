@@ -58,3 +58,30 @@ test("managed skill learning fails closed when approval is absent or declined", 
     rmSync(f.directory, { recursive: true, force: true });
   }
 });
+
+
+test("managed skill learning accepts verified general-workflow candidates with explicit approval", async () => {
+  const f = fixture();
+  const workflowCandidate: LearnedSkillCandidate = {
+    name: "workflow-general",
+    trigger: "Create a reusable project summary",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect the project and constraints", "summarize verified project facts", "verify the summary against source evidence"],
+    verification: ["typecheck", "test", "build"],
+    evidenceIds: ["acceptance-check-1"],
+  };
+  try {
+    const handler = createManagedSkillLearningHandler(f.lifecycle, async (request) => {
+      assert.equal(request.toolName, "skill.lifecycle.promote");
+      assert.equal(request.risk, "high");
+      return true;
+    });
+    assert.equal(await handler(workflowCandidate, "run-workflow-1", "operator-1"), true);
+    const active = f.platform.get("learned:workflow-general:unknown");
+    assert.equal(active?.source, "learned");
+    assert.match(active?.skill.description ?? "", /workflow/i);
+  } finally {
+    rmSync(f.directory, { recursive: true, force: true });
+  }
+});
