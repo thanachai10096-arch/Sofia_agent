@@ -99,9 +99,14 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const browserTools=policy.allowBrowser?createBrowserTools(new PlaywrightBrowserRuntime()):[];
   const tools=createToolRegistry([...createBuiltinTools(userMemoryStore),...browserTools]);
   const profileEncryptionKey = process.env.SOFIA_MODEL_PROFILE_ENCRYPTION_KEY?.trim();
+  const configuredStateDir = process.env.SOFIA_STATE_DIR?.trim();
+  if (configuredStateDir && !path.isAbsolute(configuredStateDir)) throw new Error("SOFIA_STATE_DIR must be an absolute path.");
+  const profileStorePath = configuredStateDir
+    ? path.join(configuredStateDir, "sofia-agents", "model-profiles.json")
+    : path.join(workspace, ".sofia", "model-profiles.json");
   const extraProfileHosts = (process.env.SOFIA_MODEL_PROFILE_ALLOWED_HOSTS ?? "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean);
   const modelProfileStore = profileEncryptionKey
-    ? new EncryptedUserModelProfileStore(path.join(workspace, ".sofia", "model-profiles.json"), profileEncryptionKey, extraProfileHosts)
+    ? new EncryptedUserModelProfileStore(profileStorePath, profileEncryptionKey, extraProfileHosts)
     : undefined;
   const provider=new SofiaModelGateway(config.providers, modelProfileStore);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
