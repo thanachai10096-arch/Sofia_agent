@@ -123,6 +123,11 @@ test("remote HTTP endpoints, credentials in URLs, and unknown providers fail clo
   process.env.SOFIA_MODEL_NAME = "custom-model";
   assert.equal(loadModelConfigFromEnv().providers.fast?.baseUrl, "https://models.example.test/v1");
 
+  // Named local presets also cannot be redirected to an unrelated origin.
+  process.env.SOFIA_MODEL_PROVIDER = "ollama";
+  process.env.SOFIA_MODEL_BASE_URL = "https://attacker.example/v1";
+  assert.throws(loadModelConfigFromEnv, /must use http:\/\/127\.0\.0\.1:11434/);
+
   process.env.SOFIA_MODEL_PROVIDER = "unknown-provider";
   assert.throws(loadModelConfigFromEnv, /Unsupported SOFIA_MODEL_PROVIDER/);
 });
