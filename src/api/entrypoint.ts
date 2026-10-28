@@ -13,8 +13,22 @@ import { createMatrixMessagingRuntime } from "../integrations/messaging/matrix-r
 import { createSlackMessagingRuntime } from "../integrations/messaging/slack-runtime.js";
 import { createLineMessagingRuntime } from "../integrations/messaging/line-runtime.js";
 import { createWhatsAppMessagingRuntime } from "../integrations/messaging/whatsapp-runtime.js";
+import { splitMessage } from "../integrations/messaging/format.js";
 import { redactSecrets } from "../security/guard.js";
 import { ContinuousWorkSupervisor, FileContinuousWorkStore, hasVerifiedCompletionEvidence } from "../brain/continuous-work.js";
+
+
+async function sendDiscordText(
+  transport: ReturnType<typeof createDiscordInteractionTransport>,
+  channelId: string,
+  text: string,
+  replyToMessageId?: string,
+): Promise<void> {
+  const chunks = splitMessage(text, 1_700);
+  for (let index = 0; index < chunks.length; index += 1) {
+    await transport.sendMessage(channelId, chunks[index]!, index === 0 ? replyToMessageId : undefined);
+  }
+}
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -87,7 +101,7 @@ if (discordConfigured) {
         const value = rest.join(" ").trim();
         const owner = "chat:" + createHash("sha256").update(JSON.stringify(["discord", message.author.id])).digest("hex");
         const sendWorkReply = async (text: string) => {
-          await discordTransport?.sendMessage(message.channelId, text.slice(0, 1700), undefined, message.id);
+          if (discordTransport) await sendDiscordText(discordTransport, message.channelId, text, message.id);
         };
         if (!continuousWorkSupervisor) {
           await sendWorkReply("Sofia continuous work is unavailable.");
@@ -241,8 +255,7 @@ if (discordConfigured) {
       void waitForDiscordTask(handle, { signal: discordAbort.signal }).then(async (result) => {
         const prefix = result.status === "completed" ? "Sofia completed the task." : "Sofia job " + result.status + ".";
         const response = prefix + "\nJob ID: " + result.id + "\n" + result.summary;
-        const safeResponse = response.length > 1700 ? response.slice(0, 1690) + "… (truncated)" : response;
-        await discordTransport?.sendMessage(message.channelId, safeResponse);
+        if (discordTransport) await sendDiscordText(discordTransport, message.channelId, response);
         await deps.jobRuntime?.markNotificationDelivered?.(result.id);
       }).catch(async () => {
         try {
@@ -326,11 +339,11 @@ const server = createSofiaApi(deps, {
     const message = status === "completed"
       ? "⏰ Sofia scheduled task completed.\nSchedule: " + schedule.name + "\n" + (summary || "The task completed without a text summary.")
       : "⏰ Sofia scheduled task " + status + ".\nSchedule: " + schedule.name + "\nCheck Sofia schedule history for details.";
-    const outbound = { conversationId: target.conversationId, text: message.slice(0, 1700) };
+    const outbound = { conversationId: target.conversationId, text: message };
     switch (target.platform) {
       case "discord":
         if (!discordTransport) return false;
-        await discordTransport.sendMessage(target.conversationId, outbound.text);
+        await sendDiscordText(discordTransport, target.conversationId, outbound.text);
         return true;
       case "telegram": return telegramRuntime ? telegramRuntime.send(outbound) : false;
       case "matrix": return matrixRuntime ? matrixRuntime.send(outbound) : false;
