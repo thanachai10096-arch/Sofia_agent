@@ -8,7 +8,7 @@ import type { TaskMeasurement } from "./task-efficiency-metrics.js";
 
 const sample: TaskMeasurement = {
   taskId: "run-safe-1", completed: true, acceptanceCriteria: 1, passedCriteria: 1,
-  inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, modelCalls: 1, retries: 0,
+  inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, modelCalls: 1, unmeasuredModelCalls: 0, usageComplete: true, retries: 0,
   durationMs: 123, costKnown: false,
 };
 
