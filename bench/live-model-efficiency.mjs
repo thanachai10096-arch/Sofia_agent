@@ -25,8 +25,6 @@ if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 180000) 
   throw new Error("SOFIA_LIVE_BENCHMARK_TIMEOUT_MS must be an integer from 1000 to 180000");
 }
 const pricing = readExplicitPricing(process.env);
-const inputPricePerMillionUsd = pricing?.inputUsdPerMillion ?? null;
-const outputPricePerMillionUsd = pricing?.outputUsdPerMillion ?? null;
 
 // Small, deterministic synthetic extraction fixtures; never user content.
 const tasks = [
