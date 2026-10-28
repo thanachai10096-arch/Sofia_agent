@@ -1167,37 +1167,61 @@ export class SofiaBrain {
           ? "Task completed and all acceptance criteria passed."
           : "Task completed.";
 
-      if (this.dependencies.skillLedger && this.diagnoses.length > 0 && verification.every((item) => item.passed)) {
-        const last = this.diagnoses[this.diagnoses.length - 1]!;
-        const strategy = this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation";
+      if (this.dependencies.skillLedger && verification.length > 0 && verification.every((item) => item.passed)) {
+        const last = this.diagnoses[this.diagnoses.length - 1];
+        const strategy = this.decisions[this.decisions.length - 1]?.strategy ?? currentPlan.strategy;
         const evidenceIds = verification.flatMap((item) => item.evidenceIds);
-        const learnedCandidate: LearnedSkillCandidate = {
-          name: "repair-" + last.category,
-          trigger: last.message.slice(0, 240),
-          category: last.category,
-          strategy,
-          procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
-          verification: verification.map((item) => item.criterionId),
-          evidenceIds,
-        };
-        // Learning is opt-in: absence of an explicit host approval callback must fail closed.
-        let mayActivate = false;
-        if (this.dependencies.onSkillCandidate) {
-          try {
-            mayActivate = await this.dependencies.onSkillCandidate(learnedCandidate, this.runId, input.principalId);
-          } catch {
-            mayActivate = false;
+        // Repair candidates retain their evidence-based form. For other completed
+        // workflows, learn only when a non-empty plan and trusted verification exist.
+        const taskType = (understanding.requiredCapabilities[0] ?? "general")
+          .toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "general";
+        const workflowTrigger = String(understanding.objective || input.task)
+          .replace(/[\r\n\t]+/g, " ").trim().slice(0, 160);
+        const learnedCandidate: LearnedSkillCandidate | undefined = last
+          ? {
+              name: "repair-" + last.category,
+              trigger: last.message.slice(0, 240),
+              category: last.category,
+              strategy,
+              procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
+              verification: verification.map((item) => item.criterionId),
+              evidenceIds,
+            }
+          : currentPlan.steps.length > 0 && evidenceIds.length > 0 && workflowTrigger.length >= 12
+            ? {
+                name: "workflow-" + taskType,
+                trigger: workflowTrigger,
+                category: "unknown",
+                strategy,
+                procedure: [
+                  "re-check the current objective and constraints",
+                  ...currentPlan.steps.slice(0, 8).map((step) => String(step.objective).replace(/[\r\n\t]+/g, " ").slice(0, 240)),
+                  "verify the outcome using the trusted checks recorded for this workflow",
+                ].filter((step) => step.trim().length > 0),
+                verification: verification.map((item) => item.criterionId),
+                evidenceIds,
+              }
+            : undefined;
+        if (learnedCandidate) {
+          // Learning is opt-in: no approval callback means no promotion or persistence.
+          let mayActivate = false;
+          if (this.dependencies.onSkillCandidate) {
+            try {
+              mayActivate = await this.dependencies.onSkillCandidate(learnedCandidate, this.runId, input.principalId);
+            } catch {
+              mayActivate = false;
+            }
           }
+          if (mayActivate) this.dependencies.skillLedger.record(learnedCandidate);
         }
-        if (mayActivate) this.dependencies.skillLedger.record(learnedCandidate);
-        if (this.dependencies.projectMemory && this.projectContext) {
+        if (last && this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
           const entry: ProjectMemoryEntry = { id, project: this.projectContext.root, kind: "repair", content: "Failure: " + last.category + "\nStrategy: " + strategy + "\nResolution: " + last.message.slice(0, 1200), source: "brain-recovery", confidence: 0.85, createdAt: now, updatedAt: now, uses: 0 };
           await this.wait(() => this.dependencies.projectMemory!.save(entry));
           this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
         }
-        this.emit({ type: "brain.learning.recorded" });
+        if (learnedCandidate) this.emit({ type: "brain.learning.recorded" });
       }
 
       return this.report(
