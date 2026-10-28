@@ -133,6 +133,16 @@ This matrix describes code in the repository, not a claim of live account connec
 
 A platform string in `ChatPlatform` is only a type-level identifier. At runtime, the adapter registry lists only the concrete adapters passed to it. Unit tests and CI do not prove a real provider account has been connected; record provider smoke tests separately.
 
+## LINE setup (host integration)
+
+1. Create a LINE Official Account and Messaging API channel in the LINE Developers Console. Store the channel access token and channel secret as server-side secrets; never put them in client code.
+2. Construct `createLineHttpTransport({ channelAccessToken, channelSecret })`, then `createLineAdapter(transport)`, and pass that adapter to the existing `createMessagingGateway` alongside the same Sofia handler and access policy used by other channels.
+3. Mount `handleLineWebhookHttpRequest(req, res, transport)` on the configured HTTPS webhook path **before any JSON body parser**. It reads a bounded body and verifies `x-line-signature` against the exact raw bytes. Do not log the raw body, signature, or credentials.
+4. Configure an explicit allowlist using immutable LINE user IDs and, where relevant, group/room conversation IDs. The gateway must reject messages not allowed by the existing access policy.
+5. Enable the webhook in LINE Developers Console and use LINE's webhook verification feature. Run a real test-account smoke test for direct messages and group chats before describing the integration as connected.
+
+The route helper and transport are framework-neutral Node HTTP utilities; this change does not automatically mount a route into every deployment or create LINE credentials. Webhook delivery can be retried when dispatch returns a retryable failure; provider retries plus gateway deduplication must be validated during the smoke test.
+
 ## Natural chat behavior
 
 `createSofiaMessagingHandler` defaults to `mode: "natural"`: ordinary non-empty text from an authorized conversation is submitted as a task. The configured `/run` prefix is still accepted, while unrelated slash commands are ignored. Set `mode: "command"` explicitly for deployments that require the prefix. Natural chat does not bypass authorization, deduplication, rate limits, API policy, or runtime safety checks.
