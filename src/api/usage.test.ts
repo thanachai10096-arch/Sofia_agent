@@ -179,5 +179,8 @@ test("rejects malformed configured cost estimates without mutating usage", () =>
   assert.throws(() => usage.recordBrainUsage("key-a", {
     modelCalls: 1, reservedOrUsedTokens: 2, configuredCostNanoUsd: "-1",
   }), /provider-reported token metrics/);
+  assert.throws(() => usage.recordBrainUsage("key-a", {
+    modelCalls: 1, reservedOrUsedTokens: 2, configuredCostNanoUsd: "123",
+  }), /provider-reported token metrics/);
   assert.equal(usage.get("key-a").configuredCostNanoUsd, undefined);
 });
