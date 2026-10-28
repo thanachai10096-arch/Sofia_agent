@@ -57,7 +57,7 @@ if (discordConfigured) {
     publicKeyHex: discordPublicKey,
     botToken: discordBotToken,
     commandName: process.env.DISCORD_COMMAND_NAME?.trim() || "run",
-    additionalCommandNames: ["status", "cancel", "resume"],
+    additionalCommandNames: ["status", "cancel", "resume", "work"],
     allowedUserIds: discordUserIds,
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
