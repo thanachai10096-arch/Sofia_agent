@@ -23,6 +23,7 @@ import { reviewCodeChange } from "../review/code-review.js";
 import type { RunStore } from "./run-store.js";
 import type { ProjectMemoryEntry, ProjectMemoryStore } from "./project-memory.js";
 import type { EvolutionEngine } from "./evolution.js";
+import { TaskEfficiencyMetrics, type TaskMeasurement } from "./task-efficiency-metrics.js";
 
 import type {
   AcceptanceCriterion,
@@ -97,6 +98,8 @@ interface Dependencies {
   runStore?: RunStore;
   projectMemory?: ProjectMemoryStore;
   evolution?: EvolutionEngine;
+  /** Optional host hook for privacy-safe aggregate run telemetry. Callback failures never affect execution. */
+  onEfficiencyMeasurement?: (measurement: TaskMeasurement) => void | Promise<void>;
 }
 
 export interface BrainRunInput {
@@ -239,6 +242,7 @@ export class SofiaBrain {
   private signal!: AbortSignal;
   private readonly limits: BrainLimits;
   private readonly trace = new ExecutionTrace();
+  private readonly efficiencyMetrics = new TaskEfficiencyMetrics();
 
   private readonly usage = {
     steps: 0,
@@ -433,6 +437,7 @@ export class SofiaBrain {
       // Brain keeps only telemetry here to avoid double-reserving tokens.
       this.usage.modelCalls += 1;
 
+      const modelCallStartedAt = Date.now();
       const result = await this.wait(() =>
         prepared.invoke({
           signal: this.signal,
@@ -450,6 +455,12 @@ export class SofiaBrain {
       ) {
         throw new Stop("Invalid inference usage");
       }
+
+      this.efficiencyMetrics.recordModelCall({
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        durationMs: Math.max(0, Date.now() - modelCallStartedAt),
+      });
 
       this.usage.reservedOrUsedTokens += actual;
 
@@ -861,6 +872,8 @@ export class SofiaBrain {
     let understanding: TaskUnderstanding | undefined;
     let completedStepIds = new Set<string>();
 
+    this.efficiencyMetrics.start();
+
     const checkpointState = async (plan: ExecutionPlan | undefined): Promise<void> => {
       if (!plan || !checkpointId || !understanding) return;
       await this.saveRunSnapshot({
@@ -1257,6 +1270,17 @@ export class SofiaBrain {
         remainingRisks,
       );
     } finally {
+      try {
+        const measurement = this.efficiencyMetrics.finishTask({
+          taskId: this.runId,
+          completed: this.state === "completed",
+          acceptanceCriteria: verification.length,
+          passedCriteria: verification.filter((item) => item.passed).length,
+        });
+        await this.dependencies.onEfficiencyMeasurement?.(measurement);
+      } catch {
+        // Telemetry is best-effort and must never change task execution semantics.
+      }
       clearTimeout(timer);
       this.signal.removeEventListener("abort", onAbort);
       this.signal = originalSignal;
