@@ -1,6 +1,6 @@
 import { fenceUntrustedOutput } from "../security/untrusted.js";
 import { redactSecrets } from "../security/guard.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   digest,
@@ -1192,7 +1192,7 @@ export class SofiaBrain {
             }
           : currentPlan.steps.length > 0 && evidenceIds.length > 0 && workflowTrigger.length >= 12
             ? {
-                name: "workflow-" + taskType,
+                name: "workflow-" + taskType + "-" + createHash("sha256").update(workflowTrigger.toLowerCase()).digest("hex").slice(0, 10),
                 trigger: workflowTrigger,
                 category: "unknown",
                 strategy,
