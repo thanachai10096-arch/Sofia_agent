@@ -20,6 +20,8 @@ export interface AgentRunInput {
     probe: { tool: string; input: Record<string, unknown> };
   }>;
   priority?: "normal" | "high";
+  /** Select an available model profile for this run, or let Sofia route automatically. */
+  modelSelection?: "auto" | "fast" | "coding" | "reasoning" | "vision";
 }
 
 export type AgentRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
