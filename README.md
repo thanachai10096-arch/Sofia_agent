@@ -23,6 +23,24 @@ A model-agnostic AI agent runtime with internal model routing, policy-controlled
 
 Sofia Agent is a standalone agent runtime and platform. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
 
+## Quick start: run Sofia locally
+
+**Prerequisites:** Node.js 20 or newer and access to a supported model provider. This source-checkout path is for developers/testers; it is not yet a claim that `npx sofia` is published and ready.
+
+```bash
+git clone https://github.com/thanachai10096-arch/Sofia_agent.git
+cd Sofia_agent
+npm ci
+npm run cli -- setup
+npm run cli -- chat
+```
+
+The setup wizard asks for a provider (`openai-compatible`, `gemini`, or `openrouter`), API base URL when applicable, API key, and model ID. It writes the local config to `~/.sofia/config.json` with owner-only file permissions. **Do not commit API keys or paste them into issues or chat.**
+
+In chat, type a task normally. Enter `/exit` to leave. Local conversation sessions are stored under `~/.sofia/sessions.sqlite`. This is a local single-user CLI flow; it does not configure a hosted account or connect Telegram/Discord by itself.
+
+For contributors, run `npm run typecheck`, `npm test`, and `npm run build` before proposing changes. These checks must pass on the exact commit before the PR is considered ready.
+
 > **Model setup has two separate scopes.** A self-hosted Sofia installation can configure its own provider and model. The local `sofia setup` command writes only to that installation's `~/.sofia/config.json` and local environment; it does not configure other users. Per-user model/provider profiles for a shared hosted Sofia service (including securely stored user-supplied API keys) are not implemented yet and must not be counted as a completed end-user feature.
 
 
