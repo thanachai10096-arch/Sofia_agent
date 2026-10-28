@@ -48,3 +48,29 @@ test("rejects invalid Brain usage counters without mutating the ledger", () => {
   assert.throws(() => usage.recordBrainUsage("key-a", { modelCalls: 1, reservedOrUsedTokens: 1, providerInputTokens: -1, providerOutputTokens: 1, providerUsageCalls: 1 }));
   assert.equal(usage.get("key-a").brainRuns, 0);
 });
+
+test("rejects aggregate usage counter overflow without partially mutating the ledger", () => {
+  const usage = new UsageLimiter(10, 100);
+  usage.recordBrainUsage("key-a", { modelCalls: Number.MAX_SAFE_INTEGER, reservedOrUsedTokens: 0 });
+  const beforeModelOverflow = usage.get("key-a");
+  assert.throws(
+    () => usage.recordBrainUsage("key-a", { modelCalls: 1, reservedOrUsedTokens: 0 }),
+    /safe integer range/,
+  );
+  assert.deepEqual(usage.get("key-a"), beforeModelOverflow);
+
+  const provider = new UsageLimiter(10, 100);
+  provider.recordBrainUsage("key-a", {
+    modelCalls: 1, reservedOrUsedTokens: 1,
+    providerInputTokens: Number.MAX_SAFE_INTEGER, providerOutputTokens: 0, providerUsageCalls: 1,
+  });
+  const beforeProviderOverflow = provider.get("key-a");
+  assert.throws(
+    () => provider.recordBrainUsage("key-a", {
+      modelCalls: 1, reservedOrUsedTokens: 1,
+      providerInputTokens: 1, providerOutputTokens: 0, providerUsageCalls: 1,
+    }),
+    /safe integer range/,
+  );
+  assert.deepEqual(provider.get("key-a"), beforeProviderOverflow);
+});
