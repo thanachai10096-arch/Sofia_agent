@@ -124,10 +124,10 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
         : selected.kind === "openai"
           ? process.env[`OPENAI_${id.toUpperCase()}_MODEL`]?.trim()
           : undefined;
-    const model = routeModel ||
-      process.env[`SOFIA_${id.toUpperCase()}_MODEL`]?.trim() ||
-      process.env[`SOFIA_${id.toUpperCase()}`]?.trim() ||
-      selected.defaultModel;
+    const genericRouteModel = selected.kind === "openai-compatible"
+      ? process.env[`SOFIA_${id.toUpperCase()}_MODEL`]?.trim() || process.env[`SOFIA_${id.toUpperCase()}`]?.trim()
+      : undefined;
+    const model = routeModel || genericRouteModel || selected.defaultModel;
 
     routes.push({
       id,
