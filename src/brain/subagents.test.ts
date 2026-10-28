@@ -23,6 +23,7 @@ test("subagent runtime executes a bounded internal role without exposing model s
           return {
             value: { finding: "inspect package boundaries" },
             usage: { inputTokens: 10, outputTokens: 20 },
+            retries: 2,
           };
         },
       };
