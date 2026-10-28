@@ -124,8 +124,8 @@ export function createBuiltinTools(userMemoryStore?: UserMemoryStore): SofiaTool
       async execute(input) {
         const url = allowedNetworkUrl(String(input.url ?? ""));
         const response = await fetchBoundedText(url);
-        const text = response.text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
-          .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+        const text = response.text.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
+          .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
           .replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
         return { url: url.toString(), status: response.status, contentType: response.contentType, text: decodeHtml(text).slice(0, 20_000), untrusted: true };
       },
