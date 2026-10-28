@@ -94,3 +94,12 @@ test("invalid command prefixes are rejected at configuration time", () => {
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: " " }), /commandPrefix/);
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: "/run\nadmin" }), /commandPrefix/);
 });
+
+
+test("chat-first mode dispatches ordinary text but leaves slash commands alone", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, allowPlainText: true });
+  assert.equal(await handle(inbound("Can you help me plan this project?")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.equal(await handle(inbound("/status")), undefined);
+  assert.deepEqual(h.starts.map((entry) => entry.task), ["Can you help me plan this project?"]);
+});
