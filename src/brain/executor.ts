@@ -456,6 +456,7 @@ export class SofiaBrain {
         result.usage.inputTokens < 0 ||
         result.usage.outputTokens < 0
       ) {
+        this.efficiencyMetrics.recordUnmeasuredModelCall();
         throw new Stop("Invalid inference usage");
       }
 
@@ -463,7 +464,7 @@ export class SofiaBrain {
         inputTokens: result.usage.inputTokens,
         outputTokens: result.usage.outputTokens,
         durationMs: Math.max(0, Date.now() - modelCallStartedAt),
-        retries: result.retries ?? 0,
+        retries: ("retries" in result && typeof result.retries === "number") ? result.retries : 0,
       });
 
       this.usage.reservedOrUsedTokens += actual;
