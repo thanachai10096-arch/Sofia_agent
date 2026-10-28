@@ -1206,7 +1206,7 @@ export class SofiaBrain {
               }
             : undefined;
         if (learnedCandidate) {
-          // Learning is opt-in: no approval callback means no promotion or persistence.
+          // The host wires the managed lifecycle for automatic verified promotion. If no handler is configured, fail closed and do not persist a candidate.
           let mayActivate = false;
           if (this.dependencies.onSkillCandidate) {
             try {
