@@ -242,7 +242,7 @@ export class SofiaBrain {
   private readonly limits: BrainLimits;
   private readonly trace = new ExecutionTrace();
 
-  private readonly usage = {
+  private readonly usage: CompletionReport["usage"] = {
     steps: 0,
     toolCalls: 0,
     modelCalls: 0,
