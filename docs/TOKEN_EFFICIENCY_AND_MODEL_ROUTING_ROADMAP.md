@@ -48,6 +48,7 @@ These are foundations, not proof of measured savings or production readiness. Th
 ### P1 — Lower waste in the existing gateway
 
 - Pack evidence by relevance-to-size value; reject empty evidence and duplicate IDs.
+- Rank task context using whole-token overlap rather than substring matches (for example, `token` must not match `tokenizer`) so unrelated evidence is less likely to consume the input budget.
 - Deduplicate byte-for-byte identical evidence text without normalizing source code or whitespace.
 - Keep phase-specific output caps and use actual usage to settle reservations.
 - When estimated prices tie or are absent, use explicit cost/latency/quality weights with deterministic tie-breaking.
