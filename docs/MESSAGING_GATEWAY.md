@@ -7,7 +7,7 @@ Status: opt-in gateway, command bridge, Telegram Bot API long polling transport,
 - Messaging is disabled unless `enabled: true` is explicitly supplied.
 - Unknown users/channels are denied unless an explicit `allowUser` policy permits them.
 - The gateway calls an injected message handler. Adapters never invoke tools or a separate agent runtime directly.
-- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Only explicit `/run <task>` messages (or a configured exact prefix such as `/run@SofiaBot`) start a run. Ordinary chat and attachments do not trigger execution.
+- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Natural chat mode dispatches ordinary text without requiring `/run`; command-only mode remains available when explicitly configured. Attachments are metadata only and are not downloaded or executed automatically.
 - Use `createMessagingAccessCheck` to adapt the existing `ChatAccessPolicy` to the gateway allowlist callback. The existing command handler performs its own authorization check too. Do not pass the same deduplicator to both `createMessagingGateway` and `createSofiaMessagingHandler`, because the existing command handler claims the provider/channel/message key itself.
 - Keep bot tokens and Sofia API keys in server-side environment variables or an approved secret provider. Never expose them in client bundles, tests, errors, or logs.
 - The Telegram HTTP transport uses HTTPS long polling against the official Telegram Bot API. Choose either polling or a separately implemented webhook deployment, not both for the same bot.
@@ -27,7 +27,7 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Only explicit `/run <task>` commands dispatch work; ordinary messages do not start runs. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. The shared handler defaults to natural chat, so ordinary text can start a task without `/run`; set `mode: "command"` when a deployment intentionally requires a prefix. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
@@ -74,3 +74,11 @@ The code outline above is not a claim that the repository's API server is alread
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+## Cross-platform integration target
+
+The shared `ChatPlatform` contract now recognizes Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Microsoft Teams, Google Chat, Facebook Messenger, Instagram, LINE, WeChat, iMessage, Web Chat, Desktop, Mobile, and SDK clients. This is a routing/type contract, **not a claim that every provider transport is implemented or live-tested**.
+
+Each provider still needs its own authenticated adapter, event verification, identity mapping, outbound delivery, retry/replay handling, and signed-fixture tests. Use official APIs and supported business/platform access; some networks restrict bots, require business approval, or do not expose public messaging APIs. Never bypass those restrictions or scrape private sessions.
+
+Recommended implementation order: finish natural-chat behavior and Telegram/Discord smoke tests; then Slack, WhatsApp Business Platform, Microsoft Teams, Google Chat, Matrix, and Signal where supported; then LINE and Meta messaging channels; finally add community-maintained adapters only behind the same stable gateway contract. Keep each connector optional and independently configured.
