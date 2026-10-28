@@ -75,6 +75,8 @@ export { FileChatMessageDeduplicator } from "./integrations/file-chat-deduplicat
 export type { ChatPlatform, VerifiedChatCommand, ChatCommandHandlerOptions, ChatDispatchResult, ChatAccessPolicy, ChatMessageDeduplicator, ChatRunStarter } from "./integrations/chat-adapter.js";
 
 export { createMessagingGateway } from "./integrations/messaging/gateway.js";
+export { createMessagingAdapterRegistry } from "./integrations/messaging/registry.js";
+export type { MessagingAdapterRegistry, RegisteredMessagingAdapter } from "./integrations/messaging/registry.js";
 export type { MessagingGateway, MessagingGatewayOptions, MessagingRateLimiter } from "./integrations/messaging/gateway.js";
 export { RedisMessagingRateLimiter, REDIS_MESSAGING_RATE_LIMIT_SCRIPT } from "./integrations/messaging/redis-rate-limiter.js";
 export type { RedisEvalClient, RedisMessagingRateLimiterOptions } from "./integrations/messaging/redis-rate-limiter.js";
