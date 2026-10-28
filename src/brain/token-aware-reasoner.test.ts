@@ -54,6 +54,7 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
       projectMemory: [
         { kind: "convention", content: "Use node:test for regression tests", confidence: 0.9 },
         { kind: "note", content: "Tokenizer diagnostics concern another issue." },
+        { kind: "note", content: "The unrelated note contains no task words." },
       ],
     },
   }), { signal: new AbortController().signal, maxContextTokens: 8_000 });
@@ -70,6 +71,9 @@ test("token-aware Brain reasoner passes project memory and execution evidence th
   const tokenizerOnlyEvidence = packedEvidence.find((item) => item.text.includes("Tokenizer diagnostics"));
   assert.ok(tokenizerOnlyEvidence);
   assert.equal(tokenizerOnlyEvidence.relevance, 0.2, "whole-token matching must not treat tokenizer as token");
+  const stopWordOnlyEvidence = packedEvidence.find((item) => item.text.includes("The unrelated note"));
+  assert.ok(stopWordOnlyEvidence);
+  assert.equal(stopWordOnlyEvidence.relevance, 0.2, "common stop words must not inflate evidence relevance");
   assert.ok(packedEvidence.every((item) => item.text.includes("untrusted reference data")));
   assert.equal(new Set(packedEvidence.map((item) => item.id)).size, packedEvidence.length);
 });
