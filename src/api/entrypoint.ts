@@ -8,6 +8,7 @@ import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allow
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { resolveSessionStoreConfig } from "../session/config.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -15,9 +16,9 @@ const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
 const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
-const sessionDatabasePath = process.env.SOFIA_SESSION_DB_PATH?.trim();
-const deps = sessionDatabasePath
-  ? await createSofiaAgentDependenciesWithSessions(workspace, undefined, sessionDatabasePath)
+const sessionStoreConfig = resolveSessionStoreConfig(process.env);
+const deps = sessionStoreConfig.enabled
+  ? await createSofiaAgentDependenciesWithSessions(workspace, undefined, sessionStoreConfig.databasePath)
   : createSofiaAgentDependencies(workspace);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
