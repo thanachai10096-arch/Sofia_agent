@@ -1,3 +1,5 @@
+export { ContinuousWorkSupervisor, FileContinuousWorkStore } from "./brain/continuous-work.js";
+export type { ContinuousWorkRecord, ContinuousWorkStatus, ContinuousWorkStore, ContinuousWorkOptions } from "./brain/continuous-work.js";
 export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
 export { runSkillLifecycleWorkflow } from "./brain/skill-lifecycle-workflow.js";
 export { createManagedSkillLearningHandler } from "./brain/managed-skill-learning.js";
