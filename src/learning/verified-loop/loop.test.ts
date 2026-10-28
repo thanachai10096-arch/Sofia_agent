@@ -33,7 +33,10 @@ function makeHost() {
       async getReceipt(_scope, id) { return receipts.get(id); },
       async getEvidence(_scope, ids) { return ids.map(id => evidence.get(id)).filter((x): x is RunEvidence => Boolean(x)); },
       async runRegression(_scope, candidate) {
-        return { passed: true, checks: [{ name: "regression", passed: true }], regressionEvidenceIds: ["reg-" + candidate.id] };
+        const runId = "regression-run-" + candidate.id;
+        const id = "reg-" + candidate.id;
+        evidence.set(id, { id, runId, scope, kind: "regression", trusted: true, success: true, content: "passed", createdAt: new Date().toISOString() });
+        return { regressionRunId: runId, passed: true, checks: [{ name: "regression", passed: true }], regressionEvidenceIds: [id] };
       },
     },
     async currentPolicyRevision() { return "policy-1"; },
