@@ -17,7 +17,7 @@ Sofia's continuous-work supervisor runs a large objective as small, verifiable w
   - `POST /v1/continuous-work/:id/resume`, `/pause`, and `/stop` manage the objective (requires `agent:run`).
   - Resume returns `202`; poll the GET endpoint for progress. Each activation is bounded and returns to paused state at its cap.
 - The default API host deliberately uses a completion evaluator that never auto-declares success. This avoids treating a model's claim as verified completion; objectives must be stopped by the owner unless the host is changed to provide task-specific evidence checks. Optionally set `SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS` to a positive integer to impose a hard lifetime cap.
-- Restart recovery is owner-triggered, not automatic: after restart the owner can call `resume`; the supervisor reconciles a persisted child job before creating another slice, reuses a completed child checkpoint, and pauses safely if the child is missing or ended unsuccessfully. Automatic startup resume and multi-replica transactional coordination are not implemented.
+- Startup recovery automatically schedules objectives persisted in `active` state. It reconciles the recorded child job before creating another slice, reuses a completed child checkpoint, and pauses safely if the child is missing or ended unsuccessfully. Recovery is best-effort on a single process; multi-replica transactional coordination is not implemented.
 
 ## Example
 
@@ -47,7 +47,7 @@ await continuous.resume(work.id, authenticatedPrincipalId);
 // Later, including after a process restart, call resume again with the same store.
 ```
 
-The example's `existingJobRuntime` and `verifyObjectiveAcceptance` are host-provided dependencies, not globals exported by the package. The HTTP API currently uses a conservative never-complete evaluator until a host-specific verifier is configured.
+The example's `existingJobRuntime` and `verifyObjectiveAcceptance` are host-provided dependencies, not globals exported by the package. The API entrypoint automatically invokes `resumeInterrupted()` at startup. The HTTP API currently uses a conservative never-complete evaluator until a host-specific verifier is configured.
 
 ## Operational guardrails
 
