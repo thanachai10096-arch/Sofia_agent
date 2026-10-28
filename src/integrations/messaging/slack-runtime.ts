@@ -6,12 +6,14 @@ import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia
 import { createSlackAdapter } from "./slack.js";
 import { createSlackEventsTransport, type SlackEventsTransport } from "./slack-events-transport.js";
 import { redactSecrets } from "../../security/guard.js";
+import type { OutboundMessage } from "./types.js";
 
 export interface SlackMessagingRuntime {
   /** Supply this transport to createSofiaApi({ slackEventsRoute: { transport } }). */
   transport: SlackEventsTransport;
   start(): Promise<void>;
   stop(): Promise<void>;
+  send(message: OutboundMessage): Promise<boolean>;
 }
 export interface SlackMessagingEnvironment {
   SOFIA_MESSAGING_ENABLED?: string;
@@ -99,6 +101,7 @@ export function createSlackMessagingRuntime(
       transport,
       start: () => gateway!.start(),
       stop: () => gateway!.stop(),
+      send: (message) => gateway!.send("slack", message),
     };
   } catch (error) {
     onWarning("Slack integration disabled: " + (error instanceof Error ? error.message : "invalid configuration") + ".");
