@@ -99,6 +99,12 @@ npm run build
 
 Use the repository's package scripts as the source of truth if a command differs in your environment.
 
+### First-time model setup
+
+Run `npm run cli -- setup` (or `sofia setup` after installing the CLI). The interactive wizard accepts any OpenAI-compatible chat-completions endpoint, including Gemini, OpenAI-compatible providers, gateways, and local servers. It masks API-key input and writes settings to a private local `.env` file (owner-only permissions where supported). Keep `.env` out of source control. On hosted deployments, set the same values in the platform's server-side secret/environment settings instead of copying a developer's local key.
+
+The generic settings are `SOFIA_MODEL_BASE_URL`, `SOFIA_MODEL_API_KEY`, and `SOFIA_MODEL`; all three are required together. Optional route-specific model IDs are `SOFIA_FAST_MODEL`, `SOFIA_CODING_MODEL`, `SOFIA_REASONING_MODEL`, and `SOFIA_VISION_MODEL`. Explicit process environment variables override local `.env` values. The previous `GEMINI_API_KEY` / `GEMINI_MODEL` configuration remains supported as a backward-compatible default. Sofia does not silently switch providers if the configured provider fails.
+
 ### Persistent local state
 
 By default, local job records, Brain run snapshots, and project memory are stored under the operating system's temporary directory. Temporary storage may be cleared by reboots, cleanup jobs, or container replacement, so it is not sufficient for production recovery. Configure an absolute, persistent directory before starting Sofia:
