@@ -27,7 +27,7 @@ Common settings:
 
 - `SOFIA_MODEL_NAME`: model identifier for the selected endpoint. It is required for providers whose available model IDs change frequently.
 - `SOFIA_MODEL_API_KEY`: provider-neutral API key override.
-- `SOFIA_MODEL_BASE_URL`: endpoint override for a compatible server.
+- `SOFIA_MODEL_BASE_URL`: custom endpoint for `openai-compatible`. For named hosted providers, overrides must stay on that provider's official origin so a provider credential cannot be sent to an unrelated host. For a custom proxy or gateway, select `openai-compatible` explicitly.
 - `SOFIA_FAST_MODEL`, `SOFIA_CODING_MODEL`, `SOFIA_REASONING_MODEL`, `SOFIA_VISION_MODEL`: optional route-specific model IDs. If omitted, each route uses `SOFIA_MODEL_NAME`.
 - Gemini deployments may continue using `GEMINI_MODEL`, `GEMINI_FAST_MODEL`, `GEMINI_CODING_MODEL`, `GEMINI_REASONING_MODEL`, and `GEMINI_VISION_MODEL`.
 
@@ -100,6 +100,6 @@ console.log(result);
 - The gateway supports the OpenAI Chat Completions-compatible protocol and a native Anthropic Messages API path. Other native protocols need their own adapter or a compatible gateway.
 - The Anthropic path translates chat messages, tool definitions/tool calls, and token usage into Sofia’s common model interface. Structured Brain output is requested through instructions; availability and behavior still depend on the selected Claude model.
 - Unknown provider names fail closed. Sofia does not silently switch providers or send data to another service when a provider fails.
-- Remote endpoints must use HTTPS. Plain HTTP is accepted only for loopback local model servers. URL credentials, query strings, and fragments are rejected.
+- Remote endpoints must use HTTPS. Plain HTTP is accepted only for loopback local model servers. URL credentials, query strings, and fragments are rejected. Named provider presets are bound to their configured origin; use `openai-compatible` for a custom endpoint or proxy.
 - API keys are read from environment variables and are not written to Sofia's setup config by this module.
 - Model capabilities differ. Configuring a model under a route name does not guarantee that the model actually supports vision, tool calls, structured output, or a given context length. Verify those features against the target endpoint before relying on them.
