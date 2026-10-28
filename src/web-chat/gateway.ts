@@ -150,6 +150,12 @@ export function createWebChatGateway(apiKeys: ApiKeyMap) {
       if (req.method !== "POST") { send(res, 405, { error: "method_not_allowed" }); return true; }
       const ip = req.socket.remoteAddress ?? "unknown";
       const now = Date.now();
+      for (const [address, attempt] of attempts) {
+        if (now - attempt.startedAt >= LOGIN_WINDOW_MS) attempts.delete(address);
+      }
+      for (const [token, session] of sessions) {
+        if (session.expiresAt <= now) sessions.delete(token);
+      }
       const current = attempts.get(ip);
       const state = !current || now - current.startedAt >= LOGIN_WINDOW_MS ? { startedAt: now, count: 0 } : current;
       state.count += 1;
@@ -160,6 +166,10 @@ export function createWebChatGateway(apiKeys: ApiKeyMap) {
       const scopes = Object.prototype.hasOwnProperty.call(apiKeys, apiKey) ? apiKeys[apiKey] : undefined;
       if (!apiKey || !scopes || !scopes.some((scope) => scope === "agent:run" || scope === "agent:read")) {
         send(res, 401, { error: "invalid_credentials" });
+        return true;
+      }
+      if (sessions.size >= 10_000) {
+        send(res, 503, { error: "web_chat_session_capacity_reached" });
         return true;
       }
       const token = randomBytes(32).toString("base64url");
