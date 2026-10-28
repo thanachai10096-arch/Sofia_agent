@@ -59,19 +59,43 @@ Provider environment:
 async function setup() {
   const rl = createInterface({ input: stdin, output: stdout });
   try {
-    const providerAnswer = (await rl.question("Provider [openai-compatible/gemini/openrouter] (openai-compatible): ")).trim().toLowerCase();
+    const providerOptions = [
+      "openai-compatible", "gemini", "openai", "openrouter", "xai", "mistral",
+      "groq", "deepseek", "together", "fireworks", "cerebras", "perplexity", "ollama",
+    ] as const;
+    const providerAnswer = (await rl.question(`Provider [${providerOptions.join("/")}] (openai-compatible): `)).trim().toLowerCase();
     const provider = (providerAnswer || "openai-compatible") as LocalConfig["provider"];
-    if (!["openai-compatible", "gemini", "openrouter"].includes(provider ?? "")) {
-      throw new Error("Choose openai-compatible, gemini, or openrouter.");
+    if (!providerOptions.includes(provider as typeof providerOptions[number])) {
+      throw new Error("Choose one of the listed providers. For other compatible APIs, choose openai-compatible.");
     }
+    const presetBaseUrls: Partial<Record<NonNullable<LocalConfig["provider"]>, string>> = {
+      gemini: "https://generativelanguage.googleapis.com/v1beta/openai/",
+      openai: "https://api.openai.com/v1",
+      openrouter: "https://openrouter.ai/api/v1",
+      xai: "https://api.x.ai/v1",
+      mistral: "https://api.mistral.ai/v1",
+      groq: "https://api.groq.com/openai/v1",
+      deepseek: "https://api.deepseek.com/v1",
+      together: "https://api.together.xyz/v1",
+      fireworks: "https://api.fireworks.ai/inference/v1",
+      cerebras: "https://api.cerebras.ai/v1",
+      perplexity: "https://api.perplexity.ai",
+      ollama: "http://127.0.0.1:11434/v1",
+    };
     const baseUrl = provider === "openai-compatible"
-      ? (await rl.question("API base URL (for example https://api.openai.com/v1): ")).trim()
-      : provider === "openrouter"
-        ? ((await rl.question("OpenRouter base URL (default https://openrouter.ai/api/v1): ")).trim() || "https://openrouter.ai/api/v1")
-        : "https://generativelanguage.googleapis.com/v1beta/openai/";
-    const apiKey = (await rl.question("API key (stored locally with owner-only permissions): ")).trim();
-    const model = (await rl.question("Model ID: ")).trim();
-    if (!apiKey || !model || !baseUrl) throw new Error("Provider base URL, API key, and model are required.");
+      ? (await rl.question("API base URL (HTTPS; loopback HTTP is allowed for local servers): ")).trim()
+      : presetBaseUrls[provider!];
+    const apiKey = (await rl.question(provider === "ollama"
+      ? "API key (usually blank for local Ollama): "
+      : "API key (stored locally with owner-only permissions): ")).trim();
+    const defaultModel = provider === "gemini" ? "gemini-2.5-flash"
+      : provider === "openai" ? "gpt-4.1-mini"
+      : provider === "openrouter" ? "openai/gpt-4.1-mini"
+      : provider === "ollama" ? "llama3.2" : "";
+    const model = (await rl.question(`Model ID${defaultModel ? ` (default ${defaultModel})` : ""}: `)).trim() || defaultModel;
+    if ((provider !== "ollama" && !apiKey) || !model || !baseUrl) {
+      throw new Error("Provider base URL, required API key, and model are required.");
+    }
     await mkdir(configDir, { recursive: true, mode: 0o700 });
     const config: LocalConfig = { provider, baseUrl, apiKey, model };
     await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
