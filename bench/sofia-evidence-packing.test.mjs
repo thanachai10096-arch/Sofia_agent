@@ -26,7 +26,7 @@ test("Sofia packer returns no duplicate evidence text", async () => {
   assert.equal(new Set(result.selectedEvidence.map((item) => item.text)).size, result.selectedEvidence.length);
 });
 
-test("Sofia packer rejects losing the answer evidence rather than silently benchmarking it", async () => {
+test("Sofia packer preserves answer evidence across different task IDs", async () => {
   const result = await packWithSofiaGateway({ ...task, id: "other-task" });
   assert.ok(result.selectedEvidence.some((item) => item.id === "other-task-relevant"));
 });
