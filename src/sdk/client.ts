@@ -160,6 +160,9 @@ export class SofiaClient {
   }
 
   async startJob(input: SofiaRunInput, signal?: AbortSignal): Promise<SofiaRunResponse> {
+    if (input.modelSelection && input.modelSelection !== "auto") {
+      throw new Error("Explicit model selection is not supported for durable jobs yet; use run() or start() instead.");
+    }
     return this.request<SofiaRunResponse>("/v1/jobs", {
       method: "POST", headers: this.headers(), body: JSON.stringify(input),
     }, signal);
