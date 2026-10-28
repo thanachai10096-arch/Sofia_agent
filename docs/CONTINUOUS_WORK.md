@@ -10,7 +10,7 @@ Sofia's continuous-work supervisor runs a large objective as small, verifiable w
 - Work can continue across activations without a lifetime iteration cap by default. Set `maxLifetimeIterations` for a hard lifetime limit.
 - A trusted `isComplete` callback decides when the actual objective is complete. Do not infer completion solely from a model saying it is done; the callback should inspect task-specific acceptance criteria or verified evidence.
 - All records are owner-scoped. Child jobs are submitted with the same owner ID, and reads/stops for another owner are denied.
-- `FileContinuousWorkStore` is for a single host with persistent storage. It uses private directory/file permissions and atomic replacement. It is not a distributed lock or multi-host database; use a transactional shared `ContinuousWorkStore` implementation before running multiple replicas.
+- `FileContinuousWorkStore` is for a single API process with persistent storage. It uses private directory/file permissions, credential-shaped secret redaction, and atomic replacement. It does not coordinate concurrent writers across processes; use a transactional shared `ContinuousWorkStore` implementation before running multiple workers or replicas.
 - The supervisor is exported as a library component. It is not yet exposed as a public HTTP/chat command; callers must explicitly construct it with the existing `JobRuntime`, persistent store, and a trusted completion evaluator.
 
 ## Example
