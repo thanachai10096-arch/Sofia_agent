@@ -8,6 +8,10 @@ import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allow
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { createSlackCompletionNotifier } from "../integrations/messaging/slack-completion.js";
+
+
+const notifySlackRunTerminal = createSlackCompletionNotifier(process.env);
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -213,6 +217,7 @@ const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(path.join(workspace, ".sofia", "api-runs")),
+  onRunTerminal: (run, input) => notifySlackRunTerminal(run, input),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });

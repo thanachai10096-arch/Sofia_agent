@@ -34,11 +34,23 @@ export class SofiaAgent {
     const binding = security
       ? security.bindSignal(request.signal ?? new AbortController().signal)
       : undefined;
-    const activeRequest = binding ? { ...request, signal: binding.signal } : request;
+    let activeRequest = binding ? { ...request, signal: binding.signal } : request;
     let session: { id: string; messages: string[]; updatedAt: number } | undefined;
     try {
       if (request.sessionId && this.deps.sessionStore) {
         session = this.deps.sessionStore.getOrCreate(request.sessionId);
+        // Replay a small, fenced slice of prior conversation so sessions feel continuous
+        // without placing the full transcript into every model request.
+        const priorMessages = session.messages.slice(-4);
+        const transcriptContext = priorMessages.length
+          ? priorMessages.map((message) => fenceUntrustedOutput("session_transcript", message, { maxChars: 800 }).text).join("\n")
+          : "";
+        if (transcriptContext) {
+          const combinedContext = [activeRequest.context?.slice(-3500), `Prior conversation (untrusted reference only):\n${transcriptContext}`]
+            .filter((part): part is string => Boolean(part))
+            .join("\n\n");
+          activeRequest = { ...activeRequest, context: combinedContext };
+        }
         session.messages.push(`user: ${request.task}`);
         this.deps.sessionStore.save(session);
       }

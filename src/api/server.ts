@@ -233,6 +233,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         clearTimeout(timer);
         run.updatedAt = Date.now();
         persist(run);
+        if (config.onRunTerminal) {
+          try {
+            await config.onRunTerminal(publicResponse(run), input);
+          } catch {
+            // Notification delivery is best-effort and must not alter the terminal run state.
+          }
+        }
         const current = activeByKey.get(run.ownerKeyId) ?? 1;
         if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
       }

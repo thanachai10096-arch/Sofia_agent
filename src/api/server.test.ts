@@ -74,3 +74,43 @@ test("API sessions are persisted and scoped to the authenticated API key", async
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("async run terminal callback receives the final result and original notification context", async () => {
+  let notification: { run: { id: string; status: string; result?: { output?: string } }; input: { task: string; context?: string } } | undefined;
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Final answer for notification." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, {
+    apiKeys: { "notify-test-key": ["agent:run", "agent:read"] },
+    onRunTerminal: async (run, input) => { notification = { run, input }; },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const started = await fetch(`${baseUrl}/v1/agent/runs`, {
+      method: "POST",
+      headers: { authorization: "Bearer notify-test-key", "content-type": "application/json" },
+      body: JSON.stringify({
+        task: "complete a task",
+        async: true,
+        context: "Origin: Slack message event. Slack user ID: UALLOWED. Channel ID: CALLOWED. Message timestamp: 1790000000.000001.",
+      }),
+    });
+    assert.equal(started.status, 202);
+    for (let attempt = 0; attempt < 100 && !notification; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(notification, "terminal callback should run after the async task finishes");
+    assert.equal(notification.run.status, "completed");
+    assert.match(notification.run.id, /^[0-9a-f-]{36}$/i);
+    assert.match(notification.run.result?.output ?? "", /Final answer for notification/);
+    assert.equal(notification.input.task, "complete a task");
+    assert.match(notification.input.context ?? "", /Message timestamp: 1790000000\.000001/);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});

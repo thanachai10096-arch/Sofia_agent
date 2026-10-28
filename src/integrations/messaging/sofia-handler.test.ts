@@ -37,15 +37,22 @@ function harness(allowed = true) {
   return { starts, claims, policyInputs, accessPolicy: policy, deduplicator, client };
 }
 
-test("only explicit run commands start Sofia work", async () => {
+test("natural chat starts work without requiring /run", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
-  assert.equal(await handle(inbound("hello Sofia")), undefined);
-  assert.equal(await handle(inbound("/run build the project")), "Sofia accepted the task (run run-123, status: queued).");
-  assert.deepEqual(h.starts.map((entry) => entry.task), ["build the project"]);
+  assert.equal(await handle(inbound("hello Sofia, build the project")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.equal(await handle(inbound("/run inspect the logs", { messageId: "message-2" })), "Sofia accepted the task (run run-123, status: queued).");
+  assert.deepEqual(h.starts.map((entry) => entry.task), ["hello Sofia, build the project", "inspect the logs"]);
   assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
 });
 
+test("command mode preserves explicit-prefix behavior when requested", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, mode: "command" });
+  assert.equal(await handle(inbound("hello Sofia")), undefined);
+  assert.equal(await handle(inbound("/run build the project")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.deepEqual(h.starts.map((entry) => entry.task), ["build the project"]);
+});
 test("command prefix can be configured for a bot mention", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, commandPrefix: "/run@SofiaBot" });
@@ -63,7 +70,7 @@ test("denied user cannot start a run", async () => {
 test("empty and overlong tasks are rejected by existing dispatcher", async () => {
   const empty = harness();
   const handleEmpty = createSofiaMessagingHandler({ ...empty });
-  assert.equal(await handleEmpty(inbound("/run")), "Usage: /run <task>");
+  assert.equal(await handleEmpty(inbound("/run")), "Please send a task or message for Sofia.");
 
   const long = harness();
   const handleLong = createSofiaMessagingHandler({ ...long, maxTaskCharacters: 3 });

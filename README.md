@@ -99,6 +99,12 @@ npm run build
 
 Use the repository's package scripts as the source of truth if a command differs in your environment.
 
+### First-time model setup
+
+Run `npm run cli -- setup` (or `sofia setup` after installing the CLI). The interactive wizard accepts any OpenAI-compatible chat-completions endpoint, including Gemini, OpenAI-compatible providers, gateways, and local servers. It masks API-key input and writes settings to a private local `.env` file (owner-only permissions where supported). Keep `.env` out of source control. On hosted deployments, set the same values in the platform's server-side secret/environment settings instead of copying a developer's local key.
+
+The generic settings are `SOFIA_MODEL_BASE_URL`, `SOFIA_MODEL_API_KEY`, and `SOFIA_MODEL`; all three are required together. Optional route-specific model IDs are `SOFIA_FAST_MODEL`, `SOFIA_CODING_MODEL`, `SOFIA_REASONING_MODEL`, and `SOFIA_VISION_MODEL`. Explicit process environment variables override local `.env` values. The previous `GEMINI_API_KEY` / `GEMINI_MODEL` configuration remains supported as a backward-compatible default. Sofia does not silently switch providers if the configured provider fails.
+
 ### Persistent local state
 
 By default, local job records, Brain run snapshots, and project memory are stored under the operating system's temporary directory. Temporary storage may be cleared by reboots, cleanup jobs, or container replacement, so it is not sufficient for production recovery. Configure an absolute, persistent directory before starting Sofia:
@@ -153,6 +159,12 @@ The Discord interaction adapter supports allowlisted slash commands for durable 
 Discord is disabled unless its server-side configuration is supplied. Configure explicit user and channel ID allowlists, use HTTPS, keep the bot token/API key in a secret store, and use persistent storage for restart recovery. **CI does not replace a live Discord test.**
 
 See [Discord integration setup and smoke-test guide](docs/DISCORD_INTEGRATION_SETUP.md) for required environment variables, command registration, and a private-server acceptance checklist.
+
+## `> Chat integrations`
+
+Sofia uses one normalized messaging gateway contract so additional chat platforms can be added as independent adapters without creating a second agent runtime. The current repository includes Telegram and Discord transports plus a Slack adapter and request-signature verifier (Slack still needs a complete HTTP receiver and app setup); the gateway contract can also host WhatsApp Business Platform, Microsoft Teams, Google Chat, Matrix, Signal, LINE, Meta messaging, Web Chat, desktop/mobile clients, and SDK integrations when their adapters are implemented and configured.
+
+**A platform name in the shared type is not proof of a working connector.** Every provider still needs authenticated inbound events, trusted identity mapping, outbound delivery, retries/replay protection, access policy, and provider-specific tests. See [Messaging Gateway](docs/MESSAGING_GATEWAY.md) for the current implementation status and rollout checklist. Natural chat is the default for the shared Sofia message handler, so ordinary text can submit a task without `/run`; command-only deployments can opt into `mode: "command"`. Provider-specific commands and platform policies remain in control.
 
 ## `> Browser & local runtime`
 
@@ -252,7 +264,7 @@ try {
 }
 ```
 
-Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Session transcript persistence does not automatically replay history into model context or add transcript retrieval endpoints. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
+Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Up to four recent session messages are replayed into the next turn as bounded, fenced untrusted context (each message is capped at 800 characters, with the combined context bounded); dedicated transcript retrieval endpoints are not included. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
 
 ## User memory
 

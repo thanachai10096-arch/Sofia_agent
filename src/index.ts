@@ -75,6 +75,8 @@ export { FileChatMessageDeduplicator } from "./integrations/file-chat-deduplicat
 export type { ChatPlatform, VerifiedChatCommand, ChatCommandHandlerOptions, ChatDispatchResult, ChatAccessPolicy, ChatMessageDeduplicator, ChatRunStarter } from "./integrations/chat-adapter.js";
 
 export { createMessagingGateway } from "./integrations/messaging/gateway.js";
+export { createMessagingAdapterRegistry } from "./integrations/messaging/registry.js";
+export type { MessagingAdapterRegistry, RegisteredMessagingAdapter } from "./integrations/messaging/registry.js";
 export type { MessagingGateway, MessagingGatewayOptions, MessagingRateLimiter } from "./integrations/messaging/gateway.js";
 export { RedisMessagingRateLimiter, REDIS_MESSAGING_RATE_LIMIT_SCRIPT } from "./integrations/messaging/redis-rate-limiter.js";
 export type { RedisEvalClient, RedisMessagingRateLimiterOptions } from "./integrations/messaging/redis-rate-limiter.js";
@@ -83,6 +85,14 @@ export type { TelegramTransport, TelegramUpdate } from "./integrations/messaging
 export { createTelegramHttpTransport } from "./integrations/messaging/telegram-http-transport.js";
 export type { TelegramHttpTransportOptions } from "./integrations/messaging/telegram-http-transport.js";
 export { createDiscordAdapter } from "./integrations/messaging/discord.js";
+export { createSlackAdapter } from "./integrations/messaging/slack.js";
+export { createLineAdapter } from "./integrations/messaging/line.js";
+export type { LineTransport, VerifiedLineMessage } from "./integrations/messaging/line.js";
+export { createLineHttpTransport, verifyLineSignature } from "./integrations/messaging/line-http-transport.js";
+export type { LineHttpTransportOptions, LineWebhookResult } from "./integrations/messaging/line-http-transport.js";
+export { handleLineWebhookHttpRequest } from "./integrations/messaging/line-http-route.js";
+export type { LineWebhookTransport } from "./integrations/messaging/line-http-route.js";
+export type { SlackTransport, VerifiedSlackMessage } from "./integrations/messaging/slack.js";
 export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
 export { createDiscordInteractionTransport } from "./integrations/messaging/discord-interaction-transport.js";
 export type { DiscordInteractionTransport, DiscordInteractionTransportOptions, DiscordInteractionRequest, DiscordInteractionResult } from "./integrations/messaging/discord-interaction-transport.js";
@@ -91,7 +101,7 @@ export { createMessagingAccessCheck, createSofiaMessagingHandler } from "./integ
 export type { SofiaMessagingHandlerOptions } from "./integrations/messaging/sofia-handler.js";
 export { splitMessage } from "./integrations/messaging/format.js";
 export { messagingSessionKey } from "./integrations/messaging/session-key.js";
-export { verifyDiscordRequest, verifyTelegramWebhookSecret, safeMessageCorrelationId } from "./integrations/messaging/platform-security.js";
+export { verifyDiscordRequest, verifyTelegramWebhookSecret, verifySlackRequest, safeMessageCorrelationId } from "./integrations/messaging/platform-security.js";
 export type { DeliveryState, DeliveryReceipt, InboundMessage, MessagingAdapter, MessagingAttachment, MessagingIdentity, MessagingLogger, OutboundMessage } from "./integrations/messaging/types.js";
 
 export { ADVANCED_SKILLS, ADVANCED_SKILL_COUNT, getAdvancedSkill, listAdvancedSkillsByCategory, validateAdvancedSkillCatalog } from "./skills/advanced-skill-catalog.js";
