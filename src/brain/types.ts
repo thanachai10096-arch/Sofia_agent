@@ -88,7 +88,7 @@ export interface WorkspaceSnapshot {
 }
 
 export interface ToolGateway {
-  listTools?(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[] }>;
+  listTools?(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive" | "memory")[] }>;
   describe(name: string): {
     effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive" | "memory")[];
   } | undefined;
