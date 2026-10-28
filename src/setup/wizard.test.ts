@@ -105,17 +105,28 @@ test("explicit API check reports rejected credentials without exposing the key",
   assert.ok(!result.message.includes("secret-test-key"));
 });
 
-test("explicit API check does not attempt authenticated requests when key is missing", async () => {
-  let requestCount = 0;
+test("explicit API check reports health reachability without a key and never sends an empty bearer token", async () => {
+  const calls: Array<{ url: string; authorization?: string }> = [];
   const result = await checkHostedSofiaApi({
     apiBaseUrl: "https://sofia.example.com",
     apiKey: " ",
-    fetchImpl: async () => {
-      requestCount += 1;
-      return new Response(null, { status: 200 });
+    fetchImpl: async (input, init) => {
+      calls.push({
+        url: String(input),
+        authorization: new Headers(init?.headers).get("authorization") ?? undefined,
+      });
+      return new Response(JSON.stringify({ ok: true, service: "sofia-agent-api" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     },
   });
-  assert.equal(requestCount, 0);
+  assert.equal(result.reachable, true);
   assert.equal(result.authenticated, false);
+  assert.equal(result.service, "sofia-agent-api");
   assert.match(result.message, /SOFIA_API_KEY/);
+  assert.deepEqual(calls, [{
+    url: "https://sofia.example.com/health",
+    authorization: undefined,
+  }]);
 });
