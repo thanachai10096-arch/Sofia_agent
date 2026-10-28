@@ -36,9 +36,9 @@ These are source-level branch statements, not a claim of production deployment v
 
 - Define a normalized inbound-message contract with authenticated principal, transport, conversation/session key, message ID, text, attachments metadata, and reply target.
 - Route ordinary chat messages and optional commands into the existing Core/Tool Gateway. Keep transport adapters thin.
-- First slice: add an authenticated Discord Gateway transport for ordinary message events; remaining: wire it through the host configuration and prove end-to-end Core delivery.
+- First slice: add the authenticated Discord Gateway transport, shared natural-language handler mode, and opt-in API-entrypoint runtime; remaining: verify CI and private-server delivery.
 - Deduplicate inbound messages and preserve owner/channel authorization.
-- Acceptance: a natural-language message starts work without `/run`; the same request through API and chat reaches the same Core behavior; unauthorized users cannot trigger work. The new Gateway transport alone does not satisfy this gate until host wiring and private-server smoke tests pass.
+- Acceptance: a natural-language message starts work without `/run`; the same request through API and chat reaches the same Core behavior; unauthorized users cannot trigger work. The runtime wiring does not satisfy this gate until CI and private-server smoke tests pass.
 
 ### P0 — Session context (first slice implemented)
 
