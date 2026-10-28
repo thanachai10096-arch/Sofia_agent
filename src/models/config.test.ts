@@ -167,3 +167,22 @@ test("OPENAI_BASE_URL selects the OpenAI preset when no provider is explicitly s
   assert.equal(config.providers.fast?.apiKey, "openai-compatible-key");
   assert.equal(config.providers.fast?.model, "vendor/model");
 });
+
+
+test("OpenAI-compatible provider supports a loopback local model endpoint", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
+  process.env.SOFIA_MODEL_BASE_URL = "http://localhost:11434/v1";
+  process.env.SOFIA_MODEL_API_KEY = "local-model-key";
+  process.env.SOFIA_MODEL = "llama-local";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "http://localhost:11434/v1");
+  assert.equal(config.providers.fast?.apiKey, "local-model-key");
+  assert.equal(config.providers.fast?.model, "llama-local");
+});
+
+test("unknown provider names fail closed", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "unknown-vendor";
+  assert.throws(loadModelConfigFromEnv, /must be gemini, openai, openrouter, or openai-compatible/);
+});
