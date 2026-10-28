@@ -7,7 +7,7 @@ const usageByPhase = [];
 const benchmarkContext = [
   "Relevant project note: hello.txt must contain the word hello.",
   ...Array.from({ length: 48 }, (_, i) => "Unrelated synthetic context " + i + ": " + "sample context ".repeat(12)),
-].join("\\n");
+].join("\n");
 const budget = new TokenBudget(
   { maxTokens: 20_000, maxCostNanoUsd: 100_000_000n, maxCalls: 12, maxInFlight: 1 },
   [{ key: "offline-brain-loop", limit: { maxTokens: 20_000, maxCostNanoUsd: 100_000_000n, maxCalls: 12, maxInFlight: 1 }, price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 1n } }],
