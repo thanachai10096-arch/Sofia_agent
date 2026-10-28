@@ -15,6 +15,7 @@ type ProviderPreset = {
   apiKeyEnv?: string;
   defaultModel: string;
   requiresApiKey: boolean;
+  protocol?: "openai-compatible" | "anthropic";
 };
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
@@ -36,6 +37,13 @@ const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
     apiKeyEnv: "OPENROUTER_API_KEY",
     defaultModel: "openai/gpt-4.1-mini",
     requiresApiKey: true,
+  },
+  anthropic: {
+    baseUrl: "https://api.anthropic.com/v1",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    defaultModel: "claude-sonnet-4-5",
+    requiresApiKey: true,
+    protocol: "anthropic",
   },
   ollama: {
     baseUrl: "http://127.0.0.1:11434/v1",
@@ -74,7 +82,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
   const preset = PROVIDER_PRESETS[providerId];
   if (!preset) {
     throw new Error(
-      "Unsupported SOFIA_MODEL_PROVIDER. Supported built-in adapters: gemini, openai, openrouter, ollama, openai-compatible.",
+      "Unsupported SOFIA_MODEL_PROVIDER. Supported built-in adapters: gemini, openai, anthropic, openrouter, ollama, openai-compatible.",
     );
   }
 
@@ -136,7 +144,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       qualityWeight: numberEnv(`SOFIA_${id.toUpperCase()}_QUALITY`, quality),
       healthy: true,
     });
-    providers[id] = { baseUrl, apiKey, model };
+    providers[id] = { baseUrl, apiKey, model, protocol: preset.protocol ?? "openai-compatible" };
   }
 
   return { routes, providers };
