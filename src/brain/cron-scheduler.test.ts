@@ -91,9 +91,10 @@ test("completed scheduled jobs deliver to their trusted target and retry until a
     async resume() { return job; },
   } as unknown as JobRuntime;
   let attempts = 0;
+  let now = new Date("2026-10-28T13:00:00.000Z");
   const scheduler = new CronScheduler(runtime, {
     store,
-    now: () => new Date("2026-10-28T13:00:00.000Z"),
+    now: () => now,
     onExecutionFinished: async (schedule, execution, deliveredJob) => {
       attempts++;
       assert.equal(schedule.notificationTarget?.conversationId, "channel-1");
@@ -110,6 +111,7 @@ test("completed scheduled jobs deliver to their trusted target and retry until a
   await scheduler.tick();
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(attempts, 1);
+  now = new Date(now.getTime() + 60_000);
   await scheduler.tick();
   assert.equal(attempts, 2);
   assert.equal(state.history[0].notificationDelivered, true);
