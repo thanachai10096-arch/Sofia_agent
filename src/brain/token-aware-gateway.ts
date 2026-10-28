@@ -335,7 +335,7 @@ export class TokenAwareGateway {
     candidates.sort((a, b) => {
       if (a.score !== b.score) return a.score < b.score ? -1 : 1;
 
-      // Real configured token prices always win. When prices are missing or tie,
+      // The configured token-price estimate always wins. When estimates tie,
       // use existing route weights instead of silently choosing by array order.
       const costDifference = (a.route.costWeight ?? 0) - (b.route.costWeight ?? 0);
       if (costDifference !== 0) return costDifference;
