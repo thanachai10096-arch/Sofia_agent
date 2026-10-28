@@ -84,16 +84,16 @@ test("cron API enforces scopes and isolates schedules by authenticated owner", a
     // server closes. Retry transient directory-not-empty/handle errors instead of
     // making the cross-platform suite fail on cleanup timing alone.
     let cleanupError: unknown;
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
       try {
-        await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+        await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         cleanupError = undefined;
         break;
       } catch (error) {
         cleanupError = error;
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== "ENOTEMPTY" && code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") throw error;
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+        await new Promise((resolve) => setTimeout(resolve, Math.min(100 * (attempt + 1), 1000)));
       }
     }
     if (cleanupError) throw cleanupError;
