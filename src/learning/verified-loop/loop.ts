@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { normalizeText, validEvidence, validReceipt, validScope } from "./validation.js";
+import { normalizeText, sameScope, validEvidence, validReceipt, validScope } from "./validation.js";
 import type {
   ActiveLearningSkill, LearningExperience, LearningLoopOptions, LearningScope,
   SkillCandidate, VerifiedLearningHost, VerificationReceipt,
@@ -85,9 +85,20 @@ export class VerifiedLearningLoop {
         if (!assessment.allowed || confidence < this.options.minimumConfidence) return { recorded: true, experienceId: experience.id };
 
         const evaluation = await this.host.verification.runRegression(scope, assessedCandidate);
-        await tx.recordEvaluation(scope, candidate.id, evaluation);
-        if (!evaluation.passed || evaluation.checks.length === 0 ||
-            !evaluation.checks.every(check => check.passed) || evaluation.regressionEvidenceIds.length === 0) {
+        const regressionEvidence = evaluation.regressionEvidenceIds.length > 0
+          ? await this.host.verification.getEvidence(scope, evaluation.regressionEvidenceIds)
+          : [];
+        const verifiedRegressionIds = new Set(regressionEvidence.filter(item =>
+          item.trusted === true && item.success === true && item.kind === "regression" &&
+          item.runId === evaluation.regressionRunId && sameScope(item.scope, scope) &&
+          evaluation.regressionEvidenceIds.includes(item.id)
+        ).map(item => item.id));
+        const regressionPassed = Boolean(evaluation.regressionRunId) &&
+          evaluation.regressionEvidenceIds.length > 0 &&
+          evaluation.regressionEvidenceIds.every(id => verifiedRegressionIds.has(id));
+        await tx.recordEvaluation(scope, candidate.id, { ...evaluation, passed: evaluation.passed && regressionPassed });
+        if (!evaluation.passed || !regressionPassed || evaluation.checks.length === 0 ||
+            !evaluation.checks.every(check => check.passed)) {
           return { recorded: true, experienceId: experience.id };
         }
         // Policy may change while regression checks run; re-check immediately before activation.
