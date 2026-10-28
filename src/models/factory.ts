@@ -9,6 +9,7 @@ import { createSofiaBrain } from "../brain/executor.js";
 import type { BrainLimits } from "../brain/types.js";
 import { ModelRouter } from "./router.js";
 import { SofiaModelGateway } from "./gateway.js";
+import { EncryptedUserModelProfileStore } from "./profile-store.js";
 import { loadModelConfigFromEnv } from "./config.js";
 import type { AgentDependencies } from "../agent/types.js";
 import { Reviewer } from "../review/reviewer.js";
@@ -46,7 +47,6 @@ const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
 function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink}):NonNullable<AgentDependencies["brainFactory"]>{
-  const routeAdapters=config.routes.map(route=>createInternalRoute({modelProvider:provider,route}));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
@@ -61,6 +61,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,maxSteps,principalId,desktopCapabilities,onRunSnapshot,onEvent})=>{
+    const routeAdapters=config.routes.map(route=>createInternalRoute({modelProvider:provider.forPrincipal(principalId),route}));
     const runLimit:BudgetLimit={maxTokens:intEnv("SOFIA_BRAIN_MAX_TOKENS",60000,1),maxCostNanoUsd:bigintEnv("SOFIA_BRAIN_MAX_COST_NANO_USD",NO_COST_CAP),maxCalls:intEnv("SOFIA_BRAIN_MAX_MODEL_CALLS",12,1),maxInFlight:intEnv("SOFIA_BRAIN_MAX_IN_FLIGHT",1,1)};
     const models=config.routes.map(route=>({key:route.providerId??route.id,limit:{maxTokens:intEnv("SOFIA_BRAIN_MODEL_MAX_TOKENS",runLimit.maxTokens,1),maxCostNanoUsd:runLimit.maxCostNanoUsd,maxCalls:runLimit.maxCalls,maxInFlight:runLimit.maxInFlight},price:{inputNanoUsdPerToken:bigintEnv("SOFIA_"+route.id.toUpperCase()+"_INPUT_NANO_USD",0n),outputNanoUsdPerToken:bigintEnv("SOFIA_"+route.id.toUpperCase()+"_OUTPUT_NANO_USD",0n)}})).filter((m,i,a)=>a.findIndex(x=>x.key===m.key)===i);
     const budget=new TokenBudget(runLimit,models);
@@ -97,11 +98,16 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const userMemoryStore = new FileUserMemoryStore();
   const browserTools=policy.allowBrowser?createBrowserTools(new PlaywrightBrowserRuntime()):[];
   const tools=createToolRegistry([...createBuiltinTools(userMemoryStore),...browserTools]);
-  const provider=new SofiaModelGateway(config.providers);
+  const profileEncryptionKey = process.env.SOFIA_MODEL_PROFILE_ENCRYPTION_KEY?.trim();
+  const extraProfileHosts = (process.env.SOFIA_MODEL_PROFILE_ALLOWED_HOSTS ?? "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean);
+  const modelProfileStore = profileEncryptionKey
+    ? new EncryptedUserModelProfileStore(path.join(workspace, ".sofia", "model-profiles.json"), profileEncryptionKey, extraProfileHosts)
+    : undefined;
+  const provider=new SofiaModelGateway(config.providers, modelProfileStore);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
+  return{router:new ModelRouter(config.routes),provider,...(modelProfileStore ? { modelProfileStore } : {}),reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
