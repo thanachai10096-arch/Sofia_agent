@@ -58,7 +58,7 @@ test("missing API key requires attention and is never stored", () => {
 
 
 test("explicit API check verifies health and authenticated usage without running a task", async () => {
-  const calls: Array<{ url: string; authorization?: string }> = [];
+  const calls: Array<{ url: string; authorization?: string; redirect?: RequestRedirect }> = [];
   const result = await checkHostedSofiaApi({
     apiBaseUrl: "https://sofia.example.com",
     apiKey: "test-key",
@@ -66,6 +66,7 @@ test("explicit API check verifies health and authenticated usage without running
       calls.push({
         url: String(input),
         authorization: new Headers(init?.headers).get("authorization") ?? undefined,
+        redirect: init?.redirect,
       });
       if (String(input).endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true, service: "sofia-agent-api" }), {
@@ -86,6 +87,8 @@ test("explicit API check verifies health and authenticated usage without running
   ]);
   assert.equal(calls[0]?.authorization, undefined);
   assert.equal(calls[1]?.authorization, "Bearer test-key");
+  assert.equal(calls[0]?.redirect, "error");
+  assert.equal(calls[1]?.redirect, "error");
 });
 
 test("explicit API check reports rejected credentials without exposing the key", async () => {
