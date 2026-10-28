@@ -1,19 +1,30 @@
 import assert from "node:assert/strict";
 
-const apiKey = process.env.GEMINI_API_KEY?.trim() || process.env.Gemini_API_Key?.trim();
-if (!apiKey) {
-  console.error("Missing GEMINI_API_KEY. This benchmark is opt-in and makes live provider calls.");
+// Provider-agnostic harness for OpenAI-compatible chat-completions endpoints.
+// No provider/model defaults and no automatic provider fallback.
+const apiKey = process.env.SOFIA_BENCH_API_KEY?.trim();
+const model = process.env.SOFIA_BENCH_MODEL?.trim();
+const configuredBaseUrl = process.env.SOFIA_BENCH_API_BASE_URL?.trim();
+if (!apiKey || !model || !configuredBaseUrl) {
+  console.error("Set SOFIA_BENCH_API_BASE_URL, SOFIA_BENCH_API_KEY, and SOFIA_BENCH_MODEL. This opt-in benchmark makes live provider calls.");
   process.exit(2);
 }
-const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
-const baseUrl = (process.env.GEMINI_OPENAI_BASE_URL?.trim() || "https://generativelanguage.googleapis.com/v1beta/openai/").replace(/\/$/, "");
+let parsedBaseUrl;
+try {
+  parsedBaseUrl = new URL(configuredBaseUrl);
+} catch {
+  throw new Error("SOFIA_BENCH_API_BASE_URL must be a valid absolute URL");
+}
+if (parsedBaseUrl.protocol !== "https:" && parsedBaseUrl.hostname !== "localhost" && parsedBaseUrl.hostname !== "127.0.0.1") {
+  throw new Error("SOFIA_BENCH_API_BASE_URL must use HTTPS (HTTP is allowed only for localhost)");
+}
+const baseUrl = configuredBaseUrl.replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
 const timeoutMs = Number(process.env.SOFIA_LIVE_BENCHMARK_TIMEOUT_MS || 45000);
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 180000) {
   throw new Error("SOFIA_LIVE_BENCHMARK_TIMEOUT_MS must be an integer from 1000 to 180000");
 }
 
-// Small, deterministic extraction fixtures. Each task is run once with the full
-// evidence set and once with only the relevant evidence. No provider fallback.
+// Small, deterministic synthetic extraction fixtures; never user content.
 const tasks = [
   {
     id: "project-code",
@@ -46,7 +57,7 @@ async function callModel(task, evidence, variant) {
     const response = await fetch(baseUrl + "/chat/completions", {
       method: "POST",
       headers: {
-        "authorization": "Bearer " + apiKey,
+        authorization: "Bearer " + apiKey,
         "content-type": "application/json",
       },
       body: JSON.stringify({
@@ -68,8 +79,10 @@ async function callModel(task, evidence, variant) {
     const answer = payload?.choices?.[0]?.message?.content;
     if (typeof answer !== "string") throw new Error("Provider returned no text answer");
     const usage = payload?.usage;
-    const inputTokens = Number.isSafeInteger(usage?.prompt_tokens) ? usage.prompt_tokens : null;
-    const outputTokens = Number.isSafeInteger(usage?.completion_tokens) ? usage.completion_tokens : null;
+    const rawInputTokens = usage?.prompt_tokens ?? usage?.input_tokens;
+    const rawOutputTokens = usage?.completion_tokens ?? usage?.output_tokens;
+    const inputTokens = Number.isSafeInteger(rawInputTokens) ? rawInputTokens : null;
+    const outputTokens = Number.isSafeInteger(rawOutputTokens) ? rawOutputTokens : null;
     return {
       taskId: task.id,
       variant,
@@ -106,6 +119,7 @@ const reductionPercent = baselineTokens && compactTokens !== null
   : null;
 const summary = {
   benchmark: "live-model-context-efficiency",
+  endpointType: "OpenAI-compatible chat completions",
   model,
   taskCount: tasks.length,
   providerCalls: results.length,
@@ -128,7 +142,7 @@ const summary = {
   actualCostNote: "Cost is not inferred. Provider pricing and invoice-level billing are not queried.",
   usageComplete: results.every((r) => r.usageReported),
   results,
-  caveat: "Live provider calls on three small extraction fixtures. This compares full vs manually compacted evidence, not the full Sofia agent task loop and not the TokenAwareGateway packer itself. Results are not generalizable quality or savings claims.",
+  caveat: "Live provider calls on three small synthetic extraction fixtures. This compares full vs manually compacted evidence, not the full Sofia agent task loop and not the TokenAwareGateway packer itself. Results are not generalizable quality or savings claims.",
 };
 console.log(JSON.stringify(summary, null, 2));
 assert.equal(results.length, tasks.length * 2);
