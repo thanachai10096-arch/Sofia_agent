@@ -71,7 +71,11 @@ async function runBounded(
       }, timeoutMs);
     });
     const result = await Promise.race([
-      runner.run({ candidate, fixture, signal: controller.signal }),
+      runner.run({
+        candidate: JSON.parse(JSON.stringify(candidate)) as SkillPackage,
+        fixture: { ...fixture },
+        signal: controller.signal,
+      }),
       timedOut,
     ]);
     return validateRun(result);
@@ -113,6 +117,17 @@ export function createIsolatedSkillBenchmarkEvaluator(
   return async (candidate): Promise<SkillEvaluationResult> => {
     const checks: SkillEvaluationResult["checks"] = [];
     const baseline = await options.getActiveBaseline?.(candidate.skill.id);
+    if (baseline && baseline.skill?.id !== candidate.skill.id) {
+      return {
+        passed: false,
+        checks: [{
+          name: "baseline-identity",
+          passed: false,
+          detail: "Active baseline skill ID does not match the candidate skill ID.",
+        }],
+        evaluatedAt: new Date().toISOString(),
+      };
+    }
     const candidateRuns: SkillBenchmarkRun[] = [];
     const baselineRuns: SkillBenchmarkRun[] = [];
     for (const fixture of fixtures) {
