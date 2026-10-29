@@ -213,10 +213,18 @@ export async function readBackupBundleDirectory(sourcePath: string): Promise<Bac
   }
 
   const expectedFiles = new Set<string>(["manifest.json", ...manifest.entries.map((entry) => entry.path)]);
+  const expectedDirectories = new Set<string>();
+  for (const entry of manifest.entries) {
+    const parts = entry.path.split("/");
+    for (let index = 1; index < parts.length; index += 1) {
+      expectedDirectories.add(parts.slice(0, index).join("/"));
+    }
+  }
   let totalBytes = 0;
   const files = new Map<string, Uint8Array>();
 
-  // Reject extra files and all symlinks rather than silently ignoring payloads.
+  // Reject extra files, empty/unlisted directories, and all symlinks rather
+  // than silently accepting payloads not represented by the manifest.
   const visit = async (directory: string, relative = ""): Promise<void> => {
     const entries = await fs.readdir(directory, { withFileTypes: true });
     for (const item of entries) {
@@ -225,6 +233,7 @@ export async function readBackupBundleDirectory(sourcePath: string): Promise<Bac
       const info = await fs.lstat(absolute);
       if (info.isSymbolicLink()) throw new Error(`Backup directory contains a symlink: ${rel}`);
       if (info.isDirectory()) {
+        if (!expectedDirectories.has(rel)) throw new Error(`Unexpected backup directory: ${rel}`);
         await visit(absolute, rel);
         continue;
       }
