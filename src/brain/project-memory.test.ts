@@ -5,6 +5,28 @@ import os from "node:os";
 import path from "node:path";
 import { FileProjectMemoryStore, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
 
+test("persistent skill ledger reports asynchronous storage failures without unhandled rejections", async () => {
+  const store = {
+    async save() { throw new Error("simulated disk failure"); },
+    async list() { return []; },
+    async find() { return []; },
+  };
+  const ledger = new (await import("./project-memory.js")).PersistentSkillLedger(store);
+  ledger.record({
+    name: "repair-runtime_error",
+    trigger: "recover after a runtime failure",
+    category: "runtime_error",
+    strategy: "initial",
+    procedure: ["inspect evidence", "repair", "verify"],
+    verification: ["test"],
+    evidenceIds: ["evidence-1"],
+  });
+  assert.equal(ledger.list().length, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ledger.persistenceStatus, "failed");
+  await assert.rejects(ledger.flush(), /persistence writes failed/);
+});
+
 test("project memory survives a new store instance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-test-"));
   const first = new FileProjectMemoryStore("project-a", root);
