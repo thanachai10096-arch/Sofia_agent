@@ -137,9 +137,18 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
     });
   }
   audit(event: LearningRepairAuditEvent): Promise<void> {
+    // Treat journal inputs as untrusted at runtime despite the TypeScript interface.
+    // Validate the event container before dereferencing scope so malformed callers fail closed.
+    if (!event || typeof event !== "object" || !event.scope || typeof event.scope !== "object") {
+      throw new Error("Invalid learning repair audit event");
+    }
     assertScope(event.scope);
     const allowedEvents = new Set<LearningRepairAuditEvent["event"]>(["repair_started", "repair_revalidated", "repair_registered", "repair_succeeded", "repair_failed", "repair_already_satisfied"]);
-    if (!event || typeof event.key !== "string" || !event.key.trim() || typeof event.actorId !== "string" || !event.actorId.trim() || typeof event.skillId !== "string" || !event.skillId.trim() || !allowedEvents.has(event.event) || typeof event.at !== "string" || !Number.isFinite(Date.parse(event.at))) {
+    if (typeof event.key !== "string" || !event.key.trim() || event.key.length > 500 ||
+        typeof event.actorId !== "string" || !event.actorId.trim() || event.actorId.length > 200 ||
+        typeof event.skillId !== "string" || !event.skillId.trim() || event.skillId.length > 200 ||
+        !allowedEvents.has(event.event) || typeof event.at !== "string" || !Number.isFinite(Date.parse(event.at)) ||
+        (event.detail !== undefined && typeof event.detail !== "string")) {
       throw new Error("Invalid learning repair audit event");
     }
     return this.serial(() => {
