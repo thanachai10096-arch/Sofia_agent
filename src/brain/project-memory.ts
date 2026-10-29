@@ -6,6 +6,11 @@ import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { containsPromptInjection, redactSecrets } from "../security/guard.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 
+// Serialize read-modify-write cycles for each project-memory file within this process.
+// Atomic rename prevents partial JSON, while this lock prevents concurrent saves from
+// overwriting one another after reading the same stale snapshot.
+const PROJECT_MEMORY_WRITES = new Map<string, Promise<void>>();
+
 export interface ProjectMemoryEntry {
   id: string; project: string; kind: "convention" | "repair" | "decision"; content: string;
   source?: string; confidence: number; createdAt: string; updatedAt: string; uses: number;
@@ -28,16 +33,34 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
   async save(entry: ProjectMemoryEntry): Promise<void> {
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
     const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, 4000) };
-    const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
-    const directory = path.dirname(this.file);
-    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-    await fs.chmod(directory, 0o700);
-    const temporary = this.file + "." + randomUUID() + ".tmp";
+
+    const lockKey = path.resolve(this.file);
+    const previous = PROJECT_MEMORY_WRITES.get(lockKey) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.then(() => gate);
+    PROJECT_MEMORY_WRITES.set(lockKey, tail);
+    await previous;
     try {
-      await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
-      await fs.rename(temporary, this.file);
+      // Read inside the lock: doing this before waiting would still lose updates.
+      const entries = await this.read();
+      const index = entries.findIndex((item) => item.id === safeEntry.id);
+      if (index >= 0) entries[index] = safeEntry;
+      else entries.push(safeEntry);
+
+      const directory = path.dirname(this.file);
+      await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      await fs.chmod(directory, 0o700);
+      const temporary = this.file + "." + randomUUID() + ".tmp";
+      try {
+        await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
+        await fs.rename(temporary, this.file);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
     } finally {
-      await fs.rm(temporary, { force: true });
+      release();
+      if (PROJECT_MEMORY_WRITES.get(lockKey) === tail) PROJECT_MEMORY_WRITES.delete(lockKey);
     }
   }
   async list(){return (await this.read()).filter(entry=>!containsPromptInjection(entry.content));}
