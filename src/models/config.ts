@@ -5,6 +5,9 @@ export interface SofiaGatewayProviderConfig {
   apiKey: string;
   model: string;
   protocol?: "openai-compatible" | "anthropic-messages";
+  authHeader?: string;
+  authPrefix?: string;
+  endpointPath?: string;
   headers?: Record<string, string>;
   maxConcurrent?: number;
   requestTimeoutMs?: number;
@@ -19,6 +22,9 @@ type ProviderDefinition = {
   baseUrl: string;
   model: string;
   protocol?: "openai-compatible" | "anthropic-messages";
+  authHeader?: string;
+  authPrefix?: string;
+  endpointPath?: string;
   apiKeyEnv?: string;
   apiKey?: string;
   headers?: Record<string, string>;
@@ -93,6 +99,25 @@ function parseProviderManifest(raw: string): ProviderManifest {
     if (protocol !== "openai-compatible" && protocol !== "anthropic-messages") {
       throw new Error(`Provider ${id} protocol must be "openai-compatible" or "anthropic-messages".`);
     }
+    const authHeader = item.authHeader === undefined ? undefined : item.authHeader;
+    if (authHeader !== undefined &&
+      (typeof authHeader !== "string" ||
+       !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(authHeader) ||
+       /^(host|content-length|proxy-authorization)$/i.test(authHeader) ||
+       (protocol === "anthropic-messages" && !/^x-api-key$/i.test(authHeader)))) {
+      throw new Error(`Provider ${id} has an invalid authHeader for its protocol.`);
+    }
+    const authPrefix = item.authPrefix === undefined ? undefined : item.authPrefix;
+    if (authPrefix !== undefined && (typeof authPrefix !== "string" || authPrefix.length > 64 || /[\\r\\n]/.test(authPrefix))) {
+      throw new Error(`Provider ${id} has an invalid authPrefix.`);
+    }
+    const endpointPath = item.endpointPath === undefined ? undefined : item.endpointPath;
+    if (endpointPath !== undefined &&
+      (typeof endpointPath !== "string" || !endpointPath.startsWith("/") ||
+       endpointPath.startsWith("//") || endpointPath.includes("..") ||
+       endpointPath.includes("#") || /[\\r\\n]/.test(endpointPath))) {
+      throw new Error(`Provider ${id} endpointPath must be a safe absolute path.`);
+    }
     const apiKeyEnv = typeof item.apiKeyEnv === "string" ? item.apiKeyEnv.trim() : undefined;
     if (item.apiKey !== undefined) {
       throw new Error(`Provider ${id} must not embed apiKey in SOFIA_MODEL_PROVIDERS; use apiKeyEnv to reference a server-side secret.`);
@@ -125,6 +150,9 @@ function parseProviderManifest(raw: string): ProviderManifest {
       baseUrl: baseUrl.replace(/\/$/, ""),
       model,
       protocol,
+      ...(authHeader !== undefined ? { authHeader: authHeader as string } : {}),
+      ...(authPrefix !== undefined ? { authPrefix: authPrefix as string } : {}),
+      ...(endpointPath !== undefined ? { endpointPath: endpointPath as string } : {}),
       ...(apiKeyEnv ? { apiKeyEnv } : {}),
       ...(Object.keys(headers).length ? { headers } : {}),
       ...(maxConcurrent !== undefined ? { maxConcurrent: maxConcurrent as number } : {}),
@@ -163,6 +191,9 @@ function resolveProvider(
     apiKey,
     model,
     protocol: definition.protocol ?? "openai-compatible",
+    ...(definition.authHeader ? { authHeader: definition.authHeader } : {}),
+    ...(definition.authPrefix !== undefined ? { authPrefix: definition.authPrefix } : {}),
+    ...(definition.endpointPath ? { endpointPath: definition.endpointPath } : {}),
     ...(definition.headers ? { headers: definition.headers } : {}),
     ...(definition.maxConcurrent !== undefined ? { maxConcurrent: definition.maxConcurrent } : {}),
     ...(definition.requestTimeoutMs !== undefined ? { requestTimeoutMs: definition.requestTimeoutMs } : {}),
