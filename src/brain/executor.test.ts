@@ -5,6 +5,7 @@ import { createSofiaBrain } from "./executor.js";
 import { InMemorySkillLedger } from "./learning.js";
 import type { BrainReasoner, ToolGateway, ToolResult } from "./types.js";
 import type { SubagentRuntime } from "./subagents.js";
+import type { ProjectMemoryEntry, ProjectMemoryStore } from "./project-memory.js";
 
 const plan = {
   strategy: "initial",
@@ -665,4 +666,55 @@ test("Brain includes prior context as bounded untrusted reference data in unders
     assert.match(prompt?.payload.referenceContext?.content ?? "", /UNTRUSTED/);
     assert.match(prompt?.payload.referenceContext?.content ?? "", /project uses TypeScript/);
   }
+});
+
+
+test("Brain saves reusable workflow memory only after verified completion and excludes tool inputs", async () => {
+  const saved: ProjectMemoryEntry[] = [];
+  const projectMemory: ProjectMemoryStore = {
+    async save(entry) { saved.push(entry); },
+    async list() { return [...saved]; },
+    async find() { return []; },
+  };
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      projectContext: { root: "/workspace/project", files: [], summary: "" },
+      projectMemory,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "file exists" };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  const learned = saved.find((entry) => entry.source === "verified-workflow");
+  assert.ok(learned, "verified workflow should be persisted");
+  assert.equal(learned.kind, "decision");
+  assert.match(learned.content, /Verified workflow pattern/);
+  assert.match(learned.content, /workspace.write_file/);
+  assert.match(learned.content, /Verification evidence:/);
+  assert.doesNotMatch(learned.content, /"content":"hello"/);
 });
