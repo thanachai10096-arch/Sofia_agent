@@ -110,8 +110,14 @@ export class FileCronStore implements CronStore {
             }
           }
         } catch (statError) {
-          if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
-          if (!(statError instanceof SyntaxError)) throw statError;
+          const code = (statError as NodeJS.ErrnoException).code;
+          if (code === "ENOENT") continue;
+          // On Windows, another process may briefly hold an incompatible file handle
+          // while the exclusive lock owner is writing its PID. Treat only these
+          // transient sharing/permission errors like an incomplete lock read; keep
+          // waiting within the existing deadline and never delete or bypass the lock.
+          const transientReadError = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+          if (!(statError instanceof SyntaxError) && !transientReadError) throw statError;
           if (Date.now() >= deadline) throw new Error("Cron scheduler state lock owner could not be read");
         }
         if (Date.now() >= deadline) throw new Error("Timed out waiting for cron scheduler state lock");
