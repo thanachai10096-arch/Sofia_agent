@@ -19,9 +19,7 @@ export interface BackupBundle {
   files: ReadonlyMap<string, Uint8Array>;
 }
 
-export interface BackupBundleVerification extends BackupVerificationResult {
-  sourceCount: number;
-}
+export type BackupBundleVerification = BackupVerificationResult;
 
 /**
  * Collect in-memory snapshots from explicitly supplied stores and verify the
@@ -67,8 +65,8 @@ export async function createBackupBundle(
 export function verifyBackupBundle(bundle: unknown): BackupBundleVerification {
   if (typeof bundle !== "object" || bundle === null || !("manifest" in bundle) ||
       !("files" in bundle) || !(bundle.files instanceof Map)) {
-    return { valid: false, errors: ["Invalid backup bundle shape."], verifiedFiles: 0, verifiedBytes: 0, sourceCount: 0 };
+    return { valid: false, errors: ["Invalid backup bundle shape."], verifiedFiles: 0, verifiedBytes: 0 };
   }
   const result = verifyBackupFiles(bundle.manifest, bundle.files as ReadonlyMap<string, Uint8Array>);
-  return { ...result, sourceCount: 0 };
+  return result;
 }
