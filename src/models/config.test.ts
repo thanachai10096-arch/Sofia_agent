@@ -104,6 +104,33 @@ test("custom gateways require the explicit openai-compatible provider", () => {
   assert.equal(config.providers.fast?.baseUrl, "https://gateway.example/v1");
 });
 
+
+test("all named provider presets resolve to their configured API origins", () => {
+  const cases = [
+    ["gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY"],
+    ["openai", "https://api.openai.com/v1", "OPENAI_API_KEY"],
+    ["openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"],
+    ["xai", "https://api.x.ai/v1", "XAI_API_KEY"],
+    ["mistral", "https://api.mistral.ai/v1", "MISTRAL_API_KEY"],
+    ["groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY"],
+    ["deepseek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"],
+    ["together", "https://api.together.xyz/v1", "TOGETHER_API_KEY"],
+    ["fireworks", "https://api.fireworks.ai/inference/v1", "FIREWORKS_API_KEY"],
+    ["cerebras", "https://api.cerebras.ai/v1", "CEREBRAS_API_KEY"],
+    ["perplexity", "https://api.perplexity.ai", "PERPLEXITY_API_KEY"],
+  ] as const;
+  for (const [provider, expectedOrigin, keyName] of cases) {
+    clear();
+    process.env.SOFIA_MODEL_PROVIDER = provider;
+    process.env[keyName] = "provider-test-key";
+    process.env.SOFIA_MODEL_NAME = "provider-test-model";
+    const config = loadModelConfigFromEnv();
+    assert.equal(config.providers.fast?.baseUrl, expectedOrigin, `${provider} API origin`);
+    assert.equal(config.providers.fast?.apiKey, "provider-test-key", `${provider} API key`);
+    assert.equal(config.providers.fast?.model, "provider-test-model", `${provider} model`);
+  }
+});
+
 test("unknown provider is rejected", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "unknown";
