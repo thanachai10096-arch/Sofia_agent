@@ -2,16 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { planLearningReconciliationRepair } from "./reconciliation-repair.js";
 import type { LearningScope } from "./ports.js";
+import type { LearningRepairAuthorization } from "./reconciliation-repair.js";
 import type { LearningReconciliationReport } from "./reconciliation.js";
 
 const scope: LearningScope = { tenantId: "tenant-a", principalId: "user-a", projectId: "project-a" };
 const report = (issues: LearningReconciliationReport["issues"]): LearningReconciliationReport => ({
   scope, checkedLearningSkills: 1, checkedRuntimeSkills: 0, issues, safe: issues.length === 0,
 });
-const auth = (overrides: Record<string, unknown> = {}) => ({
+const auth = (overrides: Partial<LearningRepairAuthorization> = {}): LearningRepairAuthorization => ({
   scope, actorId: "operator-a", idempotencyKey: "repair-2026-10-29-001",
-  approvedSkillIds: ["skill-1"], currentPolicyRevisions: { "skill-1": "policy-7" },
-  trustedEvidenceSkillIds: ["skill-1"], ...overrides,
+  approvedSkillIds: ["skill-1"], learningPolicyRevisions: { "skill-1": "policy-7" },
+  currentPolicyRevisions: { "skill-1": "policy-7" }, trustedEvidenceSkillIds: ["skill-1"], ...overrides,
 });
 
 test("plans only explicitly approved missing runtime registration with current policy and trusted evidence", () => {
@@ -33,7 +34,7 @@ test("blocks repair without explicit approval or trusted evidence", () => {
 });
 
 test("blocks policy drift, duplicates, and mixed issues rather than guessing a repair", () => {
-  const stale = planLearningReconciliationRepair(report([{ kind: "missing-runtime-registration", skillId: "skill-1" }]), auth({ currentPolicyRevisions: {} }));
+  const stale = planLearningReconciliationRepair(report([{ kind: "missing-runtime-registration", skillId: "skill-1" }]), auth({ currentPolicyRevisions: { "skill-1": "policy-8" } }));
   assert.deepEqual(stale.blocked, [{ skillId: "skill-1", reason: "policy-revision-stale" }]);
   const conflict = planLearningReconciliationRepair(report([
     { kind: "missing-runtime-registration", skillId: "skill-1" },
