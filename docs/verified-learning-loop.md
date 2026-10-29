@@ -17,6 +17,12 @@ The loop is an additive extension point for Sofia's existing Brain, Skill Lifecy
 
 `SelfImprovementCheckpointStore` must persist notification cursor and pending out-of-order notifications durably and atomically. `SqliteSelfImprovementCheckpointStore` is the durable cursor/pending-event implementation; the in-memory implementation in tests remains only a test double. The `persistFinalizedReceipt` adapter must return a sequence from a durable source; do not invent a sequence from process-local counters.
 
+## Transaction and lifecycle integration boundaries
+
+The loop now commits the experience/history snapshot first, then runs policy assessment and regression checks outside the SQLite write transaction. Candidate/evaluation persistence and final activation use separate short transactions. This avoids holding SQLite's `BEGIN IMMEDIATE` lock while external policy or regression adapters run. Because these phases are intentionally separate, adapters and callers must tolerate a persisted experience/candidate without activation after interruption; activation remains gated by verified regression evidence and a fresh policy revision.
+
+The `learning_active_skills` table is the loop's durable record, **not** proof that a skill has been registered with Sofia's runtime. A production composition still needs an explicit adapter to `VersionedSkillLifecycle`/the existing `SkillsPlatform`, including conversion to a validated `SkillPackage`, lifecycle evaluation, and promotion/rollback behavior. Until that integration is implemented and covered by end-to-end tests, do not describe learned skills as available to the runtime or enable this loop in production.
+
 ## Safety notes
 
 - The loop rejects missing, stale, cross-scope, failed, or untrusted evidence.
