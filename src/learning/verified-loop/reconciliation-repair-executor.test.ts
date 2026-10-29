@@ -76,3 +76,15 @@ test("refuses ineligible plans and cross-scope actions", async () => {
   await assert.rejects(() => executeLearningRepairPlan({ ...plan, eligibleForExecutor: false }, journal, host), /not eligible/);
   await assert.rejects(() => executeLearningRepairPlan({ ...plan, actions: [{ ...action, scope: { ...scope, tenantId: "tenant-b" } }] }, journal, host), /cross-scope/);
 });
+
+test("detects drift after a journaled success instead of silently claiming healthy state", async () => {
+  const journal = new MemoryJournal();
+  await journal.begin({ key: action.idempotencyKey, scope, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running", attempts: 0, updatedAt: new Date().toISOString() });
+  await journal.finish(action.idempotencyKey, scope, "succeeded", "previously verified");
+  let registrations = 0;
+  const host = hostWith(() => snapshot({ exists: false, active: false }), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /state drifted/);
+  assert.equal(registrations, 0);
+});
