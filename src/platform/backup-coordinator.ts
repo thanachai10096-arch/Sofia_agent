@@ -1,5 +1,6 @@
 import {
   createBackupManifest,
+  MAX_BACKUP_MANIFEST_ENTRIES,
   verifyBackupFiles,
   type BackupInputFile,
   type BackupManifest,
@@ -49,7 +50,10 @@ export async function createBackupBundle(
     if (!Array.isArray(snapshotFiles)) {
       throw new Error(`Backup snapshot source ${source.name} returned an invalid snapshot.`);
     }
-    files.push(...snapshotFiles);
+    if (files.length + snapshotFiles.length > MAX_BACKUP_MANIFEST_ENTRIES) {
+      throw new Error("Backup contains too many entries.");
+    }
+    for (const file of snapshotFiles) files.push(file);
   }
 
   const manifest = createBackupManifest(files, createdAt);
