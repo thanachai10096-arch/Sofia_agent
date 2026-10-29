@@ -85,3 +85,18 @@ test("LINE runtime requires explicit enablement and complete allowlist configura
   assert.equal(warnings.length, 1);
   assert.match(warnings[0] ?? "", /allowlists are required/);
 });
+
+test("LINE runtime constructs only when enabled and all required settings are present", async () => {
+  const runtime = createLineMessagingRuntime({
+    SOFIA_LINE_ENABLED: "true",
+    LINE_CHANNEL_ACCESS_TOKEN: "test-token",
+    LINE_CHANNEL_SECRET: "test-secret",
+    LINE_ALLOWED_USER_IDS: "U123,U456",
+    LINE_ALLOWED_CONVERSATION_IDS: "U123,C789",
+    SOFIA_API_KEY: "test-api-key",
+    SOFIA_API_BASE_URL: "https://sofia.example",
+  }, "/tmp/sofia-line-runtime-test", () => undefined);
+  assert.ok(runtime);
+  assert.equal(typeof runtime.webhookTransport.handleWebhook, "function");
+  await runtime.stop();
+});
