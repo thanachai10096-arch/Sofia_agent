@@ -88,6 +88,11 @@ export class SqliteLearningTransactionStore {
         const row = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND experience_id=?").get(...values, id) as ScopeRow | undefined;
         return row ? decode<LearningExperience>(row.payload, "experience") : undefined;
       },
+      getExperienceByReceipt: async (requestedScope, receiptId) => {
+        assertSameScope(requestedScope, scope);
+        const row = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND receipt_id=?").get(...values, receiptId) as ScopeRow | undefined;
+        return row ? decode<LearningExperience>(row.payload, "experience") : undefined;
+      },
       putCandidate: async candidate => {
         assertSameScope(candidate.scope, scope);
         db.prepare("INSERT INTO learning_candidates VALUES (?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, candidate_id) DO UPDATE SET payload=excluded.payload").run(...values, candidate.id, encode(candidate));
