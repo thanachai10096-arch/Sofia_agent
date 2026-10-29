@@ -104,3 +104,19 @@ test("fails clearly when neither generic providers nor legacy Gemini are configu
   clear();
   assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_PROVIDERS/);
 });
+
+test("configures a native Anthropic Messages provider", () => {
+  clear();
+  process.env.TEST_PROVIDER_KEY = "anthropic-secret";
+  process.env.SOFIA_MODEL_PROVIDERS = JSON.stringify({ anthropic: { baseUrl: "https://api.anthropic.com/v1", apiKeyEnv: "TEST_PROVIDER_KEY", model: "claude-sonnet-test", protocol: "anthropic-messages" } });
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.protocol, "anthropic-messages");
+  assert.equal(config.providers.fast?.apiKey, "anthropic-secret");
+  assert.equal(config.providers.fast?.baseUrl, "https://api.anthropic.com/v1/");
+});
+
+test("rejects unsupported provider protocols instead of silently treating them as OpenAI-compatible", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDERS = JSON.stringify({ unknown: { baseUrl: "https://api.example.com/v1", model: "model-x", protocol: "custom-wire" } });
+  assert.throws(loadModelConfigFromEnv, /protocol must be/);
+});
