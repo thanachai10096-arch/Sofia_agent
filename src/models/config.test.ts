@@ -28,6 +28,18 @@ const names = [
   "SOFIA_CODING_MODEL",
   "SOFIA_REASONING_MODEL",
   "SOFIA_VISION_MODEL",
+  "SOFIA_ROUTE_FAST_BASE_URL",
+  "SOFIA_ROUTE_FAST_API_KEY",
+  "SOFIA_ROUTE_FAST_MODEL",
+  "SOFIA_ROUTE_CODING_BASE_URL",
+  "SOFIA_ROUTE_CODING_API_KEY",
+  "SOFIA_ROUTE_CODING_MODEL",
+  "SOFIA_ROUTE_REASONING_BASE_URL",
+  "SOFIA_ROUTE_REASONING_API_KEY",
+  "SOFIA_ROUTE_REASONING_MODEL",
+  "SOFIA_ROUTE_VISION_BASE_URL",
+  "SOFIA_ROUTE_VISION_API_KEY",
+  "SOFIA_ROUTE_VISION_MODEL",
   "SOFIA_AI_GATEWAY_API_KEY",
   "AI_GATEWAY_API_KEY",
 ];
@@ -157,4 +169,55 @@ test("requires explicit provider selection when OpenRouter and Gemini credential
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
   process.env.GEMINI_API_KEY = "gemini-test-key";
   assert.throws(loadModelConfigFromEnv, /set SOFIA_MODEL_PROVIDER to choose explicitly/);
+});
+
+
+test("a route can use an independent OpenAI-compatible provider while other routes retain the default provider", () => {
+  clear();
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.GEMINI_MODEL = "gemini-default";
+  process.env.SOFIA_ROUTE_FAST_BASE_URL = "https://api.openai.com/v1/";
+  process.env.SOFIA_ROUTE_FAST_API_KEY = "openai-route-key";
+  process.env.SOFIA_ROUTE_FAST_MODEL = "gpt-fast-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.openai.com/v1");
+  assert.equal(config.providers.fast?.apiKey, "openai-route-key");
+  assert.equal(config.providers.fast?.model, "gpt-fast-model");
+  assert.equal(config.providers.coding?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
+  assert.equal(config.providers.coding?.apiKey, "gemini-test-key");
+  assert.equal(config.providers.coding?.model, "gemini-default");
+});
+
+test("all model routes can be configured independently without a global default provider", () => {
+  clear();
+  for (const route of ["FAST", "CODING", "REASONING", "VISION"]) {
+    process.env[`SOFIA_ROUTE_${route}_BASE_URL`] = `https://${route.toLowerCase()}.example.test/v1`;
+    process.env[`SOFIA_ROUTE_${route}_API_KEY`] = `${route.toLowerCase()}-test-key`;
+    process.env[`SOFIA_ROUTE_${route}_MODEL`] = `${route.toLowerCase()}/model`;
+  }
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.routes.length, 4);
+  assert.equal(config.providers.fast?.model, "fast/model");
+  assert.equal(config.providers.coding?.baseUrl, "https://coding.example.test/v1");
+  assert.equal(config.providers.reasoning?.apiKey, "reasoning-test-key");
+  assert.equal(config.providers.vision?.model, "vision/model");
+});
+
+test("partial route-specific provider configuration fails closed", () => {
+  clear();
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.SOFIA_ROUTE_FAST_BASE_URL = "https://api.openai.com/v1";
+  process.env.SOFIA_ROUTE_FAST_MODEL = "gpt-fast-model";
+  assert.throws(loadModelConfigFromEnv, /SOFIA_ROUTE_FAST_BASE_URL, SOFIA_ROUTE_FAST_API_KEY, and SOFIA_ROUTE_FAST_MODEL must be configured together/);
+});
+
+test("route-specific provider URLs reject embedded credentials and non-HTTP schemes", () => {
+  clear();
+  for (const route of ["FAST", "CODING", "REASONING", "VISION"]) {
+    process.env[`SOFIA_ROUTE_${route}_BASE_URL`] = `https://${route.toLowerCase()}.example.test/v1`;
+    process.env[`SOFIA_ROUTE_${route}_API_KEY`] = `${route.toLowerCase()}-test-key`;
+    process.env[`SOFIA_ROUTE_${route}_MODEL`] = `${route.toLowerCase()}/model`;
+  }
+  process.env.SOFIA_ROUTE_FAST_BASE_URL = "https://user:password@fast.example.test/v1";
+  assert.throws(loadModelConfigFromEnv, /must not contain credentials/);
 });
