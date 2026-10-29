@@ -53,6 +53,24 @@ test("skill lifecycle rejects missing, blank, duplicate, and unbounded evidence 
   }
 });
 
+test("skill lifecycle rejects evaluator results above the check limit", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-evaluator-bounds-"));
+  try {
+    const lifecycle = new VersionedSkillLifecycle(
+      new InMemorySkillsPlatform(),
+      async () => ({ passed: true, checks: Array.from({ length: 101 }, () => ({ name: "check", passed: true })) }),
+      { file: path.join(root, "lifecycle.json") },
+    );
+    const candidate = lifecycle.propose(skillPackage, { source: "verified-repair", evidenceIds: ["test-run-123"], confidence: 0.9 });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.match(evaluated.evaluation?.checks[0]?.detail ?? "", /unbounded evidence/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("skill lifecycle accepts bounded unique evidence and still requires successful evaluation", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-evidence-"));
   try {
