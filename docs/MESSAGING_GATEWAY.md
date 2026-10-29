@@ -42,6 +42,10 @@ The example names are placeholders for the application's existing instances, not
 
 The Gateway path is separate from Discord's HTTP interaction route: configure either or both intentionally. The Gateway transport uses the bot REST API for replies; the interaction transport uses interaction webhooks for slash-command replies.
 
+### Enable the standalone API entrypoint (opt-in)
+
+Set `DISCORD_GATEWAY_ENABLED=true` on the intended test service, plus `DISCORD_BOT_TOKEN`, `DISCORD_ALLOWED_USER_IDS`, and `DISCORD_ALLOWED_CHANNEL_IDS`. The two allowlists are mandatory and accept comma-separated numeric IDs. The gateway uses the existing `SOFIA_API_KEY` to call the local Sofia API unless `SOFIA_API_BASE_URL` is explicitly configured. The Gateway is disabled by default; this setting does not replace or enable the signed HTTP interactions endpoint. The runtime must provide a global WebSocket implementation (for example, a supported modern Node.js runtime). Enable the privileged **Message Content Intent** in the Discord Developer Portal. Verify on the Test service before considering any Production configuration.
+
 ## Standalone Telegram runtime configuration
 
 The API entrypoint now wires the existing Telegram long-polling adapter into the same Sofia API/Core when explicitly enabled. Configure these variables on the intended service (start with the Test service, not Production):
