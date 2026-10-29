@@ -128,3 +128,21 @@ test("rejects inline provider API keys in the JSON manifest", () => {
   });
   assert.throws(loadModelConfigFromEnv, /must not embed apiKey/);
 });
+
+test("supports provider-specific auth headers and endpoint paths", () => {
+  clear();
+  process.env.TEST_PROVIDER_KEY = "azure-secret";
+  process.env.SOFIA_MODEL_PROVIDERS = JSON.stringify({
+    azure: { baseUrl: "https://azure.example.test", apiKeyEnv: "TEST_PROVIDER_KEY", model: "deployment-model", authHeader: "api-key", authPrefix: "", endpointPath: "/openai/deployments/deployment-model/chat/completions?api-version=2025-01-01-preview" },
+  });
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.authHeader, "api-key");
+  assert.equal(config.providers.fast?.authPrefix, "");
+  assert.equal(config.providers.fast?.endpointPath, "/openai/deployments/deployment-model/chat/completions?api-version=2025-01-01-preview");
+});
+
+test("rejects unsafe custom endpoint paths", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDERS = JSON.stringify({ bad: { baseUrl: "https://api.example.com", model: "model-x", endpointPath: "//evil.example/path" } });
+  assert.throws(loadModelConfigFromEnv, /endpointPath must be a safe absolute path/);
+});
