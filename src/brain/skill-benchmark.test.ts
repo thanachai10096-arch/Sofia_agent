@@ -94,3 +94,34 @@ test("benchmark evaluator fails closed when an isolated runner exceeds its timeo
   assert.equal(evaluation.checks.filter((check) => check.name.startsWith("fixture:")).length, fixtures.length);
   assert.equal(evaluation.checks.some((check) => check.detail?.includes("timed out")), true);
 });
+
+
+test("benchmark evaluator rejects incomplete baseline evidence instead of treating runner failures as poor baseline scores", async () => {
+  const evaluator = createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    minimumPassRate: 0.5,
+    getActiveBaseline: () => ({ ...candidate, version: "0.9.0" }),
+    runner: {
+      run: async ({ candidate: tested, fixture }) => {
+        if (tested.version === "0.9.0" && fixture.id === "case-2") {
+          throw new Error("baseline sandbox unavailable");
+        }
+        return result(true);
+      },
+    },
+  });
+  const evaluation = await evaluator(candidate);
+  assert.equal(evaluation.passed, false);
+  assert.equal(evaluation.checks.find((check) => check.name === "baseline-evidence")?.passed, false);
+});
+
+test("benchmark evaluator emits explicit fixture evidence for a valid but failed run", async () => {
+  const evaluator = createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    minimumPassRate: 0.5,
+    runner: { run: async ({ fixture }) => result(fixture.id !== "case-1") },
+  });
+  const evaluation = await evaluator(candidate);
+  assert.equal(evaluation.passed, false);
+  assert.equal(evaluation.checks.find((check) => check.name === "fixture:case-1")?.passed, false);
+});
