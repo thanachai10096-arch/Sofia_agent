@@ -90,3 +90,27 @@ test("repair audit journal rejects malformed events and prevents update/delete",
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("SQLite journal atomically refuses a second executor claiming a running repair", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-journal-"));
+  const file = path.join(dir, "repair.sqlite");
+  const first = await SqliteLearningRepairJournal.open(file);
+  const second = await SqliteLearningRepairJournal.open(file);
+  const entry = {
+    key: "repair-concurrent", scope, skillId: "skill-concurrent", policyRevision: "policy-1",
+    state: "running" as const, attempts: 0, updatedAt: "2026-10-29T00:00:00.000Z",
+  };
+  try {
+    const owner = await first.begin(entry);
+    assert.equal(owner.claimed, true);
+    const contender = await second.begin({ ...entry, updatedAt: "2026-10-29T00:00:01.000Z" });
+    assert.equal(contender.claimed, false);
+    assert.equal(contender.state, "running");
+    assert.equal(contender.attempts, 1);
+    assert.equal((await first.get(entry.key, scope))?.attempts, 1);
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
