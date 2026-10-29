@@ -2,6 +2,7 @@ import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import type { LineWebhookTransport } from "../integrations/messaging/line-http-route.js";
+import type { WhatsAppWebhookRouteTransport } from "../integrations/messaging/whatsapp-http-route.js";
 
 export interface AgentRunInput {
   task: string;
@@ -66,6 +67,12 @@ export interface SofiaApiConfig {
   /** Optional LINE webhook route; transport verifies signatures against raw request bytes. */
   lineWebhookRoute?: {
     transport: LineWebhookTransport;
+    path?: string;
+    maxBodyBytes?: number;
+  };
+  /** Optional WhatsApp Cloud API route; GET challenge and POST signatures are verified by the supplied transport. */
+  whatsappWebhookRoute?: {
+    transport: WhatsAppWebhookRouteTransport;
     path?: string;
     maxBodyBytes?: number;
   };
