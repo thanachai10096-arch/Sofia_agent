@@ -1240,7 +1240,17 @@ export class SofiaBrain {
             mayActivate = false;
           }
         }
-        if (mayActivate) this.dependencies.skillLedger.record(learnedCandidate);
+        if (mayActivate) {
+          // Learning is best-effort: a ledger write failure must not turn a verified task into a failed run.
+          try {
+            this.dependencies.skillLedger.record(learnedCandidate);
+            const durableLedger = this.dependencies.skillLedger as SkillLedger & { flush?: () => Promise<void> };
+            if (typeof durableLedger.flush === "function") await durableLedger.flush();
+            this.emit({ type: "brain.learning.recorded" });
+          } catch {
+            // Do not emit "recorded" when persistence failed; the completed task remains successful.
+          }
+        }
         if (this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
@@ -1248,7 +1258,6 @@ export class SofiaBrain {
           await this.wait(() => this.dependencies.projectMemory!.save(entry));
           this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
         }
-        this.emit({ type: "brain.learning.recorded" });
       }
 
       return this.report(
