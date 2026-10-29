@@ -6,7 +6,7 @@ import type { LearningRepairAction, LearningRepairPlan } from "./reconciliation-
 import type { LearningScope } from "./ports.js";
 
 const scope: LearningScope = { tenantId: "tenant-a", principalId: "user-a", projectId: "project-a" };
-const action: LearningRepairAction = { kind: "register-missing-runtime-skill", skillId: "skill-a", expectedPolicyRevision: "policy-4", scope, actorId: "operator-a", idempotencyKey: "repair-key-a" };
+const action: LearningRepairAction = { kind: "register-missing-runtime-skill", skillId: "skill-a", expectedPolicyRevision: "policy-4", scope, actorId: "operator-a", idempotencyKey: JSON.stringify(["repair-key-a", "skill-a"]) };
 const plan: LearningRepairPlan = { planId: "repair-key-a", scope, actions: [action], blocked: [], eligibleForExecutor: true };
 function snapshot(overrides: Partial<LearningRepairSnapshot> = {}): LearningRepairSnapshot {
   return { scope, exists: false, active: false, policyRevision: "policy-4", explicitlyApproved: true, trustedEvidenceValid: true, ...overrides };
