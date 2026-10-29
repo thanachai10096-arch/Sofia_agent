@@ -7,7 +7,9 @@ import {
 
 function mockResponse(body: string | Uint8Array, status = 200, contentType = "application/json"): Response {
   const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
-  return new Response(bytes, { status, headers: { "content-type": contentType, "content-length": String(bytes.byteLength) } });
+  const ownedBytes = new Uint8Array(bytes.byteLength);
+  ownedBytes.set(bytes);
+  return new Response(ownedBytes.buffer, { status, headers: { "content-type": contentType, "content-length": String(ownedBytes.byteLength) } });
 }
 
 test("OpenAI-compatible voice STT sends audio to configured endpoint and parses transcript", async () => {
