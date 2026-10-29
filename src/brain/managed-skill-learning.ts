@@ -45,6 +45,7 @@ export function createManagedSkillLearningHandler(
     ];
     if (untrustedMetadata.some((value) => containsPromptInjection(value))) return false;
 
+    const safeName = String(redactSecrets(candidate.name)).trim().slice(0, 200);
     const safeTrigger = String(redactSecrets(candidate.trigger)).trim().slice(0, 500);
     const safeTriggers = [...new Set([
       safeTrigger,
@@ -53,15 +54,15 @@ export function createManagedSkillLearningHandler(
     const safeProcedure = candidate.procedure
       .map((step) => String(redactSecrets(step)).trim().slice(0, 2_000))
       .filter(Boolean).slice(0, 12);
-    if (!safeTrigger || safeProcedure.length < 2) return false;
+    if (!safeName || !safeTrigger || safeProcedure.length < 2) return false;
 
     const requireApproval = options.requireApproval ?? process.env.SOFIA_SKILL_WRITE_APPROVAL === "true";
     if (requireApproval && !approval) return false;
 
     const skillPackage: SkillPackage = {
       skill: {
-        id: `learned:${candidate.name}:${candidate.category}`,
-        name: candidate.name,
+        id: `learned:${safeName}:${candidate.category}`,
+        name: safeName,
         description: "Learned from a workflow that passed trusted verification.",
         triggers: safeTriggers,
         categories: [candidate.category],
