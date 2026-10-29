@@ -19,6 +19,7 @@ function route(overrides: Partial<ModelRoute> = {}): ModelRoute {
 
 test("capability report marks undeclared features unknown rather than guessing", () => {
   const [entry] = buildModelCapabilityReport([route()]);
+  assert.ok(entry);
   assert.equal(entry.toolCalling, "unknown");
   assert.equal(entry.vision, "unknown");
   assert.equal(entry.structuredOutput, "unknown");
@@ -34,6 +35,7 @@ test("capability report exposes only explicitly declared feature metadata", () =
       contextWindow: 128_000,
     },
   })]);
+  assert.ok(entry);
   assert.equal(entry.toolCalling, true);
   assert.equal(entry.vision, false);
   assert.equal(entry.structuredOutput, true);
@@ -46,6 +48,7 @@ test("capability report provides safe fallbacks for missing route identifiers", 
     providerId: undefined,
     model: undefined,
   })]);
+  assert.ok(entry);
   assert.equal(entry.providerId, "fast");
   assert.equal(entry.model, "unknown");
 });
