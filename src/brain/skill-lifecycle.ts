@@ -233,6 +233,7 @@ export class VersionedSkillLifecycle {
     if (!isRecord(parsed) || parsed.schemaVersion !== 1 || !Array.isArray(parsed.records) || !isRecord(parsed.activeBySkill)) {
       throw new Error("Unsupported or corrupt skill lifecycle store");
     }
+    const seenRecordIds = new Set<string>();
     const records: SkillLifecycleRecord[] = parsed.records.map((item) => {
       if (!isRecord(item) || typeof item.id !== "string" || !item.id.trim() || item.id.length > 200 ||
           typeof item.skillId !== "string" || !item.skillId.trim() ||
@@ -244,6 +245,8 @@ export class VersionedSkillLifecycle {
           typeof item.createdAt !== "string" || typeof item.updatedAt !== "string") {
         throw new Error("Invalid skill lifecycle record");
       }
+      if (seenRecordIds.has(item.id)) throw new Error("Duplicate skill lifecycle record id");
+      seenRecordIds.add(item.id);
       const safePackage = validatePackage(item.package as SkillPackage);
       if (safePackage.skill.id !== item.skillId) throw new Error("Skill lifecycle package id does not match record");
       if (item.evaluation !== undefined) {
