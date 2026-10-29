@@ -1,4 +1,4 @@
-import type { ModelCapability, ModelRoute } from "./types.js";
+import type { ModelCapability, ModelFeatureSupport, ModelRoute } from "./types.js";
 
 export interface SofiaGatewayProviderConfig {
   baseUrl: string;
@@ -11,6 +11,7 @@ export interface SofiaGatewayProviderConfig {
   headers?: Record<string, string>;
   maxConcurrent?: number;
   requestTimeoutMs?: number;
+  features?: ModelFeatureSupport;
 }
 
 export interface SofiaModelConfig {
@@ -30,6 +31,7 @@ type ProviderDefinition = {
   headers?: Record<string, string>;
   maxConcurrent?: number;
   requestTimeoutMs?: number;
+  features?: ModelFeatureSupport;
 };
 
 type ProviderManifest = Record<string, ProviderDefinition>;
@@ -118,6 +120,34 @@ function parseProviderManifest(raw: string): ProviderManifest {
        endpointPath.includes("#") || /[\\r\\n]/.test(endpointPath))) {
       throw new Error(`Provider ${id} endpointPath must be a safe absolute path.`);
     }
+    const featuresRaw = item.features;
+    let features: ModelFeatureSupport | undefined;
+    if (featuresRaw !== undefined) {
+      if (!featuresRaw || typeof featuresRaw !== "object" || Array.isArray(featuresRaw)) {
+        throw new Error(`Provider ${id} features must be an object.`);
+      }
+      const featureValues = featuresRaw as Record<string, unknown>;
+      for (const key of Object.keys(featureValues)) {
+        if (!["toolCalling", "vision", "structuredOutput", "contextWindow"].includes(key)) {
+          throw new Error(`Provider ${id} has unknown model feature: ${key}`);
+        }
+      }
+      for (const key of ["toolCalling", "vision", "structuredOutput"] as const) {
+        if (featureValues[key] !== undefined && typeof featureValues[key] !== "boolean") {
+          throw new Error(`Provider ${id} feature ${key} must be boolean.`);
+        }
+      }
+      if (featureValues.contextWindow !== undefined &&
+        (!Number.isSafeInteger(featureValues.contextWindow) || (featureValues.contextWindow as number) < 1)) {
+        throw new Error(`Provider ${id} contextWindow must be a positive integer.`);
+      }
+      features = {
+        ...(featureValues.toolCalling !== undefined ? { toolCalling: featureValues.toolCalling as boolean } : {}),
+        ...(featureValues.vision !== undefined ? { vision: featureValues.vision as boolean } : {}),
+        ...(featureValues.structuredOutput !== undefined ? { structuredOutput: featureValues.structuredOutput as boolean } : {}),
+        ...(featureValues.contextWindow !== undefined ? { contextWindow: featureValues.contextWindow as number } : {}),
+      };
+    }
     const apiKeyEnv = typeof item.apiKeyEnv === "string" ? item.apiKeyEnv.trim() : undefined;
     if (item.apiKey !== undefined) {
       throw new Error(`Provider ${id} must not embed apiKey in SOFIA_MODEL_PROVIDERS; use apiKeyEnv to reference a server-side secret.`);
@@ -157,6 +187,7 @@ function parseProviderManifest(raw: string): ProviderManifest {
       ...(Object.keys(headers).length ? { headers } : {}),
       ...(maxConcurrent !== undefined ? { maxConcurrent: maxConcurrent as number } : {}),
       ...(requestTimeoutMs !== undefined ? { requestTimeoutMs: requestTimeoutMs as number } : {}),
+      ...(features ? { features } : {}),
     };
   }
   if (!Object.keys(manifest).length) throw new Error("SOFIA_MODEL_PROVIDERS cannot be empty.");
@@ -197,6 +228,7 @@ function resolveProvider(
     ...(definition.headers ? { headers: definition.headers } : {}),
     ...(definition.maxConcurrent !== undefined ? { maxConcurrent: definition.maxConcurrent } : {}),
     ...(definition.requestTimeoutMs !== undefined ? { requestTimeoutMs: definition.requestTimeoutMs } : {}),
+    ...(definition.features ? { features: definition.features } : {}),
   };
 }
 
@@ -258,6 +290,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       id: definition.id,
       providerId: providerKey,
       capabilities: [...definition.capabilities],
+      ...(routeProvider.features ? { features: routeProvider.features } : {}),
       costWeight: numberEnv(`SOFIA_${definition.id.toUpperCase()}_COST`, definition.cost),
       latencyWeight: numberEnv(`SOFIA_${definition.id.toUpperCase()}_LATENCY`, definition.latency),
       qualityWeight: numberEnv(`SOFIA_${definition.id.toUpperCase()}_QUALITY`, definition.quality),
