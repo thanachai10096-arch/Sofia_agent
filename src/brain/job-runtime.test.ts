@@ -999,7 +999,7 @@ test("DurableJobRuntime preserves the selected model route when resuming a check
   const runtime = new DurableJobRuntime((options) => {
     selectedRoutes.push(options.modelRouteId);
     return {
-      run: async (input) => {
+      run: async (input: BrainRunInput) => {
         runCount += 1;
         if (runCount === 1) {
           await options.onRunSnapshot?.(snapshot);
