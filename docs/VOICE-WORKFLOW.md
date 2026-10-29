@@ -2,7 +2,9 @@
 
 `VoiceWorkflow` is an optional, provider-agnostic speech pipeline. The host supplies speech-to-text (STT) and optionally text-to-speech (TTS) providers. Transcribed text is passed to a host callback that should call Sofia through its normal runtime and policy path.
 
-`createVoiceProviderRegistry` provides explicit STT/TTS provider registration and selection independently of the LLM route. `loadVoiceProviderSelectionFromEnv` reads only `SOFIA_VOICE_ENABLED`, `SOFIA_VOICE_STT_PROVIDER`, and optional `SOFIA_VOICE_TTS_PROVIDER`; voice is disabled by default and this helper never reads or returns credentials. It does not implement concrete providers.
+`createVoiceProviderRegistry` provides explicit STT/TTS provider registration and selection independently of the LLM route. `loadVoiceProviderSelectionFromEnv` reads only `SOFIA_VOICE_ENABLED`, `SOFIA_VOICE_STT_PROVIDER`, and optional `SOFIA_VOICE_TTS_PROVIDER`; voice is disabled by default and this helper never reads or returns credentials.
+
+`createOpenAICompatibleVoiceProviders` adds an opt-in adapter for compatible `/audio/transcriptions` and `/audio/speech` endpoints. It uses injected/global `fetch` and no new package dependency. It requires a non-empty server-side API key and an explicit HTTPS base URL (HTTP is permitted only for loopback development), rejects URL credentials/query/fragments, uses request cancellation, bounds provider response bytes, validates response shapes/content type, and avoids returning provider response bodies in errors. The adapter is not auto-registered and does not prove compatibility with every provider; check the target provider's API and data-handling terms before enabling it. No live provider has been tested by unit tests.
 
 `createVoiceChannelHandler` is the shared channel-neutral adapter layer. It accepts an already-verified `VerifiedVoiceEvent`, checks a host-supplied access policy, claims a stable event key through a deduplicator, runs the existing `VoiceWorkflow`, and delivers text/audio through a host-supplied delivery adapter. It deliberately does not implement provider webhook verification, remote media fetching, browser microphone capture, or a platform transport.
 
@@ -32,3 +34,29 @@ The handler uses an at-most-once event-claim default: it does not release a clai
 - Do not log raw audio, transcripts, provider payloads, API keys, or platform tokens.
 - Generated audio is output-only; do not feed it back into the same session as a fresh user turn.
 - Feature access, approval gates, tool permissions, session ownership, and audit behavior remain governed by the ordinary Sofia runtime.
+
+
+## OpenAI-compatible provider adapter
+
+The adapter is a building block for providers that implement the expected OpenAI-style audio endpoints. Register it explicitly on the server; do not expose the API key to a browser, mobile app, or chat platform.
+
+```ts
+import {
+  createOpenAICompatibleVoiceProviders,
+  createVoiceProviderRegistry,
+} from "sofia-agent";
+
+const providers = createOpenAICompatibleVoiceProviders({
+  baseUrl: process.env.SOFIA_VOICE_BASE_URL!,
+  apiKey: process.env.SOFIA_VOICE_API_KEY!,
+  sttModel: process.env.SOFIA_VOICE_STT_MODEL!,
+  ttsModel: process.env.SOFIA_VOICE_TTS_MODEL, // optional
+  ttsVoice: process.env.SOFIA_VOICE_TTS_VOICE, // optional
+});
+
+const registry = createVoiceProviderRegistry();
+registry.registerStt("configured-stt", providers.stt);
+if (providers.tts) registry.registerTts("configured-tts", providers.tts);
+```
+
+The example illustrates server-side composition only. Validate required environment values in the host's config layer and select provider IDs explicitly. Do not assume that a provider accepts the same audio formats, endpoint paths, or response semantics merely because it offers an OpenAI-compatible chat API. This adapter currently has automated mock tests, not a live-provider certification.
