@@ -199,7 +199,10 @@ export class PersistentSkillLedger implements SkillLedger {
       // Report each failed flush once. A later successful write can then recover
       // without an old transient error permanently poisoning every future flush.
       const error = this.persistenceError;
-      this.persistenceErrorReported = true;
+      // Consume the reported failure. A same-batch success must not hide it
+      // before flush(), but once surfaced it should not poison future status.
+      this.persistenceError = null;
+      this.persistenceErrorReported = false;
       throw new Error("Skill ledger persistence failed: " + error);
     }
   }
