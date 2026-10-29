@@ -168,6 +168,23 @@ test("resumes candidate evaluation when an earlier attempt persisted the receipt
 });
 
 
+test("fails closed when the regression adapter returns malformed output", async () => {
+  const state = makeHost();
+  state.host.verification.runRegression = async () => ({} as SkillEvaluation);
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "malformed-regression-1", "run1");
+  addReceipt(state, "malformed-regression-2", "run2");
+  addReceipt(state, "malformed-regression-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "malformed-regression-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "malformed-regression-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "malformed-regression-3", "Fix TypeScript build");
+
+  assert.equal(result.recorded, true);
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
 test("does not activate a learned skill without the existing lifecycle promotion gate", async () => {
   const state = makeHost();
   delete state.host.promoteCandidate;
