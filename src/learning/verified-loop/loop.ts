@@ -42,7 +42,7 @@ export class VerifiedLearningLoop {
     if (!validScope(scope)) throw new Error("Invalid authenticated learning scope");
     try {
       const receipt = await this.host.verification.getReceipt(scope, receiptId);
-      if (!receipt || !validReceipt(receipt, scope, Date.now(), this.options.maxEvidenceAgeMs)) {
+      if (!receipt || receipt.id !== receiptId || !validReceipt(receipt, scope, Date.now(), this.options.maxEvidenceAgeMs)) {
         return { recorded: false };
       }
       const currentPolicy = await this.host.currentPolicyRevision(scope);
