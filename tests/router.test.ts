@@ -58,3 +58,20 @@ test("router preserves backward compatibility when capability metadata is unknow
 
   assert.equal(router.select("vision").id, "legacy");
 });
+
+
+test("explicit model preference rejects a route declared without vision", () => {
+  const router = new ModelRouter([
+    { id: "no-vision", capabilities: ["vision", "reasoning"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true, featureSupport: { vision: false } },
+  ]);
+
+  assert.throws(() => router.select("vision", "no-vision"), /does not support vision/);
+});
+
+test("explicit model preference rejects a route declared without tool calling for coding", () => {
+  const router = new ModelRouter([
+    { id: "no-tools", capabilities: ["coding", "tool-use", "reasoning"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true, featureSupport: { toolCalling: false } },
+  ]);
+
+  assert.throws(() => router.select("coding", "no-tools"), /does not support tool calling/);
+});
