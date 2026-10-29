@@ -91,6 +91,44 @@ test("repair audit journal rejects malformed events and prevents update/delete",
   }
 });
 
+test("SQLite fencing token prevents a stale attempt from finalizing a newer retry", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-journal-fence-"));
+  const file = path.join(dir, "repair.sqlite");
+  const first = await SqliteLearningRepairJournal.open(file);
+  const second = await SqliteLearningRepairJournal.open(file);
+  const entry = {
+    key: "repair-fenced", scope, skillId: "skill-fenced", policyRevision: "policy-1",
+    state: "running" as const, attempts: 0, updatedAt: "2026-10-29T00:00:00.000Z",
+  };
+  try {
+    const attemptA = await first.begin(entry);
+    assert.equal(attemptA.claimed, true);
+    assert.ok(attemptA.claimToken);
+    await first.finish(entry.key, scope, "failed", "attempt A failed", attemptA.claimToken);
+    const attemptB = await second.begin({ ...entry, updatedAt: "2026-10-29T00:01:00.000Z" });
+    assert.equal(attemptB.claimed, true);
+    assert.ok(attemptB.claimToken);
+    assert.notEqual(attemptB.claimToken, attemptA.claimToken);
+
+    await assert.rejects(
+      () => first.finish(entry.key, scope, "succeeded", "stale attempt A", attemptA.claimToken),
+      /claim lost/,
+    );
+    const stillOwned = await second.get(entry.key, scope);
+    assert.equal(stillOwned?.state, "running");
+    assert.equal(stillOwned?.attempts, 2);
+
+    await second.finish(entry.key, scope, "succeeded", "attempt B verified", attemptB.claimToken);
+    const completed = await first.get(entry.key, scope);
+    assert.equal(completed?.state, "succeeded");
+    assert.equal(completed?.result, "attempt B verified");
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("SQLite journal atomically refuses a second executor claiming a running repair", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-journal-"));
   const file = path.join(dir, "repair.sqlite");
