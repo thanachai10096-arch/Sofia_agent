@@ -9,6 +9,7 @@ import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } fro
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 import { createLineMessagingRuntime } from "../integrations/messaging/line-runtime.js";
+import { createWhatsAppMessagingRuntime } from "../integrations/messaging/whatsapp-runtime.js";
 import { createSlackCompletionNotifier } from "../integrations/messaging/slack-completion.js";
 
 
@@ -23,8 +24,9 @@ mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0
 const deps = createSofiaAgentDependencies(workspace);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
-// LINE is optional and only mounts a signed webhook when credentials and both allowlists exist.
+// LINE and WhatsApp are optional; each requires signed webhooks and explicit allowlists.
 const lineRuntime = createLineMessagingRuntime(process.env, workspace);
+const whatsappRuntime = createWhatsAppMessagingRuntime(process.env, workspace);
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -224,6 +226,7 @@ const server = createSofiaApi(deps, {
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
   ...(lineRuntime ? { lineWebhookRoute: { transport: lineRuntime.webhookTransport } } : {}),
+  ...(whatsappRuntime ? { whatsappWebhookRoute: { transport: whatsappRuntime.webhookTransport } } : {}),
 });
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
@@ -235,6 +238,9 @@ server.listen(port, "0.0.0.0", () => {
   void lineRuntime?.start().catch((error) => {
     console.error("LINE integration failed to start:", error instanceof Error ? error.name : "UnknownError");
   });
+  void whatsappRuntime?.start().catch((error) => {
+    console.error("WhatsApp integration failed to start:", error instanceof Error ? error.name : "UnknownError");
+  });
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
@@ -243,6 +249,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     void discordTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
     void lineRuntime?.stop().catch(() => console.error("LINE integration shutdown failed."));
+    void whatsappRuntime?.stop().catch(() => console.error("WhatsApp integration shutdown failed."));
     server.close();
   });
 }
