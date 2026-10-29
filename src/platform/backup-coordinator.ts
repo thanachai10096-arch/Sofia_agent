@@ -275,6 +275,51 @@ export async function readBackupBundleDirectory(sourcePath: string): Promise<Bac
   return { manifest, files };
 }
 
+/**
+ * Stage a verified bundle in a newly-created private directory for a future
+ * restore preflight. This does not apply data to any live store. The caller
+ * must invoke cleanup() when the staged bytes are no longer needed.
+ */
+export async function stageBackupBundleForRestore(
+  bundle: unknown,
+  stagingParent: string,
+): Promise<{ directory: string; cleanup: () => Promise<void> }> {
+  const verification = verifyBackupBundle(bundle);
+  if (!verification.valid) {
+    throw new Error(`Refusing to stage an invalid backup bundle: ${verification.errors.join("; ")}`);
+  }
+  if (typeof stagingParent !== "string" || stagingParent.trim().length === 0) {
+    throw new Error("A restore staging parent directory is required.");
+  }
+  const parent = path.resolve(stagingParent);
+  const parentInfo = await fs.lstat(parent).catch(() => undefined);
+  if (!parentInfo?.isDirectory() || parentInfo.isSymbolicLink()) {
+    throw new Error("Restore staging parent must be an existing real directory.");
+  }
+
+  const privateRoot = await fs.mkdtemp(path.join(parent, ".sofia-restore-stage-"));
+  try {
+    if (process.platform !== "win32") await fs.chmod(privateRoot, 0o700);
+    const directory = path.join(privateRoot, "bundle");
+    await writeBackupBundleDirectory(bundle, directory);
+    // Read it back from disk so the caller receives a verified staged copy,
+    // not just the original in-memory map.
+    await readBackupBundleDirectory(directory);
+    let cleaned = false;
+    return {
+      directory,
+      async cleanup() {
+        if (cleaned) return;
+        cleaned = true;
+        await fs.rm(privateRoot, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    await fs.rm(privateRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 /** Verify bundle bytes against the manifest before any future restore step. */
 export function verifyBackupBundle(bundle: unknown): BackupBundleVerification {
   if (typeof bundle !== "object" || bundle === null || !("manifest" in bundle) ||
