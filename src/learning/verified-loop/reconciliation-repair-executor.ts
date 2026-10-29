@@ -261,9 +261,14 @@ export async function executeLearningRepairPlan(
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or completed by another executor; manual reconciliation required" });
         continue;
       }
-      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
       await journal.finish(action.idempotencyKey, action.scope, "failed", reason, claim.claimToken);
-      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
+      let finalReason = reason;
+      try {
+        await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
+      } catch {
+        finalReason += "; failure audit append failed";
+      }
+      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: finalReason });
       continue;
     }
     if (snapshot.exists && snapshot.active) {
@@ -273,9 +278,14 @@ export async function executeLearningRepairPlan(
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or completed by another executor; manual reconciliation required" });
         continue;
       }
-      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_already_satisfied", at: now() });
       await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Runtime registration already satisfied", claim.claimToken);
-      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", reason: "already satisfied" });
+      let resultReason = "already satisfied";
+      try {
+        await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_already_satisfied", at: now() });
+      } catch {
+        resultReason += "; audit append failed";
+      }
+      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", reason: resultReason });
       continue;
     }
     if (snapshot.exists && !snapshot.active) {
@@ -286,9 +296,14 @@ export async function executeLearningRepairPlan(
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or completed by another executor; manual reconciliation required" });
         continue;
       }
-      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
       await journal.finish(action.idempotencyKey, action.scope, "failed", reason, claim.claimToken);
-      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
+      let finalReason = reason;
+      try {
+        await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
+      } catch {
+        finalReason += "; failure audit append failed";
+      }
+      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: finalReason });
       continue;
     }
     const entry = await journal.begin({ key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running", attempts: 0, updatedAt: now() });
