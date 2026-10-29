@@ -153,3 +153,47 @@ test("configured LINE webhook route preserves raw body and forwards the signatur
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("configured WhatsApp webhook supports GET challenge and forwards raw POST before API authentication", async () => {
+  let receivedBody = "";
+  let receivedSignature: string | undefined;
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Unused by webhook test." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Unused by webhook test." }) },
+  }, {
+    apiKeys: {},
+    whatsappWebhookRoute: {
+      transport: {
+        verifyChallenge: ({ mode, token, challenge }) => mode === "subscribe" && token === "valid-verify-token" ? challenge : undefined,
+        handleWebhook: async (rawBody, signature) => {
+          receivedBody = Buffer.from(rawBody).toString("utf8");
+          receivedSignature = signature;
+          return { status: 200, acceptedEvents: 1 };
+        },
+      },
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}/v1/integrations/whatsapp/webhook`;
+  try {
+    const challenge = await fetch(base + "?hub.mode=subscribe&hub.verify_token=valid-verify-token&hub.challenge=challenge-123");
+    assert.equal(challenge.status, 200);
+    assert.equal(await challenge.text(), "challenge-123");
+    const rawBody = '{ "object" : "whatsapp_business_account" }';
+    const response = await fetch(base, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-hub-signature-256": "sha256=test-signature" },
+      body: rawBody,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(receivedBody, rawBody);
+    assert.equal(receivedSignature, "sha256=test-signature");
+    assert.deepEqual(await response.json(), { acceptedEvents: 1 });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
