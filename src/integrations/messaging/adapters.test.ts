@@ -17,6 +17,9 @@ test("Telegram adapter normalizes messages and splits oversized replies", async 
   await onUpdate!({ update_id: 1, message: { message_id: 2, date: 100, text: "hello", chat: { id: 3, type: "private" }, from: { id: 4 } } });
   assert.equal((received as { identity: { userId: string } }).identity.userId, "4");
   assert.equal((received as { directMessage?: boolean }).directMessage, true);
+  await onUpdate!({ update_id: 2, message: { message_id: 3, date: 101, text: "group chatter", chat: { id: -30, type: "group" }, from: { id: 5 } } });
+  assert.equal((received as { directMessage?: boolean }).directMessage, undefined,
+    "group messages must not be marked as trusted direct messages");
   assert.equal((await adapter.send({ conversationId: "3", text: "x".repeat(5000) })).state, "sent");
   assert.equal(sent.length, 2);
 });
