@@ -41,3 +41,13 @@ test("bundle verification detects tampering, missing files and invalid shapes", 
   assert.equal(verifyBackupBundle({ manifest: bundle.manifest, files: new Map() }).valid, false);
   assert.equal(verifyBackupBundle(null).valid, false);
 });
+
+test("backup coordinator bounds the total number of collected entries", async () => {
+  const tooMany = Array.from({ length: 10_001 }, (_, index) => ({
+    path: `files/${index}.txt`,
+    content: Buffer.from("x"),
+  }));
+  await assert.rejects(createBackupBundle([
+    { name: "large", async snapshot() { return tooMany; } },
+  ], createdAt), /too many entries/);
+});
