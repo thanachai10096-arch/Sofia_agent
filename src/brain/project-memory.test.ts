@@ -178,8 +178,12 @@ test("persistent skill ledger does not hide a failed write behind a later succes
   await assert.rejects(ledger.flush(), /first write failed/);
   assert.equal(ledger.list().length, 1);
   assert.equal(ledger.list()[0]?.trigger, "second verified failure");
-  assert.equal(ledger.getPersistenceStatus().lastError, null, "flush reports and clears the batch failure");
+  assert.equal(ledger.getPersistenceStatus().lastError, "first write failed", "reported failure remains available for diagnostics");
   await ledger.flush();
+  assert.equal(ledger.getPersistenceStatus().lastError, "first write failed", "subsequent flush does not erase or rethrow a reported failure");
+  ledger.record({ ...learnedCandidate, trigger: "recovery after reported batch failure" });
+  await ledger.flush();
+  assert.equal(ledger.getPersistenceStatus().lastError, null, "a later successful durable write clears the reported failure");
 });
 
 test("persistent skill ledger does not expose candidates before durable persistence completes", async () => {
