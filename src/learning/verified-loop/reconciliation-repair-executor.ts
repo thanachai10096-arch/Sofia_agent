@@ -174,7 +174,7 @@ export async function executeLearningRepairPlan(
         typeof action.actorId !== "string" || !action.actorId.trim() || action.actorId.length > 200 ||
         typeof action.idempotencyKey !== "string" || !action.idempotencyKey.trim() || action.idempotencyKey.length > 500 ||
         typeof plan.planId !== "string" || !plan.planId.trim() ||
-        action.idempotencyKey !== plan.planId + ":" + action.skillId) {
+        action.idempotencyKey !== JSON.stringify([plan.planId, action.skillId])) {
       throw new Error("Invalid, unbound, or cross-scope repair action");
     }
     const now = () => (host.now?.() ?? new Date()).toISOString();
