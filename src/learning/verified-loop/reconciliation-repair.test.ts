@@ -49,3 +49,9 @@ test("rejects cross-scope authorization and invalid idempotency keys", () => {
   assert.throws(() => planLearningReconciliationRepair(report([]), auth({ scope: { ...scope, tenantId: "tenant-b" })), /scope/);
   assert.throws(() => planLearningReconciliationRepair(report([]), auth({ idempotencyKey: " " })), /authorization/);
 });
+
+test("rejects inconsistent reconciliation report metadata", () => {
+  assert.throws(() => planLearningReconciliationRepair(
+    { ...report([{ kind: "missing-runtime-registration", skillId: "skill-1" }]), safe: true }, auth(),
+  ), /Invalid reconciliation report/);
+});
