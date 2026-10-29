@@ -267,9 +267,9 @@ export class SofiaModelGateway implements ModelProvider {
       : undefined;
 
     // Brain route adapter supplies a JSON context envelope and expects a
-    // machine-readable object. Ask Gemini's OpenAI-compatible endpoint for
-    // JSON mode on those internal Brain calls only; keep ordinary chat replies
-    // as natural language and do not combine JSON mode with tool calling.
+    // machine-readable object. OpenAI-compatible endpoints receive JSON mode;
+    // Anthropic receives a JSON-only system instruction. Ordinary chat remains
+    // natural language and structured mode is never combined with tool calling.
     let brainStructuredOutput = false;
     if (request.context) {
       try {
