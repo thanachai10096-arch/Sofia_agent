@@ -141,3 +141,22 @@ test("persistent skill ledger exposes storage failures without unhandled rejecti
   assert.match(ledger.getPersistenceStatus().lastError ?? "", /disk unavailable/);
   assert.equal(ledger.list().length, 0, "a candidate whose durable write failed must not remain available for matching");
 });
+
+test("persistent skill ledger recovers after a failed write and persists subsequent candidates", async () => {
+  let attempts = 0;
+  const recoveringStore = {
+    save: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("temporary disk failure");
+    },
+    list: async () => [],
+    find: async () => [],
+  };
+  const ledger = new PersistentSkillLedger(recoveringStore);
+  ledger.record(learnedCandidate);
+  await assert.rejects(ledger.flush(), /temporary disk failure/);
+  ledger.record({ ...learnedCandidate, trigger: "different verified failure" });
+  await ledger.flush();
+  assert.equal(ledger.list().length, 1, "only the candidate whose write succeeded should remain available");
+  assert.equal(ledger.getPersistenceStatus().lastError, null);
+});
