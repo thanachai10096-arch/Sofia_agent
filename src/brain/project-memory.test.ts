@@ -186,6 +186,27 @@ test("persistent skill ledger does not hide a failed write behind a later succes
   assert.equal(ledger.getPersistenceStatus().lastError, null, "a later successful durable write clears the reported failure");
 });
 
+test("persistent skill ledger deduplicates equivalent candidates while the first write is pending", async () => {
+  let release!: () => void;
+  let saves = 0;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const blockingStore = {
+    save: async () => { saves += 1; await gate; },
+    list: async () => [],
+    find: async () => [],
+  };
+  const ledger = new PersistentSkillLedger(blockingStore);
+  ledger.record(learnedCandidate);
+  ledger.record({ ...learnedCandidate, evidenceIds: ["different-evidence-for-same-procedure"] });
+
+  assert.equal(saves, 0, "the queued write starts on the serialized promise chain");
+  assert.equal(ledger.list().length, 0, "pending skills are not visible before durable persistence");
+  release();
+  await ledger.flush();
+  assert.equal(saves, 1, "equivalent pending candidates should only schedule one durable write");
+  assert.equal(ledger.list().length, 1);
+});
+
 test("persistent skill ledger does not expose candidates before durable persistence completes", async () => {
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
