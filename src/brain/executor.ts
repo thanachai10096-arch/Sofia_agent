@@ -14,6 +14,37 @@ import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrateg
 import { compactSkillContext, matchSkills } from "./skills.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
+
+const MAX_PROJECT_MEMORY_ENTRIES = 12;
+const MAX_PROJECT_MEMORY_CHARS = 8_000;
+const MAX_PROJECT_MEMORY_ENTRY_CHARS = 2_000;
+
+function compactProjectMemory(entries: readonly ProjectMemoryEntry[]): Array<{
+  kind: ProjectMemoryEntry["kind"];
+  content: string;
+  confidence: number;
+  source: string;
+}> {
+  const selected: Array<{ kind: ProjectMemoryEntry["kind"]; content: string; confidence: number; source: string }> = [];
+  let remaining = MAX_PROJECT_MEMORY_CHARS;
+
+  // Entries are already ranked by the memory store; keep that order and stop
+  // when the total fenced representation would exceed the context budget.
+  for (const entry of entries.slice(0, MAX_PROJECT_MEMORY_ENTRIES)) {
+    if (remaining < 256) break;
+    const maxChars = Math.min(MAX_PROJECT_MEMORY_ENTRY_CHARS, remaining - 256);
+    const fenced = fenceUntrustedOutput("project_memory", entry.content, { maxChars });
+    if (fenced.text.length > remaining) break;
+    selected.push({
+      kind: entry.kind,
+      content: fenced.text,
+      confidence: entry.confidence,
+      source: entry.source,
+    });
+    remaining -= fenced.text.length;
+  }
+  return selected;
+}
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 import type { BrainRunSnapshot } from "./run-state.js";
@@ -405,7 +436,7 @@ export class SofiaBrain {
           diagnoses: this.diagnoses,
           decisions: this.decisions,
           projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined,
-          projectMemory: this.projectMemory.slice(0, 12).map((entry) => ({ kind: entry.kind, content: fenceUntrustedOutput("project_memory", entry.content, { maxChars: 4_000 }).text, confidence: entry.confidence, source: entry.source })),
+          projectMemory: compactProjectMemory(this.projectMemory),
         },
       });
 
