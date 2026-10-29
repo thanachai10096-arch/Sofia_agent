@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
@@ -16,6 +16,26 @@ test("project memory survives a new store instance", async () => {
   assert.equal(entries.length, 2);
   assert.ok((await second.find("TypeScript")).length > 0);
   assert.ok((await second.find("type_error")).length > 0);
+});
+
+test("project memory treats a missing file as empty but surfaces corrupt JSON", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-corrupt-"));
+  const store = new FileProjectMemoryStore("corrupt-project", root);
+  assert.deepEqual(store.readSync(), [], "a missing file is a normal first-run state");
+
+  await store.save(memoryEntryFromConvention("corrupt-project", "valid entry before corruption"));
+  const names = await readdir(root);
+  await writeFile(path.join(root, names[0]!), "{not valid JSON", "utf8");
+  assert.throws(() => store.readSync(), SyntaxError, "corrupt memory must not be silently reported as empty");
+});
+
+test("project memory rejects a valid JSON document with the wrong top-level shape", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-shape-"));
+  const store = new FileProjectMemoryStore("shape-project", root);
+  await store.save(memoryEntryFromConvention("shape-project", "valid entry"));
+  const names = await readdir(root);
+  await writeFile(path.join(root, names[0]!), JSON.stringify({ content: "not an array" }), "utf8");
+  assert.throws(() => store.readSync(), /must contain a JSON array/);
 });
 
 test("project memory writes valid JSON", async () => {
