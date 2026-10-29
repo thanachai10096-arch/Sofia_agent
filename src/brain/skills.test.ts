@@ -13,3 +13,11 @@ test("dependency failures select dependency repair", () => {
   const skills = matchSkills("dependency_error", "Cannot find module");
   assert.equal(skills[0]?.id, "dependency-repair");
 });
+
+
+test("CI failures select evidence-first CI triage", () => {
+  const skills = matchSkills("environment_error", "Windows CI failed with ENOTEMPTY in a cross-platform workflow run");
+  assert.equal(skills[0]?.id, "ci-failure-triage");
+  assert.ok(skills[0]?.procedure.some(step => step.includes("never skip")));
+  assert.deepEqual(skills[0]?.verification, ["test", "build"]);
+});
