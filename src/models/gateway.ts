@@ -15,6 +15,9 @@ export interface GatewayProviderConfig {
   maxConcurrent?: number;
   /** One deadline for queue wait, provider attempts, and retry delays. Defaults to 45 seconds. */
   requestTimeoutMs?: number;
+  /** Wire protocol used by this provider. Defaults to OpenAI Chat Completions compatibility. */
+  protocol?: "openai-compatible" | "anthropic-messages";
+  anthropicVersion?: string;
 }
 
 interface ChatResponse {
@@ -33,6 +36,117 @@ interface ChatResponse {
     prompt_tokens?: number;
     completion_tokens?: number;
     total_tokens?: number;
+  };
+}
+
+
+
+interface AnthropicContentBlock {
+  type?: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: unknown;
+}
+
+interface AnthropicResponse {
+  content?: AnthropicContentBlock[];
+  stop_reason?: string | null;
+  usage?: { input_tokens?: number; output_tokens?: number };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boolean): {
+  system: string;
+  messages: Array<{ role: "user" | "assistant"; content: string | Array<Record<string, unknown>> }>;
+} {
+  let system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
+  if (brainStructuredOutput) {
+    system = [system, "For this internal request, respond with exactly one valid JSON object and no Markdown fences or surrounding prose."].filter(Boolean).join("\n\n");
+  }
+
+  const result: Array<{ role: "user" | "assistant"; content: string | Array<Record<string, unknown>> }> = [];
+  const append = (role: "user" | "assistant", value: string | Array<Record<string, unknown>>) => {
+    const previous = result[result.length - 1];
+    if (!previous || previous.role !== role) {
+      result.push({ role, content: value });
+      return;
+    }
+    const previousBlocks = Array.isArray(previous.content)
+      ? previous.content
+      : [{ type: "text", text: previous.content }];
+    const nextBlocks = Array.isArray(value) ? value : [{ type: "text", text: value }];
+    previous.content = [...previousBlocks, ...nextBlocks];
+  };
+
+  messages.forEach((message, index) => {
+    if (message.role === "system") return;
+    if (message.role === "tool") {
+      if (message.toolCallId) {
+        append("user", [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content }]);
+      } else {
+        append("user", "[Tool result]\n" + message.content);
+      }
+      return;
+    }
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      const blocks: Array<Record<string, unknown>> = [];
+      if (message.content.trim()) blocks.push({ type: "text", text: message.content });
+      for (const call of message.toolCalls) {
+        let input: unknown;
+        try {
+          input = JSON.parse(call.arguments);
+        } catch {
+          throw new Error("Cannot send invalid assistant tool-call arguments to Anthropic.");
+        }
+        const recordInput = asRecord(input);
+        if (!recordInput) throw new Error("Anthropic tool-call input must be a JSON object.");
+        blocks.push({ type: "tool_use", id: call.id, name: call.name, input: recordInput });
+      }
+      append("assistant", blocks);
+      return;
+    }
+    append(message.role === "assistant" ? "assistant" : "user", message.content);
+  });
+
+  if (result.length === 0) result.push({ role: "user", content: "Continue the task." });
+  return { system, messages: result };
+}
+
+function normalizeAnthropicResponse(value: unknown): ChatResponse {
+  const raw = asRecord(value) as AnthropicResponse | undefined;
+  if (!raw || !Array.isArray(raw.content)) throw new Error("Anthropic Messages API returned an invalid response.");
+  const textParts: string[] = [];
+  const toolCalls: Array<{ id?: string; function?: { name?: string; arguments?: string } }> = [];
+  for (const block of raw.content) {
+    if (block?.type === "text" && typeof block.text === "string" && block.text.trim()) {
+      textParts.push(block.text.trim());
+    } else if (block?.type === "tool_use") {
+      const name = typeof block.name === "string" ? block.name : "";
+      const id = typeof block.id === "string" ? block.id : "";
+      if (!name || !id) throw new Error("Anthropic Messages API returned an invalid tool-use block.");
+      toolCalls.push({
+        id,
+        function: { name, arguments: JSON.stringify(block.input ?? {}) },
+      });
+    }
+  }
+  const usage = raw.usage;
+  return {
+    choices: [{
+      finish_reason: raw.stop_reason ?? null,
+      message: {
+        content: textParts.join("\n") || null,
+        tool_calls: toolCalls,
+        ...(raw.stop_reason === "refusal" ? { refusal: "Anthropic refused the request." } : {}),
+      },
+    }],
+    ...(usage ? { usage: { prompt_tokens: usage.input_tokens, completion_tokens: usage.output_tokens } } : {}),
   };
 }
 
@@ -154,9 +268,9 @@ export class SofiaModelGateway implements ModelProvider {
       : undefined;
 
     // Brain route adapter supplies a JSON context envelope and expects a
-    // machine-readable object. Ask Gemini's OpenAI-compatible endpoint for
-    // JSON mode on those internal Brain calls only; keep ordinary chat replies
-    // as natural language and do not combine JSON mode with tool calling.
+    // machine-readable object. OpenAI-compatible endpoints receive JSON mode;
+    // Anthropic receives a JSON-only system instruction. Ordinary chat remains
+    // natural language and structured mode is never combined with tool calling.
     let brainStructuredOutput = false;
     if (request.context) {
       try {
@@ -173,15 +287,50 @@ export class SofiaModelGateway implements ModelProvider {
       }
     }
 
-    const body = {
-      model: config.model,
-      messages,
-      ...(tools ? { tools, tool_choice: "auto" } : {}),
-      ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" as const } } : {}),
-      ...(options.maxOutputTokens
-        ? { max_tokens: options.maxOutputTokens }
-        : {}),
-    };
+    const protocol = config.protocol ?? "openai-compatible";
+    let endpoint: string;
+    let requestHeaders: Record<string, string>;
+    let body: Record<string, unknown>;
+    if (protocol === "anthropic-messages") {
+      const converted = anthropicMessages(messages, brainStructuredOutput);
+      endpoint = config.baseUrl.replace(/\/+$/, "") + "/messages";
+      requestHeaders = {
+        ...config.headers,
+        "x-api-key": config.apiKey,
+        "anthropic-version": config.anthropicVersion ?? "2023-06-01",
+        "content-type": "application/json",
+      };
+      body = {
+        model: config.model,
+        max_tokens: options.maxOutputTokens ?? 2_048,
+        ...(converted.system ? { system: converted.system } : {}),
+        messages: converted.messages,
+        ...(tools ? {
+          tools: tools.map((tool) => ({
+            name: tool.function.name,
+            description: tool.function.description,
+            input_schema: tool.function.parameters,
+          })),
+          tool_choice: { type: "auto" },
+        } : {}),
+      };
+    } else {
+      endpoint = config.baseUrl.replace(/\/+$/, "") + "/chat/completions";
+      requestHeaders = {
+        ...config.headers,
+        authorization: "Bearer " + config.apiKey,
+        "content-type": "application/json",
+      };
+      body = {
+        model: config.model,
+        messages,
+        ...(tools ? { tools, tool_choice: "auto" } : {}),
+        ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" as const } } : {}),
+        ...(options.maxOutputTokens
+          ? { max_tokens: options.maxOutputTokens }
+          : {}),
+      };
+    }
 
     const providerId = route.providerId ?? route.id;
     const timeoutMs = config.requestTimeoutMs ?? 45_000;
@@ -207,19 +356,12 @@ export class SofiaModelGateway implements ModelProvider {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         let retryableFailure = false;
         try {
-          const response = await fetch(
-            config.baseUrl.replace(/\/$/, "") + "/chat/completions",
-            {
-              method: "POST",
-              headers: {
-                ...config.headers,
-                authorization: "Bearer " + config.apiKey,
-                "content-type": "application/json",
-              },
-              body: JSON.stringify(body),
-              signal: requestSignal,
-            },
-          );
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: requestHeaders,
+            body: JSON.stringify(body),
+            signal: requestSignal,
+          });
           if (response.ok) {
             // Do not close a half-open circuit until the payload has been validated.
             return response;
@@ -282,9 +424,12 @@ export class SofiaModelGateway implements ModelProvider {
 
     let data: ChatResponse;
     try {
-      data = (await response.json()) as ChatResponse;
+      const raw: unknown = await response.json();
+      data = protocol === "anthropic-messages"
+        ? normalizeAnthropicResponse(raw)
+        : raw as ChatResponse;
     } catch {
-      return failResponse("Model gateway returned invalid JSON.");
+      return failResponse("Model gateway returned invalid JSON or an unsupported provider response.");
     }
     const message = data.choices?.[0]?.message;
 

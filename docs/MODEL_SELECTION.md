@@ -36,4 +36,4 @@ An explicitly selected route is not silently replaced by another route. If the r
 - When no provider is explicitly selected, configure only one built-in provider credential. If both OpenRouter and Gemini credentials exist, Sofia requires explicit selection rather than silently redirecting requests.
 - Route-specific environment variables can assign different model IDs to fast, coding, reasoning, and vision routes.
 
-Custom endpoints must implement the OpenAI Chat Completions-compatible protocol. Native APIs with a different request/response format need a dedicated adapter; Sofia does not claim every model API is protocol-identical.
+Custom endpoints use the OpenAI Chat Completions-compatible protocol by default. Set `SOFIA_MODEL_PROTOCOL=anthropic-messages` only when the configured custom endpoint implements the Anthropic Messages API. Built-in OpenRouter and Gemini use OpenAI-compatible requests; Anthropic uses its native Messages request/response format. Other native protocols still need a dedicated adapter; Sofia does not claim every model API is protocol-identical.
