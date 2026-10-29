@@ -576,3 +576,16 @@ test("restore transaction rejects malformed adapters before invoking any adapter
   );
   assert.deepEqual(events, []);
 });
+
+
+test("backup bundle owns snapshot bytes so later source mutation cannot invalidate it", async () => {
+  const sourceBytes = Buffer.from("original snapshot");
+  const bundle = await createBackupBundle([
+    { name: "mutable-source", async snapshot() {
+      return [{ path: "state.txt", content: sourceBytes }];
+    } },
+  ], createdAt);
+  sourceBytes.fill(0x78);
+  assert.equal(verifyBackupBundle(bundle).valid, true);
+  assert.equal(Buffer.from(bundle.files.get("state.txt")!).toString("utf8"), "original snapshot");
+});
