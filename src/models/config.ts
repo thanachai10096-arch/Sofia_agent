@@ -195,7 +195,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       (manifest ? "" : "gemini");
 
     let providerDefinition: ProviderDefinition | undefined;
-    if (selectedProvider === "gemini" && !manifest) {
+    if (selectedProvider === "gemini" && legacyGeminiKey) {
       providerDefinition = legacyGemini;
     } else {
       providerDefinition = selectedProvider ? manifest?.[selectedProvider] : undefined;
