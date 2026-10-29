@@ -449,9 +449,16 @@ export class DurableJobRuntime implements JobRuntime {
     this.jobs.set(id, record);
     await this.state.save(record);
     const execution = this.execute(record, input)
-      .catch(() => {
-        // execute() handles normal run failures itself; this guard also prevents
-        // unexpected persistence/setup failures from becoming unhandled rejections.
+      .catch(async () => {
+        // execute() handles normal run failures itself. If setup/claim persistence
+        // fails outside that path, avoid an unhandled rejection and do not leave a
+        // locally queued/running record looking healthy.
+        if (record.status === "queued" || record.status === "running") {
+          record.status = "failed";
+          record.error = "Job execution failed before a terminal result could be persisted.";
+          record.updatedAt = new Date().toISOString();
+          try { await this.state.save(record); } catch { /* preserve the original failure boundary */ }
+        }
       })
       .finally(() => {
         if (this.executions.get(record.id) === execution) this.executions.delete(record.id);
