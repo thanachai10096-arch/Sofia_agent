@@ -25,9 +25,19 @@ export function createVerifiedCompletionHandler(options: {
 }): (input: FinalizedBrainCompletion) => Promise<void> {
   const workers = new Map<string, ScopedSelfImprovement>();
   return async (input) => {
-    if (!input.runId || !input.task.trim() || input.evidenceIds.length === 0 ||
-        input.verification.length === 0 ||
-        !input.verification.every(item => item.passed && item.evidenceIds.length > 0)) return;
+    const validEvidenceIds = (value: unknown): value is string[] =>
+      Array.isArray(value) && value.length > 0 &&
+      value.every(id => typeof id === "string" && id.trim().length > 0 && id.length <= 500);
+    if (!input || typeof input !== "object" ||
+        typeof input.runId !== "string" || !input.runId.trim() ||
+        typeof input.task !== "string" || !input.task.trim() ||
+        !validEvidenceIds(input.evidenceIds) ||
+        !Array.isArray(input.verification) || input.verification.length === 0 ||
+        !input.verification.every(item =>
+          Boolean(item) && typeof item === "object" && item.passed === true &&
+          validEvidenceIds(item.evidenceIds) &&
+          typeof item.criterionId === "string" && item.criterionId.trim().length > 0 &&
+          typeof item.workspaceRevision === "string" && item.workspaceRevision.trim().length > 0)) return;
 
     const scope = await options.resolveScope(input);
     if (!scope || ![scope.tenantId, scope.principalId, scope.projectId].every(value => typeof value === "string" && value.trim().length > 0)) throw new Error("Scope resolver returned an invalid authenticated scope");
