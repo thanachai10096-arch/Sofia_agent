@@ -17,6 +17,14 @@ const names = [
   "GEMINI_CODING_MODEL",
   "GEMINI_REASONING_MODEL",
   "GEMINI_VISION_MODEL",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_FAST_MODEL",
+  "ANTHROPIC_CODING_MODEL",
+  "ANTHROPIC_REASONING_MODEL",
+  "ANTHROPIC_VISION_MODEL",
+  "SOFIA_MODEL_PROTOCOL",
   "SOFIA_MODEL_PROVIDER",
   "SOFIA_BASE_URL",
   "SOFIA_API_KEY",
@@ -157,4 +165,31 @@ test("requires explicit provider selection when OpenRouter and Gemini credential
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
   process.env.GEMINI_API_KEY = "gemini-test-key";
   assert.throws(loadModelConfigFromEnv, /set SOFIA_MODEL_PROVIDER to choose explicitly/);
+});
+
+
+test("Anthropic provider uses the native Messages protocol and route-specific model IDs", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "anthropic";
+  process.env.ANTHROPIC_API_KEY = "anthropic-test-key";
+  process.env.ANTHROPIC_MODEL = "claude-test-model";
+  process.env.ANTHROPIC_CODING_MODEL = "claude-coding-test-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.anthropic.com/v1");
+  assert.equal(config.providers.fast?.apiKey, "anthropic-test-key");
+  assert.equal(config.providers.fast?.model, "claude-test-model");
+  assert.equal(config.providers.fast?.protocol, "anthropic-messages");
+  assert.equal(config.providers.coding?.model, "claude-coding-test-model");
+});
+
+test("custom endpoints can opt into the Anthropic Messages protocol", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_MODEL_PROTOCOL = "anthropic-messages";
+  process.env.SOFIA_BASE_URL = "https://anthropic-proxy.example.test/v1";
+  process.env.SOFIA_API_KEY = "proxy-key";
+  process.env.SOFIA_MODEL = "claude-proxy-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.protocol, "anthropic-messages");
+  assert.equal(config.providers.fast?.baseUrl, "https://anthropic-proxy.example.test/v1");
 });
