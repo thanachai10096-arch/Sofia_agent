@@ -232,7 +232,8 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
   }
   async function sendMessage(channelId: string, text: string, replyToMessageId?: string): Promise<{ messageId: string }> {
     if (!/^\d{1,24}$/.test(channelId)) throw new Error("Invalid Discord channel ID.");
-    if (!running || controller?.signal.aborted) throw new Error("Discord Gateway transport is stopped.");
+    const activeController = controller;
+    if (!running || !activeController || activeController.signal.aborted) throw new Error("Discord Gateway transport is stopped.");
     const body: Record<string, unknown> = { content: text };
     if (replyToMessageId && /^\d{1,24}$/.test(replyToMessageId)) {
       body.message_reference = { message_id: replyToMessageId, fail_if_not_exists: false };
@@ -241,7 +242,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
       const response = await fetchImpl("https://discord.com/api/v10/channels/" + encodeURIComponent(channelId) + "/messages", {
         method: "POST",
         headers: { authorization: "Bot " + options.botToken, "content-type": "application/json" },
-        body: JSON.stringify(body), signal: controller.signal,
+        body: JSON.stringify(body), signal: activeController.signal,
       });
       if (!response.ok) { notify("message_delivery_failed", response.status); throw new Error("Discord message delivery failed."); }
       const result: unknown = await response.json();
