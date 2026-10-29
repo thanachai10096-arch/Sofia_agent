@@ -96,6 +96,7 @@ test("Telegram run completion reports failed runs without exposing internal erro
     },
   });
   assert.match(sent[0]?.text ?? "", /task failed/i);
-  assert.match(sent[0]?.text ?? "", /Reason: provider_http_402_insufficient_credits/);
+  assert.match(sent[0]?.text ?? "", /couldn't complete this task/i);
+  assert.doesNotMatch(sent[0]?.text ?? "", /provider_http_402_insufficient_credits/);
   assert.doesNotMatch(sent[0]?.text ?? "", /Bearer secret-token/);
 });
