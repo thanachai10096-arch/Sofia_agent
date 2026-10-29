@@ -195,15 +195,11 @@ export class PersistentSkillLedger implements SkillLedger {
 
   async flush(): Promise<void> {
     await this.pending;
-    if (this.persistenceError) {
-      // Report each failed flush once. A later successful write can then recover
-      // without an old transient error permanently poisoning every future flush.
-      const error = this.persistenceError;
-      // Consume the reported failure. A same-batch success must not hide it
-      // before flush(), but once surfaced it should not poison future status.
-      this.persistenceError = null;
-      this.persistenceErrorReported = false;
-      throw new Error("Skill ledger persistence failed: " + error);
+    if (this.persistenceError && !this.persistenceErrorReported) {
+      // Report the failure once while retaining it for diagnostics. A later
+      // successful durable write clears this reported transient error.
+      this.persistenceErrorReported = true;
+      throw new Error("Skill ledger persistence failed: " + this.persistenceError);
     }
   }
 
