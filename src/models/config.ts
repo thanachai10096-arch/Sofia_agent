@@ -4,6 +4,7 @@ export interface SofiaModelProviderConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  protocol?: "openai-compatible" | "anthropic-messages";
 }
 
 export interface SofiaModelConfig {
@@ -15,7 +16,8 @@ interface ProviderSelection {
   baseUrl: string;
   apiKey: string;
   defaultModel: string;
-  routeModelPrefix: "OPENROUTER" | "GEMINI" | "SOFIA";
+  routeModelPrefix: "OPENROUTER" | "GEMINI" | "ANTHROPIC" | "SOFIA";
+  protocol: "openai-compatible" | "anthropic-messages";
 }
 
 function numberEnv(name: string, fallback: number) {
@@ -60,20 +62,26 @@ function selectProvider(): ProviderSelection {
 
   const openRouterKey = process.env.OPENROUTER_API_KEY?.trim() ?? "";
   const geminiKey = firstEnv("GEMINI_API_KEY", "Gemini_API_Key");
+  const anthropicKey = firstEnv("ANTHROPIC_API_KEY");
 
-  if (requested && !["openrouter", "gemini", "custom", "openai-compatible"].includes(requested)) {
-    throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, or custom.");
+  if (requested && !["openrouter", "gemini", "anthropic", "custom", "openai-compatible"].includes(requested)) {
+    throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, anthropic, or custom.");
   }
 
   const chooseCustom = (): ProviderSelection => {
     if (!customBaseUrl || !customApiKey || !customModel) {
       throw new Error("Custom model configuration requires SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL (or BASE_URL, API_KEY, and MODEL).");
     }
+    const protocol = firstEnv("SOFIA_MODEL_PROTOCOL") || "openai-compatible";
+    if (protocol !== "openai-compatible" && protocol !== "anthropic-messages") {
+      throw new Error("SOFIA_MODEL_PROTOCOL must be openai-compatible or anthropic-messages.");
+    }
     return {
       baseUrl: normalizeBaseUrl(customBaseUrl),
       apiKey: customApiKey,
       defaultModel: customModel,
       routeModelPrefix: "SOFIA",
+      protocol,
     };
   };
 
@@ -84,6 +92,7 @@ function selectProvider(): ProviderSelection {
       apiKey: openRouterKey,
       defaultModel: firstEnv("OPENROUTER_MODEL") || "openrouter/auto",
       routeModelPrefix: "OPENROUTER",
+      protocol: "openai-compatible",
     };
   };
 
@@ -94,26 +103,44 @@ function selectProvider(): ProviderSelection {
       apiKey: geminiKey,
       defaultModel: firstEnv("GEMINI_MODEL") || "gemini-2.5-flash",
       routeModelPrefix: "GEMINI",
+      protocol: "openai-compatible",
+    };
+  };
+
+
+  const chooseAnthropic = (): ProviderSelection => {
+    if (!anthropicKey) throw new Error("SOFIA_MODEL_PROVIDER=anthropic requires ANTHROPIC_API_KEY.");
+    const model = firstEnv("ANTHROPIC_MODEL");
+    if (!model) throw new Error("SOFIA_MODEL_PROVIDER=anthropic requires ANTHROPIC_MODEL.");
+    return {
+      baseUrl: normalizeBaseUrl(firstEnv("ANTHROPIC_BASE_URL") || "https://api.anthropic.com/v1"),
+      apiKey: anthropicKey,
+      defaultModel: model,
+      routeModelPrefix: "ANTHROPIC",
+      protocol: "anthropic-messages",
     };
   };
 
   if (requested === "custom" || requested === "openai-compatible") return chooseCustom();
   if (requested === "openrouter") return chooseOpenRouter();
   if (requested === "gemini") return chooseGemini();
+  if (requested === "anthropic") return chooseAnthropic();
 
   // A complete custom tuple is an explicit provider choice. If multiple
   // built-in providers are configured, require an explicit selection so adding
   // a second credential cannot silently redirect prompts to another vendor.
   if (hasCustomConfig) return chooseCustom();
-  if (openRouterKey && geminiKey) {
-    throw new Error("Both OpenRouter and Gemini credentials are configured; set SOFIA_MODEL_PROVIDER to choose explicitly.");
+  const configuredBuiltIns = [openRouterKey, geminiKey, anthropicKey].filter(Boolean).length;
+  if (configuredBuiltIns > 1) {
+    throw new Error("Multiple built-in provider credentials are configured; set SOFIA_MODEL_PROVIDER to choose explicitly.");
   }
   if (openRouterKey) return chooseOpenRouter();
   if (geminiKey) return chooseGemini();
+  if (anthropicKey) return chooseAnthropic();
 
   throw new Error(
     "Configure SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL for an OpenAI-compatible endpoint, " +
-    "or set OPENROUTER_API_KEY or GEMINI_API_KEY.",
+    "or set OPENROUTER_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY.",
   );
 }
 
@@ -152,6 +179,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       baseUrl: selected.baseUrl,
       apiKey: selected.apiKey,
       model,
+      protocol: selected.protocol,
     };
   }
 
