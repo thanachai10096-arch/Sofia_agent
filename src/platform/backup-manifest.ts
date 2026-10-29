@@ -41,7 +41,14 @@ function safeRelativePath(value: unknown): value is string {
   if (value.includes("\\") || value.startsWith("/") || value.includes("\0")) return false;
   if (/^[a-zA-Z]:/u.test(value) || value.startsWith("//")) return false;
   const parts = value.split("/");
-  return parts.every((part) => part.length > 0 && part !== "." && part !== "..");
+  return parts.every((part) => {
+    if (part.length === 0 || part === "." || part === "..") return false;
+    // Keep backup paths portable across POSIX and Windows extraction targets.
+    if (/[<>:"|?*\\x00-\\x1f]/u.test(part) || /[. ]$/u.test(part)) return false;
+    const deviceName = part.split(".")[0]?.toUpperCase();
+    if (deviceName && /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/u.test(deviceName)) return false;
+    return true;
+  });
 }
 
 function digest(content: Uint8Array): string {
