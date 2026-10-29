@@ -88,17 +88,25 @@ if (discordConfigured) {
     try {
       if (message.transportVerified === true &&
           (!discordUserIds.includes(message.author.id) || !discordChannelIds.includes(message.channelId))) return;
+      const trimmedContent = message.content.trim();
+      const command = trimmedContent.split(/\s+/, 1)[0] ?? "";
+      const argument = trimmedContent.slice(command.length).trim();
+      const prefix = "/run";
+      const isRunCommand = trimmedContent === prefix || trimmedContent.startsWith(prefix + " ") || trimmedContent.startsWith(prefix + "\\t");
+      const isNaturalMessage = message.transportVerified === true &&
+        (message.directMessage === true || message.addressedToBot === true) &&
+        trimmedContent.length > 0 && !trimmedContent.startsWith("/");
+      const isExplicitCommand = isRunCommand || command === "/status" || command === "/cancel" || command === "/resume";
+      if (message.transportVerified === true && !isNaturalMessage && !isExplicitCommand) return;
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       if (message.transportVerified === true) {
         // Gateway events can be replayed across reconnects or process restarts.
-        // Persist the claim before dispatch; if storage fails, fail closed.
+        // Persist a claim only for a message that can dispatch work; fail closed if storage fails.
         const dedupeKey = "discord:gateway:" + message.channelId + ":" + message.id;
         if (!await discordGatewayDeduplicator.claim(dedupeKey)) return;
       }
       const principalId = "discord:" + message.author.id;
-      const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
-      const argument = message.content.trim().slice(command.length).trim();
       if (command === "/status" || command === "/cancel" || command === "/resume") {
         if (!/^([0-9a-f]{8}-[0-9a-f-]{27,})$/i.test(argument)) {
           await sendDiscordMessage(message, 
@@ -155,14 +163,9 @@ if (discordConfigured) {
         );
         return;
       }
-      const prefix = "/run";
-      const trimmedContent = message.content.trim();
-      const isNaturalMessage = message.transportVerified === true &&
-        (message.directMessage === true || message.addressedToBot === true) &&
-        trimmedContent.length > 0 && !trimmedContent.startsWith("/");
       const task = isNaturalMessage
         ? trimmedContent
-        : trimmedContent.startsWith(prefix)
+        : isRunCommand
           ? trimmedContent.slice(prefix.length).trim()
           : "";
       if (!task) {
