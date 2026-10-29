@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SofiaModelGateway } from "./gateway.js";
+import { createInternalRoute } from "../brain/model-route-adapter.js";
 import type { ModelRequest, ModelRoute } from "./types.js";
 
 const route: ModelRoute = {
@@ -122,5 +123,38 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
     assert.equal(result.text, "{\"ok\":true}");
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("Brain route adapter honors declared model context window and preserves legacy override", async () => {
+  const originalContext = process.env.SOFIA_CODING_CONTEXT;
+  const modelProvider = {
+    async generate() {
+      return { text: "{}", usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  };
+
+  try {
+    delete process.env.SOFIA_CODING_CONTEXT;
+    const declared = createInternalRoute({
+      modelProvider,
+      route: { ...route, featureSupport: { contextWindow: 128_000 } },
+    });
+    assert.equal(declared.contextWindow, 128_000);
+
+    process.env.SOFIA_CODING_CONTEXT = "64000";
+    const overridden = createInternalRoute({
+      modelProvider,
+      route: { ...route, featureSupport: { contextWindow: 128_000 } },
+    });
+    assert.equal(overridden.contextWindow, 64_000);
+
+    delete process.env.SOFIA_CODING_CONTEXT;
+    const legacy = createInternalRoute({ modelProvider, route });
+    assert.equal(legacy.contextWindow, 32_000);
+  } finally {
+    if (originalContext === undefined) delete process.env.SOFIA_CODING_CONTEXT;
+    else process.env.SOFIA_CODING_CONTEXT = originalContext;
   }
 });
