@@ -120,3 +120,11 @@ test("rejects unsupported provider protocols instead of silently treating them a
   process.env.SOFIA_MODEL_PROVIDERS = JSON.stringify({ unknown: { baseUrl: "https://api.example.com/v1", model: "model-x", protocol: "custom-wire" } });
   assert.throws(loadModelConfigFromEnv, /protocol must be/);
 });
+
+test("rejects inline provider API keys in the JSON manifest", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDERS = JSON.stringify({
+    provider: { baseUrl: "https://api.example.com/v1", model: "model-x", apiKey: "do-not-inline" },
+  });
+  assert.throws(loadModelConfigFromEnv, /must not embed apiKey/);
+});
