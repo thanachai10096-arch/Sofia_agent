@@ -1,6 +1,7 @@
 import { promises as fs, readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { redactSecrets } from "../security/guard.js";
 
 export interface SkillPerformance {
   id: string;
@@ -63,6 +64,10 @@ function normalizeTaskType(taskType: string): string {
   return normalized || "general";
 }
 
+function safeFailureMessage(message: unknown): string {
+  return String(redactSecrets(String(message))).slice(0, 500);
+}
+
 export class EvolutionEngine {
   private snapshot: EvolutionSnapshot;
   private readonly file?: string;
@@ -82,7 +87,13 @@ export class EvolutionEngine {
             id: skill.id ?? id,
             taskTypes: skill.taskTypes ?? {},
             successHistory: skill.successHistory ?? [],
-            failureHistory: skill.failureHistory ?? [],
+            // Older snapshots may contain provider errors with credentials. Sanitize
+            // failure text on load so a later persistence write cannot retain them.
+            ...(typeof skill.lastFailure === "string" ? { lastFailure: safeFailureMessage(skill.lastFailure) } : {}),
+            failureHistory: (skill.failureHistory ?? []).slice(-20).map((entry) => ({
+              ...entry,
+              message: safeFailureMessage(entry.message),
+            })),
           }])),
           taskTypes: loaded.taskTypes ?? {},
         };
@@ -163,7 +174,7 @@ export class EvolutionEngine {
     local.failures++;
     s.confidence = clamp(s.confidence * 0.75 - 0.05, 0.05, 0.95);
     s.lastFailureAt = new Date().toISOString();
-    s.lastFailure = message.slice(0, 500);
+    s.lastFailure = safeFailureMessage(message);
     s.failureHistory.push({ at: s.lastFailureAt, message: s.lastFailure });
     s.failureHistory = s.failureHistory.slice(-20);
     void this.persist();
