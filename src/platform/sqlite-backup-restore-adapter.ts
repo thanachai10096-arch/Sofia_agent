@@ -94,7 +94,7 @@ export function sqliteFileBackupRestoreAdapter(
       if (bytes.byteLength === 0) throw new Error("SQLite restore backup file must not be empty.");
       // SQLite header validation catches wrong-file inputs before live state changes.
       const header = Buffer.from(bytes.subarray(0, 16)).toString("ascii");
-      if (header !== "SQLite format 3\\0") {
+      if (header !== "SQLite format 3\0") {
         throw new Error("SQLite restore backup does not have a valid SQLite database header.");
       }
     },
@@ -107,7 +107,7 @@ export function sqliteFileBackupRestoreAdapter(
         throw new Error("SQLite restore apply received an unexpected path selection.");
       }
       const bytes = bundle.files.get(relativePath);
-      if (!bytes || Buffer.from(bytes.subarray(0, 16)).toString("ascii") !== "SQLite format 3\\0") {
+      if (!bytes || Buffer.from(bytes.subarray(0, 16)).toString("ascii") !== "SQLite format 3\0") {
         throw new Error("SQLite restore bundle is missing a valid database snapshot.");
       }
       await lifecycle.close();
