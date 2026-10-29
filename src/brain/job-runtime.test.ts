@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
-import type { SofiaBrain } from "./executor.js";
+import type { BrainRunInput, SofiaBrain } from "./executor.js";
 
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
   const namespace = "job-runtime-restart-" + randomUUID();
@@ -615,7 +615,7 @@ test("DurableJobRuntime admits only one resumed execution across separate proces
     import { appendFile } from "node:fs/promises";
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
     const runtime = new DurableJobRuntime(() => ({
-      run: async (input) => {
+      run: async (input: BrainRunInput) => {
         if (!input.resume) throw new Error("expected a resume checkpoint");
         await appendFile(${JSON.stringify(markerFile)}, process.pid + "\\n");
         await new Promise((resolve) => setTimeout(resolve, 300));
