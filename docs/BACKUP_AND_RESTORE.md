@@ -2,7 +2,7 @@
 
 ## Status
 
-The versioned integrity-manifest primitives in `src/platform/backup-manifest.ts` are an initial building block, not a complete backup/restore feature. They do not create a complete backup bundle, encrypt data, or restore state. `SqliteSessionStore.createConsistentSnapshot()` now creates an isolated SQLite snapshot using SQLite `VACUUM INTO`, so committed WAL content is included without copying live database files or sidecars. The snapshot helper refuses existing destinations and does not overwrite them.
+The versioned integrity-manifest primitives in `src/platform/backup-manifest.ts` and the explicit-source coordinator in `src/platform/backup-coordinator.ts` are initial building blocks, not a complete backup/restore feature. The coordinator can collect caller-supplied in-memory snapshots and verify the resulting bundle, but it does not discover all stores, write an archive, encrypt data, or restore state. `SqliteSessionStore.createConsistentSnapshot()` now creates an isolated SQLite snapshot using SQLite `VACUUM INTO`, so committed WAL content is included without copying live database files or sidecars. The snapshot helper refuses existing destinations and does not overwrite them.
 
 ## Manifest
 
