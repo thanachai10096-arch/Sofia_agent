@@ -44,6 +44,22 @@ const BUILTIN_SKILLS: readonly SofiaSkill[] = [
     verification: ["test"],
   },
   {
+    id: "durable-job-recovery",
+    name: "Durable job recovery",
+    description: "Reconcile interrupted jobs from durable runtime evidence without duplicating uncertain work.",
+    triggers: ["job recovery", "after restart", "indeterminate", "duplicate dispatch", "runtime job missing"],
+    categories: ["runtime_error", "environment_error"],
+    strategy: "inspect-evidence",
+    procedure: [
+      "Inspect the durable execution record, run ID, owner scope, and last persisted state before taking action.",
+      "Query the authoritative job runtime by its persisted job ID; distinguish a confirmed missing job from a transient lookup or storage error.",
+      "If dispatch outcome is indeterminate and no job ID was persisted, do not resubmit automatically; preserve evidence and require explicit reconciliation.",
+      "Reconcile completed, failed, or cancelled jobs idempotently and resume monitoring only when the runtime confirms the job is still active.",
+      "Add a regression test for restart, transient lookup failure, and duplicate-dispatch prevention; report unverified recovery states clearly.",
+    ],
+    verification: ["test", "build"],
+  },
+  {
     id: "ci-failure-triage",
     name: "CI failure triage",
     description: "Diagnose continuous-integration failures from authoritative logs and fix root causes without weakening tests or security.",
