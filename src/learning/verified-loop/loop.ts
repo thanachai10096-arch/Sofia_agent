@@ -69,7 +69,7 @@ export class VerifiedLearningLoop {
         const skillName = `learned-${taskFingerprint.slice(0, 12)}`;
         const activeSkills = await tx.listActiveSkills(scope);
         if (activeSkills.some(skill => skill.name === skillName && skill.policyRevision === currentPolicy)) {
-          return { inserted: true as const, experienceId: experience.id };
+          return { inserted: true as const, experienceId: experience.id, candidate: undefined };
         }
         const procedure = [
           "Inspect current task context and trusted evidence; do not rely on memory alone.",
