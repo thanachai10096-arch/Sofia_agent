@@ -286,15 +286,50 @@ export class SofiaModelGateway implements ModelProvider {
       }
     }
 
-    const body = {
-      model: config.model,
-      messages,
-      ...(tools ? { tools, tool_choice: "auto" } : {}),
-      ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" as const } } : {}),
-      ...(options.maxOutputTokens
-        ? { max_tokens: options.maxOutputTokens }
-        : {}),
-    };
+    const protocol = config.protocol ?? "openai-compatible";
+    let endpoint: string;
+    let requestHeaders: Record<string, string>;
+    let body: Record<string, unknown>;
+    if (protocol === "anthropic-messages") {
+      const converted = anthropicMessages(messages, brainStructuredOutput);
+      endpoint = config.baseUrl.replace(/\/+$/, "") + "/messages";
+      requestHeaders = {
+        ...config.headers,
+        "x-api-key": config.apiKey,
+        "anthropic-version": config.anthropicVersion ?? "2023-06-01",
+        "content-type": "application/json",
+      };
+      body = {
+        model: config.model,
+        max_tokens: options.maxOutputTokens ?? 2_048,
+        ...(converted.system ? { system: converted.system } : {}),
+        messages: converted.messages,
+        ...(tools ? {
+          tools: tools.map((tool) => ({
+            name: tool.function.name,
+            description: tool.function.description,
+            input_schema: tool.function.parameters,
+          })),
+          tool_choice: { type: "auto" },
+        } : {}),
+      };
+    } else {
+      endpoint = config.baseUrl.replace(/\/+$/, "") + "/chat/completions";
+      requestHeaders = {
+        ...config.headers,
+        authorization: "Bearer " + config.apiKey,
+        "content-type": "application/json",
+      };
+      body = {
+        model: config.model,
+        messages,
+        ...(tools ? { tools, tool_choice: "auto" } : {}),
+        ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" as const } } : {}),
+        ...(options.maxOutputTokens
+          ? { max_tokens: options.maxOutputTokens }
+          : {}),
+      };
+    }
 
     const providerId = route.providerId ?? route.id;
     const timeoutMs = config.requestTimeoutMs ?? 45_000;
@@ -320,19 +355,12 @@ export class SofiaModelGateway implements ModelProvider {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         let retryableFailure = false;
         try {
-          const response = await fetch(
-            config.baseUrl.replace(/\/$/, "") + "/chat/completions",
-            {
-              method: "POST",
-              headers: {
-                ...config.headers,
-                authorization: "Bearer " + config.apiKey,
-                "content-type": "application/json",
-              },
-              body: JSON.stringify(body),
-              signal: requestSignal,
-            },
-          );
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: requestHeaders,
+            body: JSON.stringify(body),
+            signal: requestSignal,
+          });
           if (response.ok) {
             // Do not close a half-open circuit until the payload has been validated.
             return response;
@@ -395,9 +423,12 @@ export class SofiaModelGateway implements ModelProvider {
 
     let data: ChatResponse;
     try {
-      data = (await response.json()) as ChatResponse;
+      const raw: unknown = await response.json();
+      data = protocol === "anthropic-messages"
+        ? normalizeAnthropicResponse(raw)
+        : raw as ChatResponse;
     } catch {
-      return failResponse("Model gateway returned invalid JSON.");
+      return failResponse("Model gateway returned invalid JSON or an unsupported provider response.");
     }
     const message = data.choices?.[0]?.message;
 
