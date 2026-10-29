@@ -288,13 +288,20 @@ export async function executeLearningRepairPlan(
           !after.explicitlyApproved || !after.trustedEvidenceValid) {
         throw new Error("Post-repair authoritative verification failed");
       }
-      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_succeeded", at: now() });
       await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Postcondition verified", entry.claimToken);
+      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_succeeded", at: now() });
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded" });
     } catch (error) {
       const reason = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
-      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
-      await journal.finish(action.idempotencyKey, action.scope, "failed", reason, entry.claimToken);
+      // If the claim was fenced by a newer attempt, do not let this stale worker
+      // overwrite that attempt or make the whole batch fail to return a result.
+      try {
+        await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
+        await journal.finish(action.idempotencyKey, action.scope, "failed", reason, entry.claimToken);
+      } catch {
+        results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair claim lost; stale executor could not finalize this attempt" });
+        continue;
+      }
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
     }
   }
