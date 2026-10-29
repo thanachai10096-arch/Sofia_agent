@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBackupBundle, projectMemoryBackupSource, sqliteSessionBackupSource, userMemoryBackupSource, verifyBackupBundle, writeBackupBundleDirectory } from "./backup-coordinator.js";
+import { createBackupBundle, projectMemoryBackupSource, readBackupBundleDirectory, sqliteSessionBackupSource, userMemoryBackupSource, verifyBackupBundle, writeBackupBundleDirectory } from "./backup-coordinator.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -171,6 +171,69 @@ test("backup directory export refuses invalid bundles and cleans partial output 
     const invalid = { ...bundle, files: new Map() };
     await assert.rejects(writeBackupBundleDirectory(invalid, path.join(root, "invalid")), /invalid backup bundle/i);
     await assert.rejects((await import("node:fs/promises")).stat(path.join(root, "invalid")), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("backup directory reader round-trips an export and verifies its bytes", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-roundtrip-"));
+  const destination = path.join(root, "export");
+  try {
+    const original = await createBackupBundle([
+      { name: "roundtrip", async snapshot() {
+        return [
+          { path: "sessions/state.json", content: Buffer.from('{"state":"ok"}') },
+          { path: "memory/project.json", content: Buffer.from("{}") },
+        ];
+      } },
+    ], createdAt);
+    await writeBackupBundleDirectory(original, destination);
+    const restored = await readBackupBundleDirectory(destination);
+    assert.equal(verifyBackupBundle(restored).valid, true);
+    assert.deepEqual(restored.manifest, original.manifest);
+    assert.equal(Buffer.from(restored.files.get("sessions/state.json")!).toString("utf8"), '{"state":"ok"}');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("backup directory reader rejects changed bytes and unexpected files", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-reader-invalid-"));
+  const destination = path.join(root, "export");
+  try {
+    const bundle = await createBackupBundle([
+      { name: "reader", async snapshot() { return [{ path: "state.json", content: Buffer.from("original") }]; } },
+    ], createdAt);
+    await writeBackupBundleDirectory(bundle, destination);
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(path.join(destination, "state.json"), "tampered");
+    await assert.rejects(readBackupBundleDirectory(destination), /size|verification|checksum/i);
+
+    await fs.writeFile(path.join(destination, "state.json"), "original");
+    await fs.writeFile(path.join(destination, "unexpected.txt"), "not in manifest");
+    await assert.rejects(readBackupBundleDirectory(destination), /Unexpected backup file/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("backup directory reader refuses symlink payloads", async () => {
+  if (process.platform === "win32") return;
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-reader-link-"));
+  const destination = path.join(root, "export");
+  const external = path.join(root, "external.txt");
+  try {
+    const bundle = await createBackupBundle([
+      { name: "reader", async snapshot() { return [{ path: "state.txt", content: Buffer.from("safe") }]; } },
+    ], createdAt);
+    await writeBackupBundleDirectory(bundle, destination);
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(external, "outside");
+    await fs.unlink(path.join(destination, "state.txt"));
+    await fs.symlink(external, path.join(destination, "state.txt"));
+    await assert.rejects(readBackupBundleDirectory(destination), /symlink/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
