@@ -114,3 +114,42 @@ test("async run terminal callback receives the final result and original notific
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("configured LINE webhook route preserves raw body and forwards the signature before API authentication", async () => {
+  let receivedBody = "";
+  let receivedSignature: string | undefined;
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Unused by webhook test." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Unused by webhook test." }) },
+  }, {
+    apiKeys: {},
+    lineWebhookRoute: {
+      transport: {
+        handleWebhook: async (rawBody, signature) => {
+          receivedBody = Buffer.from(rawBody).toString("utf8");
+          receivedSignature = signature;
+          return { status: 200, acceptedEvents: 1 };
+        },
+      },
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const rawBody = '{ "events" : [{"type":"message"}] }';
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/integrations/line/webhook`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-line-signature": "signed-raw-body" },
+      body: rawBody,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(receivedBody, rawBody);
+    assert.equal(receivedSignature, "signed-raw-body");
+    assert.deepEqual(await response.json(), { acceptedEvents: 1 });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
