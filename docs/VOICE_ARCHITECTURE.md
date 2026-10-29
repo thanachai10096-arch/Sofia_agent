@@ -72,15 +72,13 @@ Important boundaries:
 
 Use the existing `src/voice/workflow.ts` as the workflow foundation; do not replace it or create a second runtime.
 
-- `src/voice/types.ts` (only if shared types grow beyond the existing workflow contracts): normalized voice session and provider capability types.
-- `src/voice/provider-registry.ts`: explicit provider registration/config resolution; no automatic use of credentials merely because multiple keys exist.
-- `src/voice/media-validation.ts`: media byte limits, allowed formats, decoded duration/sample-rate/channel limits, and safe failure mapping.
-- `src/voice/session-controller.ts`: lifecycle, cancellation, turn state, interruption, and resource cleanup.
-- `src/voice/output.ts`: optional TTS, audio response metadata, and channel-neutral output.
-- `src/integrations/voice/...`: channel-specific voice adapters only when a platform actually supports the required API and has a tested transport.
-- `docs/VOICE_ARCHITECTURE.md`: this document and its acceptance matrix.
+- `src/voice/workflow.ts`: existing provider-injected STT → Sofia callback → optional TTS workflow.
+- `src/voice/channel-handler.ts`: added shared handler for verified normalized voice events, access policy, deduplication, workflow invocation, and text/audio delivery.
+- `src/integrations/voice/...`: future platform-specific adapters that verify platform events, safely acquire media, decode/inspect duration, and deliver responses.
+- Provider registry, media decoder, session controller, and real provider implementations remain future work; do not claim they exist until added and tested.
+- `docs/VOICE-WORKFLOW.md`: integration contract and safety requirements.
 
-These are proposed boundaries, not a claim that these files already exist. Before creating any module, inspect current exports and nearby implementations and extend existing abstractions where they already fit.
+The channel handler is a shared contract, not a claim that transport adapters for all listed channels already exist. Extend existing adapters where possible and avoid parallel messaging/runtime abstractions.
 
 ## Channel coverage and rollout
 
@@ -147,8 +145,8 @@ Realtime transport must still use the same Sofia request/session and policy cont
 
 ### P0 — audit and core contract
 - Review current main and any voice-related PRs/diffs before integrating anything.
-- Confirm the current `VoiceWorkflow` contract and export; add missing tests without breaking text-only calls.
-- Add provider-neutral configuration validation and a safe feature-off default.
+- Confirm the current `VoiceWorkflow` contract and export; a shared `createVoiceChannelHandler` and focused unit tests are now added on the feature branch.
+- Next: add provider-neutral configuration validation and a safe feature-off default.
 - Add media validation independent of untrusted duration metadata.
 - Exit: typecheck/build/tests pass; disabled voice does not change current behavior.
 
