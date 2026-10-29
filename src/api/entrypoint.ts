@@ -87,7 +87,7 @@ if (discordConfigured) {
   const handleDiscordMessage = async (message: VerifiedDiscordMessage) => {
     try {
       if (message.transportVerified === true &&
-          (!discordUserIds.has(message.author.id) || !discordChannelIds.has(message.channelId))) return;
+          (!discordUserIds.includes(message.author.id) || !discordChannelIds.includes(message.channelId))) return;
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       if (message.transportVerified === true) {
