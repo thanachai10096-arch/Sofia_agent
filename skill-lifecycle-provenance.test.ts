@@ -16,7 +16,7 @@ const skillPackage: SkillPackage = {
     name: "Evidence guard skill",
     description: "Fixture for provenance validation",
     triggers: ["test"],
-    categories: ["testing"],
+    categories: ["runtime_error"],
     strategy: "inspect-evidence",
     procedure: ["inspect evidence", "verify outcome"],
     verification: ["test"],
