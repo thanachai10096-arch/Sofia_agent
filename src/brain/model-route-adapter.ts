@@ -5,6 +5,16 @@ import type { InternalRoute, PackedPrompt, PreparedCall, ProviderReply } from ".
 
 const encoder = new TextEncoder();
 
+function positiveSafeIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`Invalid ${name}: expected a positive safe integer`);
+  }
+  return value;
+}
+
 function upperBoundTokens(value: unknown): number {
   const text = JSON.stringify(value);
   return encoder.encode(text).byteLength;
@@ -83,8 +93,14 @@ export function createInternalRoute(
     budgetKey: route.providerId ?? route.id,
     qualityTier: Math.max(1, Math.round(route.qualityWeight)),
     capabilities: [...capabilities],
-    contextWindow: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_CONTEXT"] ?? route.featureSupport?.contextWindow ?? 32_000),
-    maxOutputTokens: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT"] ?? 4_096),
+    contextWindow: positiveSafeIntegerEnv(
+      "SOFIA_" + route.id.toUpperCase() + "_CONTEXT",
+      route.featureSupport?.contextWindow ?? 32_000,
+    ),
+    maxOutputTokens: positiveSafeIntegerEnv(
+      "SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT",
+      4_096,
+    ),
     hardOutputCap: true,
 
     prepare(prompt: PackedPrompt): PreparedCall {
