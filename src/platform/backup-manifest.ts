@@ -60,7 +60,7 @@ function safeRelativePath(value: unknown): value is string {
 function reservePortablePath(value: string, seen: Set<string>): void {
   const normalized = value.normalize("NFC").toLowerCase();
   if (seen.has(normalized)) {
-    throw new Error("Backup entry paths must be unique across portable filesystems.");
+    throw new Error("Backup entry paths must be unique; duplicate or portable filesystem collision detected.");
   }
   const parts = normalized.split("/");
   for (let i = 1; i < parts.length; i += 1) {
