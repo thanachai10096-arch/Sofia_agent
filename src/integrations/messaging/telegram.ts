@@ -9,6 +9,8 @@ export interface TelegramUpdate {
     text?: string;
     chat: { id: number | string; type: string; title?: string; username?: string };
     from?: { id: number | string; username?: string; first_name?: string };
+    entities?: Array<{ type: string; offset: number; length: number }>;
+    reply_to_message?: { from?: { username?: string; is_bot?: boolean } };
     document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
   };
 }
@@ -17,8 +19,14 @@ export interface TelegramTransport {
   sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<{ messageId: string }>;
   stop(): Promise<void>;
 }
+export interface TelegramAdapterOptions {
+  /** Optional bot username without @; required to recognize group mentions/replies as addressed messages. */
+  botUsername?: string;
+}
+
 /** Adapter mapping already-authenticated Telegram updates to the shared gateway contract. */
-export function createTelegramAdapter(transport: TelegramTransport): MessagingAdapter {
+export function createTelegramAdapter(transport: TelegramTransport, options: TelegramAdapterOptions = {}): MessagingAdapter {
+  const botUsername = options.botUsername?.trim().replace(/^@/, "").toLowerCase();
   let running = false;
   return {
     platform: "telegram",
@@ -37,11 +45,20 @@ export function createTelegramAdapter(transport: TelegramTransport): MessagingAd
           ...(msg.document.mime_type ? { contentType: msg.document.mime_type } : {}),
           ...(typeof msg.document.file_size === "number" ? { sizeBytes: msg.document.file_size } : {}),
         }] : [];
+        const botMentioned = Boolean(botUsername && msg.text && (msg.entities ?? []).some((entity) => {
+          if (entity.type !== "mention" || !Number.isSafeInteger(entity.offset) || !Number.isSafeInteger(entity.length) || entity.offset < 0 || entity.length < 2) return false;
+          const mention = msg.text!.slice(entity.offset, entity.offset + entity.length);
+          return mention.toLowerCase() === "@" + botUsername;
+        }));
+        const repliedToBot = Boolean(botUsername && msg.reply_to_message?.from?.is_bot === true &&
+          msg.reply_to_message.from.username?.toLowerCase() === botUsername);
         const inbound: InboundMessage = {
           platform: "telegram", messageId: String(msg.message_id),
           identity: { platform: "telegram", userId, channelId, conversationId: channelId,
             ...(msg.from.username ? { displayName: msg.from.username } : {}) },
           text: msg.text ?? "", attachments, receivedAt: msg.date * 1000,
+          directMessage: msg.chat.type === "private",
+          ...(msg.chat.type !== "private" && (botMentioned || repliedToBot) ? { addressedToBot: true } : {}),
         };
         await onMessage(inbound);
       });

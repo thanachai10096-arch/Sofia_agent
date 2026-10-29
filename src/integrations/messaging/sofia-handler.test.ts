@@ -94,3 +94,27 @@ test("invalid command prefixes are rejected at configuration time", () => {
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: " " }), /commandPrefix/);
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: "/run\nadmin" }), /commandPrefix/);
 });
+
+
+test("natural chat starts tasks in direct messages without /run", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h });
+  assert.equal(await handle(inbound("Please help me improve Sofia", { directMessage: true })), "Sofia accepted the task (run run-123, status: queued).");
+  assert.deepEqual(h.starts.map((entry) => entry.task), ["Please help me improve Sofia"]);
+});
+
+test("natural chat only starts group messages explicitly addressed to the bot", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h });
+  assert.equal(await handle(inbound("someone said hello")), undefined);
+  assert.equal(await handle(inbound("Sofia, help me plan this", { addressedToBot: true })), "Sofia accepted the task (run run-123, status: queued).");
+  assert.deepEqual(h.starts.map((entry) => entry.task), ["Sofia, help me plan this"]);
+});
+
+test("natural chat can be disabled and platform slash commands are not treated as tasks", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, naturalChat: false });
+  assert.equal(await handle(inbound("hello", { directMessage: true })), undefined);
+  assert.equal(await handle(inbound("/start", { directMessage: true })), undefined);
+  assert.equal(h.starts.length, 0);
+});

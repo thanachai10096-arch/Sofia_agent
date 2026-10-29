@@ -23,6 +23,10 @@ export interface InboundMessage {
   text: string;
   attachments: MessagingAttachment[];
   receivedAt: number;
+  /** True only when trusted platform metadata identifies a one-to-one conversation. */
+  directMessage?: boolean;
+  /** True only when trusted platform metadata confirms the bot was explicitly addressed. */
+  addressedToBot?: boolean;
 }
 export interface OutboundMessage {
   conversationId: string;

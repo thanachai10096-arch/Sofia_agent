@@ -14,6 +14,8 @@ export interface SofiaMessagingHandlerOptions {
   deduplicator: ChatMessageDeduplicator;
   /** Exact command prefix, e.g. /run or /run@SofiaBot. Defaults to /run. */
   commandPrefix?: string;
+  /** Natural conversation in verified DMs or messages explicitly addressed to the bot. Enabled by default. */
+  naturalChat?: boolean;
   maxTaskCharacters?: number;
   /** Called after the API accepts a run; implementations should schedule completion reporting without blocking polling. */
   onAccepted?: (input: { runId: string; runStatus: string; message: InboundMessage }) => void;
@@ -31,7 +33,8 @@ export function createMessagingAccessCheck(policy: ChatAccessPolicy) {
 
 /**
  * Bridges normalized inbound messages to Sofia's existing command dispatcher.
- * Only explicit command messages start a run; ordinary chat and attachments do not.
+ * Natural chat is enabled by default only for verified direct messages or messages
+ * explicitly addressed to the bot; group chatter and platform slash commands stay ignored.
  * Do not also pass this same deduplicator to createMessagingGateway, because the
  * existing command handler claims the provider/channel/message key itself.
  */
@@ -49,8 +52,12 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
 
   return async function onMessage(message: InboundMessage): Promise<string | void> {
     const text = message.text.trim();
-    if (text !== prefix && !text.startsWith(prefix + " ") && !text.startsWith(prefix + "\t")) return;
-    const task = text.slice(prefix.length).trim();
+    const isCommand = text === prefix || text.startsWith(prefix + " ") || text.startsWith(prefix + "\t");
+    const isNaturalMessage = options.naturalChat !== false &&
+      (message.directMessage === true || message.addressedToBot === true) &&
+      text.length > 0 && !text.startsWith("/");
+    if (!isCommand && !isNaturalMessage) return;
+    const task = isCommand ? text.slice(prefix.length).trim() : text;
     const result = await handleCommand({
       platform: message.platform,
       messageId: message.messageId,
