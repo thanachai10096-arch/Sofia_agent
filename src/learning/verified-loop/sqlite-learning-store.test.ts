@@ -42,6 +42,33 @@ test("SQLite learning transactions persist experiences and skills across reopen"
   }
 });
 
+test("SQLite learning stores enforce receipt uniqueness across independent connections", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-learning-concurrent-"));
+  const file = path.join(directory, "learning.sqlite");
+  let first: SqliteLearningTransactionStore | undefined;
+  let second: SqliteLearningTransactionStore | undefined;
+  try {
+    first = await SqliteLearningTransactionStore.open(file);
+    second = await SqliteLearningTransactionStore.open(file);
+    const results = await Promise.all([
+      first.transaction(scope, tx => tx.insertExperienceIfAbsent(experience("shared-receipt", "experience-first"))),
+      second.transaction(scope, tx => tx.insertExperienceIfAbsent(experience("shared-receipt", "experience-second"))),
+    ]);
+
+    assert.equal(results.filter(Boolean).length, 1);
+    assert.equal(results.filter(result => !result).length, 1);
+    await first.transaction(scope, async tx => {
+      const rows = await tx.listExperiences(scope, 10);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].receiptId, "shared-receipt");
+    });
+  } finally {
+    first?.close();
+    second?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("SQLite learning transaction rolls back all writes when the operation fails", async () => {
   const store = await SqliteLearningTransactionStore.open(":memory:");
   try {
