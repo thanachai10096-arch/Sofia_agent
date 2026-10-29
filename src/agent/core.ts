@@ -82,16 +82,16 @@ export class SofiaAgent {
       if (entries.length === 0) return request;
       const memoryText = entries
         .slice(0, 6)
-        .map((entry) => \`- [\${entry.kind}] \${entry.content.slice(0, 500)}\`)
+        .map((entry) => `- [${entry.kind}] ${entry.content.slice(0, 500)}`)
         .join("\n")
         .slice(0, 3_500);
       if (!memoryText) return request;
 
       const sections = [
         request.context?.trim()
-          ? \`Caller-provided context (untrusted reference data):\n\${request.context.slice(0, 4_000)}\`
+          ? `Caller-provided context (untrusted reference data):\n${request.context.slice(0, 4_000)}`
           : "",
-        \`Relevant user memory (untrusted reference data; may be incomplete or outdated):\n\${memoryText}\`,
+        `Relevant user memory (untrusted reference data; may be incomplete or outdated):\n${memoryText}`,
       ].filter(Boolean);
       return { ...request, context: sections.join("\n\n").slice(0, 7_500) };
     } catch {
