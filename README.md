@@ -301,3 +301,8 @@ Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record tu
 ## User memory
 
 See [User Memory](docs/USER_MEMORY.md) for explicit, user-scoped memory API routes, scopes, retention limits, and privacy boundaries.
+
+### Capability reporting and detection limits
+
+The capability report helper in `src/models/capability-report.ts` summarizes each configured route using only explicit `features` metadata. Undeclared capabilities are reported as `unknown`; route IDs, model names, and protocol names are not treated as evidence. The helper performs no network calls and cannot incur provider charges. This is a truthful declaration report, **not live capability detection**. A future live probe must be explicit/opt-in, bounded by timeout and token/cost limits, and must report observed behavior separately from provider claims.
+
