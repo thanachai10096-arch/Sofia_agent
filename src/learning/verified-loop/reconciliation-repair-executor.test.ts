@@ -22,7 +22,10 @@ class MemoryJournal implements LearningRepairJournal {
   async begin(entry: LearningRepairJournalEntry) {
     const prior = this.entries.get(entry.key);
     if (prior && (prior.scope.tenantId !== entry.scope.tenantId || prior.scope.principalId !== entry.scope.principalId || prior.scope.projectId !== entry.scope.projectId || prior.skillId !== entry.skillId || prior.policyRevision !== entry.policyRevision)) throw new Error("Key conflict");
-    const next = { ...entry, state: prior?.state === "succeeded" ? "succeeded" as const : "running" as const, attempts: (prior?.attempts ?? 0) + 1 };
+    if (prior?.state === "succeeded" || prior?.state === "running") {
+      return { ...prior, claimed: false };
+    }
+    const next = { ...entry, state: "running" as const, attempts: (prior?.attempts ?? 0) + 1, claimed: true };
     this.entries.set(entry.key, next);
     return next;
   }
@@ -60,14 +63,16 @@ test("refuses stale policy or missing trusted evidence before registration", asy
   assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
 });
 
-test("recovers a crash after registration by revalidation without registering twice", async () => {
+test("does not steal an existing running claim from another executor", async () => {
   const journal = new MemoryJournal();
   await journal.begin({ key: action.idempotencyKey, scope, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running", attempts: 0, updatedAt: new Date().toISOString() });
   let registrations = 0;
-  const host = hostWith(() => snapshot({ exists: true, active: true }), async () => { registrations++; });
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
   const result = await executeLearningRepairPlan(plan, journal, host);
-  assert.equal(result[0]?.state, "succeeded");
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /already running/);
   assert.equal(registrations, 0);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "running");
 });
 
 test("refuses ineligible plans and cross-scope actions", async () => {
