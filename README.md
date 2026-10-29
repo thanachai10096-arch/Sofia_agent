@@ -23,7 +23,7 @@ A model-agnostic AI agent runtime with internal model routing, policy-controlled
 
 Sofia Agent is a standalone agent runtime and platform. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
 
-> **Model routing is an internal policy.** End users do not choose models; Sofia decides how requests are handled.
+> **Model routing:** Sofia currently chooses routes internally based on task classification and configured routes. Per-request user-selected provider/model and an `auto` override are a planned parity item, not yet a supported public contract.
 
 
 ## Open source and contribution
@@ -34,6 +34,8 @@ Sofia Agent is distributed under the [MIT License](LICENSE). Review third-party 
 - **Report security issues:** [SECURITY.md](SECURITY.md)
 - **Open-source and commercial roadmap boundaries:** [docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md](docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md)
 - **Shared access architecture:** [docs/UNIFIED_ACCESS_ARCHITECTURE.md](docs/UNIFIED_ACCESS_ARCHITECTURE.md)
+- **Hermes-style core behavior parity contract:** [docs/HERMES_CORE_BEHAVIOR_PARITY.md](docs/HERMES_CORE_BEHAVIOR_PARITY.md)
+- **System architecture and phased implementation plan:** [docs/SOFIA_SYSTEM_ARCHITECTURE.md](docs/SOFIA_SYSTEM_ARCHITECTURE.md)
 
 Hosted and enterprise services described in the roadmap are potential offerings, not a claim that they are currently available.
 
@@ -142,7 +144,7 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 
 ## `> Discord integration (opt-in)`
 
-The Discord interaction adapter supports allowlisted slash commands for durable background work:
+The Discord Interactions HTTP adapter supports allowlisted slash commands for durable background work:
 
 - `/run` submits a task and returns a job ID.
 - `/status` and `/cancel` are restricted to jobs owned by the invoking Discord user.
@@ -151,6 +153,10 @@ The Discord interaction adapter supports allowlisted slash commands for durable 
 - Restart recovery can notify the configured channel about interrupted jobs and whether a checkpoint is available.
 
 Discord is disabled unless its server-side configuration is supplied. Configure explicit user and channel ID allowlists, use HTTPS, keep the bot token/API key in a secret store, and use persistent storage for restart recovery. **CI does not replace a live Discord test.**
+
+
+
+The API entrypoint also has an opt-in ordinary-message runtime using `createDiscordGatewayTransport` + the existing `createDiscordAdapter`/`MessagingGateway`. Enable it with `SOFIA_DISCORD_GATEWAY_ENABLED=true` and configure `DISCORD_BOT_TOKEN`, `DISCORD_ALLOWED_USER_IDS`, `DISCORD_ALLOWED_CHANNEL_IDS`, and the existing Sofia API connection variables. The bot needs the Message Content privileged intent enabled in the Discord Developer Portal. Ordinary text enters the same authorized run handler; unrelated slash commands are ignored. This is separate from the signed Interactions HTTP adapter. Start in a private test server and verify an allowed user, a denied user, duplicate messages, and final-result delivery before treating it as deployment-ready.
 
 See [Discord integration setup and smoke-test guide](docs/DISCORD_INTEGRATION_SETUP.md) for required environment variables, command registration, and a private-server acceptance checklist.
 
@@ -252,7 +258,7 @@ try {
 }
 ```
 
-Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Session transcript persistence does not automatically replay history into model context or add transcript retrieval endpoints. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
+Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. On the current agent-core path, a supplied `sessionId` replays a bounded set of recent turns into the next request as untrusted reference context. Explicitly saved user memories are also retrieved when a memory store and authenticated `principalId` are configured. This does not add a public transcript retrieval endpoint. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
 
 ## User memory
 

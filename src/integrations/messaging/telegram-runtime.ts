@@ -98,6 +98,8 @@ export interface TelegramMessagingEnvironment {
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
+  /** Set to "true" to keep legacy /run-only behavior. Natural-language mode is the default. */
+  TELEGRAM_COMMANDS_ONLY?: string;
   SOFIA_API_KEY?: string;
   SOFIA_API_BASE_URL?: string;
   RAILWAY_PUBLIC_DOMAIN?: string;
@@ -106,7 +108,7 @@ export interface TelegramMessagingEnvironment {
 /**
  * Build the optional Telegram bridge using the existing Sofia API and command
  * dispatcher. Missing/invalid optional configuration disables Telegram without
- * taking the core API offline. Only /run commands can start agent work.
+ * taking the core API offline. Natural-language tasks are enabled by default; set TELEGRAM_COMMANDS_ONLY=true for legacy command-only behavior.
  */
 export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
@@ -144,6 +146,7 @@ export function createTelegramMessagingRuntime(
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
+      naturalLanguageMode: env.TELEGRAM_COMMANDS_ONLY === "true" ? "commands-only" : "natural-language",
       onAccepted: ({ runId, message }) => {
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({

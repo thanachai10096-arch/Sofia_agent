@@ -1,13 +1,13 @@
 # Messaging Gateway (incremental integration)
 
-Status: opt-in gateway, command bridge, Telegram Bot API long polling transport, and Discord interaction verification/REST transport. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
+Status: opt-in gateway, shared natural-language/command bridge, Telegram Bot API long polling transport, Discord interaction verification/REST transport, and a separate Discord Gateway transport/runtime for ordinary messages. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
 
 ## Safety defaults
 
 - Messaging is disabled unless `enabled: true` is explicitly supplied.
 - Unknown users/channels are denied unless an explicit `allowUser` policy permits them.
 - The gateway calls an injected message handler. Adapters never invoke tools or a separate agent runtime directly.
-- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Only explicit `/run <task>` messages (or a configured exact prefix such as `/run@SofiaBot`) start a run. Ordinary chat and attachments do not trigger execution.
+- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Its backwards-compatible default is commands-only; opt into `naturalLanguageMode: "natural-language"` to route ordinary text through the same authorized `/run` execution path. In natural-language mode, slash commands other than the configured run prefix and attachment-only messages are ignored, not executed as task text.
 - Use `createMessagingAccessCheck` to adapt the existing `ChatAccessPolicy` to the gateway allowlist callback. The existing command handler performs its own authorization check too. Do not pass the same deduplicator to both `createMessagingGateway` and `createSofiaMessagingHandler`, because the existing command handler claims the provider/channel/message key itself.
 - Keep bot tokens and Sofia API keys in server-side environment variables or an approved secret provider. Never expose them in client bundles, tests, errors, or logs.
 - The Telegram HTTP transport uses HTTPS long polling against the official Telegram Bot API. Choose either polling or a separately implemented webhook deployment, not both for the same bot.
@@ -27,9 +27,23 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Only explicit `/run <task>` commands dispatch work; ordinary messages do not start runs. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Natural-language messages start tasks without `/run` by default in the standalone Telegram runtime. Set `TELEGRAM_COMMANDS_ONLY=true` to retain legacy command-only behavior. Slash commands other than `/run` and attachment-only messages are ignored. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
+
+## Standalone Discord ordinary-message runtime (opt-in)
+
+The API entrypoint can start a separate Discord Gateway connection when `SOFIA_DISCORD_GATEWAY_ENABLED=true`. It uses the existing Sofia API, `MessagingGateway`, shared access policy, durable API run flow, and file-backed chat deduplicator; it does not create a second agent runtime.
+
+Required server-side variables:
+- `SOFIA_DISCORD_GATEWAY_ENABLED=true`
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_ALLOWED_USER_IDS` — comma-separated numeric Discord user IDs
+- `DISCORD_ALLOWED_CHANNEL_IDS` — comma-separated numeric channel IDs
+- `SOFIA_API_KEY`
+- `SOFIA_API_BASE_URL` (or `RAILWAY_PUBLIC_DOMAIN`)
+
+Enable the **Message Content Intent** in Discord Developer Portal before starting this runtime. It is intentionally separate from the signed Interactions HTTP adapter; the same bot token may support both. Natural-language messages are treated as tasks, and unrelated slash commands are ignored. Only allowlisted user/channel pairs can start work. Start with a private test server and keep the Gateway runtime disabled until the privileged intent and allowlists have been checked. The runtime reports the durable run result to the originating channel when the API can retrieve it.
 
 ## Composition contract
 
@@ -42,7 +56,7 @@ The existing `createChatCommandHandler` remains the shared command dispatcher fo
 At the application composition root:
 1. Construct the existing Sofia SDK client with a server-side API key that has the required `agent:run` scope.
 2. Reuse the existing `ChatAccessPolicy` and atomic `ChatMessageDeduplicator`.
-3. Construct the Telegram adapter with `createTelegramAdapter(createTelegramHttpTransport({ token: process.env.TELEGRAM_BOT_TOKEN! }))`.
+3. Construct the Telegram adapter with `createTelegramAdapter(createTelegramHttpTransport({ token: process.env.TELEGRAM_BOT_TOKEN! }))`; use `naturalLanguageMode: "natural-language"` on the shared handler when ordinary text should start work.
 4. Construct the Discord transport with `createDiscordInteractionTransport({ publicKeyHex, botToken: process.env.DISCORD_BOT_TOKEN! })`; wrap it with `createDiscordAdapter` and pass the transport to `createSofiaApi` as `discordInteractionRoute: { transport }` (default path `/v1/integrations/discord/interactions`). Expose that route only over HTTPS. For the standalone entrypoint, configure `DISCORD_ALLOWED_USER_IDS=123...,456...` and `DISCORD_ALLOWED_CHANNEL_IDS=789...`; both lists are mandatory and validated before the transport starts.
 5. Create the gateway with `enabled: process.env.SOFIA_MESSAGING_ENABLED === "true"`, `allowUser: createMessagingAccessCheck(policy)`, and `onMessage: createSofiaMessagingHandler({ client, accessPolicy: policy, deduplicator })`.
 6. Ensure the command prefix configured for the handler matches the prefix configured for Discord's interaction transport.

@@ -1,6 +1,7 @@
 import { promises as fs, readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { redactSecrets } from "../security/guard.js";
 
 export interface SkillPerformance {
   id: string;
@@ -40,6 +41,19 @@ export interface SkillRanking {
   attempts: number;
 }
 
+/** A review-only suggestion derived from repeated execution evidence. */
+export interface SkillImprovementProposal {
+  skillId: string;
+  taskType: string;
+  reason: "low-success-rate" | "high-recovery-cost";
+  attempts: number;
+  successes: number;
+  failures: number;
+  successRate: number;
+  avgRecoveryRounds: number;
+  status: "review-required";
+}
+
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
@@ -63,6 +77,10 @@ function normalizeTaskType(taskType: string): string {
   return normalized || "general";
 }
 
+function safeFailureMessage(message: unknown): string {
+  return String(redactSecrets(String(message))).slice(0, 500);
+}
+
 export class EvolutionEngine {
   private snapshot: EvolutionSnapshot;
   private readonly file?: string;
@@ -82,7 +100,13 @@ export class EvolutionEngine {
             id: skill.id ?? id,
             taskTypes: skill.taskTypes ?? {},
             successHistory: skill.successHistory ?? [],
-            failureHistory: skill.failureHistory ?? [],
+            // Older snapshots may contain provider errors with credentials. Sanitize
+            // failure text on load so a later persistence write cannot retain them.
+            ...(typeof skill.lastFailure === "string" ? { lastFailure: safeFailureMessage(skill.lastFailure) } : {}),
+            failureHistory: (skill.failureHistory ?? []).slice(-20).map((entry) => ({
+              ...entry,
+              message: safeFailureMessage(entry.message),
+            })),
           }])),
           taskTypes: loaded.taskTypes ?? {},
         };
@@ -163,7 +187,7 @@ export class EvolutionEngine {
     local.failures++;
     s.confidence = clamp(s.confidence * 0.75 - 0.05, 0.05, 0.95);
     s.lastFailureAt = new Date().toISOString();
-    s.lastFailure = message.slice(0, 500);
+    s.lastFailure = safeFailureMessage(message);
     s.failureHistory.push({ at: s.lastFailureAt, message: s.lastFailure });
     s.failureHistory = s.failureHistory.slice(-20);
     void this.persist();
@@ -179,6 +203,44 @@ export class EvolutionEngine {
     stats.attempts++;
     completed ? stats.successes++ : stats.failures++;
     void this.persist();
+  }
+
+  /**
+   * Suggests where an existing skill may need attention based on repeated,
+   * task-specific outcomes. This is advisory only: it never edits, enables,
+   * promotes, or executes a skill.
+   */
+  getImprovementProposals(minAttempts = 3): SkillImprovementProposal[] {
+    const threshold = Math.max(3, Math.floor(Number.isFinite(minAttempts) ? minAttempts : 3));
+    const proposals: SkillImprovementProposal[] = [];
+    for (const skill of Object.values(this.snapshot.skills)) {
+      for (const [taskType, outcome] of Object.entries(skill.taskTypes)) {
+        if (outcome.attempts < threshold) continue;
+        const successRate = outcome.successes / Math.max(1, outcome.attempts);
+        const reason = successRate < 0.6
+          ? "low-success-rate"
+          : skill.avgRecoveryRounds >= 1.5
+            ? "high-recovery-cost"
+            : undefined;
+        if (!reason) continue;
+        proposals.push({
+          skillId: skill.id,
+          taskType,
+          reason,
+          attempts: outcome.attempts,
+          successes: outcome.successes,
+          failures: outcome.failures,
+          successRate,
+          avgRecoveryRounds: skill.avgRecoveryRounds,
+          status: "review-required",
+        });
+      }
+    }
+    return proposals.sort((a, b) =>
+      (a.successRate - b.successRate) ||
+      (b.attempts - a.attempts) ||
+      a.skillId.localeCompare(b.skillId),
+    );
   }
 
   getDiagnostics(): LearningDiagnostics {

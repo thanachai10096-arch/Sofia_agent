@@ -58,6 +58,33 @@ test("history is bounded to the most recent twenty outcomes", () => {
 });
 
 
+test("evolution redacts provider secrets before retaining failure history", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-evolution-redaction-"));
+  const file = join(directory, "evolution.json");
+  const secretMessage = "provider failed with sk_live_12345678901234567890 and api_key=super-secret-value";
+  try {
+    const engine = new EvolutionEngine(file);
+    engine.recordFailure("provider-repair", secretMessage, "model-routing");
+    await engine.flush();
+
+    const skill = engine.getSkill("provider-repair");
+    assert.ok(skill);
+    assert.ok(!skill.lastFailure?.includes("12345678901234567890"));
+    assert.ok(!skill.lastFailure?.includes("super-secret-value"));
+    assert.match(skill.lastFailure ?? "", /\[REDACTED\]/);
+
+    const persisted = await readFile(file, "utf8");
+    assert.ok(!persisted.includes("12345678901234567890"));
+    assert.ok(!persisted.includes("super-secret-value"));
+
+    const reloaded = new EvolutionEngine(file).getSkill("provider-repair");
+    assert.ok(reloaded);
+    assert.ok(!reloaded.failureHistory.at(-1)?.message.includes("super-secret-value"));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("skill ranking uses task-specific outcomes while retaining global evidence", () => {
   const engine = new EvolutionEngine();
   engine.recordSuccess("generalist", 3, 0, "file-write");
