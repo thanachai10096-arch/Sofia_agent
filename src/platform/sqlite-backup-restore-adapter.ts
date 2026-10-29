@@ -44,13 +44,16 @@ export function sqliteFileBackupRestoreAdapter(
     if (!parentInfo.isDirectory() || parentInfo.isSymbolicLink()) {
       throw new Error("SQLite restore database parent must be a real directory.");
     }
-    try {
-      const info = await fs.lstat(database);
-      if (info.isSymbolicLink() || !info.isFile()) {
-        throw new Error("SQLite restore destination must be a regular file, not a symbolic link.");
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const realParent = await fs.realpath(parent);
+    if (path.resolve(realParent) !== path.resolve(parent)) {
+      throw new Error("SQLite restore database parent must not traverse symlinked path components.");
+    }
+    const info = await fs.lstat(database).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!info || info.isSymbolicLink() || !info.isFile()) {
+      throw new Error("SQLite restore destination must be an existing regular file, not a symbolic link.");
     }
   }
 
