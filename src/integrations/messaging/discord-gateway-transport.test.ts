@@ -182,3 +182,25 @@ test("Discord Gateway stops reconnecting after a fatal authentication close code
   assert.ok(errors.some((error) => error.event === "gateway_connect_failed" && error.status === 4004));
   await transport.stop();
 });
+
+
+test("Discord Gateway does not treat group DMs as private direct messages", async () => {
+  const socket = new FakeSocket();
+  const delivered: Array<{ directMessage?: boolean; addressedToBot?: boolean }> = [];
+  const transport = createDiscordGatewayTransport({
+    botToken: "x".repeat(30),
+    socketFactory: () => socket,
+  });
+  await transport.start(new AbortController().signal, async (message) => {
+    delivered.push({ directMessage: message.directMessage, addressedToBot: message.addressedToBot });
+  });
+  socket.gateway({ op: 10, d: { heartbeat_interval: 60_000 } });
+  socket.gateway({ op: 0, t: "READY", s: 1, d: { session_id: "session-1", user: { id: "999", username: "Sofia" } } });
+  socket.gateway({ op: 0, t: "MESSAGE_CREATE", s: 2, d: {
+    id: "103", channel_id: "203", channel_type: 3, content: "group DM chatter",
+    author: { id: "404", username: "user", bot: false }, mentions: [],
+  } });
+  await tick();
+  assert.deepEqual(delivered, [{ directMessage: false, addressedToBot: undefined }]);
+  await transport.stop();
+});
