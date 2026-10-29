@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { SqliteSessionStore } from "../session/sqlite-store.js";
 import type { FileProjectMemoryStore } from "../brain/project-memory.js";
 import type { FileUserMemoryStore } from "../brain/user-memory.js";
 import {
@@ -66,6 +70,30 @@ export async function createBackupBundle(
     throw new Error(`Backup bundle failed self-verification: ${verification.errors.join("; ")}`);
   }
   return { manifest, files: fileMap };
+}
+
+/**
+ * Adapt the durable SQLite session store into a consistent snapshot source.
+ * A private temporary directory is used for VACUUM INTO output and removed
+ * after its bytes are read; the live database and its WAL/SHM files are never
+ * copied directly. In-memory SQLite stores reject this operation explicitly.
+ */
+export function sqliteSessionBackupSource(store: SqliteSessionStore): BackupSnapshotSource {
+  return {
+    name: "sessions-sqlite",
+    async snapshot() {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), "sofia-backup-session-"));
+      try {
+        if (process.platform !== "win32") await fs.chmod(directory, 0o700);
+        const destination = path.join(directory, "sessions.sqlite");
+        store.createConsistentSnapshot(destination);
+        const content = await fs.readFile(destination);
+        return [{ path: "sessions/sessions.sqlite", content }];
+      } finally {
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    },
+  };
 }
 
 /**
