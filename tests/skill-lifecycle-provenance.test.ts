@@ -53,6 +53,30 @@ test("skill lifecycle rejects missing, blank, duplicate, and unbounded evidence 
   }
 });
 
+test("skill lifecycle bounds skill metadata collection sizes", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-metadata-bounds-"));
+  try {
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, {
+      file: path.join(root, "lifecycle.json"),
+    });
+    const invalidPackages: SkillPackage[] = [
+      { ...skillPackage, skill: { ...skillPackage.skill, triggers: Array.from({ length: 101 }, (_, i) => `trigger-${i}`) } },
+      { ...skillPackage, skill: { ...skillPackage.skill, categories: Array.from({ length: 51 }, (_, i) => `category-${i}`) } },
+      { ...skillPackage, skill: { ...skillPackage.skill, procedure: Array.from({ length: 101 }, (_, i) => `step-${i}`) } },
+      { ...skillPackage, skill: { ...skillPackage.skill, verification: ["typecheck", "test", "build", "test"] } },
+    ];
+    for (const invalidPackage of invalidPackages) {
+      assert.throws(
+        () => lifecycle.propose(invalidPackage, { source: "repair", evidenceIds: ["evidence-1"], confidence: 0.9 }),
+        /Invalid skill metadata/,
+      );
+    }
+    assert.equal(lifecycle.list().length, 0, "oversized skill metadata must not create lifecycle records");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("skill lifecycle rejects persisted records with missing evidence IDs", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-persisted-evidence-"));
   const file = path.join(root, "lifecycle.json");
