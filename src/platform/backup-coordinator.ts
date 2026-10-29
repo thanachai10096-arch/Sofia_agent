@@ -7,8 +7,12 @@ import type { FileProjectMemoryStore } from "../brain/project-memory.js";
 import type { FileUserMemoryStore } from "../brain/user-memory.js";
 import {
   createBackupManifest,
+  parseBackupManifestJson,
   serializeBackupManifest,
+  MAX_BACKUP_ENTRY_BYTES,
   MAX_BACKUP_MANIFEST_ENTRIES,
+  MAX_BACKUP_MANIFEST_JSON_BYTES,
+  MAX_BACKUP_TOTAL_BYTES,
   verifyBackupFiles,
   type BackupInputFile,
   type BackupManifest,
@@ -180,6 +184,86 @@ export async function writeBackupBundleDirectory(
     await fs.rm(destination, { recursive: true, force: true });
     throw error;
   }
+}
+
+/**
+ * Read and verify a directory export without following symlinks. This returns
+ * verified bytes only; it never writes to a restore target or mutates Sofia state.
+ */
+export async function readBackupBundleDirectory(sourcePath: string): Promise<BackupBundle> {
+  if (typeof sourcePath !== "string" || sourcePath.trim().length === 0) {
+    throw new Error("A backup source path is required.");
+  }
+  const root = path.resolve(sourcePath);
+  const rootInfo = await fs.lstat(root);
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) {
+    throw new Error("Backup source must be a real directory.");
+  }
+
+  const manifestPath = path.join(root, "manifest.json");
+  const manifestInfo = await fs.lstat(manifestPath);
+  if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink() ||
+      manifestInfo.size > MAX_BACKUP_MANIFEST_JSON_BYTES) {
+    throw new Error("Backup manifest is missing, unsafe, or too large.");
+  }
+  const manifestText = await fs.readFile(manifestPath, "utf8");
+  const manifest = parseBackupManifestJson(manifestText);
+  if (manifest.entries.length > MAX_BACKUP_MANIFEST_ENTRIES) {
+    throw new Error("Backup contains too many entries.");
+  }
+
+  const expectedFiles = new Set<string>(["manifest.json", ...manifest.entries.map((entry) => entry.path)]);
+  let totalBytes = 0;
+  const files = new Map<string, Uint8Array>();
+
+  // Reject extra files and all symlinks rather than silently ignoring payloads.
+  const visit = async (directory: string, relative = ""): Promise<void> => {
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    for (const item of entries) {
+      const rel = relative ? `${relative}/${item.name}` : item.name;
+      const absolute = path.join(directory, item.name);
+      const info = await fs.lstat(absolute);
+      if (info.isSymbolicLink()) throw new Error(`Backup directory contains a symlink: ${rel}`);
+      if (info.isDirectory()) {
+        await visit(absolute, rel);
+        continue;
+      }
+      if (!info.isFile()) throw new Error(`Backup directory contains a non-regular entry: ${rel}`);
+      if (!expectedFiles.has(rel)) throw new Error(`Unexpected backup file: ${rel}`);
+    }
+  };
+  await visit(root);
+
+  for (const entry of manifest.entries) {
+    if (!Number.isSafeInteger(entry.size) || entry.size < 0 || entry.size > MAX_BACKUP_ENTRY_BYTES) {
+      throw new Error(`Backup entry size is outside supported limits: ${entry.path}`);
+    }
+    totalBytes += entry.size;
+    if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_BACKUP_TOTAL_BYTES) {
+      throw new Error("Backup exceeds the total supported size.");
+    }
+    const parts = entry.path.split("/");
+    let current = root;
+    for (const part of parts.slice(0, -1)) {
+      current = path.join(current, part);
+      const info = await fs.lstat(current);
+      if (!info.isDirectory() || info.isSymbolicLink()) {
+        throw new Error(`Backup path contains an unsafe directory: ${entry.path}`);
+      }
+    }
+    const absolute = path.join(root, ...parts);
+    const info = await fs.lstat(absolute);
+    if (!info.isFile() || info.isSymbolicLink() || info.size !== entry.size) {
+      throw new Error(`Backup entry is missing or has an invalid size: ${entry.path}`);
+    }
+    files.set(entry.path, await fs.readFile(absolute));
+  }
+
+  const verification = verifyBackupFiles(manifest, files);
+  if (!verification.valid) {
+    throw new Error(`Backup directory verification failed: ${verification.errors.join("; ")}`);
+  }
+  return { manifest, files };
 }
 
 /** Verify bundle bytes against the manifest before any future restore step. */
