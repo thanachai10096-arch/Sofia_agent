@@ -92,7 +92,7 @@ if (discordConfigured) {
       const command = trimmedContent.split(/\s+/, 1)[0] ?? "";
       const argument = trimmedContent.slice(command.length).trim();
       const prefix = "/run";
-      const isRunCommand = trimmedContent === prefix || trimmedContent.startsWith(prefix + " ") || trimmedContent.startsWith(prefix + "\\t");
+      const isRunCommand = trimmedContent === prefix || trimmedContent.startsWith(prefix + " ") || trimmedContent.startsWith(prefix + "\t");
       const isNaturalMessage = message.transportVerified === true &&
         (message.directMessage === true || message.addressedToBot === true) &&
         trimmedContent.length > 0 && !trimmedContent.startsWith("/");
