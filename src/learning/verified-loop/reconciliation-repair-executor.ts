@@ -170,10 +170,6 @@ export async function executeLearningRepairPlan(
     }
     const now = () => (host.now?.() ?? new Date()).toISOString();
     const existing = await journal.get(action.idempotencyKey, action.scope);
-    if (existing?.state === "succeeded") {
-      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", reason: "already journaled" });
-      continue;
-    }
     const snapshot = await host.revalidate(action);
     if (!snapshot || !validScope(snapshot.scope) || !sameScope(snapshot.scope, action.scope) ||
         typeof snapshot.exists !== "boolean" || typeof snapshot.active !== "boolean" ||
@@ -181,11 +177,19 @@ export async function executeLearningRepairPlan(
         typeof snapshot.policyRevision !== "string" || !snapshot.policyRevision.trim()) {
       throw new Error("Authoritative repair revalidation returned invalid state");
     }
+    if (existing?.state === "succeeded") {
+      if (snapshot.exists && snapshot.active && snapshot.policyRevision === action.expectedPolicyRevision && snapshot.explicitlyApproved && snapshot.trustedEvidenceValid) {
+        results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", reason: "journal and authoritative state agree" });
+      } else {
+        results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "journal says succeeded but authoritative state drifted; manual reconciliation required" });
+      }
+      continue;
+    }
     if (snapshot.policyRevision !== action.expectedPolicyRevision || !snapshot.explicitlyApproved || !snapshot.trustedEvidenceValid) {
       const reason = "scope/policy/approval/evidence revalidation failed";
-      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
       const entry = existing ?? { key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running" as const, attempts: 0, updatedAt: now() };
       await journal.begin(entry);
+      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
       await journal.finish(action.idempotencyKey, action.scope, "failed", reason);
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
       continue;
