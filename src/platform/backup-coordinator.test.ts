@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBackupBundle, projectMemoryBackupSource, sqliteSessionBackupSource, userMemoryBackupSource, verifyBackupBundle } from "./backup-coordinator.js";
+import { createBackupBundle, projectMemoryBackupSource, sqliteSessionBackupSource, userMemoryBackupSource, verifyBackupBundle, writeBackupBundleDirectory } from "./backup-coordinator.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -125,4 +125,53 @@ test("backup coordinator bounds the total number of collected entries", async ()
   await assert.rejects(createBackupBundle([
     { name: "large", async snapshot() { return tooMany; } },
   ], createdAt), /too many entries/);
+});
+
+
+test("backup directory export verifies bytes, writes manifest last, and uses private file permissions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-export-"));
+  const destination = path.join(root, "export");
+  try {
+    const bundle = await createBackupBundle([
+      { name: "state", async snapshot() {
+        return [
+          { path: "sessions/session.json", content: Buffer.from('{"ok":true}') },
+          { path: "memory/project.json", content: Buffer.from("{}") },
+        ];
+      } },
+    ], createdAt);
+    assert.equal(await writeBackupBundleDirectory(bundle, destination), destination);
+    const manifest = JSON.parse(await (await import("node:fs/promises")).readFile(path.join(destination, "manifest.json"), "utf8")) as { entries: Array<{ path: string; sha256: string }> };
+    assert.equal(manifest.entries.length, 2);
+    assert.equal(await (await import("node:fs/promises")).readFile(path.join(destination, "sessions/session.json"), "utf8"), '{"ok":true}');
+    if (process.platform !== "win32") {
+      const stats = await (await import("node:fs/promises")).stat(path.join(destination, "sessions/session.json"));
+      assert.equal(stats.mode & 0o777, 0o600);
+    }
+    await assert.rejects(writeBackupBundleDirectory(bundle, destination), /EEXIST|exist/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("backup directory export refuses invalid bundles and cleans partial output on write failure", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-export-fail-"));
+  try {
+    const bundle = await createBackupBundle([
+      { name: "state", async snapshot() {
+        return [
+          { path: "a", content: Buffer.from("file") },
+          { path: "a/b", content: Buffer.from("conflicting nested file") },
+        ];
+      } },
+    ], createdAt);
+    const destination = path.join(root, "partial");
+    await assert.rejects(writeBackupBundleDirectory(bundle, destination));
+    await assert.rejects((await import("node:fs/promises")).stat(destination), { code: "ENOENT" });
+    const invalid = { ...bundle, files: new Map() };
+    await assert.rejects(writeBackupBundleDirectory(invalid, path.join(root, "invalid")), /invalid backup bundle/i);
+    await assert.rejects((await import("node:fs/promises")).stat(path.join(root, "invalid")), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
