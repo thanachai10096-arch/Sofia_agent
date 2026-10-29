@@ -258,3 +258,17 @@ Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record tu
 ## User memory
 
 See [User Memory](docs/USER_MEMORY.md) for explicit, user-scoped memory API routes, scopes, retention limits, and privacy boundaries.
+
+
+### Declared model capability metadata
+
+Model routes may optionally declare `featureSupport` metadata for `toolCalling`,
+`vision`, `structuredOutput`, and `contextWindow`. The router skips a route
+for vision tasks when `vision: false`, and for coding/debugging/research tasks
+when `toolCalling: false`. Missing metadata is treated as unknown, not as
+unsupported, so existing route configurations remain compatible.
+
+`buildModelCapabilityReport(routes)` reports only declared metadata and marks
+missing values as `unknown`. It does not infer capabilities from model names,
+probe providers, or expose provider credentials. Capability declarations are
+operator-provided information, not independently verified claims about a model.
