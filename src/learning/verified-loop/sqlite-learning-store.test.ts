@@ -30,7 +30,9 @@ test("SQLite learning transactions persist experiences and skills across reopen"
     await reopened.transaction(scope, async tx => {
       assert.equal((await tx.listExperiences(scope, 10)).length, 1);
       assert.equal((await tx.listActiveSkills(scope)).length, 1);
-      assert.equal((await tx.listExperiences({ ...scope, projectId: "other" }, 10)).length, 0);
+      let isolated = false;
+      try { await tx.listExperiences({ ...scope, projectId: "other" }, 10); } catch { isolated = true; }
+      assert.equal(isolated, true);
     });
     reopened.close();
   } finally {
