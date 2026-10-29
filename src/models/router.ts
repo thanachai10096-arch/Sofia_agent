@@ -47,7 +47,11 @@ export class ModelRouter {
   }
 
   listRoutes(): ModelRoute[] {
-    return this.routes.map((route) => ({ ...route, capabilities: [...route.capabilities] }));
+    return this.routes.map((route) => ({
+      ...route,
+      capabilities: [...route.capabilities],
+      ...(route.featureSupport ? { featureSupport: { ...route.featureSupport } } : {}),
+    }));
   }
 
   select(kind: TaskKind, preferredRouteId?: string): ModelRoute {
