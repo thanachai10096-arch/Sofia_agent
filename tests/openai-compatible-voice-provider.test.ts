@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createOpenAICompatibleVoiceProviders } from "../src/voice/openai-compatible-provider.js";
+import {
+  createOpenAICompatibleVoiceProviders,
+  loadOpenAICompatibleVoiceConfigFromEnv,
+} from "../src/voice/openai-compatible-provider.js";
 
 function mockResponse(body: string | Uint8Array, status = 200, contentType = "application/json"): Response {
   const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
@@ -148,4 +151,38 @@ test("OpenAI-compatible voice provider does not expose provider error response b
       && /HTTP 500/.test(error.message)
       && !error.message.includes("sensitive-provider-error-body"),
   );
+});
+
+
+test("voice provider env loader returns undefined when unconfigured and requires complete config", () => {
+  assert.equal(loadOpenAICompatibleVoiceConfigFromEnv({}), undefined);
+  assert.throws(() => loadOpenAICompatibleVoiceConfigFromEnv({
+    SOFIA_VOICE_BASE_URL: "https://voice.example.test/v1",
+    SOFIA_VOICE_STT_MODEL: "stt",
+  }), /must be configured together/);
+});
+
+test("voice provider env loader reads server-side credentials and optional settings without exposing them in errors", () => {
+  const config = loadOpenAICompatibleVoiceConfigFromEnv({
+    SOFIA_VOICE_BASE_URL: "https://voice.example.test/v1",
+    SOFIA_VOICE_API_KEY: "server-secret",
+    SOFIA_VOICE_STT_MODEL: "stt-model",
+    SOFIA_VOICE_TTS_MODEL: "tts-model",
+    SOFIA_VOICE_TTS_VOICE: "voice-a",
+    SOFIA_VOICE_MAX_RESPONSE_BYTES: "2048",
+  });
+  assert.deepEqual(config, {
+    baseUrl: "https://voice.example.test/v1",
+    apiKey: "server-secret",
+    sttModel: "stt-model",
+    ttsModel: "tts-model",
+    ttsVoice: "voice-a",
+    maxResponseBytes: 2048,
+  });
+  assert.throws(() => loadOpenAICompatibleVoiceConfigFromEnv({
+    SOFIA_VOICE_BASE_URL: "https://voice.example.test/v1",
+    SOFIA_VOICE_API_KEY: "server-secret",
+    SOFIA_VOICE_STT_MODEL: "stt",
+    SOFIA_VOICE_MAX_RESPONSE_BYTES: "NaN",
+  }), /must be an integer/);
 });
