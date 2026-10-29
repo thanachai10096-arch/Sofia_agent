@@ -20,7 +20,7 @@ Sofia should follow the same user-facing agent operating model as Hermes Agent: 
 
 ## Current branch status (verified against source and tests)
 
-- **Session replay — implemented on the `SofiaAgent` path:** when a caller supplies `sessionId`, the next run receives up to 12 prior turns within a 6,000-character bound. This is not semantic search across older transcript history.
+- **Session replay and older-turn retrieval — implemented on the `SofiaAgent` path:** when a caller supplies `sessionId`, the next run receives up to 12 recent prior turns within a 6,000-character bound, plus up to five lexical matches from older turns in that same session (2,000-character bound). Retrieval never searches across sessions/users and retrieved history is fenced as untrusted. This is bounded lexical matching, not semantic/vector search.
 - **Saved user memory — implemented as optional retrieval:** if a configured memory store and host-derived `principalId` are present, Sofia retrieves up to five relevant explicitly saved memories within a 2,400-character bound. Retrieval is best-effort and memory is fenced as untrusted reference data. This does not enable automatic memory writing.
 - **Learning — partially implemented:** the Brain has a verified repair-skill learning path, the EvolutionEngine records outcomes and ranks skills, and managed skill lifecycle mechanisms exist. This is not proof of autonomous general-purpose skill creation from arbitrary completed conversations or model training.
 - **Model selection — not yet exposed as a per-request provider/model preference:** current legacy routing selects an internal route by task type. Explicit user choice plus `auto` remains open work.
