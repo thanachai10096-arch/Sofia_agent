@@ -108,9 +108,15 @@ function validateLearnedCandidate(candidate: LearnedSkillCandidate): LearnedSkil
   const name = String(redactSecrets(candidate.name)).slice(0, 200);
   const trigger = String(redactSecrets(candidate.trigger)).slice(0, 240);
   const procedure = candidate.procedure.map(step => String(redactSecrets(step)).slice(0, 2000));
+  const evidenceIds = candidate.evidenceIds.map(id => String(redactSecrets(id)).slice(0, 500));
   if (containsPromptInjection(name) || containsPromptInjection(trigger) ||
       procedure.some(step => containsPromptInjection(step))) {
     throw new Error("Learned skill candidate rejected by prompt-injection guard");
+  }
+  // Redaction can make distinct identifiers equal; reject collisions rather than
+  // silently merging provenance records after sanitization.
+  if (new Set(evidenceIds).size !== evidenceIds.length) {
+    throw new Error("Learned skill candidate evidence IDs collide after secret redaction");
   }
   return {
     name,
@@ -119,7 +125,7 @@ function validateLearnedCandidate(candidate: LearnedSkillCandidate): LearnedSkil
     strategy: candidate.strategy,
     procedure,
     verification: [...candidate.verification],
-    evidenceIds: [...candidate.evidenceIds],
+    evidenceIds,
   };
 }
 
