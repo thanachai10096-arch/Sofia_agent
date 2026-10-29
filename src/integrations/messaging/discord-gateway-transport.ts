@@ -213,7 +213,30 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
         resolve();
       };
       const onOpen = () => { opened = true; };
-      const onClose = () => { finish(); };
+      const onClose = (event: SocketEvent) => {
+        const code = typeof event.code === "number" ? event.code : 0;
+        // These close codes require configuration or credentials to change; retrying
+        // indefinitely only creates noisy reconnects and hides the actual problem.
+        const fatalCloseCodes = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
+        if (fatalCloseCodes.has(code)) {
+          active = false;
+          settleFirstReady(new Error(
+            code === 4004
+              ? "Discord Gateway authentication failed; check the bot token."
+              : code === 4014 || code === 4013
+                ? "Discord Gateway rejected the configured intents; check Developer Portal privileged intents."
+                : "Discord Gateway rejected the connection configuration; check bot/application settings.",
+          ));
+          safeNotify(options, "gateway_failed", code);
+          controller?.abort();
+        } else if (code === 4007 || code === 4009) {
+          // Invalid sequence or expired session cannot be resumed.
+          sessionId = undefined;
+          sequence = undefined;
+          resumeUrl = undefined;
+        }
+        finish();
+      };
       const onError = () => { if (!opened) settleFirstReady(new Error("Discord Gateway connection failed.")); };
       const onAbort = () => { try { current.close(1000, "Sofia transport stopped"); } finally { finish(); } };
       const onMessage = (event: SocketEvent) => {
