@@ -13,9 +13,9 @@ The loop is an additive extension point for Sofia's existing Brain, Skill Lifecy
 
 ## Required host adapters
 
-`VerifiedLearningHost` must be implemented against the existing Sofia stores and policy/verifier interfaces. Its transaction implementation must provide atomic uniqueness for the tuple (tenantId, principalId, projectId, receiptId), and it must persist experiences, candidates, evaluations, and active skills. Do not implement this contract with an in-memory map in production.
+`VerifiedLearningHost` must be implemented against the existing Sofia stores and policy/verifier interfaces. `SqliteLearningTransactionStore` now supplies a durable transaction-port implementation for experiences, candidates, evaluations, and active skills. It enforces atomic uniqueness for (tenantId, principalId, projectId, receiptId), scope checks, rollback, and private POSIX database-file permissions. Compose it with `withSqliteLearningTransactions(existingServices, store)`; the other host services remain required and must be the authoritative receipt/evidence lookup, policy assessor, and real regression runner. The adapter does not fabricate these services or enable learning by itself.
 
-`SelfImprovementCheckpointStore` must persist notification cursor and pending out-of-order notifications durably and atomically. The in-memory implementation in tests is only a test double. The `persistFinalizedReceipt` adapter must return a sequence from a durable source; do not invent a sequence from process-local counters.
+`SelfImprovementCheckpointStore` must persist notification cursor and pending out-of-order notifications durably and atomically. `SqliteSelfImprovementCheckpointStore` is the durable cursor/pending-event implementation; the in-memory implementation in tests remains only a test double. The `persistFinalizedReceipt` adapter must return a sequence from a durable source; do not invent a sequence from process-local counters.
 
 ## Safety notes
 
