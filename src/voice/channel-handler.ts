@@ -91,6 +91,17 @@ export function createVoiceChannelHandler(options: VoiceChannelHandlerOptions) {
       }
     }
 
+    // Reject malformed audio envelopes before consuming the durable event claim.
+    // The workflow still enforces deployment-specific byte, duration, and MIME limits.
+    if (!event.audio || typeof event.audio !== "object" ||
+        !(event.audio.bytes instanceof Uint8Array) || event.audio.bytes.byteLength === 0 ||
+        typeof event.audio.mimeType !== "string" || !event.audio.mimeType.trim() ||
+        event.audio.mimeType.length > 128 || /[\\r\\n\\0]/.test(event.audio.mimeType) ||
+        typeof event.audio.durationMs !== "number" || !Number.isFinite(event.audio.durationMs) ||
+        event.audio.durationMs <= 0) {
+      throw new Error("Invalid voice event audio metadata");
+    }
+
     const allowed = await options.accessPolicy.isAllowed({
       channel: event.channel,
       senderId: event.senderId,
