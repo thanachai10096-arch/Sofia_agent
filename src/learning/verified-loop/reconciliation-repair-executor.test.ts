@@ -25,14 +25,15 @@ class MemoryJournal implements LearningRepairJournal {
     if (prior?.state === "succeeded" || prior?.state === "running") {
       return { ...prior, claimed: false };
     }
-    const next = { ...entry, state: "running" as const, attempts: (prior?.attempts ?? 0) + 1, claimed: true };
+    const next = { ...entry, state: "running" as const, attempts: (prior?.attempts ?? 0) + 1, claimed: true, claimToken: `claim-${(prior?.attempts ?? 0) + 1}` };
     this.entries.set(entry.key, next);
     return next;
   }
-  async finish(key: string, requested: LearningScope, state: "running" | "succeeded" | "failed", result?: string) {
+  async finish(key: string, requested: LearningScope, state: "running" | "succeeded" | "failed", result?: string, claimToken?: string) {
     const prior = this.entries.get(key);
     if (!prior || prior.scope.tenantId !== requested.tenantId || prior.scope.principalId !== requested.principalId || prior.scope.projectId !== requested.projectId) throw new Error("Missing entry");
-    this.entries.set(key, { ...prior, state, result, updatedAt: new Date().toISOString() });
+    if (claimToken !== undefined && prior.claimToken !== claimToken) throw new Error("Repair claim lost; stale executor cannot finalize this attempt");
+    this.entries.set(key, { ...prior, state, result, updatedAt: new Date().toISOString(), claimToken: undefined });
   }
   async audit(event: LearningRepairAuditEvent) { this.events.push(event); }
 }
