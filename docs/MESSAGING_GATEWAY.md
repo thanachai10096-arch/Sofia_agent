@@ -146,3 +146,10 @@ The runtime reuses Sofia's existing API client, messaging gateway, handler, file
 ## Natural chat behavior
 
 `createSofiaMessagingHandler` defaults to `mode: "natural"`: ordinary non-empty text from an authorized conversation is submitted as a task. The configured `/run` prefix is still accepted, while unrelated slash commands are ignored. Set `mode: "command"` explicitly for deployments that require the prefix. Natural chat does not bypass authorization, deduplication, rate limits, API policy, or runtime safety checks.
+
+
+## WhatsApp Cloud API (optional)
+
+The Node API entrypoint can optionally mount `GET` and `POST /v1/integrations/whatsapp/webhook` when `SOFIA_WHATSAPP_ENABLED=true` and all required settings are present. Configure the Meta webhook subscription for the `messages` field. The GET challenge is checked against `WHATSAPP_VERIFY_TOKEN`; POST bodies are authenticated against the exact raw bytes using `X-Hub-Signature-256` and `WHATSAPP_APP_SECRET` before parsing. The configured `WHATSAPP_PHONE_NUMBER_ID` must match the webhook metadata, and `WHATSAPP_GRAPH_API_VERSION` must be an explicit version supported by Meta.
+
+Required server-side variables: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_API_VERSION`, `WHATSAPP_ALLOWED_USER_IDS`, `WHATSAPP_ALLOWED_CONVERSATION_IDS`, `SOFIA_API_KEY`, and `SOFIA_API_BASE_URL` (or `RAILWAY_PUBLIC_DOMAIN`). Both allowlists are mandatory and fail closed. Use immutable WhatsApp sender IDs in both lists for individual chats; empty lists never grant access. This integration currently handles text messages only. Media, group conversations, real Meta-account smoke tests, and production enablement remain separate work items.
