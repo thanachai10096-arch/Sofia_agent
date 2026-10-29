@@ -43,20 +43,25 @@ type AnthropicMessage = { role: "user" | "assistant"; content: string | Array<Re
 function toAnthropicMessages(messages: ChatMessage[]): { system?: string; messages: AnthropicMessage[] } {
   const system: string[] = [];
   const converted: AnthropicMessage[] = [];
-  for (const message of messages) {
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index]!;
     if (message.role === "system") {
       if (message.content.trim()) system.push(message.content);
       continue;
     }
     if (message.role === "tool") {
-      converted.push({
-        role: "user",
-        content: [{
+      const results: Array<Record<string, unknown>> = [];
+      while (index < messages.length && messages[index]!.role === "tool") {
+        const toolResult = messages[index]!;
+        results.push({
           type: "tool_result",
-          tool_use_id: message.toolCallId ?? "unknown-tool-call",
-          content: message.content,
-        }],
-      });
+          tool_use_id: toolResult.toolCallId ?? "unknown-tool-call",
+          content: toolResult.content,
+        });
+        index++;
+      }
+      index--;
+      converted.push({ role: "user", content: results });
       continue;
     }
     if (message.role === "assistant" && message.toolCalls?.length) {
