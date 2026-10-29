@@ -90,7 +90,7 @@ test("verified-completion bridge rejects malformed callback shapes without throw
   });
 
   await handler({ ...completion(), evidenceIds: undefined } as unknown as FinalizedBrainCompletion);
-  await handler({ ...completion(), verification: [{ ...completion().verification[0], evidenceIds: undefined }] } as unknown as FinalizedBrainCompletion);
+  await handler({ ...completion(), verification: [{ ...completion().verification[0]!, evidenceIds: undefined }] } as unknown as FinalizedBrainCompletion);
   assert.equal(persisted, false);
   assert.equal(checkpoint.getState().lastSequence, 0);
 });
