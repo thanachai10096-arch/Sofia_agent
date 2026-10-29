@@ -8,6 +8,7 @@ import { createLineHttpTransport } from "./line-http-transport.js";
 import type { LineWebhookTransport } from "./line-http-route.js";
 import type { OutboundMessage } from "./types.js";
 import { redactSecrets } from "../../security/guard.js";
+import type { ChatPlatform } from "../chat-adapter.js";
 
 export interface LineMessagingRuntime {
   start(): Promise<void>;
@@ -61,7 +62,7 @@ export function createLineMessagingRuntime(
     const allowedConversations = parseLineIds(rawConversations, "LINE_ALLOWED_CONVERSATION_IDS");
     const client = new SofiaClient({ apiKey, baseUrl });
     const accessPolicy = {
-      isAllowed(input: { platform: "telegram" | "discord" | "slack"; senderId: string; conversationId: string }) {
+      isAllowed(input: { platform: ChatPlatform; senderId: string; conversationId: string }) {
         return input.platform === "line" && allowedUsers.has(input.senderId) &&
           allowedConversations.has(input.conversationId);
       },
