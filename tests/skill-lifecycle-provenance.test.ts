@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VersionedSkillLifecycle } from "../src/brain/skill-lifecycle.js";
@@ -16,7 +16,7 @@ const skillPackage: SkillPackage = {
     name: "Evidence guard skill",
     description: "Fixture for provenance validation",
     triggers: ["test"],
-    categories: ["testing"],
+    categories: ["runtime_error"],
     strategy: "inspect-evidence",
     procedure: ["inspect evidence", "verify outcome"],
     verification: ["test"],
@@ -41,7 +41,46 @@ test("skill lifecycle rejects missing, blank, duplicate, and unbounded evidence 
         /Invalid skill provenance/,
       );
     }
+    for (const source of ["", "x".repeat(201)]) {
+      assert.throws(
+        () => lifecycle.propose(skillPackage, { source, evidenceIds: ["evidence-1"], confidence: 0.9 }),
+        /Invalid skill provenance/,
+      );
+    }
     assert.equal(lifecycle.list().length, 0, "invalid provenance must not create lifecycle records");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skill lifecycle rejects persisted records with missing evidence IDs", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-persisted-evidence-"));
+  const file = path.join(root, "lifecycle.json");
+  try {
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    lifecycle.propose(skillPackage, { source: "repair", evidenceIds: ["evidence-1"], confidence: 0.9 });
+    const persisted = JSON.parse(readFileSync(file, "utf8")) as { records: Array<{ provenance: { evidenceIds: string[] } }> };
+    persisted.records[0]!.provenance.evidenceIds = [];
+    writeFileSync(file, JSON.stringify(persisted));
+    assert.throws(() => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }), /Invalid skill lifecycle record/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skill lifecycle rejects evaluator results above the check limit", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-evaluator-bounds-"));
+  try {
+    const lifecycle = new VersionedSkillLifecycle(
+      new InMemorySkillsPlatform(),
+      async () => ({ passed: true, checks: Array.from({ length: 101 }, () => ({ name: "check", passed: true })) }),
+      { file: path.join(root, "lifecycle.json") },
+    );
+    const candidate = lifecycle.propose(skillPackage, { source: "verified-repair", evidenceIds: ["test-run-123"], confidence: 0.9 });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.match(evaluated.evaluation?.checks[0]?.detail ?? "", /unbounded evidence/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
