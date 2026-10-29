@@ -68,6 +68,11 @@ test("repair audit journal rejects malformed events and prevents update/delete",
       key: "repair-1", scope, actorId: "", skillId: "skill-1",
       event: "repair_started", at: "not-a-date",
     }), /Invalid learning repair audit event/);
+    assert.throws(() => journal.audit(null as never), /Invalid learning repair audit event/);
+    assert.throws(() => journal.audit({
+      key: "repair-1", scope, actorId: "operator-1", skillId: "skill-1",
+      event: "repair_started", at: "2026-10-29T00:00:01.000Z", detail: 42 as never,
+    }), /Invalid learning repair audit event/);
     await journal.audit({
       key: "repair-1", scope, actorId: "operator-1", skillId: "skill-1",
       event: "repair_started", at: "2026-10-29T00:00:01.000Z",
