@@ -51,6 +51,31 @@ function safeRelativePath(value: unknown): value is string {
   });
 }
 
+/**
+ * Backup bundles must be extractable on case-insensitive filesystems too.
+ * NFC normalization also prevents visually/canonically equivalent names from
+ * mapping to the same destination. Reject file-vs-directory prefix conflicts
+ * (for example, both "state" and "state/session.json").
+ */
+function reservePortablePath(value: string, seen: Set<string>): void {
+  const normalized = value.normalize("NFC").toLowerCase();
+  if (seen.has(normalized)) {
+    throw new Error("Backup entry paths must be unique across portable filesystems.");
+  }
+  const parts = normalized.split("/");
+  for (let i = 1; i < parts.length; i += 1) {
+    if (seen.has(parts.slice(0, i).join("/"))) {
+      throw new Error("Backup paths cannot conflict as both files and directories.");
+    }
+  }
+  for (const existing of seen) {
+    if (existing.startsWith(normalized + "/")) {
+      throw new Error("Backup paths cannot conflict as both files and directories.");
+    }
+  }
+  seen.add(normalized);
+}
+
 function digest(content: Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
 }
@@ -75,8 +100,7 @@ export function createBackupManifest(
   let totalBytes = 0;
   const entries = files.map(({ path, content }) => {
     if (!safeRelativePath(path)) throw new Error("Backup entry path must be a safe relative POSIX path.");
-    if (seen.has(path)) throw new Error("Backup entry paths must be unique.");
-    seen.add(path);
+    reservePortablePath(path, seen);
     if (!(content instanceof Uint8Array)) throw new TypeError("Backup entry content must be bytes.");
     if (content.byteLength > MAX_BACKUP_ENTRY_BYTES) throw new Error("Backup entry exceeds the maximum allowed size.");
     totalBytes += content.byteLength;
@@ -111,8 +135,7 @@ export function validateBackupManifest(value: unknown): BackupManifest {
     if (!isRecord(entry) || !safeRelativePath(entry.path)) {
       throw new Error("Backup manifest contains an unsafe path.");
     }
-    if (seen.has(entry.path)) throw new Error("Backup manifest contains duplicate paths.");
-    seen.add(entry.path);
+    reservePortablePath(entry.path, seen);
     if (!Number.isSafeInteger(entry.size) || (entry.size as number) < 0 ||
         (entry.size as number) > MAX_BACKUP_ENTRY_BYTES) {
       throw new Error("Backup manifest contains an invalid entry size.");
