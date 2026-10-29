@@ -126,6 +126,7 @@ export class PersistentSkillLedger implements SkillLedger {
   private readonly pendingCandidates = new Set<LearnedSkillCandidate>();
   private pending: Promise<void> = Promise.resolve();
   private persistenceError: string | null = null;
+  private persistenceErrorReported = false;
   private pendingWrites = 0;
 
   constructor(private readonly store: ProjectMemoryStore) {
@@ -167,6 +168,12 @@ export class PersistentSkillLedger implements SkillLedger {
       () => {
         this.pendingCandidates.delete(safe);
         this.cache.push(safe);
+        // Clear a previously reported transient failure only after a later
+        // durable write succeeds; do not erase failures before flush observes them.
+        if (this.persistenceErrorReported) {
+          this.persistenceError = null;
+          this.persistenceErrorReported = false;
+        }
       },
       error => {
         // Keep the error observable until flush() reports it. A later successful
@@ -192,7 +199,7 @@ export class PersistentSkillLedger implements SkillLedger {
       // Report each failed flush once. A later successful write can then recover
       // without an old transient error permanently poisoning every future flush.
       const error = this.persistenceError;
-      this.persistenceError = null;
+      this.persistenceErrorReported = true;
       throw new Error("Skill ledger persistence failed: " + error);
     }
   }
