@@ -16,3 +16,6 @@ export type { RuntimeLearningSkill, LearningReconciliationIssue, LearningReconci
 
 export { planLearningReconciliationRepair } from "./reconciliation-repair.js";
 export type { LearningRepairAuthorization, LearningRepairAction, LearningRepairBlock, LearningRepairPlan } from "./reconciliation-repair.js";
+
+export { executeLearningRepairPlan, SqliteLearningRepairJournal } from "./reconciliation-repair-executor.js";
+export type { LearningRepairState, LearningRepairJournalEntry, LearningRepairAuditEvent, LearningRepairJournal, LearningRepairSnapshot, LearningRepairExecutorHost, LearningRepairExecutionResult } from "./reconciliation-repair-executor.js";
