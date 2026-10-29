@@ -3,6 +3,7 @@ import test from "node:test";
 import { createHmac } from "node:crypto";
 import { createWhatsAppHttpTransport, verifyWhatsAppSignature, verifyWhatsAppWebhookChallenge } from "./whatsapp-http-transport.js";
 import { createWhatsAppAdapter, type VerifiedWhatsAppMessage } from "./whatsapp.js";
+import { createWhatsAppMessagingRuntime } from "./whatsapp-runtime.js";
 
 const appSecret = "test-meta-app-secret";
 const signed = (body: string) => "sha256=" + createHmac("sha256", appSecret).update(body).digest("hex");
@@ -78,4 +79,44 @@ test("WhatsApp adapter maps identities and sends chunked replies via the shared 
 test("WhatsApp transport validates explicit Graph API version and configured phone ID", () => {
   assert.throws(() => createWhatsAppHttpTransport({ ...options, graphApiVersion: "latest" }), /version/);
   assert.throws(() => createWhatsAppHttpTransport({ ...options, phoneNumberId: "not-a-number" }), /phone number ID/);
+});
+
+test("WhatsApp runtime remains disabled by default and fails closed without allowlists", () => {
+  const warnings: string[] = [];
+  assert.equal(createWhatsAppMessagingRuntime({}, "/tmp/sofia-whatsapp-test", (warning) => warnings.push(warning)), undefined);
+  assert.deepEqual(warnings, []);
+  const runtime = createWhatsAppMessagingRuntime({
+    SOFIA_WHATSAPP_ENABLED: "true",
+    WHATSAPP_ACCESS_TOKEN: "token",
+    WHATSAPP_APP_SECRET: "secret",
+    WHATSAPP_VERIFY_TOKEN: "verify",
+    WHATSAPP_PHONE_NUMBER_ID: "12345678901",
+    WHATSAPP_GRAPH_API_VERSION: "v99.0",
+    WHATSAPP_ALLOWED_USER_IDS: "66812345678",
+    WHATSAPP_ALLOWED_CONVERSATION_IDS: "",
+    SOFIA_API_KEY: "api-key",
+    SOFIA_API_BASE_URL: "https://sofia.example",
+  }, "/tmp/sofia-whatsapp-test", (warning) => warnings.push(warning));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /allowlists are required/);
+});
+
+test("WhatsApp runtime constructs only when all required settings are present", async () => {
+  const runtime = createWhatsAppMessagingRuntime({
+    SOFIA_WHATSAPP_ENABLED: "true",
+    WHATSAPP_ACCESS_TOKEN: "token",
+    WHATSAPP_APP_SECRET: "secret",
+    WHATSAPP_VERIFY_TOKEN: "verify",
+    WHATSAPP_PHONE_NUMBER_ID: "12345678901",
+    WHATSAPP_GRAPH_API_VERSION: "v99.0",
+    WHATSAPP_ALLOWED_USER_IDS: "66812345678",
+    WHATSAPP_ALLOWED_CONVERSATION_IDS: "66812345678",
+    SOFIA_API_KEY: "api-key",
+    SOFIA_API_BASE_URL: "https://sofia.example",
+  }, "/tmp/sofia-whatsapp-runtime-test", () => undefined);
+  assert.ok(runtime);
+  assert.equal(typeof runtime.webhookTransport.handleWebhook, "function");
+  assert.equal(runtime.webhookTransport.verifyChallenge({ mode: "subscribe", token: "verify", challenge: "challenge" }), "challenge");
+  await runtime.stop();
 });
