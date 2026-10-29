@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createBackupBundle } from "./backup-coordinator.js";
@@ -83,6 +84,5 @@ test("SQLite restore adapter rejects invalid database headers before lifecycle m
 
 function requireFsWrite(destination: string, bytes: Uint8Array): void {
   // Synchronous fixture helper keeps the lifecycle callback's contract synchronous.
-  const fs = require("node:fs") as typeof import("node:fs");
-  fs.writeFileSync(destination, bytes, { mode: 0o600 });
+  writeFileSync(destination, bytes, { mode: 0o600 });
 }
