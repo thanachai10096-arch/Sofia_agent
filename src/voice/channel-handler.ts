@@ -10,6 +10,12 @@ export type VoiceChannel =
   | "telegram" | "discord-text" | "discord-voice" | "slack"
   | "whatsapp" | "signal" | "matrix";
 
+const VOICE_CHANNELS: ReadonlySet<string> = new Set([
+  "api", "sdk", "cli", "web", "desktop", "mobile",
+  "telegram", "discord-text", "discord-voice", "slack",
+  "whatsapp", "signal", "matrix",
+]);
+
 export interface VerifiedVoiceEvent {
   channel: VoiceChannel;
   /** Stable platform event/message ID, not user-supplied text. */
@@ -72,6 +78,9 @@ export interface VoiceChannelHandlerOptions {
 export function createVoiceChannelHandler(options: VoiceChannelHandlerOptions) {
   return async function handle(event: VerifiedVoiceEvent, signal: AbortSignal): Promise<VoiceChannelResult> {
     signal.throwIfAborted();
+    if (!event || typeof event !== "object" || !VOICE_CHANNELS.has(event.channel)) {
+      throw new Error("Invalid voice event channel");
+    }
     for (const [name, value] of [
       ["eventId", event.eventId],
       ["senderId", event.senderId],
