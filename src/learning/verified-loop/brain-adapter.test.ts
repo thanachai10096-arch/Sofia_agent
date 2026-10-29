@@ -94,3 +94,35 @@ test("verified-completion bridge rejects malformed callback shapes without throw
   assert.equal(persisted, false);
   assert.equal(checkpoint.getState().lastSequence, 0);
 });
+
+
+test("verified-completion bridge rejects a callback principal that differs from authenticated scope", async () => {
+  const checkpoint = checkpointFixture();
+  let persisted = false;
+  const handler = createVerifiedCompletionHandler({
+    loop: { async recordVerifiedCompletion() { assert.fail("mismatched principal must not enter learning"); } } as unknown as VerifiedLearningLoop,
+    resolveScope: async () => scope,
+    persistFinalizedReceipt: async () => { persisted = true; return { receiptId: "receipt-1", sequence: 1 }; },
+    checkpoints: checkpoint.checkpoints,
+    redact: value => value,
+  });
+  await assert.rejects(
+    () => handler(completion({ principalId: "attacker-controlled-principal" })),
+    /principal does not match authenticated learning scope/i,
+  );
+  assert.equal(persisted, false);
+  assert.equal(checkpoint.getState().lastSequence, 0);
+});
+
+test("verified-completion bridge rejects malformed authoritative receipt metadata", async () => {
+  const checkpoint = checkpointFixture();
+  const handler = createVerifiedCompletionHandler({
+    loop: { async recordVerifiedCompletion() { assert.fail("invalid receipt metadata must not enter learning"); } } as unknown as VerifiedLearningLoop,
+    resolveScope: async () => scope,
+    persistFinalizedReceipt: async () => ({ receiptId: 42, sequence: Number.NaN } as unknown as { receiptId: string; sequence: number }),
+    checkpoints: checkpoint.checkpoints,
+    redact: value => value,
+  });
+  await assert.rejects(() => handler(completion()), /invalid sequence or receipt id/i);
+  assert.equal(checkpoint.getState().lastSequence, 0);
+});
