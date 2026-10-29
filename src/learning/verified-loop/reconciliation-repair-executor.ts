@@ -84,7 +84,7 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolute);
     try {
-      db.exec("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS learning_repair_journal (repair_key TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, skill_id TEXT NOT NULL, policy_revision TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('running','succeeded','failed')), attempts INTEGER NOT NULL, updated_at TEXT NOT NULL, result TEXT); CREATE TABLE IF NOT EXISTS learning_repair_audit (sequence INTEGER PRIMARY KEY AUTOINCREMENT, repair_key TEXT NOT NULL, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, actor_id TEXT NOT NULL, skill_id TEXT NOT NULL, event TEXT NOT NULL, at TEXT NOT NULL, detail TEXT);");
+      db.exec("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS learning_repair_journal (repair_key TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, skill_id TEXT NOT NULL, policy_revision TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('running','succeeded','failed')), attempts INTEGER NOT NULL, updated_at TEXT NOT NULL, result TEXT); CREATE TABLE IF NOT EXISTS learning_repair_audit (sequence INTEGER PRIMARY KEY AUTOINCREMENT, repair_key TEXT NOT NULL, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, actor_id TEXT NOT NULL, skill_id TEXT NOT NULL, event TEXT NOT NULL, at TEXT NOT NULL, detail TEXT); CREATE TRIGGER IF NOT EXISTS learning_repair_audit_no_update BEFORE UPDATE ON learning_repair_audit BEGIN SELECT RAISE(ABORT, 'learning repair audit is append-only'); END; CREATE TRIGGER IF NOT EXISTS learning_repair_audit_no_delete BEFORE DELETE ON learning_repair_audit BEGIN SELECT RAISE(ABORT, 'learning repair audit is append-only'); END;");
       privateFile(absolute);
       return new SqliteLearningRepairJournal(db, absolute);
     } catch (error) { db.close(); throw error; }
@@ -138,6 +138,10 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
   }
   audit(event: LearningRepairAuditEvent): Promise<void> {
     assertScope(event.scope);
+    const allowedEvents = new Set<LearningRepairAuditEvent["event"]>(["repair_started", "repair_revalidated", "repair_registered", "repair_succeeded", "repair_failed", "repair_already_satisfied"]);
+    if (!event || typeof event.key !== "string" || !event.key.trim() || typeof event.actorId !== "string" || !event.actorId.trim() || typeof event.skillId !== "string" || !event.skillId.trim() || !allowedEvents.has(event.event) || typeof event.at !== "string" || !Number.isFinite(Date.parse(event.at))) {
+      throw new Error("Invalid learning repair audit event");
+    }
     return this.serial(() => {
       this.db.prepare("INSERT INTO learning_repair_audit (repair_key,tenant_id,principal_id,project_id,actor_id,skill_id,event,at,detail) VALUES (?,?,?,?,?,?,?,?,?)").run(event.key, event.scope.tenantId, event.scope.principalId, event.scope.projectId, event.actorId, event.skillId, event.event, event.at, event.detail?.slice(0, 1000) ?? null);
       privateFile(this.file);
