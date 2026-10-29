@@ -67,11 +67,22 @@ export function createInternalRoute(
 ): InternalRoute {
   const { modelProvider, route } = options;
 
+  // Keep legacy route capabilities unless the operator explicitly declares
+  // a feature. Explicit negative declarations must also apply to the Brain
+  // gateway, which performs its own capability filtering independently of ModelRouter.
+  const capabilities = new Set<string>(route.capabilities);
+  if (route.featureSupport?.toolCalling === true) capabilities.add("tool-use");
+  if (route.featureSupport?.toolCalling === false) capabilities.delete("tool-use");
+  if (route.featureSupport?.vision === true) capabilities.add("vision");
+  if (route.featureSupport?.vision === false) capabilities.delete("vision");
+  if (route.featureSupport?.structuredOutput === true) capabilities.add("structured-output");
+  if (route.featureSupport?.structuredOutput === false) capabilities.delete("structured-output");
+
   return {
     id: route.id,
     budgetKey: route.providerId ?? route.id,
     qualityTier: Math.max(1, Math.round(route.qualityWeight)),
-    capabilities: route.capabilities,
+    capabilities: [...capabilities],
     contextWindow: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_CONTEXT"] ?? route.featureSupport?.contextWindow ?? 32_000),
     maxOutputTokens: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT"] ?? 4_096),
     hardOutputCap: true,
