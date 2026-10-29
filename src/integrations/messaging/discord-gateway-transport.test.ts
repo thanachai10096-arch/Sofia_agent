@@ -21,7 +21,7 @@ class FakeSocket implements DiscordGatewaySocket {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-test("Discord Gateway identifies, ignores ordinary group chatter, and marks exact bot mentions", async () => {
+test("Discord Gateway identifies, passes unaddressed group chatter as unaddressed, and marks exact bot mentions", async () => {
   const socket = new FakeSocket();
   const delivered: Array<{ content: string; directMessage?: boolean; addressedToBot?: boolean; transportVerified?: true }> = [];
   const transport = createDiscordGatewayTransport({
