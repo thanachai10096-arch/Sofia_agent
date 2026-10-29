@@ -542,3 +542,37 @@ test("restore plan target ordering is independent of host locale", async () => {
   ]);
   assert.deepEqual(plan.targets.map((target) => target.name), ["A-target", "z-target", "ä-target"]);
 });
+
+
+test("restore transaction rejects malformed adapters before invoking any adapter", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() { return [{ path: "a.json", content: Buffer.from("A") }]; } },
+  ], createdAt);
+  const events: string[] = [];
+  const valid = {
+    name: "target",
+    paths: ["a.json"],
+    async preflight() { events.push("preflight"); },
+    async captureRollback() { events.push("snapshot"); return "old"; },
+    async apply() { events.push("apply"); },
+    async rollback() { events.push("rollback"); },
+  };
+
+  await assert.rejects(
+    executeBackupRestoreTransaction(bundle, null as never),
+    /adapters must be an array/i,
+  );
+  await assert.rejects(
+    executeBackupRestoreTransaction(bundle, [null] as never),
+    /adapter must be an object/i,
+  );
+  await assert.rejects(
+    executeBackupRestoreTransaction(bundle, [{ ...valid, apply: undefined }] as never),
+    /missing required method: apply/i,
+  );
+  await assert.rejects(
+    executeBackupRestoreTransaction(bundle, [{ ...valid, paths: "a.json" }] as never),
+    /array of paths/i,
+  );
+  assert.deepEqual(events, []);
+});
