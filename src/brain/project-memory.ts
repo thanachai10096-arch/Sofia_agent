@@ -78,27 +78,160 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
       .slice(0, 12);
   }
   readSync(): ProjectMemoryEntry[] {
-    try { const entries=JSON.parse(readFileSync(this.file,"utf8")) as ProjectMemoryEntry[]; return entries.filter(entry=>!containsPromptInjection(entry.content)); }
-    catch { return []; }
+    let raw: string;
+    try {
+      raw = readFileSync(this.file, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+
+    // A missing file is a normal first-run state; a corrupt or unreadable file
+    // is not. Surface corruption so callers cannot mistake data loss for empty memory.
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      throw new Error("Project memory file must contain a JSON array.");
+    }
+    return parsed.filter((entry): entry is ProjectMemoryEntry =>
+      Boolean(entry && typeof entry === "object" &&
+        typeof (entry as ProjectMemoryEntry).content === "string" &&
+        !containsPromptInjection((entry as ProjectMemoryEntry).content))
+    );
   }
+}
+
+const LEARNABLE_CATEGORIES = new Set<FailureCategory>([
+  "syntax_error", "type_error", "runtime_error", "dependency_error", "permission_error",
+  "network_error", "tool_error", "wrong_assumption", "incomplete_solution", "environment_error", "unknown",
+]);
+const LEARNABLE_STRATEGIES = new Set<Strategy>([
+  "initial", "inspect-evidence", "fix-implementation", "fix-environment", "alternative-tool",
+]);
+
+function validateLearnedCandidate(candidate: LearnedSkillCandidate): LearnedSkillCandidate {
+  if (!candidate || typeof candidate !== "object" ||
+      typeof candidate.name !== "string" || candidate.name.trim().length === 0 || candidate.name.length > 200 ||
+      typeof candidate.trigger !== "string" || candidate.trigger.trim().length === 0 || candidate.trigger.length > 240 ||
+      !LEARNABLE_CATEGORIES.has(candidate.category) || !LEARNABLE_STRATEGIES.has(candidate.strategy) ||
+      !Array.isArray(candidate.procedure) || candidate.procedure.length < 2 || candidate.procedure.length > 100 ||
+      !candidate.procedure.every(step => typeof step === "string" && step.trim().length > 0 && step.length <= 2000) ||
+      !Array.isArray(candidate.verification) || candidate.verification.length < 1 || candidate.verification.length > 3 ||
+      !candidate.verification.every(item => item === "typecheck" || item === "test" || item === "build") ||
+      !Array.isArray(candidate.evidenceIds) || candidate.evidenceIds.length < 1 || candidate.evidenceIds.length > 100 ||
+      !candidate.evidenceIds.every(id => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
+      new Set(candidate.evidenceIds).size !== candidate.evidenceIds.length) {
+    throw new Error("Invalid learned skill candidate");
+  }
+  const name = String(redactSecrets(candidate.name)).slice(0, 200);
+  const trigger = String(redactSecrets(candidate.trigger)).slice(0, 240);
+  const procedure = candidate.procedure.map(step => String(redactSecrets(step)).slice(0, 2000));
+  const evidenceIds = candidate.evidenceIds.map(id => String(redactSecrets(id)).slice(0, 500));
+  if (containsPromptInjection(name) || containsPromptInjection(trigger) ||
+      procedure.some(step => containsPromptInjection(step)) ||
+      evidenceIds.some(id => containsPromptInjection(id))) {
+    throw new Error("Learned skill candidate rejected by prompt-injection guard");
+  }
+  // Redaction can make distinct identifiers equal; reject collisions rather than
+  // silently merging provenance records after sanitization.
+  if (new Set(evidenceIds).size !== evidenceIds.length) {
+    throw new Error("Learned skill candidate evidence IDs collide after secret redaction");
+  }
+  return {
+    name,
+    trigger,
+    category: candidate.category,
+    strategy: candidate.strategy,
+    procedure,
+    verification: [...candidate.verification],
+    evidenceIds,
+  };
 }
 
 export class PersistentSkillLedger implements SkillLedger {
   private cache: LearnedSkillCandidate[];
+  private readonly pendingCandidates = new Set<LearnedSkillCandidate>();
+  private pending: Promise<void> = Promise.resolve();
+  private persistenceError: string | null = null;
+  private persistenceErrorReported = false;
+  private pendingWrites = 0;
+
   constructor(private readonly store: ProjectMemoryStore) {
     const syncStore = store as FileProjectMemoryStore;
     this.cache = typeof syncStore.readSync === "function"
-      ? syncStore.readSync().filter(e=>e.kind==="repair"&&e.project==="skill").map(e=>{try{return JSON.parse(e.content) as LearnedSkillCandidate}catch{return undefined}})
-        .filter((e):e is LearnedSkillCandidate=>Boolean(e))
+      ? syncStore.readSync()
+          .filter(entry => entry.kind === "repair" && entry.project === "skill")
+          .map(entry => {
+            try { return validateLearnedCandidate(JSON.parse(entry.content) as LearnedSkillCandidate); }
+            catch { return undefined; }
+          })
+          .filter((entry): entry is LearnedSkillCandidate => Boolean(entry))
       : [];
   }
+
   record(candidate: LearnedSkillCandidate): void {
-    if (!this.cache.some(x=>x.name===candidate.name&&x.category===candidate.category&&x.trigger===candidate.trigger)) this.cache.push(candidate);
-    const now=new Date().toISOString();
-    const id=createHash("sha256").update(JSON.stringify({category:candidate.category,strategy:candidate.strategy,trigger:candidate.trigger,procedure:candidate.procedure})).digest("hex");
-    void this.store.save({id,project:"skill",kind:"repair",content:JSON.stringify(candidate),source:candidate.evidenceIds.join(","),confidence:0.8,createdAt:now,updatedAt:now,uses:0});
+    const safe = validateLearnedCandidate(candidate);
+    const duplicate = [...this.cache, ...this.pendingCandidates].some(item =>
+      item.name === safe.name && item.category === safe.category &&
+      item.trigger === safe.trigger && JSON.stringify(item.procedure) === JSON.stringify(safe.procedure));
+    if (duplicate) return;
+
+    // Keep pending candidates out of list() until their durable write succeeds.
+    this.pendingCandidates.add(safe);
+    const now = new Date().toISOString();
+    const id = createHash("sha256").update(JSON.stringify({
+      category: safe.category, strategy: safe.strategy, trigger: safe.trigger, procedure: safe.procedure,
+    })).digest("hex");
+    const entry: ProjectMemoryEntry = {
+      id, project: "skill", kind: "repair", content: JSON.stringify(safe),
+      source: safe.evidenceIds.join(","), confidence: 0.8, createdAt: now, updatedAt: now, uses: 0,
+    };
+
+    // Serialize writes and observe failures instead of creating an unhandled rejection.
+    this.pendingWrites += 1;
+    this.pending = this.pending.then(
+      () => this.store.save(entry),
+    ).then(
+      () => {
+        this.pendingCandidates.delete(safe);
+        this.cache.push(safe);
+        // Clear a previously reported transient failure only after a later
+        // durable write succeeds; do not erase failures before flush observes them.
+        if (this.persistenceErrorReported) {
+          this.persistenceError = null;
+          this.persistenceErrorReported = false;
+        }
+      },
+      error => {
+        // Keep the error observable until flush() reports it. A later successful
+        // write must not hide an earlier failed candidate in the same batch.
+        this.persistenceError = error instanceof Error ? error.message : String(error);
+        this.pendingCandidates.delete(safe);
+      },
+    ).finally(() => { this.pendingWrites = Math.max(0, this.pendingWrites - 1); });
   }
-  list(): readonly LearnedSkillCandidate[] { return [...this.cache]; }
+
+  list(): readonly LearnedSkillCandidate[] {
+    return this.cache.map(candidate => ({
+      ...candidate,
+      procedure: [...candidate.procedure],
+      verification: [...candidate.verification],
+      evidenceIds: [...candidate.evidenceIds],
+    }));
+  }
+
+  async flush(): Promise<void> {
+    await this.pending;
+    if (this.persistenceError && !this.persistenceErrorReported) {
+      // Report the failure once while retaining it for diagnostics. A later
+      // successful durable write clears this reported transient error.
+      this.persistenceErrorReported = true;
+      throw new Error("Skill ledger persistence failed: " + this.persistenceError);
+    }
+  }
+
+  getPersistenceStatus(): { pending: boolean; lastError: string | null } {
+    return { pending: this.pendingWrites > 0, lastError: this.persistenceError };
+  }
 }
 
 export function memoryEntryFromConvention(project:string,content:string,source="project-context"):ProjectMemoryEntry{
