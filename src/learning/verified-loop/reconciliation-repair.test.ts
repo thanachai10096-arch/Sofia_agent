@@ -46,7 +46,7 @@ test("blocks policy drift, duplicates, and mixed issues rather than guessing a r
 });
 
 test("rejects cross-scope authorization and invalid idempotency keys", () => {
-  assert.throws(() => planLearningReconciliationRepair(report([]), auth({ scope: { ...scope, tenantId: "tenant-b" })), /scope/);
+  assert.throws(() => planLearningReconciliationRepair(report([]), auth({ scope: { ...scope, tenantId: "tenant-b" } })), /scope/);
   assert.throws(() => planLearningReconciliationRepair(report([]), auth({ idempotencyKey: " " })), /authorization/);
 });
 
