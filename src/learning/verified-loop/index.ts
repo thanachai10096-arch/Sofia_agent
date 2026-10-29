@@ -6,4 +6,5 @@ export type { FinalizedBrainCompletion, PersistedCompletionReceipt } from "./bra
 export { ScopedSelfImprovement } from "./self-improvement.js";
 export type { SelfImprovementCheckpointStore, VerifiedExecutionNotification } from "./self-improvement.js";
 export { SqliteSelfImprovementCheckpointStore } from "./sqlite-checkpoint-store.js";
+export { SqliteLearningTransactionStore, withSqliteLearningTransactions } from "./sqlite-learning-store.js"; 
 export { SqliteLearningTransactionStore, withSqliteLearningTransactions } from "./sqlite-learning-store.js";
