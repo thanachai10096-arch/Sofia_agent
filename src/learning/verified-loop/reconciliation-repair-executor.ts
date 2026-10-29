@@ -312,7 +312,7 @@ export async function executeLearningRepairPlan(
       void journal.heartbeat!(action.idempotencyKey, action.scope, entry.claimToken!, now().toISOString())
         .then(owned => { if (!owned) heartbeatLost = true; })
         .catch(() => { heartbeatLost = true; });
-    }, 15_000) : undefined;
+    }, 1_000) : undefined;
     try {
       // Require a durable start audit before any mutation.
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
