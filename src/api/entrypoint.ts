@@ -86,15 +86,16 @@ if (discordConfigured) {
   };
   const handleDiscordMessage = async (message: VerifiedDiscordMessage) => {
     try {
+      if (message.transportVerified === true &&
+          (!discordUserIds.has(message.author.id) || !discordChannelIds.has(message.channelId))) return;
+      deps.securityController?.assertRunning();
+      if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       if (message.transportVerified === true) {
-        if (!discordUserIds.has(message.author.id) || !discordChannelIds.has(message.channelId)) return;
         // Gateway events can be replayed across reconnects or process restarts.
         // Persist the claim before dispatch; if storage fails, fail closed.
         const dedupeKey = "discord:gateway:" + message.channelId + ":" + message.id;
         if (!await discordGatewayDeduplicator.claim(dedupeKey)) return;
       }
-      deps.securityController?.assertRunning();
-      if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       const principalId = "discord:" + message.author.id;
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
       const argument = message.content.trim().slice(command.length).trim();
