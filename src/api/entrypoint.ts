@@ -251,8 +251,8 @@ server.listen(port, "0.0.0.0", () => {
       const accessPolicy = {
         isAllowed(input: { platform: "telegram" | "discord" | "slack"; senderId: string; conversationId: string }) {
           return input.platform === "discord" &&
-            allowedUsers.has(input.senderId) &&
-            allowedChannels.has(input.conversationId);
+            allowedUsers.includes(input.senderId) &&
+            allowedChannels.includes(input.conversationId);
         },
       };
       const baseUrl = process.env.SOFIA_API_BASE_URL?.trim() || "http://127.0.0.1:" + port;
