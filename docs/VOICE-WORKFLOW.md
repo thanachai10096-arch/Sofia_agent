@@ -2,6 +2,8 @@
 
 `VoiceWorkflow` is an optional, provider-agnostic speech pipeline. The host supplies speech-to-text (STT) and optionally text-to-speech (TTS) providers. Transcribed text is passed to a host callback that should call Sofia through its normal runtime and policy path.
 
+`createVoiceProviderRegistry` provides explicit STT/TTS provider registration and selection independently of the LLM route. `loadVoiceProviderSelectionFromEnv` reads only `SOFIA_VOICE_ENABLED`, `SOFIA_VOICE_STT_PROVIDER`, and optional `SOFIA_VOICE_TTS_PROVIDER`; voice is disabled by default and this helper never reads or returns credentials. It does not implement concrete providers.
+
 `createVoiceChannelHandler` is the shared channel-neutral adapter layer. It accepts an already-verified `VerifiedVoiceEvent`, checks a host-supplied access policy, claims a stable event key through a deduplicator, runs the existing `VoiceWorkflow`, and delivers text/audio through a host-supplied delivery adapter. It deliberately does not implement provider webhook verification, remote media fetching, browser microphone capture, or a platform transport.
 
 ## Integrating a channel
@@ -22,7 +24,7 @@ The handler uses an at-most-once event-claim default: it does not release a clai
 
 ## Privacy and safety
 
-- No provider is bundled and no audio is sent anywhere unless the host configures a provider.
+- The registry and provider interfaces are implemented, but no concrete STT/TTS provider is bundled; no audio is sent anywhere unless a host registers and explicitly selects a provider.
 - Audio is processed in memory and is not persisted by this class.
 - Input MIME type, byte size, duration metadata, transcript length, provider output, and stage timeouts are validated by the workflow.
 - The workflow's duration limit trusts host-supplied duration metadata; a production adapter must independently inspect media duration and decode safely.
