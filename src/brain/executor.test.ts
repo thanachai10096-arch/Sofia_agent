@@ -622,6 +622,39 @@ test("Brain preserves the highest-ranked project memories when limiting context"
 });
 
 
+test("Brain bounds total fenced project-memory context while preserving ranking", async () => {
+  let selected: Array<{ content: string }> = [];
+  const memories = Array.from({ length: 12 }, (_, index) => ({
+    id: "large-memory-" + index, project: "test", kind: "decision" as const,
+    content: "ranked-" + index + " " + "x".repeat(4_000),
+    confidence: 0.9, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", uses: 0,
+  }));
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner((request) => {
+        const parsed = JSON.parse(request) as { memory?: { projectMemory?: Array<{ content: string }> } };
+        if (parsed.memory?.projectMemory) selected = parsed.memory.projectMemory;
+      }),
+      tools: makeTools(), allowShell: false, allowNetwork: false,
+      projectMemory: { async save() {}, async list() { return memories; }, async find() { return memories; } },
+    },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
+  });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists", description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) { return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" }; },
+    }],
+  });
+  assert.equal(report.completed, true, report.summary);
+  assert.ok(selected.length > 0 && selected.length < 12);
+  assert.ok(selected.reduce((sum, entry) => sum + entry.content.length, 0) <= 8_000);
+  assert.match(selected[0]?.content ?? "", /ranked-0/);
+  assert.ok(selected.every((entry) => entry.content.includes("UNTRUSTED")));
+});
+
 test("Brain fences retrieved project memories as untrusted reference data", async () => {
   let selected: Array<{ content: string }> = [];
   const memory = {
