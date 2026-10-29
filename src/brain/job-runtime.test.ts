@@ -1014,7 +1014,6 @@ test("DurableJobRuntime preserves the selected model route when resuming a check
   const submitted = await runtime.submit({
     task: "resume using selected route",
     modelRouteId: "coding",
-    acceptanceCriteria: ["preserve route"],
   });
   let current = await runtime.get(submitted.id);
   for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
