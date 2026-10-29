@@ -62,11 +62,34 @@ function assertResponseLimit(value: number | undefined): number {
 async function readLimited(response: Response, limit: number): Promise<Uint8Array> {
   const declared = response.headers.get("content-length");
   if (declared && /^\d+$/.test(declared) && Number(declared) > limit) {
+    await response.body?.cancel().catch(() => undefined);
     throw new Error("Voice provider response exceeds configured byte limit.");
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > limit) throw new Error("Voice provider response exceeds configured byte limit.");
-  return bytes;
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error("Voice provider response exceeds configured byte limit.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
 }
 
 async function providerError(response: Response): Promise<Error> {
@@ -86,6 +109,7 @@ export function createOpenAICompatibleVoiceProviders(config: OpenAICompatibleVoi
   if (!config || typeof config.apiKey !== "string" || !config.apiKey.trim()) {
     throw new Error("Voice provider apiKey is required.");
   }
+  if (/[\r\n\0]/.test(config.apiKey)) throw new Error("Voice provider apiKey contains invalid control characters.");
   const base = validateBaseUrl(config.baseUrl);
   const sttModel = validateModel(config.sttModel, "sttModel");
   const ttsModel = config.ttsModel ? validateModel(config.ttsModel, "ttsModel") : undefined;
