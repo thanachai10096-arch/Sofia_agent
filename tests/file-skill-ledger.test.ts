@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { FileSkillLedger } from "../src/brain/file-skill-ledger.js";
@@ -48,9 +48,7 @@ test("file skill ledger rejects malformed and unbounded candidates without persi
     assert.throws(() => ledger.record({ ...candidate, evidenceIds: [] }), /Invalid learned skill candidate/);
     assert.throws(() => ledger.record({ ...candidate, procedure: Array.from({ length: 101 }, () => "step") }), /Invalid learned skill candidate/);
     assert.equal(ledger.list().length, 0);
-    assert.equal(readFileSync(file, "utf8"), "");
-  } catch (error) {
-    if (error instanceof Error && !error.message.includes("ENOENT")) throw error;
+    assert.equal(existsSync(file), false, "invalid candidates must not create persisted state");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
