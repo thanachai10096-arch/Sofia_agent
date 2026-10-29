@@ -127,7 +127,8 @@ function validateLearnedCandidate(candidate: LearnedSkillCandidate): LearnedSkil
   const procedure = candidate.procedure.map(step => String(redactSecrets(step)).slice(0, 2000));
   const evidenceIds = candidate.evidenceIds.map(id => String(redactSecrets(id)).slice(0, 500));
   if (containsPromptInjection(name) || containsPromptInjection(trigger) ||
-      procedure.some(step => containsPromptInjection(step))) {
+      procedure.some(step => containsPromptInjection(step)) ||
+      evidenceIds.some(id => containsPromptInjection(id))) {
     throw new Error("Learned skill candidate rejected by prompt-injection guard");
   }
   // Redaction can make distinct identifiers equal; reject collisions rather than
