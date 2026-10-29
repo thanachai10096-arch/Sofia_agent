@@ -292,8 +292,6 @@ server.listen(port, "0.0.0.0", () => {
         enabled: true,
         adapters: [createDiscordAdapter(discordGatewayTransport)],
         allowUser: createMessagingAccessCheck(accessPolicy),
-        maxMessagesPerWindow: 5,
-        rateWindowMs: 60_000,
         onMessage: (message) => handler(message),
         logger: {
           info: (event) => console.log("Discord Gateway:", event),
