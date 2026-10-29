@@ -210,7 +210,11 @@ export async function executeLearningRepairPlan(
     if (snapshot.policyRevision !== action.expectedPolicyRevision || !snapshot.explicitlyApproved || !snapshot.trustedEvidenceValid) {
       const reason = "scope/policy/approval/evidence revalidation failed";
       const entry = existing ?? { key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running" as const, attempts: 0, updatedAt: now() };
-      await journal.begin(entry);
+      const claim = await journal.begin(entry);
+      if (claim.claimed !== true) {
+        results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or completed by another executor; manual reconciliation required" });
+        continue;
+      }
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
       await journal.finish(action.idempotencyKey, action.scope, "failed", reason);
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
@@ -218,7 +222,11 @@ export async function executeLearningRepairPlan(
     }
     if (snapshot.exists && snapshot.active) {
       const entry = existing ?? { key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running" as const, attempts: 0, updatedAt: now() };
-      await journal.begin(entry);
+      const claim = await journal.begin(entry);
+      if (claim.claimed !== true) {
+        results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or completed by another executor; manual reconciliation required" });
+        continue;
+      }
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_already_satisfied", at: now() });
       await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Runtime registration already satisfied");
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", reason: "already satisfied" });
@@ -227,7 +235,11 @@ export async function executeLearningRepairPlan(
     if (snapshot.exists && !snapshot.active) {
       const reason = "existing inactive runtime entry requires manual review";
       const entry = existing ?? { key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running" as const, attempts: 0, updatedAt: now() };
-      await journal.begin(entry);
+      const claim = await journal.begin(entry);
+      if (claim.claimed !== true) {
+        results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or completed by another executor; manual reconciliation required" });
+        continue;
+      }
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
       await journal.finish(action.idempotencyKey, action.scope, "failed", reason);
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
