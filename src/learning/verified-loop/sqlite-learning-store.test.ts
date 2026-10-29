@@ -22,6 +22,8 @@ test("SQLite learning transactions persist experiences and skills across reopen"
     await store.transaction(scope, async tx => {
       assert.equal(await tx.insertExperienceIfAbsent(experience("r1")), true);
       assert.equal(await tx.insertExperienceIfAbsent(experience("r1", "duplicate")), false);
+      assert.equal((await tx.getExperienceByReceipt(scope, "r1"))?.id, "experience-r1");
+      assert.equal(await tx.getExperienceByReceipt(scope, "missing"), undefined);
       await tx.activateSkill(activeSkill("skill-1"));
     });
     store.close();
