@@ -31,6 +31,15 @@ test("SQLite transcript pagination and full-text search work", async () => {
   try {
     store.save({ id: "alpha", messages: ["planning launch", "deploy safely"], updatedAt: 0 });
     store.save({ id: "beta", messages: ["unrelated note", "planning recovery"], updatedAt: 0 });
+    // Set explicit timestamps so this test never depends on wall-clock millisecond timing.
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(dir, "sessions.sqlite"));
+    try {
+      db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(10, "alpha");
+      db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(20, "beta");
+    } finally {
+      db.close();
+    }
     assert.deepEqual(store.listMessages("alpha", { limit: 1, offset: 1 }), ["deploy safely"]);
     assert.deepEqual(store.search("recovery").map((session) => session.id), ["beta"]);
     assert.deepEqual(store.search("planning").map((session) => session.id), ["beta", "alpha"]);
