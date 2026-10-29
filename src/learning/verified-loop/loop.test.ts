@@ -97,3 +97,17 @@ test("rejects stale policy receipts and untrusted evidence", async () => {
   state.evidence.set("evidence-r1", { ...state.evidence.get("evidence-r1")!, trusted: false });
   assert.equal((await loop.recordVerifiedCompletion(scope, "r1", "task")).recorded, false);
 });
+
+test("does not activate a candidate when assessment confidence is not finite", async () => {
+  const state = makeHost();
+  state.host.assessCandidate = async () => ({ allowed: true, confidence: Number.NaN });
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "bad-1", "run1");
+  addReceipt(state, "bad-2", "run2");
+  addReceipt(state, "bad-3", "run3");
+  await loop.recordVerifiedCompletion(scope, "bad-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "bad-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "bad-3", "Fix TypeScript build");
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
