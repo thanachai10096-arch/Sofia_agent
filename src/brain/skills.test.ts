@@ -21,3 +21,11 @@ test("CI failures select evidence-first CI triage", () => {
   assert.ok(skills[0]?.procedure.some(step => step.includes("never skip")));
   assert.deepEqual(skills[0]?.verification, ["test", "build"]);
 });
+
+
+test("durable recovery skill preserves evidence and avoids duplicate dispatch", () => {
+  const skills = matchSkills("runtime_error", "job recovery after restart has an indeterminate dispatch outcome");
+  assert.equal(skills[0]?.id, "durable-job-recovery");
+  assert.ok(skills[0]?.procedure.some(step => step.includes("do not resubmit automatically")));
+  assert.deepEqual(skills[0]?.verification, ["test", "build"]);
+});
