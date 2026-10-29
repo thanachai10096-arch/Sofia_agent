@@ -58,3 +58,46 @@ test("EvolutionEngine redacts secrets from recorded failure evidence", () => {
   assert.ok(skill?.lastFailure);
   assert.doesNotMatch(skill.lastFailure, new RegExp(marker));
 });
+
+test("EvolutionEngine proposes review-only improvements from repeated task-specific failures", () => {
+  const engine = new EvolutionEngine();
+  engine.recordSuccess("flaky-skill", 3, 2, "typescript");
+  engine.recordFailure("flaky-skill", "typecheck failed", "typescript");
+  engine.recordFailure("flaky-skill", "test failed", "typescript");
+  engine.recordSuccess("flaky-skill", 2, 0, "research");
+  engine.recordSuccess("reliable-skill", 2, 0, "typescript");
+  engine.recordSuccess("reliable-skill", 2, 0, "typescript");
+  engine.recordSuccess("reliable-skill", 2, 0, "typescript");
+
+  const proposals = engine.getImprovementProposals();
+  assert.equal(proposals.length, 1);
+  assert.deepEqual(
+    {
+      skillId: proposals[0]!.skillId,
+      taskType: proposals[0]!.taskType,
+      reason: proposals[0]!.reason,
+      attempts: proposals[0]!.attempts,
+      successes: proposals[0]!.successes,
+      failures: proposals[0]!.failures,
+      status: proposals[0]!.status,
+    },
+    {
+      skillId: "flaky-skill",
+      taskType: "typescript",
+      reason: "low-success-rate",
+      attempts: 3,
+      successes: 1,
+      failures: 2,
+      status: "review-required",
+    },
+  );
+  // The assessment is advisory; it must not mutate the recorded outcomes.
+  assert.equal(engine.getSkill("flaky-skill")?.taskTypes.typescript?.attempts, 3);
+});
+
+test("EvolutionEngine never proposes an improvement from fewer than three outcomes", () => {
+  const engine = new EvolutionEngine();
+  engine.recordFailure("new-skill", "not enough evidence", "api");
+  engine.recordFailure("new-skill", "not enough evidence", "api");
+  assert.deepEqual(engine.getImprovementProposals(1), []);
+});
