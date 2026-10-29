@@ -23,7 +23,7 @@ A model-agnostic AI agent runtime with internal model routing, policy-controlled
 
 Sofia Agent is a standalone agent runtime and platform. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
 
-> **Model routing is an internal policy.** End users do not choose models; Sofia decides how requests are handled.
+> **Model routing defaults to Sofia policy.** Deployment owners can configure providers and per-task model routes. A tenant-scoped end-user model-selection UI/API is not yet implemented; do not expose server environment variables as user preferences.
 
 
 ## Open source and contribution
@@ -134,7 +134,8 @@ Configure providers with the server-side `SOFIA_MODEL_PROVIDERS` JSON environmen
     "baseUrl": "https://openrouter.ai/api/v1",
     "apiKeyEnv": "OPENROUTER_API_KEY",
     "model": "provider/model-name",
-    "protocol": "openai-compatible"
+    "protocol": "openai-compatible",
+    "features": { "toolCalling": true, "vision": true, "structuredOutput": true, "contextWindow": 128000 }
   },
   "anthropic": {
     "baseUrl": "https://api.anthropic.com/v1",
@@ -160,7 +161,7 @@ export SOFIA_REASONING_MODEL=provider/reasoning-model
 export SOFIA_VISION_PROVIDER=openrouter
 ```
 
-Supported route names are `FAST`, `CODING`, `REASONING`, and `VISION`. Each route can override `BASE_URL`, `MODEL`, and `API_KEY` using `SOFIA_<ROUTE>_BASE_URL`, `SOFIA_<ROUTE>_MODEL`, and `SOFIA_<ROUTE>_API_KEY`. For provider-specific headers and request controls, the manifest also accepts `headers`, `maxConcurrent`, and `requestTimeoutMs`. Use `authHeader` / `authPrefix` for services that do not use Bearer authentication, and `endpointPath` for compatible deployments with a custom path or query string (for example, Azure OpenAI deployment endpoints). Supported protocol values are `openai-compatible` (default) and `anthropic-messages`; unsupported protocols are rejected rather than silently sent using the wrong API format. Remote endpoints must use HTTPS; plain HTTP is permitted only for loopback hosts. Existing `GEMINI_API_KEY` / `Gemini_API_Key` configuration remains supported for backward compatibility.
+Supported route names are `FAST`, `CODING`, `REASONING`, and `VISION`. Each route can override `BASE_URL`, `MODEL`, and `API_KEY` using `SOFIA_<ROUTE>_BASE_URL`, `SOFIA_<ROUTE>_MODEL`, and `SOFIA_<ROUTE>_API_KEY`. For provider-specific headers and request controls, the manifest also accepts `headers`, `maxConcurrent`, and `requestTimeoutMs`. Use `authHeader` / `authPrefix` for services that do not use Bearer authentication, and `endpointPath` for compatible deployments with a custom path or query string (for example, Azure OpenAI deployment endpoints). Supported protocol values are `openai-compatible` (default) and `anthropic-messages`; unsupported protocols are rejected rather than silently sent using the wrong API format. Optional `features` metadata may declare `toolCalling`, `vision`, `structuredOutput`, and `contextWindow`. These values are operator-declared, not automatically inferred from a model name or proven by a live benchmark; the router avoids routes explicitly declared not to support vision or tool calling. Remote endpoints must use HTTPS; plain HTTP is permitted only for loopback hosts. Existing `GEMINI_API_KEY` / `Gemini_API_Key` configuration remains supported for backward compatibility.
 
 This configuration enables user/deployment owners to select models by task route. A future UI/API for per-user model preferences must persist choices in an authenticated, tenant-scoped configuration store; environment variables are deployment-wide and should not be presented as individual-user preferences.
 
@@ -256,7 +257,7 @@ Before exposing Sofia to external clients, follow the [API Security and Deployme
 
 ## `> Integration principle`
 
-Clients should use Sofia Agent's stable API/SDK and let Sofia apply internal model routing and execution policy. Keep model selection and privileged capabilities out of the end-user interface.
+Clients should use Sofia Agent's stable API/SDK and let Sofia apply execution policy. Provider and per-task model routes are deployment-configurable; per-user model preferences require an authenticated, tenant-scoped settings API and must never expose provider secrets.
 
 ---
 
