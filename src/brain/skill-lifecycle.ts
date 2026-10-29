@@ -24,6 +24,11 @@ interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[];
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
+function hasValidEvidenceIds(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.length <= 100 &&
+    value.every((id) => typeof id === "string" && Boolean(id.trim()) && id.length <= 500) &&
+    new Set(value).size === value.length;
+}
 function validatePackage(value: SkillPackage): SkillPackage {
   if (!isRecord(value) || !isRecord(value.skill) || typeof value.skill.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value.skill.id)) {
     throw new Error("Invalid skill package or skill id");
@@ -81,7 +86,7 @@ export class VersionedSkillLifecycle {
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
     const safePackage = validatePackage(skillPackage);
     if (!isRecord(provenance) || typeof provenance.source !== "string" || !provenance.source.trim() ||
-        !Array.isArray(provenance.evidenceIds) || !provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
+        !hasValidEvidenceIds(provenance.evidenceIds) ||
         !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1) {
       throw new Error("Invalid skill provenance");
     }
@@ -135,6 +140,7 @@ export class VersionedSkillLifecycle {
   promote(candidateId: string): SkillLifecycleRecord {
     const candidate = this.requireRecord(candidateId);
     if (candidate.status !== "verified" || candidate.evaluation?.passed !== true) throw new Error("Only successfully evaluated candidates can be promoted");
+    if (!hasValidEvidenceIds(candidate.provenance.evidenceIds)) throw new Error("Skill candidate requires valid verification evidence");
     if (candidate.provenance.confidence < this.minimumConfidence) throw new Error("Skill candidate confidence is below the promotion threshold");
     const before = clone(this.snapshot);
     const previousPackage = this.platform.get(candidate.skillId);
