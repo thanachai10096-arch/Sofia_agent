@@ -161,8 +161,12 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
           const updated = this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=?,claim_token=NULL WHERE repair_key=? AND claim_token=?").run(state, new Date().toISOString(), result?.slice(0, 1000) ?? null, key, claimToken);
           if (Number(updated.changes) !== 1) throw new Error("Repair claim lost; stale executor cannot finalize this attempt");
         } else {
-          // Backward-compatible path for legacy non-executor callers.
-          this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=?,claim_token=NULL WHERE repair_key=?").run(state, new Date().toISOString(), result?.slice(0, 1000) ?? null, key);
+          // Legacy callers may finalize only rows that are not currently owned by a
+          // token-bearing attempt. Never let a tokenless caller bypass fencing.
+          if (row.claim_token !== null && row.claim_token !== undefined) {
+            throw new Error("Repair claim token required; refusing unfenced finalization");
+          }
+          this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=? WHERE repair_key=? AND claim_token IS NULL").run(state, new Date().toISOString(), result?.slice(0, 1000) ?? null, key);
         }
         this.db.exec("COMMIT");
       } catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
