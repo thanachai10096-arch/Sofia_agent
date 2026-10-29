@@ -251,7 +251,7 @@ export class VersionedSkillLifecycle {
             item.evaluation.checks.length === 0 || item.evaluation.checks.length > 100 || !item.evaluation.checks.every((check) =>
               isRecord(check) && typeof check.name === "string" && Boolean(check.name.trim()) && check.name.length <= 200 &&
               typeof check.passed === "boolean" &&
-              (check.detail === undefined || (typeof check.detail === "string" && check.detail.length <= 10_000))) {
+              (check.detail === undefined || (typeof check.detail === "string" && check.detail.length <= 10_000)))) {
           throw new Error("Invalid skill lifecycle evaluation");
         }
       }
