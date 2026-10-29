@@ -169,8 +169,13 @@ export async function executeLearningRepairPlan(
   for (const action of plan.actions) {
     assertScope(action.scope);
     if (!sameScope(action.scope, plan.scope) || action.kind !== "register-missing-runtime-skill" ||
-        !action.skillId.trim() || !action.expectedPolicyRevision.trim() || !action.actorId.trim() || !action.idempotencyKey.trim()) {
-      throw new Error("Invalid or cross-scope repair action");
+        typeof action.skillId !== "string" || !action.skillId.trim() || action.skillId.length > 200 ||
+        typeof action.expectedPolicyRevision !== "string" || !action.expectedPolicyRevision.trim() || action.expectedPolicyRevision.length > 200 ||
+        typeof action.actorId !== "string" || !action.actorId.trim() || action.actorId.length > 200 ||
+        typeof action.idempotencyKey !== "string" || !action.idempotencyKey.trim() || action.idempotencyKey.length > 500 ||
+        typeof plan.planId !== "string" || !plan.planId.trim() ||
+        action.idempotencyKey !== plan.planId + ":" + action.skillId) {
+      throw new Error("Invalid, unbound, or cross-scope repair action");
     }
     const now = () => (host.now?.() ?? new Date()).toISOString();
     const existing = await journal.get(action.idempotencyKey, action.scope);
