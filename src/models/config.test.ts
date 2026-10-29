@@ -38,6 +38,22 @@ const names = [
   "SOFIA_VISION_MODEL",
   "SOFIA_AI_GATEWAY_API_KEY",
   "AI_GATEWAY_API_KEY",
+  "SOFIA_FAST_SUPPORTS_TOOL_CALLING",
+  "SOFIA_FAST_SUPPORTS_VISION",
+  "SOFIA_FAST_SUPPORTS_STRUCTURED_OUTPUT",
+  "SOFIA_FAST_CONTEXT_WINDOW",
+  "SOFIA_CODING_SUPPORTS_TOOL_CALLING",
+  "SOFIA_CODING_SUPPORTS_VISION",
+  "SOFIA_CODING_SUPPORTS_STRUCTURED_OUTPUT",
+  "SOFIA_CODING_CONTEXT_WINDOW",
+  "SOFIA_REASONING_SUPPORTS_TOOL_CALLING",
+  "SOFIA_REASONING_SUPPORTS_VISION",
+  "SOFIA_REASONING_SUPPORTS_STRUCTURED_OUTPUT",
+  "SOFIA_REASONING_CONTEXT_WINDOW",
+  "SOFIA_VISION_SUPPORTS_TOOL_CALLING",
+  "SOFIA_VISION_SUPPORTS_VISION",
+  "SOFIA_VISION_SUPPORTS_STRUCTURED_OUTPUT",
+  "SOFIA_VISION_CONTEXT_WINDOW",
 ];
 
 const original = new Map(names.map((name) => [name, process.env[name]]));
@@ -192,4 +208,36 @@ test("custom endpoints can opt into the Anthropic Messages protocol", () => {
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.protocol, "anthropic-messages");
   assert.equal(config.providers.fast?.baseUrl, "https://anthropic-proxy.example.test/v1");
+});
+
+
+test("per-route capability declarations are loaded without guessing missing values", () => {
+  clear();
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.SOFIA_CODING_SUPPORTS_TOOL_CALLING = "true";
+  process.env.SOFIA_CODING_SUPPORTS_VISION = "false";
+  process.env.SOFIA_CODING_SUPPORTS_STRUCTURED_OUTPUT = "yes";
+  process.env.SOFIA_CODING_CONTEXT_WINDOW = "128000";
+  const config = loadModelConfigFromEnv();
+  assert.deepEqual(config.routes.find((route) => route.id === "coding")?.featureSupport, {
+    toolCalling: true,
+    vision: false,
+    structuredOutput: true,
+    contextWindow: 128000,
+  });
+  assert.equal(config.routes.find((route) => route.id === "fast")?.featureSupport, undefined);
+});
+
+test("invalid per-route capability declarations fail fast", () => {
+  clear();
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.SOFIA_CODING_SUPPORTS_VISION = "sometimes";
+  assert.throws(loadModelConfigFromEnv, /SOFIA_CODING_SUPPORTS_VISION must be true or false/);
+});
+
+test("invalid context window declaration fails fast", () => {
+  clear();
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.SOFIA_CODING_CONTEXT_WINDOW = "-1";
+  assert.throws(loadModelConfigFromEnv, /SOFIA_CODING_CONTEXT_WINDOW must be a positive safe integer/);
 });
