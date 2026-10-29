@@ -29,8 +29,8 @@ export interface WhatsAppMessagingEnvironment {
 }
 function parseIds(value: string, name: string): ReadonlySet<string> {
   const entries = value.split(",").map((entry) => entry.trim());
-  if (!entries.length || entries.some((entry) => !entry || entry.length > 256 || /[\r\n\0]/.test(entry))) {
-    throw new Error(name + " must be a comma-separated list of valid IDs.");
+  if (!entries.length || entries.some((entry) => !/^[0-9]{1,32}$/.test(entry))) {
+    throw new Error(name + " must be a comma-separated list of numeric WhatsApp IDs.");
   }
   const ids = new Set(entries);
   if (ids.size !== entries.length) throw new Error(name + " must not contain duplicate IDs.");
