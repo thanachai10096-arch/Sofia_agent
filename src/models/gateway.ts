@@ -104,8 +104,9 @@ function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boole
         } catch {
           throw new Error("Cannot send invalid assistant tool-call arguments to Anthropic.");
         }
-        if (!asRecord(input)) throw new Error("Anthropic tool-call input must be a JSON object.");
-        blocks.push({ type: "tool_use", id: call.id, name: call.name, input });
+        const recordInput = asRecord(input);
+        if (!recordInput) throw new Error("Anthropic tool-call input must be a JSON object.");
+        blocks.push({ type: "tool_use", id: call.id, name: call.name, input: recordInput });
       }
       append("assistant", blocks);
       return;
