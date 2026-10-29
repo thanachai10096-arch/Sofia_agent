@@ -975,6 +975,61 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
 });
 
 
+test("DurableJobRuntime preserves the selected model route when resuming a checkpoint", async () => {
+  const namespace = "job-runtime-resume-model-route-" + randomUUID();
+  const selectedRoutes: Array<string | undefined> = [];
+  let runCount = 0;
+  const snapshot = {
+    version: 1,
+    runId: "resume-route-" + randomUUID(),
+    task: "resume using selected route",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: ["preserve route"],
+    completedStepIds: [],
+    checkpointId: "resume-route-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const runtime = new DurableJobRuntime((options) => {
+    selectedRoutes.push(options.modelRouteId);
+    return {
+      run: async (input) => {
+        runCount += 1;
+        if (runCount === 1) {
+          await input.onRunSnapshot?.(snapshot);
+          return { completed: false, state: "failed", summary: "checkpoint saved" };
+        }
+        assert.ok(input.resume, "resume must receive the saved checkpoint");
+        return { completed: true, state: "completed", summary: "resumed" };
+      },
+    } as unknown as SofiaBrain;
+  }, undefined, namespace);
+
+  const submitted = await runtime.submit({
+    task: "resume using selected route",
+    modelRouteId: "coding",
+    acceptanceCriteria: ["preserve route"],
+  });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "failed");
+  assert.ok(current?.snapshot, "first attempt must persist a resumable checkpoint");
+  const resumed = await runtime.resume(submitted.id);
+  assert.equal(resumed.status, "completed");
+  assert.deepEqual(selectedRoutes, ["coding", "coding"]);
+  assert.equal(resumed.modelRouteId, "coding");
+});
+
 test("DurableJobRuntime preserves the selected model route on submitted jobs", async () => {
   const namespace = "job-runtime-model-route-" + randomUUID();
   let selectedRoute: string | undefined;
