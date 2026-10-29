@@ -44,7 +44,7 @@ function safeRelativePath(value: unknown): value is string {
   return parts.every((part) => {
     if (part.length === 0 || part === "." || part === "..") return false;
     // Keep backup paths portable across POSIX and Windows extraction targets.
-    if (/[<>:"|?*\\x00-\\x1f]/u.test(part) || /[. ]$/u.test(part)) return false;
+    if (/[<>:"|?*\x00-\x1f]/u.test(part) || /[. ]$/u.test(part)) return false;
     const deviceName = part.split(".")[0]?.toUpperCase();
     if (deviceName && /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/u.test(deviceName)) return false;
     return true;
