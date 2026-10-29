@@ -128,20 +128,20 @@ This matrix describes code in the repository, not a claim of live account connec
 | Telegram | Adapter, Bot API long-poll transport, optional runtime | Requires bot token, Sofia API credentials, and explicit user/chat allowlists. |
 | Discord | Adapter and interaction transport/route | Requires application setup, valid signature verification, and explicit user/channel allowlists. |
 | Slack | Adapter and signed Events API receiver | Requires a Slack app, signing secret, bot token, allowlists, and a deployed HTTPS callback. |
-| LINE | Adapter, LINE Messaging API push transport, raw-body HMAC signature verification, webhook event mapper, unit tests | Host must mount a raw-body webhook route and call `handleWebhook`; configure channel access token/secret and explicit Sofia sender/conversation allowlists. Real provider smoke test still required. |
+| LINE | Adapter, signed webhook transport, raw-body route mounted by the API, optional runtime, allowlists, and task-completion replies | Set `SOFIA_LINE_ENABLED=true`, server-side `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_CHANNEL_SECRET`, `SOFIA_API_KEY`, `SOFIA_API_BASE_URL` (or `RAILWAY_PUBLIC_DOMAIN`), plus explicit `LINE_ALLOWED_USER_IDS` and `LINE_ALLOWED_CONVERSATION_IDS`. Route defaults to `POST /v1/integrations/line/webhook`. Real provider smoke test still required. |
 | WhatsApp, Signal, Matrix, Teams, Google Chat, Messenger, Instagram, WeChat, iMessage, Viber, KakaoTalk, Zalo, Mattermost, Rocket.Chat, Zulip, IRC, email, SMS | Not confirmed as end-to-end adapters by this matrix | Do not show as connected or available until a concrete adapter, authentication path, send/receive transport, tests, and setup instructions exist. |
 
 A platform string in `ChatPlatform` is only a type-level identifier. At runtime, the adapter registry lists only the concrete adapters passed to it. Unit tests and CI do not prove a real provider account has been connected; record provider smoke tests separately.
 
-## LINE setup (host integration)
+## LINE setup
 
-1. Create a LINE Official Account and Messaging API channel in the LINE Developers Console. Store the channel access token and channel secret as server-side secrets; never put them in client code.
-2. Construct `createLineHttpTransport({ channelAccessToken, channelSecret })`, then `createLineAdapter(transport)`, and pass that adapter to the existing `createMessagingGateway` alongside the same Sofia handler and access policy used by other channels.
-3. Mount `handleLineWebhookHttpRequest(req, res, transport)` on the configured HTTPS webhook path **before any JSON body parser**. It reads a bounded body and verifies `x-line-signature` against the exact raw bytes. Do not log the raw body, signature, or credentials.
-4. Configure an explicit allowlist using immutable LINE user IDs and, where relevant, group/room conversation IDs. The gateway must reject messages not allowed by the existing access policy.
-5. Enable the webhook in LINE Developers Console and use LINE's webhook verification feature. Run a real test-account smoke test for direct messages and group chats before describing the integration as connected.
+1. Create a LINE Official Account and Messaging API channel in the LINE Developers Console.
+2. Configure these as **server-side secrets/variables** in the same Sofia API process: `SOFIA_LINE_ENABLED=true`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `SOFIA_API_KEY`, `SOFIA_API_BASE_URL` (or `RAILWAY_PUBLIC_DOMAIN`), `LINE_ALLOWED_USER_IDS`, and `LINE_ALLOWED_CONVERSATION_IDS`.
+3. Both allowlists are mandatory comma-separated immutable IDs. Private chats normally use the user's ID as the conversation ID; for group/room messages, add the relevant group/room ID to the conversation allowlist. If any required value is missing or malformed, the optional integration stays disabled.
+4. The API entrypoint mounts the signed raw-body handler at `POST /v1/integrations/line/webhook` when the runtime is configured. Set this exact HTTPS URL as the webhook URL in LINE Developers Console; do not place a JSON body parser in front of the route or log request bodies/signatures/secrets.
+5. Verify the webhook in LINE Developers Console, then test a permitted direct message and group/room message. Confirm acceptance acknowledgement, actual task result, duplicate webhook behavior, and rejected sender/conversation behavior before production use.
 
-The route helper and transport are framework-neutral Node HTTP utilities; this change does not automatically mount a route into every deployment or create LINE credentials. Webhook delivery can be retried when dispatch returns a retryable failure; provider retries plus gateway deduplication must be validated during the smoke test.
+The runtime reuses Sofia's existing API client, messaging gateway, handler, file-backed deduplicator, and access-policy contract; it does not bypass model/runtime policy. Unit/CI tests do not prove that a real LINE account is connected.
 
 ## Natural chat behavior
 
