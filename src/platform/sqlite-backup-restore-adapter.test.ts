@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -91,7 +91,7 @@ test("SQLite restore adapter rejects a symlinked database parent before lifecycl
   const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-sqlite-restore-"));
   const realDirectory = path.join(parent, "real");
   const aliasDirectory = path.join(parent, "alias");
-  await import("node:fs/promises").then(({ mkdir }) => mkdir(realDirectory));
+  await mkdir(realDirectory);
   const database = path.join(realDirectory, "sessions.sqlite");
   await writeFile(database, sqliteBytes("original"));
   await symlink(realDirectory, aliasDirectory);
