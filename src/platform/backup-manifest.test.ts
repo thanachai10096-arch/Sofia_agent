@@ -82,3 +82,21 @@ test("manifest JSON round-trips deterministically and rejects malformed or overs
   assert.throws(() => parseBackupManifestJson(" ".repeat(16 * 1024 * 1024 + 1)), /maximum allowed size/);
   assert.throws(() => serializeBackupManifest({ format: "wrong" }), /Invalid Sofia backup manifest format/);
 });
+
+test("manifest paths reject Windows device names, alternate streams, controls, and non-portable segments", () => {
+  for (const path of [
+    "CON", "con.txt", "NUL.json", "folder/COM1.log", "folder/LPT9",
+    "file:stream", "trailing-dot.", "trailing-space ", "control-\\u0001",
+    "folder/a?b", "folder/a*b", "folder/a|b",
+  ]) {
+    assert.throws(
+      () => createBackupManifest([{ path, content: Buffer.from("x") }], createdAt),
+      /safe relative/,
+      `expected unsafe path to be rejected: ${JSON.stringify(path)}`,
+    );
+  }
+  assert.doesNotThrow(() => createBackupManifest([
+    { path: "sessions/session-1.sqlite", content: Buffer.from("x") },
+    { path: "memory/user-profile.json", content: Buffer.from("y") },
+  ], createdAt));
+});
