@@ -89,8 +89,9 @@ export class FileCronStore implements CronStore {
     let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
     while (!handle) {
       try {
+        // Keep acquisition errors separate from lock initialization errors. If opening
+        // succeeds but writing the owner record fails, that is not lock contention.
         handle = await fs.open(this.lock, "wx", 0o600);
-        await handle.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }));
       } catch (error) {
         const openCode = (error as NodeJS.ErrnoException).code;
         // Windows may report EPERM/EACCES/EBUSY when concurrent exclusive opens
@@ -129,6 +130,16 @@ export class FileCronStore implements CronStore {
         if (Date.now() >= deadline) throw new Error("Timed out waiting for cron scheduler state lock");
         await new Promise(resolve => setTimeout(resolve, 15));
       }
+    }
+    try {
+      await handle.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }));
+    } catch (error) {
+      // We created the exclusive lock but could not durably identify its owner.
+      // Close our descriptor and fail closed; do not unlink a path that may have
+      // been replaced by another process or silently proceed with an unowned lock.
+      await handle.close();
+      handle = undefined;
+      throw new Error("Failed to initialize cron scheduler lock; manual recovery may be required: " + this.lock, { cause: error });
     }
     try {
       const state = await this.read();
