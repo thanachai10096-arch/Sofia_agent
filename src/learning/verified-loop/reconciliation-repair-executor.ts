@@ -222,7 +222,14 @@ export async function executeLearningRepairPlan(
     }
     const entry = await journal.begin({ key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running", attempts: 0, updatedAt: now() });
     if (entry.state === "succeeded") {
-      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", reason: "already journaled" });
+      // Another executor may have completed between our initial read and begin().
+      // Never trust the journal alone: the snapshot above must still prove the postcondition.
+      if (snapshot.exists && snapshot.active && snapshot.policyRevision === action.expectedPolicyRevision &&
+          snapshot.explicitlyApproved && snapshot.trustedEvidenceValid) {
+        results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", reason: "journal and authoritative state agree" });
+      } else {
+        results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "journal says succeeded but authoritative state is not active; manual reconciliation required" });
+      }
       continue;
     }
     await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
