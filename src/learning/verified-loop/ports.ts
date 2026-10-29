@@ -81,6 +81,8 @@ export interface VerifiedLearningHost {
   currentPolicyRevision(scope: LearningScope): Promise<string>;
   redact(text: string): string;
   assessCandidate(scope: LearningScope, candidate: SkillCandidate): Promise<{ allowed: boolean; confidence: number; reason?: string }>;
+  /** Must route promotion through Sofia's existing VersionedSkillLifecycle and explicit approval gate. */
+  promoteCandidate?(scope: LearningScope, candidate: SkillCandidate): Promise<boolean>;
 }
 export interface LearningLoopOptions {
   maxEvidenceAgeMs?: number;
