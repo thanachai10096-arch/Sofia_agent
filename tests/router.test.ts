@@ -75,3 +75,37 @@ test("explicit model preference rejects a route declared without tool calling fo
 
   assert.throws(() => router.select("coding", "no-tools"), /does not support tool calling/);
 });
+
+
+test("route listing cannot mutate internal capability metadata", () => {
+  const router = new ModelRouter([
+    {
+      id: "vision-route",
+      capabilities: ["vision", "reasoning"],
+      costWeight: 1,
+      latencyWeight: 1,
+      qualityWeight: 10,
+      healthy: true,
+      featureSupport: { vision: true, toolCalling: true },
+    },
+    {
+      id: "fallback",
+      capabilities: ["vision", "reasoning"],
+      costWeight: 2,
+      latencyWeight: 2,
+      qualityWeight: 5,
+      healthy: true,
+      featureSupport: { vision: true, toolCalling: true },
+    },
+  ]);
+
+  const listed = router.listRoutes();
+  const exposed = listed.find((route) => route.id === "vision-route");
+  assert.ok(exposed?.featureSupport);
+  exposed.featureSupport.vision = false;
+  exposed.featureSupport.toolCalling = false;
+  exposed.capabilities.length = 0;
+
+  assert.equal(router.select("vision").id, "vision-route");
+  assert.equal(router.select("coding", "vision-route").id, "vision-route");
+});
