@@ -435,3 +435,74 @@ test("restore transaction reports rollback failures without hiding the apply fai
     async rollback() { throw new Error("rollback broke"); },
   }]), /rollback was incomplete.*apply broke.*rollback broke/i);
 });
+
+
+test("restore transaction continues reverse rollback after one rollback adapter fails", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() {
+      return [
+        { path: "a.json", content: Buffer.from("A") },
+        { path: "b.json", content: Buffer.from("B") },
+        { path: "c.json", content: Buffer.from("C") },
+      ];
+    } },
+  ], createdAt);
+  const events: string[] = [];
+  const makeAdapter = (name: string, targetPath: string, failApply = false, failRollback = false) => ({
+    name,
+    paths: [targetPath],
+    async preflight() {},
+    async captureRollback() { return `old-${name}`; },
+    async apply() {
+      events.push(`apply:${name}`);
+      if (failApply) throw new Error("apply failed");
+    },
+    async rollback(snapshot: unknown) {
+      events.push(`rollback:${name}:${String(snapshot)}`);
+      if (failRollback) throw new Error(`rollback failed for ${name}`);
+    },
+  });
+  await assert.rejects(executeBackupRestoreTransaction(bundle, [
+    makeAdapter("a", "a.json"),
+    makeAdapter("b", "b.json", false, true),
+    makeAdapter("c", "c.json", true),
+  ]), /rollback was incomplete.*apply failed.*rollback failed for b/i);
+  assert.deepEqual(events, [
+    "apply:a", "apply:b", "apply:c",
+    "rollback:c:old-c", "rollback:b:old-b", "rollback:a:old-a",
+  ]);
+});
+
+test("restore transaction does not apply any target when rollback snapshot capture fails", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() {
+      return [
+        { path: "a.json", content: Buffer.from("A") },
+        { path: "b.json", content: Buffer.from("B") },
+      ];
+    } },
+  ], createdAt);
+  const events: string[] = [];
+  await assert.rejects(executeBackupRestoreTransaction(bundle, [
+    {
+      name: "a",
+      paths: ["a.json"],
+      async preflight() { events.push("preflight:a"); },
+      async captureRollback() { events.push("snapshot:a"); return "old-a"; },
+      async apply() { events.push("apply:a"); },
+      async rollback() { events.push("rollback:a"); },
+    },
+    {
+      name: "b",
+      paths: ["b.json"],
+      async preflight() { events.push("preflight:b"); },
+      async captureRollback() { events.push("snapshot:b"); throw new Error("snapshot unavailable"); },
+      async apply() { events.push("apply:b"); },
+      async rollback() { events.push("rollback:b"); },
+    },
+  ]), /snapshot unavailable/);
+  assert.deepEqual(events, [
+    "preflight:a", "preflight:b",
+    "snapshot:a", "snapshot:b",
+  ]);
+});
