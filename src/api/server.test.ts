@@ -154,3 +154,42 @@ test("API rejects unknown model routes before starting a run", async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API refuses an explicitly selected unhealthy model route before starting a run", async () => {
+  const unhealthy: ModelRoute = {
+    id: "temporarily-unavailable",
+    capabilities: ["coding", "reasoning"],
+    costWeight: 1,
+    latencyWeight: 1,
+    qualityWeight: 5,
+    healthy: false,
+  };
+  let providerCalls = 0;
+  const server = createSofiaApi({
+    provider: {
+      generate: async () => {
+        providerCalls += 1;
+        return { text: "Must not run." };
+      },
+    },
+    router: new ModelRouter([unhealthy]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, { apiKeys: { "model-key": ["agent:run"] } });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer model-key", "content-type": "application/json" },
+      body: JSON.stringify({ task: "do a task", modelRouteId: "temporarily-unavailable" }),
+    });
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { error: "model_route_unavailable" });
+    assert.equal(providerCalls, 0, "the unavailable route must be rejected before model invocation");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
