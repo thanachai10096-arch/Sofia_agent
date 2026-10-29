@@ -150,3 +150,11 @@ test("rejects malformed or credential-bearing custom base URLs", () => {
   process.env.SOFIA_MODEL = "vendor/model";
   assert.throws(loadModelConfigFromEnv, /must not contain credentials/);
 });
+
+
+test("requires explicit provider selection when OpenRouter and Gemini credentials both exist", () => {
+  clear();
+  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  assert.throws(loadModelConfigFromEnv, /set SOFIA_MODEL_PROVIDER to choose explicitly/);
+});
