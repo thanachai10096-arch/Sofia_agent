@@ -6,7 +6,6 @@ import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia
 import { createLineAdapter } from "./line.js";
 import { createLineHttpTransport } from "./line-http-transport.js";
 import type { LineWebhookTransport } from "./line-http-route.js";
-import type { OutboundMessage } from "./types.js";
 import { redactSecrets } from "../../security/guard.js";
 import type { ChatPlatform } from "../chat-adapter.js";
 
