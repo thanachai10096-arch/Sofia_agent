@@ -72,7 +72,7 @@ export function createInternalRoute(
     budgetKey: route.providerId ?? route.id,
     qualityTier: Math.max(1, Math.round(route.qualityWeight)),
     capabilities: route.capabilities,
-    contextWindow: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_CONTEXT"] ?? 32_000),
+    contextWindow: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_CONTEXT"] ?? route.featureSupport?.contextWindow ?? 32_000),
     maxOutputTokens: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT"] ?? 4_096),
     hardOutputCap: true,
 
