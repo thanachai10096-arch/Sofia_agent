@@ -39,7 +39,7 @@ function compactProjectMemory(entries: readonly ProjectMemoryEntry[]): Array<{
       kind: entry.kind,
       content: fenced.text,
       confidence: entry.confidence,
-      source: entry.source,
+      source: entry.source ?? "",
     });
     remaining -= fenced.text.length;
   }
