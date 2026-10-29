@@ -35,3 +35,10 @@ The `learning_active_skills` table is the loop's durable record, **not** proof t
 ## Read-only activation reconciliation
 
 `reconcileLearningActivationState(scope, learningSkills, runtimeSkills)` compares scope-filtered records from the learning SQLite store and an authoritative runtime/lifecycle adapter. It reports missing runtime registration (possible crash after learning-store/runtime divergence), runtime-active skills without a learning record, policy-revision drift, duplicate IDs, and cross-scope input. The function is deliberately read-only: it never activates, unregisters, deletes, or overwrites a skill. The caller must obtain runtime records from an authoritative adapter that can prove tenant/principal/project ownership; a global lifecycle listing without scope provenance must not be passed as if it were scoped. Repair should be implemented separately as an audited, idempotent operation after the report is reviewed. This detects inconsistencies but does not claim to make two separate stores atomic.
+
+
+## Conservative repair planning
+
+`planLearningReconciliationRepair` converts a reconciliation report into a non-mutating proposal. It only proposes a missing runtime registration when the authenticated scope matches, an operator explicitly approves that skill ID, a current policy revision is supplied, and trusted evidence has been re-resolved. Duplicate IDs, policy drift, runtime-only activations, and mixed/conflicting issues are blocked rather than guessed at. The generated idempotency key is per plan and skill.
+
+This is intentionally **planning only**, not a repair executor. Before applying any action, a separate host adapter must re-read the learning and runtime stores, compare the exact expected policy revision and scope, persist an idempotency journal, emit an audit intent/result, and perform registration through the existing approved skill lifecycle. The plan must never be treated as proof that a mutation occurred; a crash between stores remains possible and requires a fresh reconciliation.
