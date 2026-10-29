@@ -87,3 +87,17 @@ test("concurrent memory writes across store instances do not lose entries", asyn
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("user memory search supports Thai queries without whitespace segmentation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-thai-"));
+  try {
+    const store = new FileUserMemoryStore(root);
+    await store.save("user-th", createUserMemoryEntry("preference", "ผู้ใช้ต้องการให้โซเฟียตอบภาษาไทยและทำงานต่อเนื่อง"));
+    const matches = await store.find("user-th", "โซเฟียตอบไทย");
+    assert.equal(matches.length, 1);
+    assert.match(matches[0]?.content ?? "", /โซเฟียตอบภาษาไทย/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
