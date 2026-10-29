@@ -7,6 +7,7 @@ import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } 
 import { UsageLimiter } from "./usage.js";
 import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
+import { handleLineWebhookHttpRequest } from "../integrations/messaging/line-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
@@ -126,11 +127,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const discordRoute = config.discordInteractionRoute;
   const discordRoutePath = discordRoute?.path ?? "/v1/integrations/discord/interactions";
   const discordMaxBodyBytes = discordRoute?.maxBodyBytes ?? 1_000_000;
+  const lineRoute = config.lineWebhookRoute;
+  const lineRoutePath = lineRoute?.path ?? "/v1/integrations/line/webhook";
+  const lineMaxBodyBytes = lineRoute?.maxBodyBytes ?? 1_000_000;
   if (discordRoute && (!discordRoutePath.startsWith("/") || discordRoutePath.includes("?") || discordRoutePath.includes("#"))) {
     throw new Error("Discord interaction route path must be an absolute path without query or fragment.");
   }
   if (discordRoute && (!Number.isSafeInteger(discordMaxBodyBytes) || discordMaxBodyBytes < 1 || discordMaxBodyBytes > 1_000_000)) {
     throw new Error("Discord interaction route maxBodyBytes must be between 1 and 1000000.");
+  }
+  if (lineRoute && (!lineRoutePath.startsWith("/") || lineRoutePath.includes("?") || lineRoutePath.includes("#"))) {
+    throw new Error("LINE webhook route path must be an absolute path without query or fragment.");
+  }
+  if (lineRoute && (!Number.isSafeInteger(lineMaxBodyBytes) || lineMaxBodyBytes < 1 || lineMaxBodyBytes > 1_000_000)) {
+    throw new Error("LINE webhook route maxBodyBytes must be between 1 and 1000000.");
   }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
@@ -261,6 +271,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try {
       if (discordRoute && req.url === discordRoutePath) {
         await handleDiscordInteractionHttpRequest(req, res, discordRoute.transport, discordMaxBodyBytes);
+        return;
+      }
+      if (lineRoute && req.url === lineRoutePath) {
+        await handleLineWebhookHttpRequest(req, res, lineRoute.transport, lineMaxBodyBytes);
         return;
       }
 
