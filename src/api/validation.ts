@@ -10,6 +10,7 @@ export function validateAgentRunInput(value: unknown): { valid: true; input: Age
   if (input.context !== undefined && typeof input.context !== "string" && (input.context === null || typeof input.context !== "object" || Array.isArray(input.context))) {
     return { valid: false, error: "invalid_context" };
   }
+  if (input.modelRouteId !== undefined && (typeof input.modelRouteId !== "string" || !input.modelRouteId.trim() || input.modelRouteId.length > 64 || !/^[A-Za-z0-9._-]+$/.test(input.modelRouteId))) return { valid: false, error: "invalid_model_route" };
   if (input.maxSteps !== undefined && (!Number.isInteger(input.maxSteps) || (input.maxSteps as number) < 1 || (input.maxSteps as number) > 200)) {
     return { valid: false, error: "invalid_max_steps" };
   }
