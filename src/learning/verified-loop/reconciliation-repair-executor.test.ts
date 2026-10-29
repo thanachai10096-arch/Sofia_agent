@@ -75,6 +75,30 @@ test("does not steal an existing running claim from another executor", async () 
   assert.equal(journal.entries.get(action.idempotencyKey)?.state, "running");
 });
 
+test("early reconciliation branches never finish another executor's running claim", async () => {
+  for (const current of [
+    snapshot({ policyRevision: "policy-stale", explicitlyApproved: false }),
+    snapshot({ exists: true, active: true }),
+    snapshot({ exists: true, active: false }),
+  ]) {
+    const journal = new MemoryJournal();
+    await journal.begin({
+      key: action.idempotencyKey, scope, skillId: action.skillId,
+      policyRevision: action.expectedPolicyRevision, state: "running",
+      attempts: 0, updatedAt: new Date().toISOString(),
+    });
+    const host = hostWith(() => current, async () => {
+      throw new Error("registration must not run for an unclaimed repair");
+    });
+    const result = await executeLearningRepairPlan(plan, journal, host);
+    assert.equal(result[0]?.state, "failed");
+    assert.match(result[0]?.reason ?? "", /another executor/);
+    assert.equal(journal.entries.get(action.idempotencyKey)?.state, "running");
+    assert.equal(journal.entries.get(action.idempotencyKey)?.attempts, 1);
+    assert.equal(journal.events.length, 0);
+  }
+});
+
 test("refuses ineligible plans and cross-scope actions", async () => {
   const journal = new MemoryJournal();
   const host = hostWith(() => snapshot(), async () => {});
