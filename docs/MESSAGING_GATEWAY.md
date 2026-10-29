@@ -24,11 +24,12 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 
 - `SOFIA_MESSAGING_ENABLED=true` — opt in; otherwise Telegram remains off.
 - `TELEGRAM_BOT_TOKEN` — BotFather token, stored only as a server-side secret.
+- `TELEGRAM_BOT_USERNAME` — optional bot username without `@`; when configured, group messages that contain a real Telegram `mention` entity for this exact username or reply to a message from this bot can start a natural-chat task. Ordinary group chatter remains ignored.
 - `TELEGRAM_ALLOWED_USER_IDS` — comma-separated immutable Telegram user IDs.
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Verified Telegram private-chat messages can dispatch work without `/run`; group messages remain ignored unless the transport marks them as explicitly addressed to Sofia. `/run <task>` remains supported. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Verified Telegram private-chat messages can dispatch work without `/run`; group messages can dispatch only when `TELEGRAM_BOT_USERNAME` is configured and Telegram metadata confirms an exact bot mention or reply to the bot. `/run <task>` remains supported. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
