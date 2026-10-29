@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
-import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
+import { InMemorySkillLedger, type LearnedSkillCandidate, type SkillLedger } from "./learning.js";
 
 test("project memory survives a new store instance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-test-"));
@@ -87,6 +87,29 @@ test("project memory ranks entries matching more query terms ahead of weaker mat
   const results = await store.find("build test typecheck");
   assert.equal(results[0]?.id, "strong");
   assert.equal(results.some((entry) => entry.id === "weak"), true);
+});
+
+test("in-memory skill ledger isolates recorded and returned candidate arrays", () => {
+  const ledger = new InMemorySkillLedger();
+  const candidate: LearnedSkillCandidate = {
+    name: "repair-runtime_error",
+    trigger: "runtime failure",
+    category: "runtime_error",
+    strategy: "inspect-evidence",
+    procedure: ["inspect evidence", "verify repair"],
+    verification: ["test"],
+    evidenceIds: ["run-1"],
+  };
+
+  ledger.record(candidate);
+  candidate.procedure.push("mutated after record");
+  candidate.evidenceIds.push("untrusted-late-evidence");
+  assert.equal(ledger.list()[0]?.procedure.length, 2, "caller mutation must not change stored procedure");
+  assert.deepEqual(ledger.list()[0]?.evidenceIds, ["run-1"], "caller mutation must not change stored evidence");
+
+  const listed = ledger.list()[0]!;
+  listed.verification.push("build");
+  assert.deepEqual(ledger.list()[0]?.verification, ["test"], "list callers must receive defensive copies");
 });
 
 const learnedCandidate: LearnedSkillCandidate = {
