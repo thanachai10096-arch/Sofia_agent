@@ -304,7 +304,7 @@ export async function executeLearningRepairPlan(
       try {
         await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_succeeded", at: now() });
       } catch {
-        successResult.reason = "postcondition verified and journal finalized; success audit append failed";
+        successResult.reason = [successResult.reason, "success audit append failed"].filter(Boolean).join("; ") || "success audit append failed";
       }
     } catch (error) {
       const reason = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
