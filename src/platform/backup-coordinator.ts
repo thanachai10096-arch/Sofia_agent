@@ -415,3 +415,86 @@ export function preflightBackupRestore(
     targets,
   };
 }
+
+
+export interface BackupRestoreTargetAdapter {
+  /** Must be unique and stable for this restore operation. */
+  name: string;
+  /** Exact manifest paths owned by this adapter. */
+  paths: readonly string[];
+  /** Validate compatibility and destination safety without changing live state. */
+  preflight(bundle: BackupBundle, paths: readonly string[]): Promise<void>;
+  /** Capture sufficient prior state to restore this target if a later step fails. */
+  captureRollback(): Promise<unknown>;
+  /** Apply only the explicitly assigned paths. */
+  apply(bundle: BackupBundle, paths: readonly string[]): Promise<void>;
+  /** Restore the snapshot returned by captureRollback(). */
+  rollback(snapshot: unknown): Promise<void>;
+}
+
+export interface BackupRestoreTransactionResult {
+  plan: BackupRestorePreflightPlan;
+  appliedTargets: string[];
+}
+
+/**
+ * Execute a guarded, adapter-driven restore transaction. Every adapter is
+ * preflighted and every rollback snapshot is captured before the first write.
+ * If apply fails, rollback is attempted in reverse order, including the target
+ * whose apply failed because it may have partially mutated state. This is a
+ * best-effort multi-store transaction, not a filesystem-wide atomic commit:
+ * callers must implement reliable snapshots and idempotent rollback adapters.
+ */
+export async function executeBackupRestoreTransaction(
+  bundle: unknown,
+  adapters: readonly BackupRestoreTargetAdapter[],
+): Promise<BackupRestoreTransactionResult> {
+  const plan = preflightBackupRestore(bundle, adapters.map(({ name, paths }) => ({ name, paths })));
+  const record = bundle as BackupBundle;
+  const byName = new Map(adapters.map((adapter) => [adapter.name, adapter]));
+
+  // All destination checks run before rollback capture or live mutations.
+  for (const target of plan.targets) {
+    const adapter = byName.get(target.name);
+    if (!adapter) throw new Error(`Missing restore adapter: ${target.name}`);
+    await adapter.preflight(record, target.paths);
+  }
+
+  const rollbackSnapshots = new Map<string, unknown>();
+  for (const target of plan.targets) {
+    const adapter = byName.get(target.name)!;
+    rollbackSnapshots.set(target.name, await adapter.captureRollback());
+  }
+
+  const applied: string[] = [];
+  try {
+    for (const target of plan.targets) {
+      const adapter = byName.get(target.name)!;
+      // Record before apply: a rejected apply may have partially changed state.
+      applied.push(target.name);
+      await adapter.apply(record, target.paths);
+    }
+    return { plan, appliedTargets: [...applied] };
+  } catch (applyError) {
+    const rollbackErrors: Array<{ target: string; error: unknown }> = [];
+    for (const name of applied.reverse()) {
+      try {
+        await byName.get(name)!.rollback(rollbackSnapshots.get(name));
+      } catch (error) {
+        rollbackErrors.push({ target: name, error });
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      const details = rollbackErrors.map(({ target, error }) =>
+        `${target}: ${error instanceof Error ? error.message : String(error)}`).join("; ");
+      throw new Error(
+        `Restore apply failed and rollback was incomplete. Apply error: ${applyError instanceof Error ? applyError.message : String(applyError)}. Rollback errors: ${details}`,
+        { cause: applyError },
+      );
+    }
+    throw new Error(
+      `Restore apply failed; prior state rollback was attempted for ${applied.length} target(s). Cause: ${applyError instanceof Error ? applyError.message : String(applyError)}`,
+      { cause: applyError },
+    );
+  }
+}
