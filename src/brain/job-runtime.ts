@@ -169,6 +169,7 @@ class FileJobStateStore {
             if (Date.now() >= deadline) {
               throw new Error("Timed out waiting for durable job-state file lock");
             }
+            await new Promise<void>((resolve) => setTimeout(resolve, 20));
             continue;
           }
           // A newly-created lock can be observed before its JSON payload is fully
