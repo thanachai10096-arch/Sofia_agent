@@ -4,6 +4,7 @@ export interface SofiaGatewayProviderConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  protocol?: "openai-compatible" | "anthropic-messages";
   headers?: Record<string, string>;
   maxConcurrent?: number;
   requestTimeoutMs?: number;
@@ -17,6 +18,7 @@ export interface SofiaModelConfig {
 type ProviderDefinition = {
   baseUrl: string;
   model: string;
+  protocol?: "openai-compatible" | "anthropic-messages";
   apiKeyEnv?: string;
   apiKey?: string;
   headers?: Record<string, string>;
@@ -87,6 +89,10 @@ function parseProviderManifest(raw: string): ProviderManifest {
     if (parsedUrl.protocol !== "https:" && !(parsedUrl.protocol === "http:" && localHost)) {
       throw new Error(`Provider ${id} baseUrl must use HTTPS (HTTP is allowed only for localhost).`);
     }
+    const protocol = item.protocol === undefined ? "openai-compatible" : item.protocol;
+    if (protocol !== "openai-compatible" && protocol !== "anthropic-messages") {
+      throw new Error(`Provider ${id} protocol must be "openai-compatible" or "anthropic-messages".`);
+    }
     const apiKeyEnv = typeof item.apiKeyEnv === "string" ? item.apiKeyEnv.trim() : undefined;
     const apiKey = typeof item.apiKey === "string" ? item.apiKey : undefined;
     const headers: Record<string, string> = {};
@@ -116,6 +122,7 @@ function parseProviderManifest(raw: string): ProviderManifest {
     manifest[id] = {
       baseUrl: baseUrl.replace(/\/$/, ""),
       model,
+      protocol,
       ...(apiKeyEnv ? { apiKeyEnv } : {}),
       ...(apiKey !== undefined ? { apiKey } : {}),
       ...(Object.keys(headers).length ? { headers } : {}),
@@ -154,6 +161,7 @@ function resolveProvider(
     baseUrl: baseUrl.replace(/\/$/, "") + "/",
     apiKey,
     model,
+    protocol: definition.protocol ?? "openai-compatible",
     ...(definition.headers ? { headers: definition.headers } : {}),
     ...(definition.maxConcurrent !== undefined ? { maxConcurrent: definition.maxConcurrent } : {}),
     ...(definition.requestTimeoutMs !== undefined ? { requestTimeoutMs: definition.requestTimeoutMs } : {}),
