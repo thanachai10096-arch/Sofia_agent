@@ -263,3 +263,27 @@ test("native Anthropic Messages protocol maps text and tool calls", async () => 
     assert.deepEqual(result.usage, { inputTokens: 17, outputTokens: 8 });
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test("gateway supports custom authentication header and endpoint path", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl = "";
+  let capturedHeaders: Headers | undefined;
+  globalThis.fetch = async (input, init) => {
+    capturedUrl = String(input);
+    capturedHeaders = new Headers(init?.headers);
+    return okResponse();
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": {
+        baseUrl: "https://azure.example.test", apiKey: "azure-test-key", model: "deployment-model",
+        endpointPath: "/openai/deployments/deployment-model/chat/completions?api-version=2025-01-01-preview",
+        authHeader: "api-key", authPrefix: "",
+      },
+    });
+    await gateway.generate(request, makeRoute());
+    assert.equal(capturedUrl, "https://azure.example.test/openai/deployments/deployment-model/chat/completions?api-version=2025-01-01-preview");
+    assert.equal(capturedHeaders?.get("api-key"), "azure-test-key");
+    assert.equal(capturedHeaders?.get("authorization"), null);
+  } finally { globalThis.fetch = originalFetch; }
+});
