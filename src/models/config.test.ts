@@ -146,3 +146,31 @@ test("rejects unsafe custom endpoint paths", () => {
   process.env.SOFIA_MODEL_PROVIDERS = JSON.stringify({ bad: { baseUrl: "https://api.example.com", model: "model-x", endpointPath: "//evil.example/path" } });
   assert.throws(loadModelConfigFromEnv, /endpointPath must be a safe absolute path/);
 });
+
+
+test("exposes declared model capabilities and context window without guessing", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDERS = JSON.stringify({
+    multimodal: {
+      baseUrl: "https://api.example.com/v1",
+      model: "model-vision",
+      features: { toolCalling: true, vision: true, structuredOutput: false, contextWindow: 128000 },
+    },
+  });
+  const config = loadModelConfigFromEnv();
+  assert.deepEqual(config.routes[0]?.features, {
+    toolCalling: true, vision: true, structuredOutput: false, contextWindow: 128000,
+  });
+});
+
+test("rejects invalid model capability metadata", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDERS = JSON.stringify({
+    invalid: { baseUrl: "https://api.example.com/v1", model: "model-x", features: { vision: "yes" } },
+  });
+  assert.throws(loadModelConfigFromEnv, /feature vision must be boolean/);
+  process.env.SOFIA_MODEL_PROVIDERS = JSON.stringify({
+    invalid: { baseUrl: "https://api.example.com/v1", model: "model-x", features: { contextWindow: 0 } },
+  });
+  assert.throws(loadModelConfigFromEnv, /contextWindow must be a positive integer/);
+});
