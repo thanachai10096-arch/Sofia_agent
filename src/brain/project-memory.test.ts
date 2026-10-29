@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileProjectMemoryStore, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
@@ -53,6 +53,22 @@ test("project memory files use private permissions on POSIX", async () => {
   }
 });
 
+
+test("project memory ignores malformed records without crashing valid memory reads", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-malformed-records-"));
+  const store = new FileProjectMemoryStore("malformed-project", root);
+  await store.save(memoryEntryFromConvention("malformed-project", "Keep this valid memory"));
+  const [filename] = await readdir(root);
+  const file = path.join(root, filename!);
+  const raw = JSON.parse(await readFile(file, "utf8")) as unknown[];
+  raw.push(null, { id: "missing-content", project: "malformed-project", kind: "decision" });
+  await writeFile(file, JSON.stringify(raw), "utf8");
+
+  const entries = await store.list();
+  assert.equal(entries.length, 1);
+  assert.match(entries[0]!.content, /Keep this valid memory/);
+  assert.equal((await store.find("valid memory")).length, 1);
+});
 
 test("project memory ranks exact token and phrase matches above substring false positives", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-ranking-"));
