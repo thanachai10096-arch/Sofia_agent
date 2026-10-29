@@ -7,7 +7,7 @@ import type { LearningScope } from "./ports.js";
 
 const scope: LearningScope = { tenantId: "tenant-a", principalId: "user-a", projectId: "project-a" };
 const action: LearningRepairAction = { kind: "register-missing-runtime-skill", skillId: "skill-a", expectedPolicyRevision: "policy-4", scope, actorId: "operator-a", idempotencyKey: "repair-key-a" };
-const plan: LearningRepairPlan = { planId: "repair-plan-a", scope, actions: [action], blocked: [], eligibleForExecutor: true };
+const plan: LearningRepairPlan = { planId: "repair-key-a", scope, actions: [action], blocked: [], eligibleForExecutor: true };
 function snapshot(overrides: Partial<LearningRepairSnapshot> = {}): LearningRepairSnapshot {
   return { scope, exists: false, active: false, policyRevision: "policy-4", explicitlyApproved: true, trustedEvidenceValid: true, ...overrides };
 }
@@ -75,6 +75,17 @@ test("refuses ineligible plans and cross-scope actions", async () => {
   const host = hostWith(() => snapshot(), async () => {});
   await assert.rejects(() => executeLearningRepairPlan({ ...plan, eligibleForExecutor: false }, journal, host), /not eligible/);
   await assert.rejects(() => executeLearningRepairPlan({ ...plan, actions: [{ ...action, scope: { ...scope, tenantId: "tenant-b" } }] }, journal, host), /cross-scope/);
+});
+
+test("rejects an action whose idempotency key is not bound to the plan and skill", async () => {
+  const journal = new MemoryJournal();
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  await assert.rejects(
+    () => executeLearningRepairPlan({ ...plan, actions: [{ ...action, idempotencyKey: "unrelated-key" }] }, journal, host),
+    /unbound/,
+  );
+  assert.equal(registrations, 0);
 });
 
 test("detects drift after a journaled success instead of silently claiming healthy state", async () => {
