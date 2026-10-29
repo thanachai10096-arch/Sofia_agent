@@ -12,7 +12,7 @@ export interface VerifiedWhatsAppMessage {
 }
 export interface WhatsAppTransport {
   start(signal: AbortSignal, onMessage: (message: VerifiedWhatsAppMessage) => Promise<void>): Promise<void>;
-  sendText(recipientId: string, phoneNumberId: string, text: string): Promise<{ messageId?: string }>;
+  sendText(recipientId: string, text: string): Promise<{ messageId?: string }>;
   stop(): Promise<void>;
 }
 
@@ -51,13 +51,10 @@ export function createWhatsAppAdapter(transport: WhatsAppTransport): MessagingAd
     },
     async send(message: OutboundMessage): Promise<DeliveryReceipt> {
       if (!running) return { state: "failed", errorCode: "transport_stopped" };
-      // WhatsApp Cloud API sends to a recipient ID and requires the configured business phone ID.
-      const phoneNumberId = message.interactionId;
-      if (!phoneNumberId) return { state: "failed", errorCode: "whatsapp_phone_number_id_missing" };
       try {
         let lastId: string | undefined;
         for (const chunk of splitMessage(message.text, 4_000)) {
-          const result = await transport.sendText(message.conversationId, phoneNumberId, chunk);
+          const result = await transport.sendText(message.conversationId, chunk);
           lastId = result.messageId ?? lastId;
         }
         return { state: "sent", ...(lastId ? { providerMessageId: lastId } : {}) };
