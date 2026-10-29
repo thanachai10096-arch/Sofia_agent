@@ -103,3 +103,16 @@ test("skill regression evaluator validates thresholds", () => {
   assert.throws(() => createSkillRegressionEvaluator({ fixtures, runCase: async () => ({ passed: true }), minimumPassRate: 0 }));
   assert.throws(() => createSkillRegressionEvaluator({ fixtures, runCase: async () => ({ passed: true }), maxLatencyRegressionRatio: 0.5 }));
 });
+
+
+test("skill regression evaluator caps fixture suites to bound evaluation cost", () => {
+  const tooMany = Array.from({ length: 101 }, (_, index) => ({
+    id: "fixture-" + index,
+    taskType: "synthetic",
+    input: { value: index },
+  }));
+  assert.throws(
+    () => createSkillRegressionEvaluator({ fixtures: tooMany, runCase: async () => ({ passed: true }) }),
+    /cannot exceed 100 cases/,
+  );
+});
