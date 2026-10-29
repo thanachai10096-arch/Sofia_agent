@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBackupBundle, verifyBackupBundle } from "./backup-coordinator.js";
+import { createBackupBundle, projectMemoryBackupSource, verifyBackupBundle } from "./backup-coordinator.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { FileProjectMemoryStore, memoryEntryFromConvention } from "../brain/project-memory.js";
 
 const createdAt = "2026-10-29T04:00:00.000Z";
 
@@ -14,6 +18,22 @@ test("backup coordinator snapshots sources sequentially and verifies the returne
   assert.deepEqual(order, ["sessions", "memory"]);
   assert.equal(bundle.manifest.entries.length, 2);
   assert.equal(verifyBackupBundle(bundle).valid, true);
+});
+
+test("project-memory source includes only the explicit store snapshot", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-memory-source-"));
+  try {
+    const store = new FileProjectMemoryStore("backup-source-project", root);
+    const source = projectMemoryBackupSource(store);
+    assert.deepEqual(await source.snapshot(), []);
+    await store.save(memoryEntryFromConvention("backup-source-project", "Backup-safe memory record"));
+    const bundle = await createBackupBundle([source], createdAt);
+    assert.equal(bundle.manifest.entries.length, 1);
+    assert.match(bundle.manifest.entries[0]!.path, /^memory\/[a-f0-9]{64}\.json$/u);
+    assert.equal(verifyBackupBundle(bundle).valid, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("backup coordinator fails closed on duplicate source names and duplicate file paths", async () => {
