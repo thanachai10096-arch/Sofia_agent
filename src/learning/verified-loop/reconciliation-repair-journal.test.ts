@@ -216,28 +216,34 @@ test("SQLite journal atomically refuses a second executor claiming a running rep
 test("SQLite lease heartbeat keeps a live claim from being reclaimed, then permits stale recovery", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-lease-"));
   const file = path.join(dir, "repair.sqlite");
-  const first = await SqliteLearningRepairJournal.open(file, { leaseMs: 5_000 });
-  const second = await SqliteLearningRepairJournal.open(file, { leaseMs: 5_000 });
+  let clock = new Date("2026-10-29T00:00:00.000Z");
+  const now = () => new Date(clock);
+  const first = await SqliteLearningRepairJournal.open(file, { leaseMs: 5_000, now });
+  const second = await SqliteLearningRepairJournal.open(file, { leaseMs: 5_000, now });
   const entry = {
     key: "repair-lease", scope, skillId: "skill-lease", policyRevision: "policy-1",
-    state: "running" as const, attempts: 0, updatedAt: "2026-10-29T00:00:00.000Z",
+    state: "running" as const, attempts: 0, updatedAt: "2099-01-01T00:00:00.000Z",
   };
   try {
     const owner = await first.begin(entry);
     assert.equal(owner.claimed, true);
     assert.ok(owner.claimToken);
 
-    assert.equal(await first.heartbeat(entry.key, scope, owner.claimToken!, "2026-10-29T00:00:04.000Z"), true);
-    const stillLive = await second.begin({ ...entry, updatedAt: "2026-10-29T00:00:06.000Z" });
+    clock = new Date("2026-10-29T00:00:04.000Z");
+    assert.equal(await first.heartbeat(entry.key, scope, owner.claimToken!, "2099-01-01T00:00:00.000Z"), true);
+    clock = new Date("2026-10-29T00:00:06.000Z");
+    const stillLive = await second.begin({ ...entry, updatedAt: "2099-01-01T00:00:00.000Z" });
     assert.equal(stillLive.claimed, false);
     assert.equal(stillLive.state, "running");
 
-    const recovered = await second.begin({ ...entry, updatedAt: "2026-10-29T00:00:10.000Z" });
+    clock = new Date("2026-10-29T00:00:10.000Z");
+    const recovered = await second.begin({ ...entry, updatedAt: "2000-01-01T00:00:00.000Z" });
     assert.equal(recovered.claimed, true);
     assert.equal(recovered.state, "running");
     assert.equal(recovered.attempts, 2);
     assert.notEqual(recovered.claimToken, owner.claimToken);
-    assert.equal(await first.heartbeat(entry.key, scope, owner.claimToken!, "2026-10-29T00:00:11.000Z"), false);
+    clock = new Date("2026-10-29T00:00:11.000Z");
+    assert.equal(await first.heartbeat(entry.key, scope, owner.claimToken!, "2000-01-01T00:00:00.000Z"), false);
     await assert.rejects(
       () => first.finish(entry.key, scope, "succeeded", "stale worker", owner.claimToken),
       /claim lost/,
