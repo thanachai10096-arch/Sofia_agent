@@ -3,6 +3,7 @@ import test from "node:test";
 import { createHmac } from "node:crypto";
 import { createLineHttpTransport, verifyLineSignature } from "./line-http-transport.js";
 import { createLineAdapter, type VerifiedLineMessage } from "./line.js";
+import { createLineMessagingRuntime } from "./line-runtime.js";
 
 const secret = "test-channel-secret";
 const signed = (body: string) => createHmac("sha256", secret).update(body).digest("base64");
@@ -64,4 +65,23 @@ test("LINE adapter sends replies through the shared adapter contract", async () 
   assert.deepEqual(await adapter.send({ conversationId: "c1", text: "reply" }), { state: "sent", providerMessageId: "line-message-1" });
   assert.deepEqual(sent, [{ conversationId: "c1", text: "reply" }]);
   await adapter.stop();
+});
+
+test("LINE runtime requires explicit enablement and complete allowlist configuration", () => {
+  const warnings: string[] = [];
+  assert.equal(createLineMessagingRuntime({}, "/tmp/sofia-line-test", (warning) => warnings.push(warning)), undefined);
+  assert.deepEqual(warnings, []);
+
+  const runtime = createLineMessagingRuntime({
+    SOFIA_LINE_ENABLED: "true",
+    LINE_CHANNEL_ACCESS_TOKEN: "token",
+    LINE_CHANNEL_SECRET: "secret",
+    LINE_ALLOWED_USER_IDS: "U123",
+    LINE_ALLOWED_CONVERSATION_IDS: "",
+    SOFIA_API_KEY: "api-key",
+    SOFIA_API_BASE_URL: "https://sofia.example",
+  }, "/tmp/sofia-line-test", (warning) => warnings.push(warning));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /allowlists are required/);
 });
