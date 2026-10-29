@@ -43,6 +43,22 @@ const BUILTIN_SKILLS: readonly SofiaSkill[] = [
     procedure: ["inspect the failing test", "trace the failing behavior", "make the smallest fix", "run the failing test or test suite"],
     verification: ["test"],
   },
+  {
+    id: "ci-failure-triage",
+    name: "CI failure triage",
+    description: "Diagnose continuous-integration failures from authoritative logs and fix root causes without weakening tests or security.",
+    triggers: ["CI failed", "workflow run", "ENOTEMPTY", "cross-platform", "failing job"],
+    categories: ["runtime_error", "environment_error"],
+    strategy: "inspect-evidence",
+    procedure: [
+      "Inspect the exact failed job, commit SHA, and first actionable error in the authoritative CI logs.",
+      "Separate a product defect from a test-fixture, runner, dependency, or transient environment failure.",
+      "Make the smallest root-cause fix; never skip, weaken, or delete a test merely to obtain a green build.",
+      "Run the focused test and relevant typecheck/build locally when possible, then rerun CI on the new commit.",
+      "Report the exact commit and verified platform results, and leave unverified checks explicitly pending.",
+    ],
+    verification: ["test", "build"],
+  },
 ];
 
 function learnedToSkill(skill: LearnedSkillCandidate): SofiaSkill {
