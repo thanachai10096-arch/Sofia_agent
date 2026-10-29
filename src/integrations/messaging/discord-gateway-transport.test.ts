@@ -47,14 +47,14 @@ test("Discord Gateway identifies, ignores ordinary group chatter, and marks exac
     author: { id: "404", username: "user", bot: false }, mentions: [],
   } });
   socket.gateway({ op: 0, t: "MESSAGE_CREATE", s: 3, d: {
-    id: "102", channel_id: "202", guild_id: "303", content: "Sofia help",
+    id: "102", channel_id: "202", guild_id: "303", content: "<@999> help me",
     author: { id: "404", username: "user", bot: false }, mentions: [{ id: "999" }],
   } });
   await tick();
   assert.deepEqual(delivered, [{
     content: "ordinary group chat", directMessage: false, addressedToBot: undefined, transportVerified: true,
   }, {
-    content: "Sofia help", directMessage: false, addressedToBot: true, transportVerified: true,
+    content: "help me", directMessage: false, addressedToBot: true, transportVerified: true,
   }]);
   await transport.stop();
 });
