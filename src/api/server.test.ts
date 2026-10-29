@@ -108,6 +108,13 @@ test("API lists configured models and honors an explicit model route", async () 
     assert.equal(listed.status, 200);
     const payload = await listed.json() as { automaticSelection: boolean; models: Array<{ id: string; model: string }> };
     assert.equal(payload.automaticSelection, true);
+    // The public model catalogue may expose configured IDs and capabilities, never provider credentials.
+    assert.equal(JSON.stringify(payload).toLowerCase().includes("api_key"), false);
+    assert.equal(JSON.stringify(payload).toLowerCase().includes("secret"), false);
+
+    const unauthenticated = await fetch(baseUrl + "/v1/models");
+    assert.equal(unauthenticated.status, 401);
+    assert.deepEqual(await unauthenticated.json(), { error: "unauthorized" });
     assert.deepEqual(payload.models.map((model) => ({ id: model.id, model: model.model })), [
       { id: "fast", model: "vendor/fast-model" },
       { id: "coding", model: "vendor/coding-model" },
