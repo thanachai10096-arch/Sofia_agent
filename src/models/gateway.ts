@@ -121,9 +121,7 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
   const raw = asRecord(value) as AnthropicResponse | undefined;
   if (!raw || !Array.isArray(raw.content)) throw new Error("Anthropic Messages API returned an invalid response.");
   const textParts: string[] = [];
-  const toolCalls: NonNullable<ChatResponse["choices"]>[number]["message"] extends infer M
-    ? M extends { tool_calls?: infer T } ? NonNullable<T> : never
-    : never = [];
+  const toolCalls: Array<{ id?: string; function?: { name?: string; arguments?: string } }> = [];
   for (const block of raw.content) {
     if (block?.type === "text" && typeof block.text === "string" && block.text.trim()) {
       textParts.push(block.text.trim());
