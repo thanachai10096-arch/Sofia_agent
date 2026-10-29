@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBackupBundle, projectMemoryBackupSource, userMemoryBackupSource, verifyBackupBundle } from "./backup-coordinator.js";
+import { createBackupBundle, projectMemoryBackupSource, sqliteSessionBackupSource, userMemoryBackupSource, verifyBackupBundle } from "./backup-coordinator.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileProjectMemoryStore, memoryEntryFromConvention } from "../brain/project-memory.js";
 import { FileUserMemoryStore, createUserMemoryEntry } from "../brain/user-memory.js";
+import { SqliteSessionStore } from "../session/sqlite-store.js";
 
 const createdAt = "2026-10-29T04:00:00.000Z";
 
@@ -60,6 +61,33 @@ test("user-memory backup source snapshots only the explicitly selected user's fi
     assert.equal(Buffer.from(bytes).toString("utf8").includes("Separate user's private note"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("SQLite session backup source returns a verified consistent snapshot", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-session-source-"));
+  const store = await SqliteSessionStore.open(path.join(root, "live.sqlite"));
+  try {
+    store.save({ id: "backup-session", messages: ["committed before snapshot"], updatedAt: 0 });
+    const source = sqliteSessionBackupSource(store);
+    const bundle = await createBackupBundle([source], createdAt);
+    assert.equal(bundle.manifest.entries.length, 1);
+    assert.equal(bundle.manifest.entries[0]!.path, "sessions/sessions.sqlite");
+    assert.equal(verifyBackupBundle(bundle).valid, true);
+    store.save({ id: "live-after", messages: ["still writable"], updatedAt: 0 });
+    assert.deepEqual(store.get("live-after")?.messages, ["still writable"]);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("SQLite session backup source rejects in-memory stores", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    await assert.rejects(sqliteSessionBackupSource(store).snapshot(), /in-memory/);
+  } finally {
+    store.close();
   }
 });
 
