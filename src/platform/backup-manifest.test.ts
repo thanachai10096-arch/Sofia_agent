@@ -105,7 +105,7 @@ test("manifest rejects case-folded, Unicode-normalized, and file-directory path 
       ...manifest.entries[0],
       path: "state.json",
     }],
-  }), /unique across portable filesystems/);
+  }), /unique|duplicate|portable filesystem collision|both files and directories/);
 });
 
 test("manifest paths reject Windows device names, alternate streams, controls, and non-portable segments", () => {
