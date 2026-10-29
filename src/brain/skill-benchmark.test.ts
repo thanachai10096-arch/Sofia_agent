@@ -194,3 +194,24 @@ test("benchmark timeout aborts the isolated runner signal", async () => {
   assert.equal(evaluation.passed, false);
   assert.equal(signal?.aborted, true);
 });
+
+test("benchmark evidence reports measured duration and token usage", async () => {
+  const evaluator = createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    getActiveBaseline: () => ({ ...candidate, version: "0.9.0" }),
+    runner: {
+      run: async ({ candidate: tested }) => ({
+        passed: true,
+        score: 1,
+        durationMs: tested.version === "0.9.0" ? 7 : 11,
+        tokensUsed: tested.version === "0.9.0" ? 13 : 17,
+      }),
+    },
+  });
+  const evaluation = await evaluator(candidate);
+  const evidence = evaluation.checks.find((check) => check.name === "benchmark-evidence");
+  assert.match(evidence?.detail ?? "", /candidateDurationMs=33/);
+  assert.match(evidence?.detail ?? "", /candidateTokens=51/);
+  assert.match(evidence?.detail ?? "", /baselineDurationMs=21/);
+  assert.match(evidence?.detail ?? "", /baselineTokens=39/);
+});
