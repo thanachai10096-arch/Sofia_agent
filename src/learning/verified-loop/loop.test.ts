@@ -89,6 +89,20 @@ test("does not learn from missing or cross-scope evidence and deduplicates recei
   assert.equal((await loop.recordVerifiedCompletion(scope, "r1", "task")).recorded, false);
   assert.equal(state.experiences.length, 1);
 });
+test("rejects a receipt whose stored ID differs from the requested receipt ID", async () => {
+  const state = makeHost();
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "requested-id", "run1");
+  state.receipts.set("requested-id", {
+    ...state.receipts.get("requested-id")!,
+    id: "different-id",
+  });
+
+  const result = await loop.recordVerifiedCompletion(scope, "requested-id", "Fix TypeScript build");
+  assert.equal(result.recorded, false);
+  assert.equal(state.experiences.length, 0);
+});
+
 test("rejects stale policy receipts and untrusted evidence", async () => {
   const state = makeHost();
   const loop = new VerifiedLearningLoop(state.host);
@@ -168,6 +182,23 @@ test("resumes candidate evaluation when an earlier attempt persisted the receipt
 });
 
 
+test("fails closed when the regression adapter returns malformed output", async () => {
+  const state = makeHost();
+  state.host.verification.runRegression = async () => ({} as SkillEvaluation);
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "malformed-regression-1", "run1");
+  addReceipt(state, "malformed-regression-2", "run2");
+  addReceipt(state, "malformed-regression-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "malformed-regression-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "malformed-regression-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "malformed-regression-3", "Fix TypeScript build");
+
+  assert.equal(result.recorded, true);
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
 test("does not activate a learned skill without the existing lifecycle promotion gate", async () => {
   const state = makeHost();
   delete state.host.promoteCandidate;
@@ -183,6 +214,26 @@ test("does not activate a learned skill without the existing lifecycle promotion
 });
 
  
+test("does not activate a skill if policy changes during lifecycle promotion", async () => {
+  const state = makeHost();
+  state.host.promoteCandidate = async () => {
+    // Simulate policy changing while the lifecycle gate is doing external work.
+    state.host.currentPolicyRevision = async () => "policy-2";
+    return true;
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "policy-race-1", "run1");
+  addReceipt(state, "policy-race-2", "run2");
+  addReceipt(state, "policy-race-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "policy-race-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "policy-race-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "policy-race-3", "Fix TypeScript build");
+
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
 test("duplicate receipt cannot be reinterpreted with a different task summary", async () => {
   const state = makeHost();
   const loop = new VerifiedLearningLoop(state.host);

@@ -6,9 +6,13 @@ export function validScope(scope: LearningScope): boolean {
     typeof scope.projectId === "string" && scope.projectId.trim());
 }
 export function sameScope(a: LearningScope, b: LearningScope): boolean {
-  return a.tenantId === b.tenantId && a.principalId === b.principalId && a.projectId === b.projectId;
+  return validScope(a) && validScope(b) &&
+    a.tenantId === b.tenantId && a.principalId === b.principalId && a.projectId === b.projectId;
 }
 export function validReceipt(receipt: VerificationReceipt, scope: LearningScope, now = Date.now(), maxAgeMs = 7 * 24 * 60 * 60 * 1000): boolean {
+  if (!receipt || typeof receipt !== "object" || !validScope(scope) || !validScope(receipt.scope) ||
+      typeof receipt.completedAt !== "string" || !Number.isFinite(now) ||
+      !Number.isFinite(maxAgeMs) || maxAgeMs < 1) return false;
   const completedAt = Date.parse(receipt.completedAt);
   return receipt.completed === true && receipt.verified === true &&
     typeof receipt.id === "string" && receipt.id.length > 0 &&
@@ -21,6 +25,10 @@ export function validReceipt(receipt: VerificationReceipt, scope: LearningScope,
     Number.isFinite(completedAt) && completedAt <= now && now - completedAt <= maxAgeMs;
 }
 export function validEvidence(evidence: RunEvidence, receipt: VerificationReceipt): boolean {
+  if (!evidence || typeof evidence !== "object" || !receipt || typeof receipt !== "object" ||
+      !validScope(evidence.scope) || !validScope(receipt.scope) ||
+      !Array.isArray(receipt.evidenceIds) || typeof evidence.id !== "string" ||
+      typeof evidence.runId !== "string") return false;
   return evidence.trusted === true && evidence.success === true &&
     evidence.runId === receipt.runId && sameScope(evidence.scope, receipt.scope) &&
     receipt.evidenceIds.includes(evidence.id) &&
