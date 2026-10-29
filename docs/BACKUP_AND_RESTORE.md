@@ -16,7 +16,7 @@ The versioned integrity-manifest primitives in `src/platform/backup-manifest.ts`
 ## Required before production restore
 
 1. **Explicit scope:** enumerate supported stores and exclude credentials, environment files, API keys, tokens, and provider secrets by default.
-2. **Consistent snapshot:** use store-specific snapshots or quiesce writers. The session store offers `createConsistentSnapshot()` using SQLite `VACUUM INTO`; the file-backed project-memory store and selected-user memory store expose read-only snapshot contracts; every other persistent store still needs its own snapshot contract. Never copy a live SQLite database without coordinating WAL/SHM.
+2. **Consistent snapshot:** use store-specific snapshots or quiesce writers. The session store offers `createConsistentSnapshot()` using SQLite `VACUUM INTO`, and `sqliteSessionBackupSource()` stages a private temporary snapshot and removes it after reading; the file-backed project-memory store and selected-user memory store expose read-only snapshot contracts; every other persistent store still needs its own snapshot contract. Never copy a live SQLite database without coordinating WAL/SHM.
 3. **Private output:** create backup directories/files with restrictive permissions and never log file contents or secrets.
 4. **Archive defenses:** if archives are added, reject absolute paths, traversal, symlinks/hardlinks, duplicate normalized paths, and decompression bombs before extraction.
 5. **Verify before mutation:** validate the complete manifest and every byte count/checksum before touching destination state.
