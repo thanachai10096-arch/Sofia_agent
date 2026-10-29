@@ -9,6 +9,7 @@ import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } fro
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 import { SofiaClient } from "../sdk/client.js";
+import { redactSecrets } from "../security/guard.js";
 import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 import { createDiscordAdapter } from "../integrations/messaging/discord.js";
 import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
@@ -270,7 +271,7 @@ server.listen(port, "0.0.0.0", () => {
           void client.waitForRun(runId, { timeoutMs: 30 * 60 * 1_000, intervalMs: 1_000 })
             .then(async (run) => {
               const output = typeof run.result?.output === "string" ? run.result.output.trim() : "";
-              const safeOutput = output.replace(/(sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})/g, "[REDACTED]");
+              const safeOutput = String(redactSecrets(output));
               const resultText = run.status === "completed"
                 ? "Sofia completed the task.\nRun ID: " + runId + (safeOutput ? "\n\n" + safeOutput : "\n\nThe run completed without text output.")
                 : "Sofia task " + run.status + ".\nRun ID: " + runId;
@@ -305,7 +306,7 @@ server.listen(port, "0.0.0.0", () => {
         discordGatewayTransport = undefined;
       });
     } catch (error) {
-      console.error("Discord Gateway disabled:", error instanceof Error ? error.message : "configuration_error");
+      console.error("Discord Gateway disabled:", error instanceof Error ? error.name : "configuration_error");
       discordGateway = undefined;
       discordGatewayTransport = undefined;
     }
