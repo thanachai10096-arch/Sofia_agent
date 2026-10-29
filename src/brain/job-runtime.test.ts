@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
-import type { SofiaBrain } from "./executor.js";
+import type { BrainRunInput, SofiaBrain } from "./executor.js";
 
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
   const namespace = "job-runtime-restart-" + randomUUID();
@@ -615,7 +615,7 @@ test("DurableJobRuntime admits only one resumed execution across separate proces
     import { appendFile } from "node:fs/promises";
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
     const runtime = new DurableJobRuntime(() => ({
-      run: async (input) => {
+      run: async (input: BrainRunInput) => {
         if (!input.resume) throw new Error("expected a resume checkpoint");
         await appendFile(${JSON.stringify(markerFile)}, process.pid + "\\n");
         await new Promise((resolve) => setTimeout(resolve, 300));
@@ -974,6 +974,60 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
   }
 });
 
+
+test("DurableJobRuntime preserves the selected model route when resuming a checkpoint", async () => {
+  const namespace = "job-runtime-resume-model-route-" + randomUUID();
+  const selectedRoutes: Array<string | undefined> = [];
+  let runCount = 0;
+  const snapshot = {
+    version: 1,
+    runId: "resume-route-" + randomUUID(),
+    task: "resume using selected route",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: ["preserve route"],
+    completedStepIds: [],
+    checkpointId: "resume-route-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const runtime = new DurableJobRuntime((options) => {
+    selectedRoutes.push(options.modelRouteId);
+    return {
+      run: async (input: BrainRunInput) => {
+        runCount += 1;
+        if (runCount === 1) {
+          await options.onRunSnapshot?.(snapshot);
+          return { completed: false, state: "failed", summary: "checkpoint saved" };
+        }
+        assert.ok(input.resume, "resume must receive the saved checkpoint");
+        return { completed: true, state: "completed", summary: "resumed" };
+      },
+    } as unknown as SofiaBrain;
+  }, undefined, namespace);
+
+  const submitted = await runtime.submit({
+    task: "resume using selected route",
+    modelRouteId: "coding",
+  });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "failed");
+  assert.ok(current?.snapshot, "first attempt must persist a resumable checkpoint");
+  const resumed = await runtime.resume(submitted.id);
+  assert.equal(resumed.status, "completed");
+  assert.deepEqual(selectedRoutes, ["coding", "coding"]);
+  assert.equal(resumed.modelRouteId, "coding");
+});
 
 test("DurableJobRuntime preserves the selected model route on submitted jobs", async () => {
   const namespace = "job-runtime-model-route-" + randomUUID();

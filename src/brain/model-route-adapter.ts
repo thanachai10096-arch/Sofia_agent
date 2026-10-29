@@ -5,6 +5,16 @@ import type { InternalRoute, PackedPrompt, PreparedCall, ProviderReply } from ".
 
 const encoder = new TextEncoder();
 
+function positiveSafeIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`Invalid ${name}: expected a positive safe integer`);
+  }
+  return value;
+}
+
 function upperBoundTokens(value: unknown): number {
   const text = JSON.stringify(value);
   return encoder.encode(text).byteLength;
@@ -67,13 +77,30 @@ export function createInternalRoute(
 ): InternalRoute {
   const { modelProvider, route } = options;
 
+  // Keep legacy route capabilities unless the operator explicitly declares
+  // a feature. Explicit negative declarations must also apply to the Brain
+  // gateway, which performs its own capability filtering independently of ModelRouter.
+  const capabilities = new Set<string>(route.capabilities);
+  if (route.featureSupport?.toolCalling === true) capabilities.add("tool-use");
+  if (route.featureSupport?.toolCalling === false) capabilities.delete("tool-use");
+  if (route.featureSupport?.vision === true) capabilities.add("vision");
+  if (route.featureSupport?.vision === false) capabilities.delete("vision");
+  if (route.featureSupport?.structuredOutput === true) capabilities.add("structured-output");
+  if (route.featureSupport?.structuredOutput === false) capabilities.delete("structured-output");
+
   return {
     id: route.id,
     budgetKey: route.providerId ?? route.id,
     qualityTier: Math.max(1, Math.round(route.qualityWeight)),
-    capabilities: route.capabilities,
-    contextWindow: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_CONTEXT"] ?? 32_000),
-    maxOutputTokens: Number(process.env["SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT"] ?? 4_096),
+    capabilities: [...capabilities],
+    contextWindow: positiveSafeIntegerEnv(
+      "SOFIA_" + route.id.toUpperCase() + "_CONTEXT",
+      route.featureSupport?.contextWindow ?? 32_000,
+    ),
+    maxOutputTokens: positiveSafeIntegerEnv(
+      "SOFIA_" + route.id.toUpperCase() + "_MAX_OUTPUT",
+      4_096,
+    ),
     hardOutputCap: true,
 
     prepare(prompt: PackedPrompt): PreparedCall {

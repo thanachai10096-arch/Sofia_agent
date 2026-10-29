@@ -79,8 +79,8 @@ test("API sessions are persisted and scoped to the authenticated API key", async
 
 test("API lists configured models and honors an explicit model route", async () => {
   const routes: ModelRoute[] = [
-    { id: "fast", model: "vendor/fast-model", capabilities: ["fast"], costWeight: 1, latencyWeight: 1, qualityWeight: 5, healthy: true },
-    { id: "coding", model: "vendor/coding-model", capabilities: ["coding", "tool-use", "reasoning"], costWeight: 2, latencyWeight: 2, qualityWeight: 8, healthy: true },
+    { id: "fast", model: "vendor/fast-model", capabilities: ["fast"], costWeight: 1, latencyWeight: 1, qualityWeight: 5, healthy: true, featureSupport: { toolCalling: false, vision: false, structuredOutput: true, contextWindow: 32_000 } },
+    { id: "coding", model: "vendor/coding-model", capabilities: ["coding", "tool-use", "reasoning"], costWeight: 2, latencyWeight: 2, qualityWeight: 8, healthy: true, featureSupport: { toolCalling: true, vision: true, structuredOutput: true, contextWindow: 128_000 } },
   ];
   const router = new ModelRouter(routes);
   const selected: string[] = [];
@@ -106,11 +106,15 @@ test("API lists configured models and honors an explicit model route", async () 
       headers: { authorization: "Bearer model-key" },
     });
     assert.equal(listed.status, 200);
-    const payload = await listed.json() as { automaticSelection: boolean; models: Array<{ id: string; model: string }> };
+    const payload = await listed.json() as { automaticSelection: boolean; models: Array<{ id: string; model: string; featureSupport?: { toolCalling?: boolean; vision?: boolean; structuredOutput?: boolean; contextWindow?: number } }> };
     assert.equal(payload.automaticSelection, true);
     assert.deepEqual(payload.models.map((model) => ({ id: model.id, model: model.model })), [
       { id: "fast", model: "vendor/fast-model" },
       { id: "coding", model: "vendor/coding-model" },
+    ]);
+    assert.deepEqual(payload.models.map((model) => model.featureSupport), [
+      { toolCalling: false, vision: false, structuredOutput: true, contextWindow: 32_000 },
+      { toolCalling: true, vision: true, structuredOutput: true, contextWindow: 128_000 },
     ]);
 
     const response = await fetch(baseUrl + "/v1/agent/runs", {

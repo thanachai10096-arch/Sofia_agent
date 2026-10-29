@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SofiaModelGateway } from "./gateway.js";
+import { createInternalRoute } from "../brain/model-route-adapter.js";
 import type { ModelRequest, ModelRoute } from "./types.js";
 
 const route: ModelRoute = {
@@ -122,5 +123,117 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
     assert.equal(result.text, "{\"ok\":true}");
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("Brain route adapter enforces explicitly declared feature support", () => {
+  const modelProvider = {
+    async generate() {
+      return { text: "{}", usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  };
+
+  const unsupported = createInternalRoute({
+    modelProvider,
+    route: {
+      ...route,
+      capabilities: ["coding", "tool-use", "vision", "reasoning"],
+      featureSupport: {
+        toolCalling: false,
+        vision: false,
+        structuredOutput: false,
+      },
+    },
+  });
+  assert.equal(unsupported.capabilities.includes("tool-use"), false);
+  assert.equal(unsupported.capabilities.includes("vision"), false);
+  assert.equal(unsupported.capabilities.includes("structured-output"), false);
+
+  const declared = createInternalRoute({
+    modelProvider,
+    route: {
+      ...route,
+      capabilities: ["coding", "reasoning"],
+      featureSupport: {
+        toolCalling: true,
+        vision: true,
+        structuredOutput: true,
+      },
+    },
+  });
+  assert.equal(declared.capabilities.includes("tool-use"), true);
+  assert.equal(declared.capabilities.includes("vision"), true);
+  assert.equal(declared.capabilities.includes("structured-output"), true);
+
+  const legacy = createInternalRoute({ modelProvider, route });
+  assert.deepEqual(legacy.capabilities, route.capabilities);
+});
+
+test("Brain route adapter rejects invalid token limit environment overrides", () => {
+  const originalContext = process.env.SOFIA_CODING_CONTEXT;
+  const originalMaxOutput = process.env.SOFIA_CODING_MAX_OUTPUT;
+  const modelProvider = {
+    async generate() {
+      return { text: "{}", usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  };
+
+  try {
+    process.env.SOFIA_CODING_CONTEXT = "0";
+    assert.throws(
+      () => createInternalRoute({ modelProvider, route }),
+      /Invalid SOFIA_CODING_CONTEXT: expected a positive safe integer/,
+    );
+
+    delete process.env.SOFIA_CODING_CONTEXT;
+    process.env.SOFIA_CODING_MAX_OUTPUT = "1.5";
+    assert.throws(
+      () => createInternalRoute({ modelProvider, route }),
+      /Invalid SOFIA_CODING_MAX_OUTPUT: expected a positive safe integer/,
+    );
+
+    process.env.SOFIA_CODING_MAX_OUTPUT = "not-a-number";
+    assert.throws(
+      () => createInternalRoute({ modelProvider, route }),
+      /Invalid SOFIA_CODING_MAX_OUTPUT: expected a positive safe integer/,
+    );
+  } finally {
+    if (originalContext === undefined) delete process.env.SOFIA_CODING_CONTEXT;
+    else process.env.SOFIA_CODING_CONTEXT = originalContext;
+    if (originalMaxOutput === undefined) delete process.env.SOFIA_CODING_MAX_OUTPUT;
+    else process.env.SOFIA_CODING_MAX_OUTPUT = originalMaxOutput;
+  }
+});
+
+test("Brain route adapter honors declared model context window and preserves legacy override", async () => {
+  const originalContext = process.env.SOFIA_CODING_CONTEXT;
+  const modelProvider = {
+    async generate() {
+      return { text: "{}", usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  };
+
+  try {
+    delete process.env.SOFIA_CODING_CONTEXT;
+    const declared = createInternalRoute({
+      modelProvider,
+      route: { ...route, featureSupport: { contextWindow: 128_000 } },
+    });
+    assert.equal(declared.contextWindow, 128_000);
+
+    process.env.SOFIA_CODING_CONTEXT = "64000";
+    const overridden = createInternalRoute({
+      modelProvider,
+      route: { ...route, featureSupport: { contextWindow: 128_000 } },
+    });
+    assert.equal(overridden.contextWindow, 64_000);
+
+    delete process.env.SOFIA_CODING_CONTEXT;
+    const legacy = createInternalRoute({ modelProvider, route });
+    assert.equal(legacy.contextWindow, 32_000);
+  } finally {
+    if (originalContext === undefined) delete process.env.SOFIA_CODING_CONTEXT;
+    else process.env.SOFIA_CODING_CONTEXT = originalContext;
   }
 });

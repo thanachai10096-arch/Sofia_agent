@@ -391,6 +391,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             model: route.model ?? route.id,
             capabilities: [...route.capabilities],
             healthy: route.healthy,
+            ...(route.featureSupport ? { featureSupport: { ...route.featureSupport } } : {}),
           })),
         }, origin, config);
       }
