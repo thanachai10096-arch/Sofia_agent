@@ -2,8 +2,10 @@ import type { MessagingAdapter, InboundMessage, DeliveryReceipt, OutboundMessage
 import { splitMessage } from "./format.js";
 
 export interface VerifiedDiscordMessage {
-  /** Must only be emitted by a transport after validating Discord's signature and timestamp. */
-  signatureVerified: true;
+  /** HTTP interaction events must be signature-verified against the raw request and timestamp. */
+  signatureVerified?: true;
+  /** Gateway events are authenticated by the established Discord Gateway session over TLS. */
+  transportVerified?: true;
   id: string;
   channelId: string;
   author: { id: string; username?: string; bot?: boolean };
@@ -29,7 +31,7 @@ export function createDiscordAdapter(transport: DiscordTransport): MessagingAdap
       if (running) return;
       running = true;
       await transport.start(signal, async (event) => {
-        if (event.signatureVerified !== true || !event.id || !event.channelId || !event.author?.id || event.author.bot) return;
+        if ((event.signatureVerified !== true && event.transportVerified !== true) || !event.id || !event.channelId || !event.author?.id || event.author.bot) return;
         const inbound: InboundMessage = {
           platform: "discord", messageId: event.id,
           identity: { platform: "discord", userId: event.author.id, channelId: event.channelId,
