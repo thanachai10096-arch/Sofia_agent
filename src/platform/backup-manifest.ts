@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
 /**
@@ -8,6 +9,7 @@ export const SOFIA_BACKUP_FORMAT_VERSION = 1;
 export const MAX_BACKUP_MANIFEST_ENTRIES = 10_000;
 export const MAX_BACKUP_ENTRY_BYTES = 512 * 1024 * 1024;
 export const MAX_BACKUP_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
+export const MAX_BACKUP_MANIFEST_JSON_BYTES = 16 * 1024 * 1024;
 
 export interface BackupManifestEntry {
   path: string;
@@ -122,6 +124,32 @@ export function validateBackupManifest(value: unknown): BackupManifest {
     createdAt: value.createdAt,
     entries,
   };
+}
+
+
+/** Serialize a validated manifest in deterministic path order with a bounded output size. */
+export function serializeBackupManifest(value: unknown): string {
+  const manifest = validateBackupManifest(value);
+  manifest.entries.sort((a, b) => a.path.localeCompare(b.path));
+  const json = JSON.stringify(manifest);
+  if (Buffer.byteLength(json, "utf8") > MAX_BACKUP_MANIFEST_JSON_BYTES) {
+    throw new Error("Backup manifest JSON exceeds the maximum allowed size.");
+  }
+  return json;
+}
+
+/** Parse untrusted manifest JSON with a size limit, then validate its complete schema. */
+export function parseBackupManifestJson(input: string): BackupManifest {
+  if (typeof input !== "string" || Buffer.byteLength(input, "utf8") > MAX_BACKUP_MANIFEST_JSON_BYTES) {
+    throw new Error("Backup manifest JSON exceeds the maximum allowed size.");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(input) as unknown;
+  } catch {
+    throw new Error("Backup manifest JSON is malformed.");
+  }
+  return validateBackupManifest(value);
 }
 
 /**
