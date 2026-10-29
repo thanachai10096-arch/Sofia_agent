@@ -100,6 +100,17 @@ test("early reconciliation branches never finish another executor's running clai
   }
 });
 
+test("fails closed when a journal claims work without a fencing token", async () => {
+  const journal = new MemoryJournal();
+  journal.begin = async (entry) => ({ ...entry, state: "running", attempts: 1, claimed: true });
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /does not support safe claim fencing/);
+  assert.equal(registrations, 0);
+});
+
 test("refuses ineligible plans and cross-scope actions", async () => {
   const journal = new MemoryJournal();
   const host = hostWith(() => snapshot(), async () => {});
