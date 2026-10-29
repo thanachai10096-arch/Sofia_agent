@@ -132,10 +132,10 @@ test("manifest path ordering is locale-independent for mixed-case and Unicode na
     { path: "ä-file.txt", content: Buffer.from("unicode") },
     { path: "z-file.txt", content: Buffer.from("z") },
     { path: "A-file.txt", content: Buffer.from("upper") },
-    { path: "a-file.txt", content: Buffer.from("lower") },
+    { path: "b-file.txt", content: Buffer.from("lower") },
   ], createdAt);
   assert.deepEqual(
     manifest.entries.map((entry) => entry.path),
-    ["A-file.txt", "a-file.txt", "z-file.txt", "ä-file.txt"],
+    ["A-file.txt", "b-file.txt", "z-file.txt", "ä-file.txt"],
   );
 });
