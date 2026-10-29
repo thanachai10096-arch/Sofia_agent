@@ -119,6 +119,16 @@ export class VerifiedLearningLoop {
       }
 
       const evaluation = await this.host.verification.runRegression(scope, assessedCandidate);
+      // Treat the regression adapter as an untrusted boundary at runtime too:
+      // TypeScript types cannot prevent malformed values from plugins or external stores.
+      if (!evaluation || typeof evaluation.regressionRunId !== "string" ||
+          typeof evaluation.passed !== "boolean" ||
+          !Array.isArray(evaluation.regressionEvidenceIds) ||
+          !evaluation.regressionEvidenceIds.every(id => typeof id === "string") ||
+          !Array.isArray(evaluation.checks) ||
+          !evaluation.checks.every(check => check && typeof check.name === "string" && typeof check.passed === "boolean")) {
+        return { recorded: true, experienceId: prepared.experienceId };
+      }
       const regressionEvidence = evaluation.regressionEvidenceIds.length > 0
         ? await this.host.verification.getEvidence(scope, evaluation.regressionEvidenceIds)
         : [];
