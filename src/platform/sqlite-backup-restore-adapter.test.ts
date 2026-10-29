@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -86,3 +86,33 @@ function requireFsWrite(destination: string, bytes: Uint8Array): void {
   // Synchronous fixture helper keeps the lifecycle callback's contract synchronous.
   writeFileSync(destination, bytes, { mode: 0o600 });
 }
+
+test("SQLite restore adapter rejects a symlinked database parent before lifecycle mutation", async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-sqlite-restore-"));
+  const realDirectory = path.join(parent, "real");
+  const aliasDirectory = path.join(parent, "alias");
+  await import("node:fs/promises").then(({ mkdir }) => mkdir(realDirectory));
+  const database = path.join(realDirectory, "sessions.sqlite");
+  await writeFile(database, sqliteBytes("original"));
+  await symlink(realDirectory, aliasDirectory);
+  let lifecycleCalls = 0;
+  const lifecycle = {
+    getOpenStore() {
+      return { createConsistentSnapshot(destination: string) { lifecycleCalls += 1; requireFsWrite(destination, sqliteBytes("original")); return destination; } };
+    },
+    async close() { lifecycleCalls += 1; },
+    async reopen() { lifecycleCalls += 1; },
+  };
+  try {
+    const bundle = await createBackupBundle([{
+      name: "sessions",
+      async snapshot() { return [{ path: "sessions/snapshot.sqlite", content: sqliteBytes("restored") }]; },
+    }], createdAt);
+    const adapter = sqliteFileBackupRestoreAdapter("sessions", path.join(aliasDirectory, "sessions.sqlite"), "sessions/snapshot.sqlite", lifecycle);
+    await assert.rejects(adapter.preflight(bundle, ["sessions/snapshot.sqlite"]), /symlinked path components/);
+    assert.equal(lifecycleCalls, 0);
+    assert.deepEqual(await readFile(database), sqliteBytes("original"));
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
