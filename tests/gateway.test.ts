@@ -223,3 +223,43 @@ test("gateway leaves JSON mode disabled for ordinary chat", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("native Anthropic Messages protocol maps text and tool calls", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl = "";
+  let capturedBody: Record<string, unknown> | undefined;
+  let capturedHeaders: Headers | undefined;
+  globalThis.fetch = async (input, init) => {
+    capturedUrl = String(input);
+    capturedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    capturedHeaders = new Headers(init?.headers);
+    return new Response(JSON.stringify({
+      id: "msg_1", type: "message", role: "assistant",
+      content: [
+        { type: "text", text: "I will inspect the file." },
+        { type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "README.md" } },
+      ],
+      stop_reason: "tool_use", usage: { input_tokens: 17, output_tokens: 8 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      anthropic: { baseUrl: "https://api.anthropic.com/v1", apiKey: "anthropic-test-key", model: "claude-test", protocol: "anthropic-messages" },
+    });
+    const route = { ...makeRoute(), id: "anthropic", providerId: "anthropic" };
+    const result = await gateway.generate({
+      ...request,
+      messages: [{ role: "system", content: "Be concise." }, { role: "user", content: "Inspect the README." }],
+      tools: [{ type: "function", function: { name: "read_file", description: "Read a workspace file", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } } }],
+    }, route);
+    assert.equal(capturedUrl, "https://api.anthropic.com/v1/messages");
+    assert.equal(capturedHeaders?.get("x-api-key"), "anthropic-test-key");
+    assert.equal(capturedHeaders?.get("anthropic-version"), "2023-06-01");
+    assert.equal(capturedBody?.model, "claude-test");
+    assert.equal(capturedBody?.max_tokens, 2048);
+    assert.equal((capturedBody?.tools as Array<Record<string, unknown>>)[0]?.name, "read_file");
+    assert.equal(result.text, "I will inspect the file.");
+    assert.deepEqual(result.toolCalls, [{ id: "toolu_1", name: "read_file", input: { path: "README.md" } }]);
+    assert.deepEqual(result.usage, { inputTokens: 17, outputTokens: 8 });
+  } finally { globalThis.fetch = originalFetch; }
+});
