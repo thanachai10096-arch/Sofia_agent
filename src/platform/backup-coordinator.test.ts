@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBackupBundle, projectMemoryBackupSource, readBackupBundleDirectory, sqliteSessionBackupSource, stageBackupBundleForRestore, userMemoryBackupSource, verifyBackupBundle, writeBackupBundleDirectory } from "./backup-coordinator.js";
+import { createBackupBundle, preflightBackupRestore, projectMemoryBackupSource, readBackupBundleDirectory, sqliteSessionBackupSource, stageBackupBundleForRestore, userMemoryBackupSource, verifyBackupBundle, writeBackupBundleDirectory } from "./backup-coordinator.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -285,4 +285,59 @@ test("backup directory reader refuses symlink payloads", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+test("restore preflight creates a deterministic complete plan without mutating the bundle", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() {
+      return [
+        { path: "sessions/state.json", content: Buffer.from("session") },
+        { path: "memory/project.json", content: Buffer.from("memory") },
+      ];
+    } },
+  ], createdAt);
+  const before = [...bundle.files.entries()].map(([key, value]) => [key, Buffer.from(value).toString("hex")]);
+  const plan = preflightBackupRestore(bundle, [
+    { name: "memory-store", paths: ["memory/project.json"] },
+    { name: "session-store", paths: ["sessions/state.json"] },
+  ]);
+  assert.deepEqual(plan, {
+    format: "sofia-agent-restore-plan",
+    version: 1,
+    createdAt,
+    verifiedFiles: 2,
+    verifiedBytes: Buffer.byteLength("session") + Buffer.byteLength("memory"),
+    targets: [
+      { name: "memory-store", paths: ["memory/project.json"], bytes: Buffer.byteLength("memory") },
+      { name: "session-store", paths: ["sessions/state.json"], bytes: Buffer.byteLength("session") },
+    ],
+  });
+  assert.deepEqual([...bundle.files.entries()].map(([key, value]) => [key, Buffer.from(value).toString("hex")]), before);
+});
+
+test("restore preflight rejects incomplete, overlapping, unknown, and invalid assignments", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() {
+      return [
+        { path: "a.json", content: Buffer.from("a") },
+        { path: "b.json", content: Buffer.from("b") },
+      ];
+    } },
+  ], createdAt);
+  assert.throws(() => preflightBackupRestore(bundle, [{ name: "only", paths: ["a.json"] }]), /unassigned/i);
+  assert.throws(() => preflightBackupRestore(bundle, [
+    { name: "one", paths: ["a.json"] },
+    { name: "two", paths: ["a.json", "b.json"] },
+  ]), /assigned more than once/i);
+  assert.throws(() => preflightBackupRestore(bundle, [
+    { name: "one", paths: ["a.json", "b.json", "not-in-bundle.json"] },
+  ]), /not in the verified bundle/i);
+  assert.throws(() => preflightBackupRestore(bundle, [
+    { name: "same", paths: ["a.json"] },
+    { name: "same", paths: ["b.json"] },
+  ]), /Duplicate restore target name/i);
+  assert.throws(() => preflightBackupRestore({ ...bundle, files: new Map() }, [
+    { name: "one", paths: ["a.json", "b.json"] },
+  ]), /invalid bundle/i);
 });
