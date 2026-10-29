@@ -61,7 +61,7 @@ test("skill lifecycle bounds skill metadata collection sizes", () => {
     });
     const invalidPackages: SkillPackage[] = [
       { ...skillPackage, skill: { ...skillPackage.skill, triggers: Array.from({ length: 101 }, (_, i) => `trigger-${i}`) } },
-      { ...skillPackage, skill: { ...skillPackage.skill, categories: Array.from({ length: 51 }, (_, i) => `category-${i}`) } },
+      { ...skillPackage, skill: { ...skillPackage.skill, categories: Array.from({ length: 51 }, () => "runtime_error" as const) } },
       { ...skillPackage, skill: { ...skillPackage.skill, procedure: Array.from({ length: 101 }, (_, i) => `step-${i}`) } },
       { ...skillPackage, skill: { ...skillPackage.skill, verification: ["typecheck", "test", "build", "test"] } },
     ];
