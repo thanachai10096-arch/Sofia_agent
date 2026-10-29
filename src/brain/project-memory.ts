@@ -123,6 +123,7 @@ function validateLearnedCandidate(candidate: LearnedSkillCandidate): LearnedSkil
 
 export class PersistentSkillLedger implements SkillLedger {
   private cache: LearnedSkillCandidate[];
+  private readonly pendingCandidates = new Set<LearnedSkillCandidate>();
   private pending: Promise<void> = Promise.resolve();
   private persistenceError: string | null = null;
   private pendingWrites = 0;
@@ -142,12 +143,13 @@ export class PersistentSkillLedger implements SkillLedger {
 
   record(candidate: LearnedSkillCandidate): void {
     const safe = validateLearnedCandidate(candidate);
-    const duplicate = this.cache.some(item =>
+    const duplicate = [...this.cache, ...this.pendingCandidates].some(item =>
       item.name === safe.name && item.category === safe.category &&
       item.trigger === safe.trigger && JSON.stringify(item.procedure) === JSON.stringify(safe.procedure));
     if (duplicate) return;
 
-    this.cache.push(safe);
+    // Keep pending candidates out of list() until their durable write succeeds.
+    this.pendingCandidates.add(safe);
     const now = new Date().toISOString();
     const id = createHash("sha256").update(JSON.stringify({
       category: safe.category, strategy: safe.strategy, trigger: safe.trigger, procedure: safe.procedure,
@@ -162,13 +164,15 @@ export class PersistentSkillLedger implements SkillLedger {
     this.pending = this.pending.then(
       () => this.store.save(entry),
     ).then(
-      () => undefined,
+      () => {
+        this.pendingCandidates.delete(safe);
+        this.cache.push(safe);
+      },
       error => {
         // Keep the error observable until flush() reports it. A later successful
         // write must not hide an earlier failed candidate in the same batch.
         this.persistenceError = error instanceof Error ? error.message : String(error);
-        // A failed durable write must not leave a phantom skill available to later matching.
-        this.cache = this.cache.filter(item => item !== safe);
+        this.pendingCandidates.delete(safe);
       },
     ).finally(() => { this.pendingWrites = Math.max(0, this.pendingWrites - 1); });
   }
