@@ -34,7 +34,7 @@ export function createLearningLifecyclePromoter(
         name: candidate.name,
         description: "Learned from repeated completions with trusted verification evidence.",
         triggers: [candidate.trigger],
-        categories: ["verified-learning"],
+        categories: ["tool_error"],
         strategy: "inspect-evidence",
         procedure: [...candidate.procedure],
         verification: ["typecheck", "test", "build"],
