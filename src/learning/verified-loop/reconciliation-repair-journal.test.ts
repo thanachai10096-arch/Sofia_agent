@@ -64,7 +64,7 @@ test("repair audit journal rejects malformed events and prevents update/delete",
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-journal-"));
   const journal = await SqliteLearningRepairJournal.open(path.join(dir, "repair.sqlite"));
   try {
-    await assert.rejects(() => journal.audit({
+    assert.throws(() => journal.audit({
       key: "repair-1", scope, actorId: "", skillId: "skill-1",
       event: "repair_started", at: "not-a-date",
     }), /Invalid learning repair audit event/);
