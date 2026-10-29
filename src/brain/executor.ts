@@ -405,7 +405,7 @@ export class SofiaBrain {
           diagnoses: this.diagnoses,
           decisions: this.decisions,
           projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined,
-          projectMemory: this.projectMemory.slice(0, 12).map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, source: entry.source })),
+          projectMemory: this.projectMemory.slice(0, 12).map((entry) => ({ kind: entry.kind, content: fenceUntrustedOutput("project_memory", entry.content, { maxChars: 4_000 }).text, confidence: entry.confidence, source: entry.source })),
         },
       });
 
