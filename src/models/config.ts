@@ -170,12 +170,11 @@ function resolveProvider(
 }
 
 /**
- * Model-agnostic OpenAI-compatible configuration.
+ * Provider-agnostic model configuration.
  *
- * Each task route can select a provider and model independently. This adapter
- * supports any provider exposing the OpenAI Chat Completions-compatible API;
- * non-compatible APIs require a dedicated adapter. Credentials should be
- * supplied via secret environment variables, never committed to source control.
+ * Each task route can select a provider and model independently. The gateway
+ * supports OpenAI Chat Completions-compatible APIs and Anthropic Messages.
+ * Credentials are referenced through server-side secret environment variables.
  */
 export function loadModelConfigFromEnv(): SofiaModelConfig {
   const manifestRaw = textEnv("SOFIA_MODEL_PROVIDERS");
