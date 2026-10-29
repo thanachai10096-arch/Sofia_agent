@@ -125,3 +125,17 @@ test("manifest paths reject Windows device names, alternate streams, controls, a
     { path: "memory/user-profile.json", content: Buffer.from("y") },
   ], createdAt));
 });
+
+
+test("manifest path ordering is locale-independent for mixed-case and Unicode names", () => {
+  const manifest = createBackupManifest([
+    { path: "ä-file.txt", content: Buffer.from("unicode") },
+    { path: "z-file.txt", content: Buffer.from("z") },
+    { path: "A-file.txt", content: Buffer.from("upper") },
+    { path: "a-file.txt", content: Buffer.from("lower") },
+  ], createdAt);
+  assert.deepEqual(
+    manifest.entries.map((entry) => entry.path),
+    ["A-file.txt", "a-file.txt", "z-file.txt", "ä-file.txt"],
+  );
+});
