@@ -160,7 +160,7 @@ export function validateBackupManifest(value: unknown): BackupManifest {
 /** Serialize a validated manifest in deterministic path order with a bounded output size. */
 export function serializeBackupManifest(value: unknown): string {
   const manifest = validateBackupManifest(value);
-  manifest.entries.sort((a, b) => a.path.localeCompare(b.path));
+  manifest.entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const json = JSON.stringify(manifest);
   if (Buffer.byteLength(json, "utf8") > MAX_BACKUP_MANIFEST_JSON_BYTES) {
     throw new Error("Backup manifest JSON exceeds the maximum allowed size.");
