@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBackupBundle, projectMemoryBackupSource, readBackupBundleDirectory, sqliteSessionBackupSource, userMemoryBackupSource, verifyBackupBundle, writeBackupBundleDirectory } from "./backup-coordinator.js";
+import { createBackupBundle, projectMemoryBackupSource, readBackupBundleDirectory, sqliteSessionBackupSource, stageBackupBundleForRestore, userMemoryBackupSource, verifyBackupBundle, writeBackupBundleDirectory } from "./backup-coordinator.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -176,6 +176,37 @@ test("backup directory export refuses invalid bundles and cleans partial output 
   }
 });
 
+
+test("restore staging verifies a private copy and cleanup is idempotent", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-stage-"));
+  try {
+    const bundle = await createBackupBundle([
+      { name: "state", async snapshot() { return [{ path: "state.json", content: Buffer.from("verified") }]; } },
+    ], createdAt);
+    const staged = await stageBackupBundleForRestore(bundle, root);
+    assert.equal(verifyBackupBundle(await readBackupBundleDirectory(staged.directory)).valid, true);
+    const stat = await (await import("node:fs/promises")).stat(path.dirname(staged.directory));
+    if (process.platform !== "win32") assert.equal(stat.mode & 0o777, 0o700);
+    await staged.cleanup();
+    await staged.cleanup();
+    await assert.rejects((await import("node:fs/promises")).stat(path.dirname(staged.directory)), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("restore staging rejects invalid bundles without creating staging output", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-stage-invalid-"));
+  try {
+    const bundle = await createBackupBundle([
+      { name: "state", async snapshot() { return [{ path: "state.json", content: Buffer.from("verified") }]; } },
+    ], createdAt);
+    await assert.rejects(stageBackupBundleForRestore({ ...bundle, files: new Map() }, root), /invalid backup bundle/i);
+    assert.deepEqual(await (await import("node:fs/promises")).readdir(root), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("backup directory reader round-trips an export and verifies its bytes", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-roundtrip-"));
