@@ -344,3 +344,15 @@ test("execution timeout cancels the runtime job and records failure", async () =
   assert.equal(state.history[0].status, "failed");
   assert.match(state.history[0].error, /timed out/i);
 });
+
+
+test("schedule creation rejects malformed runtime input instead of persisting NaN limits", async () => {
+  const store: CronStore = { async transact(fn) { return fn({ schedules: [], history: [], audit: [] }); } };
+  const scheduler = new CronScheduler({ async submit() { throw new Error("unused"); } } as unknown as JobRuntime, { store });
+  const base = { name: "validated", task: "task", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice" };
+  await assert.rejects(() => scheduler.create({ ...base, maxRetries: Number.NaN }, "alice"), /maxRetries must be/i);
+  await assert.rejects(() => scheduler.create({ ...base, timeoutMs: Number.NaN }, "alice"), /timeoutMs must be/i);
+  await assert.rejects(() => scheduler.create({ ...base, misfirePolicy: "retry" as never }, "alice"), /misfire policy/i);
+  await assert.rejects(() => scheduler.create({ ...base, enabled: "false" as never }, "alice"), /enabled must be a boolean/i);
+  await assert.rejects(() => scheduler.create({ ...base, task: undefined as never }, "alice"), /task.*required/i);
+});
