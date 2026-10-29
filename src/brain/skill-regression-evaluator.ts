@@ -74,6 +74,7 @@ function ratioRegressed(candidate: number | undefined, baseline: number | undefi
  */
 export function createSkillRegressionEvaluator(options: SkillRegressionEvaluatorOptions): SkillCandidateEvaluator {
   const fixtures = [...options.fixtures];
+  if (fixtures.length > 100) throw new Error("Regression fixture suites cannot exceed 100 cases");
   const minimumPassRate = options.minimumPassRate ?? 1;
   const maxLatencyRegressionRatio = options.maxLatencyRegressionRatio ?? 1.5;
   const maxTokenRegressionRatio = options.maxTokenRegressionRatio ?? 1.5;
