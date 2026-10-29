@@ -55,3 +55,10 @@ Each newly claimed repair attempt receives a unique fencing token. Finalization 
 ### Repair journal audit integrity
 
 The SQLite repair journal now installs database triggers that reject updates and deletes from `learning_repair_audit`, so append-only behavior is enforced by SQLite rather than relying only on application convention. Audit writes also validate the event name, non-empty key/actor/skill identifiers, and parseable timestamp before insertion. This is tamper-resistance within the SQLite API boundary, not a cryptographic or externally immutable audit log; production deployments needing stronger tamper evidence should export events to an independently controlled append-only sink.
+
+
+### Repair lease and stale-worker recovery
+
+The SQLite repair journal supports bounded leases (default 60 seconds; configurable from 5 seconds to 1 hour) and owner-token heartbeats. An active executor renews its lease while registration and verification run. A competing executor may reclaim a running attempt only after the last recorded heartbeat is older than the configured lease; reclaiming rotates the fencing token and increments the attempt count. Heartbeats and finalization from the old owner are rejected after takeover.
+
+Lease expiry is a failure detector, not proof that the old process has stopped. Therefore the lifecycle adapter must remain idempotent for the same scoped skill and policy revision, and the executor revalidates authoritative state before and after registration. The lease reduces accidental concurrent work but does not create a cross-database transaction or guarantee exactly-once side effects. Deployments should tune lease duration to the slowest expected lifecycle operation and monitor repeated expirations. Stale recovery is covered by SQLite tests for live heartbeat renewal, expired-lease takeover, and stale-token rejection.
