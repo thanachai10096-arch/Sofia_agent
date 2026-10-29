@@ -159,3 +159,26 @@ test("Discord Gateway rejects malformed bot tokens before opening a socket", () 
     /invalid format/i,
   );
 });
+
+
+test("Discord Gateway stops reconnecting after a fatal authentication close code", async () => {
+  const sockets: FakeSocket[] = [];
+  const errors: Array<{ event: string; status?: number }> = [];
+  const transport = createDiscordGatewayTransport({
+    botToken: "x".repeat(30),
+    socketFactory: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+    onError: (event, status) => errors.push({ event, status }),
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  const first = sockets[0];
+  assert.ok(first);
+  first.emit("close", { code: 4004, reason: "authentication failed" });
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  assert.equal(sockets.length, 1, "fatal close code must not schedule a reconnect");
+  assert.ok(errors.some((error) => error.event === "gateway_connect_failed" && error.status === 4004));
+  await transport.stop();
+});
