@@ -55,6 +55,12 @@ export class ModelRouter {
       const preferred = this.routes.find((route) => route.id === preferredRouteId);
       if (!preferred) throw new Error("Unknown model route: " + preferredRouteId);
       if (!preferred.healthy) throw new Error("Requested model route is unhealthy: " + preferredRouteId);
+      if (kind === "vision" && preferred.featureSupport?.vision === false) {
+        throw new Error("Requested model route does not support vision: " + preferredRouteId);
+      }
+      if ((kind === "coding" || kind === "debugging" || kind === "research") && preferred.featureSupport?.toolCalling === false) {
+        throw new Error("Requested model route does not support tool calling for " + kind + ": " + preferredRouteId);
+      }
       return preferred;
     }
     const winner = this.winners.get(kind);
