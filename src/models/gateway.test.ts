@@ -127,6 +127,49 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
 });
 
 
+test("Brain route adapter enforces explicitly declared feature support", () => {
+  const modelProvider = {
+    async generate() {
+      return { text: "{}", usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  };
+
+  const unsupported = createInternalRoute({
+    modelProvider,
+    route: {
+      ...route,
+      capabilities: ["coding", "tool-use", "vision", "reasoning"],
+      featureSupport: {
+        toolCalling: false,
+        vision: false,
+        structuredOutput: false,
+      },
+    },
+  });
+  assert.equal(unsupported.capabilities.includes("tool-use"), false);
+  assert.equal(unsupported.capabilities.includes("vision"), false);
+  assert.equal(unsupported.capabilities.includes("structured-output"), false);
+
+  const declared = createInternalRoute({
+    modelProvider,
+    route: {
+      ...route,
+      capabilities: ["coding", "reasoning"],
+      featureSupport: {
+        toolCalling: true,
+        vision: true,
+        structuredOutput: true,
+      },
+    },
+  });
+  assert.equal(declared.capabilities.includes("tool-use"), true);
+  assert.equal(declared.capabilities.includes("vision"), true);
+  assert.equal(declared.capabilities.includes("structured-output"), true);
+
+  const legacy = createInternalRoute({ modelProvider, route });
+  assert.deepEqual(legacy.capabilities, route.capabilities);
+});
+
 test("Brain route adapter honors declared model context window and preserves legacy override", async () => {
   const originalContext = process.env.SOFIA_CODING_CONTEXT;
   const modelProvider = {
