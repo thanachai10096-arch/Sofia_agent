@@ -71,6 +71,8 @@ export { VoiceWorkflow } from "./voice/workflow.js";
 export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpeechProvider, VoiceAgentReply, VoiceTurnResult, VoiceWorkflowOptions } from "./voice/workflow.js";
 export type { VoiceProviderSelection, VoiceProviderRegistry } from "./voice/provider-registry.js";
 export { createVoiceProviderRegistry, loadVoiceProviderSelectionFromEnv } from "./voice/provider-registry.js";
+export { createOpenAICompatibleVoiceProviders } from "./voice/openai-compatible-provider.js";
+export type { OpenAICompatibleVoiceConfig } from "./voice/openai-compatible-provider.js";
 
 export { createChatCommandHandler } from "./integrations/chat-adapter.js";
 export { FileChatMessageDeduplicator } from "./integrations/file-chat-deduplicator.js";
