@@ -12,6 +12,9 @@ export interface GatewayProviderConfig {
   apiKey: string;
   model: string;
   protocol?: "openai-compatible" | "anthropic-messages";
+  authHeader?: string;
+  authPrefix?: string;
+  endpointPath?: string;
   headers?: Record<string, string>;
   maxConcurrent?: number;
   /** One deadline for queue wait, provider attempts, and retry delays. Defaults to 45 seconds. */
@@ -316,19 +319,19 @@ export class SofiaModelGateway implements ModelProvider {
         let retryableFailure = false;
         try {
           const response = await fetch(
-            config.baseUrl.replace(/\/$/, "") + (protocol === "anthropic-messages" ? "/messages" : "/chat/completions"),
+            config.baseUrl.replace(/\/$/, "") + (config.endpointPath ?? (protocol === "anthropic-messages" ? "/messages" : "/chat/completions")),
             {
               method: "POST",
               headers: protocol === "anthropic-messages"
                 ? {
                     ...config.headers,
                     "anthropic-version": "2023-06-01",
-                    "x-api-key": config.apiKey,
+                    [config.authHeader ?? "x-api-key"]: config.apiKey,
                     "content-type": "application/json",
                   }
                 : {
                     ...config.headers,
-                    authorization: "Bearer " + config.apiKey,
+                    [config.authHeader ?? "authorization"]: (config.authPrefix ?? "Bearer ") + config.apiKey,
                     "content-type": "application/json",
                   },
               body: JSON.stringify(body),
