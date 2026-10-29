@@ -237,8 +237,8 @@ export class VersionedSkillLifecycle {
       if (!isRecord(item) || typeof item.id !== "string" || !item.id.trim() || item.id.length > 200 ||
           typeof item.skillId !== "string" || !item.skillId.trim() ||
           !["candidate", "verified", "rejected", "active", "superseded", "rolled_back"].includes(String(item.status)) ||
-          !isRecord(item.provenance) || typeof item.provenance.source !== "string" || !item.provenance.source.trim() ||
-          !Array.isArray(item.provenance.evidenceIds) || !item.provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
+          !isRecord(item.provenance) || typeof item.provenance.source !== "string" || !item.provenance.source.trim() || item.provenance.source.length > 200 ||
+          !hasValidEvidenceIds(item.provenance.evidenceIds) ||
           typeof item.provenance.confidence !== "number" || !Number.isFinite(item.provenance.confidence) ||
           item.provenance.confidence < 0 || item.provenance.confidence > 1 ||
           typeof item.createdAt !== "string" || typeof item.updatedAt !== "string") {
@@ -248,8 +248,10 @@ export class VersionedSkillLifecycle {
       if (safePackage.skill.id !== item.skillId) throw new Error("Skill lifecycle package id does not match record");
       if (item.evaluation !== undefined) {
         if (!isRecord(item.evaluation) || typeof item.evaluation.passed !== "boolean" || !Array.isArray(item.evaluation.checks) ||
-            item.evaluation.checks.length === 0 || !item.evaluation.checks.every((check) =>
-              isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
+            item.evaluation.checks.length === 0 || item.evaluation.checks.length > 100 || !item.evaluation.checks.every((check) =>
+              isRecord(check) && typeof check.name === "string" && Boolean(check.name.trim()) && check.name.length <= 200 &&
+              typeof check.passed === "boolean" &&
+              (check.detail === undefined || (typeof check.detail === "string" && check.detail.length <= 10_000))) {
           throw new Error("Invalid skill lifecycle evaluation");
         }
       }
