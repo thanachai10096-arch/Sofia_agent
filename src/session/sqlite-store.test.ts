@@ -274,3 +274,25 @@ test("in-memory SQLite stores cannot create a file snapshot by path", async () =
     store.close();
   }
 });
+
+test("SQLite consistent snapshot safely supports apostrophes in destination paths", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-snapshot-quote-"));
+  const dir = path.join(root, "user's backups");
+  fs.mkdirSync(dir);
+  const source = path.join(root, "sessions.sqlite");
+  const snapshot = path.join(dir, "user's snapshot.sqlite");
+  const store = await SqliteSessionStore.open(source);
+  try {
+    store.save({ id: "quoted-path", messages: ["still readable"], updatedAt: 0 });
+    store.createConsistentSnapshot(snapshot);
+    const copied = await SqliteSessionStore.open(snapshot);
+    try {
+      assert.deepEqual(copied.get("quoted-path")?.messages, ["still readable"]);
+    } finally {
+      copied.close();
+    }
+  } finally {
+    store.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
