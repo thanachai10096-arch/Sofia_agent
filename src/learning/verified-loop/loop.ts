@@ -71,10 +71,14 @@ export class VerifiedLearningLoop {
         if (!persistedExperience) {
           return { inserted: false as const, experienceId: experience.id, candidate: undefined };
         }
+        // A duplicate receipt must not be reinterpreted using a new caller-supplied
+        // summary. Keep the receipt bound to the summary/fingerprint first persisted.
+        const effectiveSummary = inserted ? safeSummary : persistedExperience.summary;
+        const effectiveFingerprint = inserted ? taskFingerprint : persistedExperience.taskFingerprint;
         const history = await tx.listExperiences(scope, this.options.historyLimit);
-        const repeats = history.filter(item => item.taskFingerprint === taskFingerprint);
+        const repeats = history.filter(item => item.taskFingerprint === effectiveFingerprint);
         if (repeats.length < 2) return { inserted, experienceId: persistedExperience.id, candidate: undefined };
-        const skillName = `learned-${taskFingerprint.slice(0, 12)}`;
+        const skillName = `learned-${effectiveFingerprint.slice(0, 12)}`;
         const activeSkills = await tx.listActiveSkills(scope);
         if (activeSkills.some(skill => skill.name === skillName && skill.policyRevision === currentPolicy)) {
           return { inserted, experienceId: persistedExperience.id, candidate: undefined };
@@ -86,10 +90,10 @@ export class VerifiedLearningLoop {
           "Apply only the parts supported by current evidence and available tools.",
           "Run relevant regression checks and verify current acceptance criteria before reporting success.",
         ].slice(0, this.options.maxSkillProcedureSteps);
-        const scopeFingerprint = fingerprint([scope.tenantId, scope.principalId, scope.projectId, taskFingerprint].join("\\n"));
+        const scopeFingerprint = fingerprint([scope.tenantId, scope.principalId, scope.projectId, effectiveFingerprint].join("\\n"));
         const candidate: SkillCandidate = {
           id: `learned:${scopeFingerprint}`, scope: { ...scope }, experienceId: persistedExperience.id,
-          name: skillName, trigger: safeSummary.slice(0, 240), procedure,
+          name: skillName, trigger: effectiveSummary.slice(0, 240), procedure,
           confidence: Math.min(0.95, 0.65 + 0.05 * repeats.length),
         };
         return { inserted, experienceId: persistedExperience.id, candidate };
