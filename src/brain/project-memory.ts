@@ -78,8 +78,25 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
       .slice(0, 12);
   }
   readSync(): ProjectMemoryEntry[] {
-    try { const entries=JSON.parse(readFileSync(this.file,"utf8")) as ProjectMemoryEntry[]; return entries.filter(entry=>!containsPromptInjection(entry.content)); }
-    catch { return []; }
+    let raw: string;
+    try {
+      raw = readFileSync(this.file, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+
+    // A missing file is a normal first-run state; a corrupt or unreadable file
+    // is not. Surface corruption so callers cannot mistake data loss for empty memory.
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      throw new Error("Project memory file must contain a JSON array.");
+    }
+    return parsed.filter((entry): entry is ProjectMemoryEntry =>
+      Boolean(entry && typeof entry === "object" &&
+        typeof (entry as ProjectMemoryEntry).content === "string" &&
+        !containsPromptInjection((entry as ProjectMemoryEntry).content))
+    );
   }
 }
 
