@@ -7,3 +7,6 @@ export { ScopedSelfImprovement } from "./self-improvement.js";
 export type { SelfImprovementCheckpointStore, VerifiedExecutionNotification } from "./self-improvement.js";
 export { SqliteSelfImprovementCheckpointStore } from "./sqlite-checkpoint-store.js";
 export { SqliteLearningTransactionStore, withSqliteLearningTransactions } from "./sqlite-learning-store.js"; 
+
+export { createLearningLifecyclePromoter } from "./lifecycle-promoter.js";
+export type { LearningLifecyclePromotionOptions } from "./lifecycle-promoter.js";
