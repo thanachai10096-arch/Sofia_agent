@@ -161,11 +161,21 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
     };
     try { await callback(event); } catch { notify("message_handler_failed"); }
   }
+  function gatewayTargetUrl(): string {
+    try {
+      const target = new URL(resumeUrl || GATEWAY_URL);
+      target.searchParams.set("v", "10");
+      target.searchParams.set("encoding", "json");
+      return target.toString();
+    } catch {
+      return GATEWAY_URL;
+    }
+  }
   function connect(): void {
     if (!running || controller?.signal.aborted) return;
     const myGeneration = ++generation;
     let socket: DiscordGatewaySocket;
-    try { socket = socketFactory(resumeUrl || GATEWAY_URL); }
+    try { socket = socketFactory(gatewayTargetUrl()); }
     catch { notify("gateway_connect_failed"); scheduleReconnect(myGeneration); return; }
     currentSocket = socket;
     socket.addEventListener("message", (event) => {
@@ -203,6 +213,10 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
     socket.addEventListener("close", (event) => {
       if (socket !== currentSocket || myGeneration !== generation) return;
       clearHeartbeat();
+      if (event.code === 4007 || event.code === 4009) {
+        sessionId = undefined;
+        sequence = null;
+      }
       const fatalCodes = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
       if (typeof event.code === "number" && fatalCodes.has(event.code)) {
         notify("gateway_connect_failed", event.code);
