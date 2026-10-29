@@ -166,6 +166,8 @@ test("SQLite fencing token prevents a stale attempt from finalizing a newer retr
     assert.equal(attemptB.claimed, true);
     assert.ok(attemptB.claimToken);
     assert.notEqual(attemptB.claimToken, attemptA.claimToken);
+    assert.equal(await first.heartbeat?.(entry.key, scope, attemptA.claimToken!, "2026-10-29T00:01:01.000Z"), false);
+    assert.equal(await second.heartbeat?.(entry.key, scope, attemptB.claimToken!, "2026-10-29T00:01:02.000Z"), true);
 
     await assert.rejects(
       () => first.finish(entry.key, scope, "succeeded", "stale attempt A", attemptA.claimToken),
