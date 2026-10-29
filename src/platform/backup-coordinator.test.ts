@@ -219,6 +219,21 @@ test("backup directory reader rejects changed bytes and unexpected files", async
   }
 });
 
+test("backup directory reader rejects unlisted empty directories", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-reader-extra-dir-"));
+  const destination = path.join(root, "export");
+  try {
+    const bundle = await createBackupBundle([
+      { name: "reader", async snapshot() { return [{ path: "state/state.json", content: Buffer.from("{}") }]; } },
+    ], createdAt);
+    await writeBackupBundleDirectory(bundle, destination);
+    await (await import("node:fs/promises")).mkdir(path.join(destination, "unlisted-empty"));
+    await assert.rejects(readBackupBundleDirectory(destination), /Unexpected backup directory/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("backup directory reader refuses symlink payloads", async () => {
   if (process.platform === "win32") return;
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-reader-link-"));
