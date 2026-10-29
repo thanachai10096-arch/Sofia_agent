@@ -54,6 +54,18 @@ The code outline above is not a claim that the repository's API server is alread
 
 - The shared Sofia SDK supports an optional `idempotencyKey` for async runs. Reuse a key only for the same logical request; the API returns `409 idempotency_key_reused` if the same key is presented with a different request payload. This protection is currently process-local and is not persisted across server restarts.
 
+## Telegram HTTP 409 troubleshooting
+
+Telegram returns HTTP 409 for a long-polling conflict when another consumer is using `getUpdates`, or when webhook delivery conflicts with polling. This transport requests `deleteWebhook` without dropping pending updates before polling, so repeated 409 responses should be investigated rather than retried indefinitely.
+
+1. Confirm that only one running process/service uses this exact bot token. Check local development terminals, old Railway services, preview deployments, background workers, and any other host where the bot was tested. Do not paste the token into chat, issues, screenshots, or shell history.
+2. Check the bot's webhook state with Telegram's official `getWebhookInfo` API using a trusted secret-handling method. Never share the full request URL because the bot token is embedded in it. If a webhook is intentionally required, do not use this long-polling transport for that bot.
+3. Stop the stale poller only after confirming which service owns it. Do not stop unrelated Sofia services just because they have a similar name.
+4. After the conflict is resolved, restart the intended test instance and verify that it receives a message from an allowlisted user, rejects an unallowlisted user, and can deliver a real Sofia result.
+5. If HTTP 409 persists, record only the timestamp, service/deployment ID, and status code. Never include the token, full Bot API URL, chat contents, or raw provider response in diagnostics.
+
+The transport treats HTTP 409 as terminal and emits `poll_conflict` rather than entering an exponential retry loop. This makes the failure visible and avoids futile retries; it does not automatically find or stop the competing consumer. The Sofia API can remain available while Telegram polling is stopped.
+
 ## Production acceptance checklist
 
 - [ ] Typecheck, build, and full test suite pass on the PR head.
