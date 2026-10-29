@@ -460,7 +460,10 @@ export class CronScheduler {
       try {
         job = await this.runtime.get(execution.jobId);
       } catch {
-        job = undefined;
+        // A transient runtime/storage outage is not proof that the job is missing.
+        // Leave the durable execution pending so a later recovery pass can retry
+        // reconciliation; never turn an unreadable job into a terminal record.
+        continue;
       }
       if (!job) {
         await this.store.transact(async state => {
