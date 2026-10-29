@@ -58,6 +58,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function snowflake(value: unknown): value is string {
   return typeof value === "string" && /^\d{1,24}$/.test(value);
 }
+function safeResumeGatewayUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 2_000) return undefined;
+  try {
+    const parsed = new URL(value);
+    const hostname = parsed.hostname.toLowerCase();
+    const allowedHost = hostname === "discord.gg" || hostname.endsWith(".discord.gg");
+    if (parsed.protocol !== "wss:" || !allowedHost || parsed.username || parsed.password ||
+        (parsed.port !== "" && parsed.port !== "443")) return undefined;
+    // Normalize the URL instead of carrying arbitrary path/query data from a Gateway payload.
+    return "wss://" + hostname + "/?v=10&encoding=json";
+  } catch {
+    return undefined;
+  }
+}
 function safeNotify(options: DiscordGatewayTransportOptions, event: "gateway_failed" | "delivery_failed", status?: number): void {
   try { options.onError?.(event, status); } catch { /* diagnostics must not break transport */ }
 }
@@ -161,9 +175,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
     if (payload.t === "READY" && isRecord(payload.d)) {
       const ready = payload.d as GatewayReady;
       if (typeof ready.session_id === "string") sessionId = ready.session_id;
-      if (typeof ready.resume_gateway_url === "string" && /^wss:\/\//i.test(ready.resume_gateway_url)) {
-        resumeUrl = ready.resume_gateway_url.replace(/\/$/, "") + "/?v=10&encoding=json";
-      }
+      resumeUrl = safeResumeGatewayUrl(ready.resume_gateway_url);
       settleFirstReady();
       return;
     }
