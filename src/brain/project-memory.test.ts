@@ -142,6 +142,26 @@ const learnedCandidate: LearnedSkillCandidate = {
   evidenceIds: ["run-123"],
 };
 
+test("in-memory skill ledger rejects invalid enums and oversized candidates", () => {
+  const ledger = new InMemorySkillLedger();
+  assert.throws(() => ledger.record({
+    ...learnedCandidate,
+    category: "untrusted_category" as LearnedSkillCandidate["category"],
+  }), /Invalid learned skill candidate/);
+  assert.throws(() => ledger.record({
+    ...learnedCandidate,
+    strategy: "run-arbitrary-shell" as LearnedSkillCandidate["strategy"],
+  }), /Invalid learned skill candidate/);
+  assert.throws(() => ledger.record({
+    ...learnedCandidate,
+    procedure: ["inspect evidence", "x".repeat(2001)],
+  }), /Invalid learned skill candidate/);
+  assert.throws(() => ledger.record({
+    ...learnedCandidate,
+    evidenceIds: [],
+  }), /Invalid learned skill candidate/);
+});
+
 test("in-memory skill ledger applies secret redaction and prompt-injection checks", () => {
   const ledger = new InMemorySkillLedger();
   const secret = "github_pat_123456789012345678901234567890";
