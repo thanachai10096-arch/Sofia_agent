@@ -449,6 +449,29 @@ export async function executeBackupRestoreTransaction(
   bundle: unknown,
   adapters: readonly BackupRestoreTargetAdapter[],
 ): Promise<BackupRestoreTransactionResult> {
+  // Runtime callers may cross JavaScript/plugin boundaries and bypass TypeScript.
+  // Validate the complete adapter shape before mapping, preflight, or side effects.
+  if (!Array.isArray(adapters)) {
+    throw new Error("Restore adapters must be an array.");
+  }
+  for (const candidate of adapters as readonly unknown[]) {
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+      throw new Error("Every restore adapter must be an object.");
+    }
+    const adapter = candidate as Record<string, unknown>;
+    if (typeof adapter.name !== "string" || !adapter.name.trim()) {
+      throw new Error("Every restore adapter must have a non-empty name.");
+    }
+    if (!Array.isArray(adapter.paths)) {
+      throw new Error(`Restore adapter ${adapter.name} must provide an array of paths.`);
+    }
+    for (const method of ["preflight", "captureRollback", "apply", "rollback"]) {
+      if (typeof adapter[method] !== "function") {
+        throw new Error(`Restore adapter ${adapter.name} is missing required method: ${method}.`);
+      }
+    }
+  }
+
   const plan = preflightBackupRestore(bundle, adapters.map(({ name, paths }) => ({ name, paths })));
   const record = bundle as BackupBundle;
   const byName = new Map(adapters.map((adapter) => [adapter.name, adapter]));
