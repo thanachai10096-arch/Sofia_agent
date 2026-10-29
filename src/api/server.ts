@@ -196,6 +196,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     ...(run.error ? { error: run.error } : {}),
   });
 
+  const modelSelectionError = (input: AgentRunInput): { status: number; error: string } | undefined => {
+    const requested = input.modelRouteId?.trim();
+    if (!requested || requested === "auto") return undefined;
+    const routes = deps.router.listRoutes?.();
+    if (!routes) return { status: 503, error: "model_selection_unavailable" };
+    const route = routes.find((item) => item.id === requested);
+    if (!route) return { status: 400, error: "invalid_model_route" };
+    if (!route.healthy) return { status: 409, error: "model_route_unavailable" };
+    return undefined;
+  };
+
   const startRun = (run: ActiveRun, input: AgentRunInput) => {
     void (async () => {
       run.status = "running";
@@ -207,6 +218,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
+          ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
           ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -449,6 +461,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+            ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -503,6 +516,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
             ...(input.context !== undefined ? { context: input.context } : {}),
             ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
+            ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.acceptanceCriteria !== undefined ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
             ...(input.priority !== undefined ? { priority: input.priority } : {}),
             ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
@@ -561,6 +575,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+            ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
