@@ -139,4 +139,5 @@ test("persistent skill ledger exposes storage failures without unhandled rejecti
   ledger.record(learnedCandidate);
   await assert.rejects(ledger.flush(), /disk unavailable/);
   assert.match(ledger.getPersistenceStatus().lastError ?? "", /disk unavailable/);
+  assert.equal(ledger.list().length, 0, "a candidate whose durable write failed must not remain available for matching");
 });
