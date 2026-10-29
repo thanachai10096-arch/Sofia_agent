@@ -214,7 +214,8 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
       if (payload.t === "READY") {
         const ready = payload.d as GatewayReady | undefined;
         if (ready?.session_id) sessionId = ready.session_id;
-        const trustedResumeUrl = trustedResumeGatewayUrl(ready?.resume_gateway_url);\n        if (trustedResumeUrl) resumeUrl = trustedResumeUrl;
+        const trustedResumeUrl = trustedResumeGatewayUrl(ready?.resume_gateway_url);
+        if (trustedResumeUrl) resumeUrl = trustedResumeUrl;
         if (ready?.user?.id) botId = ready.user.id;
         reconnectAttempt = 0;
       } else if (payload.t === "MESSAGE_CREATE" && payload.d && typeof payload.d === "object") {
