@@ -115,9 +115,16 @@ export class VersionedSkillLifecycle {
     } catch (error) {
       result = { passed: false, checks: [{ name: "evaluator", passed: false, detail: error instanceof Error ? error.message : String(error) }] };
     }
-    if (!isRecord(result) || !Array.isArray(result.checks) || result.checks.length === 0 ||
-        !result.checks.every((check) => isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
-      result = { passed: false, checks: [{ name: "evaluation-result", passed: false, detail: "Evaluator returned malformed or empty evidence" }] };
+    if (!isRecord(result) || !Array.isArray(result.checks) || result.checks.length === 0 || result.checks.length > 100 ||
+        !result.checks.every((check) =>
+          isRecord(check) &&
+          typeof check.name === "string" &&
+          Boolean(check.name.trim()) &&
+          check.name.length <= 200 &&
+          typeof check.passed === "boolean" &&
+          (check.detail === undefined || (typeof check.detail === "string" && check.detail.length <= 10_000))
+        )) {
+      result = { passed: false, checks: [{ name: "evaluation-result", passed: false, detail: "Evaluator returned malformed or unbounded evidence" }] };
     }
     const before = clone(this.snapshot);
     const record = this.requireRecord(candidateId);
