@@ -18,11 +18,12 @@ test("repair journal persists idempotency state and audit events across reopen",
       state: "running", attempts: 0, updatedAt: "2026-10-29T00:00:00.000Z",
     });
     assert.equal(entry.attempts, 1);
+    assert.ok(entry.claimToken);
     await journal.audit({
       key: "repair-1", scope, actorId: "operator-1", skillId: "skill-1",
       event: "repair_started", at: "2026-10-29T00:00:01.000Z",
     });
-    await journal.finish("repair-1", scope, "succeeded", "verified");
+    await journal.finish("repair-1", scope, "succeeded", "verified", entry.claimToken);
     journal.close();
 
     journal = await SqliteLearningRepairJournal.open(file);
@@ -118,6 +119,29 @@ test("SQLite journal adds fencing column to a legacy database without losing row
     } finally {
       db.close();
     }
+  } finally {
+    journal.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tokenless finalization cannot bypass an active repair claim", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-journal-no-token-"));
+  const file = path.join(dir, "repair.sqlite");
+  const journal = await SqliteLearningRepairJournal.open(file);
+  try {
+    const entry = await journal.begin({
+      key: "repair-requires-token", scope, skillId: "skill-token", policyRevision: "policy-1",
+      state: "running", attempts: 0, updatedAt: "2026-10-29T00:00:00.000Z",
+    });
+    assert.ok(entry.claimToken);
+    await assert.rejects(
+      () => journal.finish(entry.key, scope, "succeeded", "unfenced completion"),
+      /token required/,
+    );
+    assert.equal((await journal.get(entry.key, scope))?.state, "running");
+    await journal.finish(entry.key, scope, "succeeded", "fenced completion", entry.claimToken);
+    assert.equal((await journal.get(entry.key, scope))?.state, "succeeded");
   } finally {
     journal.close();
     fs.rmSync(dir, { recursive: true, force: true });
