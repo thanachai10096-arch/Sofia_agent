@@ -24,6 +24,11 @@ export class ModelRouter {
       let best = -Infinity;
       for (const route of this.routes) {
         if (!route.healthy) continue;
+        // Declared provider features are hard constraints. Unknown features remain
+        // eligible for backward compatibility, but known unsupported features do not.
+        if (kind === "vision" && route.features?.vision === false) continue;
+        if (["coding", "debugging", "research"].includes(kind) &&
+            route.features?.toolCalling === false) continue;
         let capabilityScore = 0;
         for (const capability of required) {
           if (route.capabilities.includes(capability as never)) capabilityScore += 3;
