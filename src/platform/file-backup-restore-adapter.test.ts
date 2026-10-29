@@ -62,7 +62,7 @@ test("directory restore adapter rejects symlinked destination parents before wri
       name: "memory",
       async snapshot() { return [{ path: "memory/entry.json", content: Buffer.from("{}") }]; },
     }], createdAt);
-    const adapter = directoryBackupRestoreAdapter("memory", root, ["memory/entry.json"]);
+    const adapter = directoryBackupRestoreAdapter("a-memory", root, ["memory/entry.json"]);
     await assert.rejects(adapter.preflight(bundle, ["memory/entry.json"]), /symbolic links/);
     await assert.rejects(readFile(path.join(outside, "entry.json")), { code: "ENOENT" });
   } finally {
@@ -89,7 +89,7 @@ test("directory adapter participates in transaction rollback when a later target
     }], createdAt);
     const fileAdapter = directoryBackupRestoreAdapter("memory", root, ["memory/entry.json"]);
     const failingAdapter = {
-      name: "later",
+      name: "z-later",
       paths: ["other/fail.json"],
       async preflight() {},
       async captureRollback() { return null; },
