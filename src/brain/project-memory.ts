@@ -6,6 +6,11 @@ import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { containsPromptInjection, redactSecrets } from "../security/guard.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 
+// Serialize read-modify-write cycles for each project-memory file within this process.
+// Atomic rename prevents partial JSON, while this lock prevents concurrent saves from
+// overwriting one another after reading the same stale snapshot.
+const PROJECT_MEMORY_WRITES = new Map<string, Promise<void>>();
+
 export interface ProjectMemoryEntry {
   id: string; project: string; kind: "convention" | "repair" | "decision"; content: string;
   source?: string; confidence: number; createdAt: string; updatedAt: string; uses: number;
@@ -16,28 +21,67 @@ export interface ProjectMemoryStore {
   find(query: string): Promise<ProjectMemoryEntry[]>;
 }
 
+function isProjectMemoryEntry(value: unknown): value is ProjectMemoryEntry {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entry = value as Partial<ProjectMemoryEntry>;
+  return typeof entry.id === "string" && entry.id.length > 0 &&
+    typeof entry.project === "string" && entry.project.length > 0 &&
+    (entry.kind === "convention" || entry.kind === "repair" || entry.kind === "decision") &&
+    typeof entry.content === "string" && entry.content.length <= 4000 &&
+    (entry.source === undefined || typeof entry.source === "string") &&
+    typeof entry.confidence === "number" && Number.isFinite(entry.confidence) &&
+    typeof entry.createdAt === "string" && typeof entry.updatedAt === "string" &&
+    typeof entry.uses === "number" && Number.isFinite(entry.uses) && entry.uses >= 0;
+}
+
 export class FileProjectMemoryStore implements ProjectMemoryStore {
   private readonly file: string;
   constructor(project: string, root = sofiaStateDirectory("memory")) {
     const key = createHash("sha256").update(project).digest("hex"); this.file = path.join(root, key + ".json");
   }
   private async read(): Promise<ProjectMemoryEntry[]> {
-    try { return JSON.parse(await fs.readFile(this.file, "utf8")) as ProjectMemoryEntry[]; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    try {
+      const parsed: unknown = JSON.parse(await fs.readFile(this.file, "utf8"));
+      if (!Array.isArray(parsed)) throw new Error("Project memory file must contain a JSON array.");
+      // Ignore malformed records rather than allowing a single damaged entry to
+      // crash list/find or become model context. Keep parse/I/O failures visible.
+      return parsed.filter(isProjectMemoryEntry);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
   }
   async save(entry: ProjectMemoryEntry): Promise<void> {
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
     const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, 4000) };
-    const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
-    const directory = path.dirname(this.file);
-    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-    await fs.chmod(directory, 0o700);
-    const temporary = this.file + "." + randomUUID() + ".tmp";
+
+    const lockKey = path.resolve(this.file);
+    const previous = PROJECT_MEMORY_WRITES.get(lockKey) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.then(() => gate);
+    PROJECT_MEMORY_WRITES.set(lockKey, tail);
+    await previous;
     try {
-      await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
-      await fs.rename(temporary, this.file);
+      // Read inside the lock: doing this before waiting would still lose updates.
+      const entries = await this.read();
+      const index = entries.findIndex((item) => item.id === safeEntry.id);
+      if (index >= 0) entries[index] = safeEntry;
+      else entries.push(safeEntry);
+
+      const directory = path.dirname(this.file);
+      await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      await fs.chmod(directory, 0o700);
+      const temporary = this.file + "." + randomUUID() + ".tmp";
+      try {
+        await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
+        await fs.rename(temporary, this.file);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
     } finally {
-      await fs.rm(temporary, { force: true });
+      release();
+      if (PROJECT_MEMORY_WRITES.get(lockKey) === tail) PROJECT_MEMORY_WRITES.delete(lockKey);
     }
   }
   async list(){return (await this.read()).filter(entry=>!containsPromptInjection(entry.content));}
@@ -78,13 +122,34 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
       .slice(0, 12);
   }
   readSync(): ProjectMemoryEntry[] {
-    try { const entries=JSON.parse(readFileSync(this.file,"utf8")) as ProjectMemoryEntry[]; return entries.filter(entry=>!containsPromptInjection(entry.content)); }
-    catch { return []; }
+    try {
+      const entries: unknown = JSON.parse(readFileSync(this.file, "utf8"));
+      return Array.isArray(entries)
+        ? entries.filter(isProjectMemoryEntry).filter((entry) => !containsPromptInjection(entry.content))
+        : [];
+    } catch {
+      return [];
+    }
   }
 }
 
 export class PersistentSkillLedger implements SkillLedger {
   private cache: LearnedSkillCandidate[];
+  private readonly pendingWrites = new Set<Promise<void>>();
+  private persistenceFailed = false;
+
+  /** Persistence health for hosts that need to surface skill-learning durability. */
+  get persistenceStatus(): "healthy" | "pending" | "failed" {
+    if (this.persistenceFailed) return "failed";
+    return this.pendingWrites.size > 0 ? "pending" : "healthy";
+  }
+
+  /** Wait for writes started by record(); reject if any persistence attempt failed. */
+  async flush(): Promise<void> {
+    await Promise.all([...this.pendingWrites]);
+    if (this.persistenceFailed) throw new Error("One or more learned-skill persistence writes failed.");
+  }
+
   constructor(private readonly store: ProjectMemoryStore) {
     const syncStore = store as FileProjectMemoryStore;
     this.cache = typeof syncStore.readSync === "function"
@@ -96,7 +161,20 @@ export class PersistentSkillLedger implements SkillLedger {
     if (!this.cache.some(x=>x.name===candidate.name&&x.category===candidate.category&&x.trigger===candidate.trigger)) this.cache.push(candidate);
     const now=new Date().toISOString();
     const id=createHash("sha256").update(JSON.stringify({category:candidate.category,strategy:candidate.strategy,trigger:candidate.trigger,procedure:candidate.procedure})).digest("hex");
-    void this.store.save({id,project:"skill",kind:"repair",content:JSON.stringify(candidate),source:candidate.evidenceIds.join(","),confidence:0.8,createdAt:now,updatedAt:now,uses:0});
+    const entry: ProjectMemoryEntry = {
+      id, project: "skill", kind: "repair", content: JSON.stringify(candidate),
+      source: candidate.evidenceIds.join(","), confidence: 0.8,
+      createdAt: now, updatedAt: now, uses: 0,
+    };
+    // record() is intentionally synchronous for the SkillLedger contract. Capture
+    // persistence failures instead of creating an unhandled rejection; hosts can
+    // inspect persistenceStatus and await flush() at a durability boundary.
+    let pending!: Promise<void>;
+    pending = Promise.resolve()
+      .then(() => this.store.save(entry))
+      .catch(() => { this.persistenceFailed = true; })
+      .finally(() => { this.pendingWrites.delete(pending); });
+    this.pendingWrites.add(pending);
   }
   list(): readonly LearnedSkillCandidate[] { return [...this.cache]; }
 }
