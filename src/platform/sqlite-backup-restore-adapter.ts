@@ -32,6 +32,19 @@ export function sqliteFileBackupRestoreAdapter(
 ): BackupRestoreTargetAdapter {
   const database = path.resolve(databasePath);
   const relativePath = backupPath;
+  let databaseClosed = false;
+
+  async function closeDatabase(): Promise<void> {
+    if (databaseClosed) return;
+    await lifecycle.close();
+    databaseClosed = true;
+  }
+
+  async function reopenDatabase(): Promise<void> {
+    if (!databaseClosed) return;
+    await lifecycle.reopen();
+    databaseClosed = false;
+  }
   if (!name.trim()) throw new Error("SQLite restore adapter name is required.");
   if (!relativePath || relativePath.startsWith("/") || relativePath.includes("\\") ||
       relativePath.split("/").some((part) => !part || part === "." || part === ".." || part.includes(":"))) {
@@ -113,18 +126,18 @@ export function sqliteFileBackupRestoreAdapter(
       if (!bytes || Buffer.from(bytes.subarray(0, 16)).toString("ascii") !== "SQLite format 3\0") {
         throw new Error("SQLite restore bundle is missing a valid database snapshot.");
       }
-      await lifecycle.close();
+      await closeDatabase();
       await replaceDatabase(bytes);
-      await lifecycle.reopen();
+      await reopenDatabase();
     },
     async rollback(rawSnapshot) {
       if (!rawSnapshot || typeof rawSnapshot !== "object" ||
           !("bytes" in rawSnapshot) || !(rawSnapshot.bytes instanceof Uint8Array)) {
         throw new Error("SQLite restore rollback snapshot is invalid.");
       }
-      await lifecycle.close();
+      await closeDatabase();
       await replaceDatabase(rawSnapshot.bytes);
-      await lifecycle.reopen();
+      await reopenDatabase();
     },
   };
 }
