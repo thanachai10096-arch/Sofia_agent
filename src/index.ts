@@ -68,7 +68,8 @@ export { assessAction, containsPromptInjection, redactSecrets, riskFor } from ".
 export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/guard.js";
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
 export { VoiceWorkflow } from "./voice/workflow.js";
-export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpeechProvider, VoiceAgentReply, VoiceTurnResult, VoiceWorkflowOptions } from "./voice/workflow.js";
+export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpeechProvider, VoiceAgentReply, VoiceTurnResult, VoiceWorkflowOptions, VoiceProviderSelection, VoiceProviderRegistry } from "./voice/workflow.js";
+export { createVoiceProviderRegistry, loadVoiceProviderSelectionFromEnv } from "./voice/workflow.js";
 
 export { createChatCommandHandler } from "./integrations/chat-adapter.js";
 export { FileChatMessageDeduplicator } from "./integrations/file-chat-deduplicator.js";
