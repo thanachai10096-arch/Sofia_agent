@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
+import { SqliteSessionStore } from "../session/sqlite-store.js";
 import os from "node:os";
 import path from "node:path";
 import { createBackupBundle } from "./backup-coordinator.js";
@@ -113,6 +114,44 @@ test("SQLite restore adapter rejects a symlinked database parent before lifecycl
     assert.equal(lifecycleCalls, 0);
     assert.deepEqual(await readFile(database), sqliteBytes("original"));
   } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("SQLite restore adapter restores a real database and rollback reopens the previous state", async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-sqlite-live-restore-"));
+  const livePath = path.join(parent, "live.sqlite");
+  const backupPath = path.join(parent, "backup.sqlite");
+  let live = await SqliteSessionStore.open(livePath);
+  let backup: SqliteSessionStore | undefined;
+  try {
+    live.save({ id: "session-1", messages: ["before"], updatedAt: 0 });
+    backup = await SqliteSessionStore.open(backupPath);
+    backup.save({ id: "session-1", messages: ["restored"], updatedAt: 0 });
+    const bundle = await createBackupBundle([{
+      name: "sessions",
+      async snapshot() {
+        const snapshotPath = path.join(parent, "backup-snapshot.sqlite");
+        backup!.createConsistentSnapshot(snapshotPath);
+        const bytes = await readFile(snapshotPath);
+        await rm(snapshotPath, { force: true });
+        return [{ path: "sessions/snapshot.sqlite", content: bytes }];
+      },
+    }], createdAt);
+    const adapter = sqliteFileBackupRestoreAdapter("sessions", livePath, "sessions/snapshot.sqlite", {
+      getOpenStore() { return live; },
+      async close() { live.close(); },
+      async reopen() { live = await SqliteSessionStore.open(livePath); },
+    });
+    await adapter.preflight(bundle, ["sessions/snapshot.sqlite"]);
+    const rollback = await adapter.captureRollback();
+    await adapter.apply(bundle, ["sessions/snapshot.sqlite"]);
+    assert.deepEqual(live.get("session-1")?.messages, ["restored"]);
+    await adapter.rollback(rollback);
+    assert.deepEqual(live.get("session-1")?.messages, ["before"]);
+  } finally {
+    try { live.close(); } catch { /* already closed during cleanup */ }
+    if (backup) backup.close();
     await rm(parent, { recursive: true, force: true });
   }
 });
