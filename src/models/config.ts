@@ -62,7 +62,7 @@ function selectProvider(): ProviderSelection {
   const geminiKey = firstEnv("GEMINI_API_KEY", "Gemini_API_Key");
 
   if (requested && !["openrouter", "gemini", "custom", "openai-compatible"].includes(requested)) {
-    throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, or custom.");
+    throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, custom, or openai-compatible.");
   }
 
   const chooseCustom = (): ProviderSelection => {
