@@ -220,3 +220,57 @@ test("SQLite session storage rejects a directory as a database path", {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("SQLite consistent snapshot includes committed WAL data without stopping the live store", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-snapshot-"));
+  const source = path.join(dir, "sessions.sqlite");
+  const snapshot = path.join(dir, "snapshot.sqlite");
+  const store = await SqliteSessionStore.open(source);
+  try {
+    store.save({ id: "snapshot-live", messages: ["committed in WAL", "second row"], updatedAt: 0 });
+    assert.equal(fs.existsSync(`${source}-wal`), true);
+    assert.equal(store.createConsistentSnapshot(snapshot), snapshot);
+    assert.equal(fs.statSync(snapshot).isFile(), true);
+    if (process.platform !== "win32") assert.equal(fs.statSync(snapshot).mode & 0o777, 0o600);
+
+    const snapshotStore = await SqliteSessionStore.open(snapshot);
+    try {
+      assert.deepEqual(snapshotStore.get("snapshot-live")?.messages, ["committed in WAL", "second row"]);
+      store.save({ id: "live-only", messages: ["not in earlier snapshot"], updatedAt: 0 });
+      assert.equal(snapshotStore.get("live-only"), undefined);
+    } finally {
+      snapshotStore.close();
+    }
+    assert.deepEqual(store.get("live-only")?.messages, ["not in earlier snapshot"]);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("SQLite snapshot refuses to overwrite existing files and rejects unsafe destinations", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-snapshot-safety-"));
+  const source = path.join(dir, "sessions.sqlite");
+  const existing = path.join(dir, "keep.txt");
+  const store = await SqliteSessionStore.open(source);
+  try {
+    fs.writeFileSync(existing, "preserve existing destination");
+    assert.throws(() => store.createConsistentSnapshot(existing));
+    assert.equal(fs.readFileSync(existing, "utf8"), "preserve existing destination");
+    assert.throws(() => store.createConsistentSnapshot(source), /must differ/);
+    assert.throws(() => store.createConsistentSnapshot(path.join(dir, "missing", "snapshot.sqlite")));
+    assert.equal(fs.existsSync(path.join(dir, "missing")), false);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("in-memory SQLite stores cannot create a file snapshot by path", async () => {
+  const store = await SqliteSessionStore.open(":memory:");
+  try {
+    assert.throws(() => store.createConsistentSnapshot(path.join(os.tmpdir(), "unused-sofia-snapshot.sqlite")), /in-memory/);
+  } finally {
+    store.close();
+  }
+});
