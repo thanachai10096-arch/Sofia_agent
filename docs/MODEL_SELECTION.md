@@ -51,3 +51,15 @@ SOFIA_CODING_CONTEXT_WINDOW=128000
 ```
 
 The route prefixes are `SOFIA_FAST`, `SOFIA_CODING`, `SOFIA_REASONING`, and `SOFIA_VISION`. Boolean values accept `true/false`, `1/0`, or `yes/no`. Invalid values fail configuration loading rather than being silently ignored. Context window values must be positive safe integers. Unset fields remain unknown. These declarations guide routing; they are not live provider-verified guarantees.
+
+### Brain token limits
+
+The Brain route adapter also supports per-route runtime overrides:
+
+```dotenv
+SOFIA_CODING_CONTEXT=64000
+SOFIA_CODING_MAX_OUTPUT=4096
+```
+
+The `_CONTEXT` override takes precedence over the declared `_CONTEXT_WINDOW` metadata for that route. Both runtime overrides must be positive safe integers; malformed, fractional, zero, or negative values fail route initialization with the variable name in the error. If unset, Sofia uses the declared context window when available (otherwise 32000) and a default maximum output of 4096 tokens. The gateway still applies its own phase-specific input/output caps and budget controls.
+
