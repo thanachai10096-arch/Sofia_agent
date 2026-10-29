@@ -96,6 +96,7 @@ function parseTelegramIds(value: string, pattern: RegExp, name: string): Readonl
 export interface TelegramMessagingEnvironment {
   SOFIA_MESSAGING_ENABLED?: string;
   TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_BOT_USERNAME?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
   SOFIA_API_KEY?: string;
@@ -163,7 +164,7 @@ export function createTelegramMessagingRuntime(
       onError: (event, status) => onWarning(
         "Telegram transport " + event + (status ? " (HTTP " + status + ")" : "") + ".",
       ),
-    }));
+    }), { botUsername: env.TELEGRAM_BOT_USERNAME });
     gateway = createMessagingGateway({
       enabled: true,
       adapters: [adapter],
