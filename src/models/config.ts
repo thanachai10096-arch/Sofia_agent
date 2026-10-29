@@ -207,10 +207,12 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     }
 
     const providerKey = definition.id;
+    const legacyRouteModel = !manifest ? textEnv(`GEMINI_${definition.id.toUpperCase()}_MODEL`) : "";
     const routeProvider: ProviderDefinition = {
       ...providerDefinition,
       ...(textEnv(prefix + "BASE_URL") ? { baseUrl: textEnv(prefix + "BASE_URL") } : {}),
       ...(textEnv(prefix + "MODEL") ? { model: textEnv(prefix + "MODEL") } : {}),
+      ...(legacyRouteModel && !textEnv(prefix + "MODEL") ? { model: legacyRouteModel } : {}),
     };
     providers[providerKey] = resolveProvider(selectedProvider, routeProvider, definition.id);
     routes.push({
