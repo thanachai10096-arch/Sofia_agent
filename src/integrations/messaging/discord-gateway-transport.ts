@@ -35,7 +35,7 @@ function trustedResumeGatewayUrl(value: unknown): string | undefined {
     const host = url.hostname.toLowerCase();
     if (url.protocol !== "wss:" || url.username || url.password ||
         (url.port !== "" && url.port !== "443") ||
-        !(host === "discord.gg" || host.endsWith(".discord.gg"))) return undefined;
+        !(host === "gateway.discord.gg" || /^gateway-[a-z0-9-]+\\.discord\\.gg$/.test(host))) return undefined;
     return url.toString();
   } catch {
     return undefined;
