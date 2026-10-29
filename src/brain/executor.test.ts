@@ -617,8 +617,9 @@ test("Brain preserves the highest-ranked project memories when limiting context"
   });
   assert.equal(report.completed, true, report.summary);
   assert.equal(selected.length, 12);
-  assert.equal(selected[0]?.content, "ranked-memory-0");
-  assert.equal(selected[11]?.content, "ranked-memory-11");
+  assert.match(selected[0]?.content ?? "", /ranked-memory-0/);
+  assert.match(selected[11]?.content ?? "", /ranked-memory-11/);
+  assert.ok(selected.every((entry) => entry.content.includes("UNTRUSTED")));
 });
 
 
