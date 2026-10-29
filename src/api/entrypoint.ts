@@ -10,6 +10,7 @@ import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allow
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -49,6 +50,7 @@ if (discordConfigured) {
   // never mean that every non-bot user in an allowed channel can execute tasks.
   const discordUserIds = parseDiscordIdAllowlist(rawDiscordUserIds, "DISCORD_ALLOWED_USER_IDS");
   const discordChannelIds = parseDiscordIdAllowlist(rawDiscordChannelIds, "DISCORD_ALLOWED_CHANNEL_IDS");
+  const discordGatewayDeduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
   if (discordInteractionConfigured && discordPublicKey) {
     discordTransport = createDiscordInteractionTransport({
       publicKeyHex: discordPublicKey,
@@ -84,8 +86,13 @@ if (discordConfigured) {
   };
   const handleDiscordMessage = async (message: VerifiedDiscordMessage) => {
     try {
-      if (message.transportVerified === true &&
-          (!discordUserIds.has(message.author.id) || !discordChannelIds.has(message.channelId))) return;
+      if (message.transportVerified === true) {
+        if (!discordUserIds.has(message.author.id) || !discordChannelIds.has(message.channelId)) return;
+        // Gateway events can be replayed across reconnects or process restarts.
+        // Persist the claim before dispatch; if storage fails, fail closed.
+        const dedupeKey = "discord:gateway:" + message.channelId + ":" + message.id;
+        if (!await discordGatewayDeduplicator.claim(dedupeKey)) return;
+      }
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       const principalId = "discord:" + message.author.id;
