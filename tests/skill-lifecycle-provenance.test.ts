@@ -77,6 +77,21 @@ test("skill lifecycle bounds skill metadata collection sizes", () => {
   }
 });
 
+test("skill lifecycle rejects duplicate persisted record IDs", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-duplicate-record-"));
+  const file = path.join(root, "lifecycle.json");
+  try {
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    lifecycle.propose(skillPackage, { source: "repair", evidenceIds: ["evidence-1"], confidence: 0.9 });
+    const persisted = JSON.parse(readFileSync(file, "utf8")) as { records: Array<Record<string, unknown>> };
+    persisted.records.push({ ...persisted.records[0] });
+    writeFileSync(file, JSON.stringify(persisted));
+    assert.throws(() => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }), /Duplicate skill lifecycle record id/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("skill lifecycle rejects persisted records with missing evidence IDs", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-persisted-evidence-"));
   const file = path.join(root, "lifecycle.json");
