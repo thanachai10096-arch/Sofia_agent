@@ -85,6 +85,8 @@ export type { TelegramHttpTransportOptions } from "./integrations/messaging/tele
 export { createDiscordAdapter } from "./integrations/messaging/discord.js";
 export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
 export { createDiscordInteractionTransport } from "./integrations/messaging/discord-interaction-transport.js";
+export { createDiscordGatewayTransport } from "./integrations/messaging/discord-gateway-transport.js";
+export type { DiscordGatewayTransportOptions, DiscordGatewaySocket, DiscordGatewaySocketFactory } from "./integrations/messaging/discord-gateway-transport.js";
 export type { DiscordInteractionTransport, DiscordInteractionTransportOptions, DiscordInteractionRequest, DiscordInteractionResult } from "./integrations/messaging/discord-interaction-transport.js";
 export { handleDiscordInteractionHttpRequest } from "./integrations/messaging/discord-http-route.js";
 export { createMessagingAccessCheck, createSofiaMessagingHandler } from "./integrations/messaging/sofia-handler.js";
