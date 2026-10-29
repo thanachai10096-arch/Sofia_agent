@@ -86,7 +86,7 @@ test("manifest JSON round-trips deterministically and rejects malformed or overs
 test("manifest paths reject Windows device names, alternate streams, controls, and non-portable segments", () => {
   for (const path of [
     "CON", "con.txt", "NUL.json", "folder/COM1.log", "folder/LPT9",
-    "file:stream", "trailing-dot.", "trailing-space ", "control-\\u0001",
+    "file:stream", "trailing-dot.", "trailing-space ", "control-\u0001",
     "folder/a?b", "folder/a*b", "folder/a|b",
   ]) {
     assert.throws(
