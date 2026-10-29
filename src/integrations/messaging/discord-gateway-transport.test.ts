@@ -204,3 +204,26 @@ test("Discord Gateway does not treat group DMs as private direct messages", asyn
   assert.deepEqual(delivered, [{ directMessage: false, addressedToBot: undefined }]);
   await transport.stop();
 });
+
+
+test("Discord Gateway fails closed when the channel type lookup fails", async () => {
+  const socket = new FakeSocket();
+  const delivered: Array<{ directMessage?: boolean; addressedToBot?: boolean }> = [];
+  const transport = createDiscordGatewayTransport({
+    botToken: "x".repeat(30),
+    socketFactory: () => socket,
+    fetchImpl: async () => new Response("forbidden", { status: 403 }),
+  });
+  await transport.start(new AbortController().signal, async (message) => {
+    delivered.push({ directMessage: message.directMessage, addressedToBot: message.addressedToBot });
+  });
+  socket.gateway({ op: 10, d: { heartbeat_interval: 60_000 } });
+  socket.gateway({ op: 0, t: "READY", s: 1, d: { session_id: "session-1", user: { id: "999", username: "Sofia" } } });
+  socket.gateway({ op: 0, t: "MESSAGE_CREATE", s: 2, d: {
+    id: "104", channel_id: "204", content: "must not be assumed to be a private DM",
+    author: { id: "404", username: "user", bot: false }, mentions: [],
+  } });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(delivered, [{ directMessage: false, addressedToBot: undefined }]);
+  await transport.stop();
+});
