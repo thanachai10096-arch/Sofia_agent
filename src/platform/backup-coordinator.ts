@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import type { FileProjectMemoryStore } from "../brain/project-memory.js";
+import type { FileUserMemoryStore } from "../brain/user-memory.js";
 import {
   createBackupManifest,
   MAX_BACKUP_MANIFEST_ENTRIES,
@@ -75,6 +77,25 @@ export function projectMemoryBackupSource(store: FileProjectMemoryStore): Backup
     name: "project-memory",
     async snapshot() {
       const snapshot = await store.backupSnapshot();
+      return snapshot ? [snapshot] : [];
+    },
+  };
+}
+
+/**
+ * Adapt one explicitly selected user's file-backed memory into a backup
+ * source. The source name is hashed so user identifiers are not exposed in
+ * diagnostics or manifests; callers must opt in each user independently.
+ */
+export function userMemoryBackupSource(store: FileUserMemoryStore, userId: string): BackupSnapshotSource {
+  if (typeof userId !== "string" || !userId.trim() || userId.length > 512) {
+    throw new Error("A valid user identity is required for user memory backup.");
+  }
+  const identityKey = createHash("sha256").update(userId.trim()).digest("hex");
+  return {
+    name: `user-memory-${identityKey}`,
+    async snapshot() {
+      const snapshot = await store.backupSnapshot(userId);
       return snapshot ? [snapshot] : [];
     },
   };
