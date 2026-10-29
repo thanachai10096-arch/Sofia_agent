@@ -143,3 +143,18 @@ test("benchmark evaluator rejects an active baseline for a different skill ident
   assert.equal(calls, 0);
   assert.equal(evaluation.checks.find((check) => check.name === "baseline-identity")?.passed, false);
 });
+
+
+test("benchmark evaluator fails closed when active baseline lookup throws", async () => {
+  let calls = 0;
+  const evaluator = createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    getActiveBaseline: () => { throw new Error("lifecycle store unavailable"); },
+    runner: { run: async () => { calls++; return result(true); } },
+  });
+  const evaluation = await evaluator(candidate);
+  assert.equal(evaluation.passed, false);
+  assert.equal(calls, 0);
+  assert.equal(evaluation.checks.find((check) => check.name === "baseline-evidence")?.passed, false);
+  assert.match(evaluation.checks[0]?.detail ?? "", /lifecycle store unavailable/);
+});
