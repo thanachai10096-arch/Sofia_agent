@@ -11,6 +11,10 @@ export interface GatewayProviderConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  protocol?: "openai-compatible" | "anthropic-messages";
+  authHeader?: string;
+  authPrefix?: string;
+  endpointPath?: string;
   headers?: Record<string, string>;
   maxConcurrent?: number;
   /** One deadline for queue wait, provider attempts, and retry delays. Defaults to 45 seconds. */
@@ -33,6 +37,93 @@ interface ChatResponse {
     prompt_tokens?: number;
     completion_tokens?: number;
     total_tokens?: number;
+  };
+}
+
+
+type AnthropicMessage = { role: "user" | "assistant"; content: string | Array<Record<string, unknown>> };
+
+function toAnthropicMessages(messages: ChatMessage[]): { system?: string; messages: AnthropicMessage[] } {
+  const system: string[] = [];
+  const converted: AnthropicMessage[] = [];
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index]!;
+    if (message.role === "system") {
+      if (message.content.trim()) system.push(message.content);
+      continue;
+    }
+    if (message.role === "tool") {
+      const results: Array<Record<string, unknown>> = [];
+      while (index < messages.length && messages[index]!.role === "tool") {
+        const toolResult = messages[index]!;
+        results.push({
+          type: "tool_result",
+          tool_use_id: toolResult.toolCallId ?? "unknown-tool-call",
+          content: toolResult.content,
+        });
+        index++;
+      }
+      index--;
+      converted.push({ role: "user", content: results });
+      continue;
+    }
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      const content: Array<Record<string, unknown>> = [];
+      if (message.content.trim()) content.push({ type: "text", text: message.content });
+      for (const call of message.toolCalls) {
+        let input: unknown;
+        try { input = JSON.parse(call.arguments); } catch { input = {}; }
+        content.push({
+          type: "tool_use",
+          id: call.id,
+          name: call.name,
+          input: input && typeof input === "object" && !Array.isArray(input) ? input : {},
+        });
+      }
+      converted.push({ role: "assistant", content });
+      continue;
+    }
+    converted.push({ role: message.role === "assistant" ? "assistant" : "user", content: message.content });
+  }
+  return { ...(system.length ? { system: system.join("\n\n") } : {}), messages: converted };
+}
+
+function normalizeAnthropicResponse(raw: unknown): ChatResponse {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const value = raw as Record<string, unknown>;
+  const parts = Array.isArray(value.content) ? value.content : [];
+  const textParts: Array<{ type: string; text: string }> = [];
+  const toolCalls: Array<{ id: string; function: { name: string; arguments: string } }> = [];
+  for (const part of parts) {
+    if (!part || typeof part !== "object" || Array.isArray(part)) continue;
+    const item = part as Record<string, unknown>;
+    if (item.type === "text" && typeof item.text === "string") {
+      textParts.push({ type: "text", text: item.text });
+    } else if (item.type === "tool_use" && typeof item.id === "string" &&
+      typeof item.name === "string" && item.input && typeof item.input === "object" && !Array.isArray(item.input)) {
+      toolCalls.push({
+        id: item.id,
+        function: { name: item.name, arguments: JSON.stringify(item.input) },
+      });
+    }
+  }
+  const usage = value.usage && typeof value.usage === "object"
+    ? value.usage as Record<string, unknown>
+    : {};
+  return {
+    choices: [{
+      finish_reason: typeof value.stop_reason === "string" ? value.stop_reason : null,
+      message: {
+        content: textParts,
+        tool_calls: toolCalls,
+        ...(typeof value.stop_reason === "string" && value.stop_reason === "refusal"
+          ? { refusal: "Provider refused the request." } : {}),
+      },
+    }],
+    usage: {
+      ...(typeof usage.input_tokens === "number" ? { prompt_tokens: usage.input_tokens } : {}),
+      ...(typeof usage.output_tokens === "number" ? { completion_tokens: usage.output_tokens } : {}),
+    },
   };
 }
 
@@ -173,15 +264,35 @@ export class SofiaModelGateway implements ModelProvider {
       }
     }
 
-    const body = {
-      model: config.model,
-      messages,
-      ...(tools ? { tools, tool_choice: "auto" } : {}),
-      ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" as const } } : {}),
-      ...(options.maxOutputTokens
-        ? { max_tokens: options.maxOutputTokens }
-        : {}),
-    };
+    const protocol = config.protocol ?? "openai-compatible";
+    const body = protocol === "anthropic-messages"
+      ? (() => {
+          const converted = toAnthropicMessages(messages);
+          const system = [
+            ...(converted.system ? [converted.system] : []),
+            ...(!tools && brainStructuredOutput ? ["Return only a valid JSON object. Do not include Markdown fences or prose outside the JSON."] : []),
+          ].join("\n\n");
+          return {
+            model: config.model,
+            max_tokens: options.maxOutputTokens ?? 2048,
+            ...(system ? { system } : {}),
+            messages: converted.messages,
+            ...(tools ? {
+              tools: tools.map((tool) => ({
+                name: tool.function.name,
+                description: tool.function.description,
+                input_schema: tool.function.parameters,
+              })),
+            } : {}),
+          };
+        })()
+      : {
+          model: config.model,
+          messages,
+          ...(tools ? { tools, tool_choice: "auto" } : {}),
+          ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" as const } } : {}),
+          ...(options.maxOutputTokens ? { max_tokens: options.maxOutputTokens } : {}),
+        };
 
     const providerId = route.providerId ?? route.id;
     const timeoutMs = config.requestTimeoutMs ?? 45_000;
@@ -208,14 +319,21 @@ export class SofiaModelGateway implements ModelProvider {
         let retryableFailure = false;
         try {
           const response = await fetch(
-            config.baseUrl.replace(/\/$/, "") + "/chat/completions",
+            config.baseUrl.replace(/\/$/, "") + (config.endpointPath ?? (protocol === "anthropic-messages" ? "/messages" : "/chat/completions")),
             {
               method: "POST",
-              headers: {
-                ...config.headers,
-                authorization: "Bearer " + config.apiKey,
-                "content-type": "application/json",
-              },
+              headers: protocol === "anthropic-messages"
+                ? {
+                    ...config.headers,
+                    "anthropic-version": "2023-06-01",
+                    [config.authHeader ?? "x-api-key"]: config.apiKey,
+                    "content-type": "application/json",
+                  }
+                : {
+                    ...config.headers,
+                    [config.authHeader ?? "authorization"]: (config.authPrefix ?? "Bearer ") + config.apiKey,
+                    "content-type": "application/json",
+                  },
               body: JSON.stringify(body),
               signal: requestSignal,
             },
@@ -282,7 +400,10 @@ export class SofiaModelGateway implements ModelProvider {
 
     let data: ChatResponse;
     try {
-      data = (await response.json()) as ChatResponse;
+      const raw: unknown = await response.json();
+      data = protocol === "anthropic-messages"
+        ? normalizeAnthropicResponse(raw)
+        : raw as ChatResponse;
     } catch {
       return failResponse("Model gateway returned invalid JSON.");
     }
