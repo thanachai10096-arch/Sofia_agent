@@ -2,7 +2,7 @@
 
 ## Status
 
-The versioned integrity-manifest primitives in `src/platform/backup-manifest.ts` and the explicit-source coordinator in `src/platform/backup-coordinator.ts` are initial building blocks, not a complete backup/restore feature. The coordinator can collect caller-supplied in-memory snapshots and verify the resulting bundle, but it does not discover all stores, write an archive, encrypt data, or restore state. `SqliteSessionStore.createConsistentSnapshot()` now creates an isolated SQLite snapshot using SQLite `VACUUM INTO`, so committed WAL content is included without copying live database files or sidecars. The snapshot helper refuses existing destinations and does not overwrite them.
+The versioned integrity-manifest primitives in `src/platform/backup-manifest.ts` and the explicit-source coordinator in `src/platform/backup-coordinator.ts` are initial building blocks, not a complete backup/restore feature. The coordinator can collect caller-supplied in-memory snapshots and verify the resulting bundle. An explicit adapter now snapshots the existing file-backed project-memory store without scanning its directory; missing memory produces an empty source. It still does not discover all stores, write an archive, encrypt data, or restore state. `SqliteSessionStore.createConsistentSnapshot()` now creates an isolated SQLite snapshot using SQLite `VACUUM INTO`, so committed WAL content is included without copying live database files or sidecars. The snapshot helper refuses existing destinations and does not overwrite them.
 
 ## Manifest
 
@@ -16,7 +16,7 @@ The versioned integrity-manifest primitives in `src/platform/backup-manifest.ts`
 ## Required before production restore
 
 1. **Explicit scope:** enumerate supported stores and exclude credentials, environment files, API keys, tokens, and provider secrets by default.
-2. **Consistent snapshot:** use store-specific snapshots or quiesce writers. The session store offers `createConsistentSnapshot()` using SQLite `VACUUM INTO`; every other persistent store still needs its own snapshot contract. Never copy a live SQLite database without coordinating WAL/SHM.
+2. **Consistent snapshot:** use store-specific snapshots or quiesce writers. The session store offers `createConsistentSnapshot()` using SQLite `VACUUM INTO`; the file-backed project-memory store now exposes a read-only snapshot contract; every other persistent store still needs its own snapshot contract. Never copy a live SQLite database without coordinating WAL/SHM.
 3. **Private output:** create backup directories/files with restrictive permissions and never log file contents or secrets.
 4. **Archive defenses:** if archives are added, reject absolute paths, traversal, symlinks/hardlinks, duplicate normalized paths, and decompression bombs before extraction.
 5. **Verify before mutation:** validate the complete manifest and every byte count/checksum before touching destination state.
