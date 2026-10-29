@@ -289,17 +289,29 @@ export async function executeLearningRepairPlan(
         throw new Error("Post-repair authoritative verification failed");
       }
       await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Postcondition verified", entry.claimToken);
-      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_succeeded", at: now() });
-      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded" });
+      const successResult: LearningRepairExecutionResult = { key: action.idempotencyKey, skillId: action.skillId, state: "succeeded" };
+      results.push(successResult);
+      // The repair is already durably finalized. A later audit append failure must
+      // not misreport it as failed or try to finalize the consumed token again.
+      try {
+        await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_succeeded", at: now() });
+      } catch {
+        successResult.reason = "postcondition verified and journal finalized; success audit append failed";
+      }
     } catch (error) {
       const reason = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
-      // If the claim was fenced by a newer attempt, do not let this stale worker
-      // overwrite that attempt or make the whole batch fail to return a result.
+      // Finalize the owned attempt first so an audit backend failure cannot strand
+      // it in running. A stale token cannot mutate a newer attempt.
       try {
-        await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
         await journal.finish(action.idempotencyKey, action.scope, "failed", reason, entry.claimToken);
       } catch {
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair claim lost; stale executor could not finalize this attempt" });
+        continue;
+      }
+      try {
+        await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
+      } catch {
+        results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: reason + "; failure audit append failed" });
         continue;
       }
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
