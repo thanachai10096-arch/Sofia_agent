@@ -166,7 +166,7 @@ test("benchmark runner receives isolated candidate and fixture copies", async ()
     fixtures,
     runner: {
       run: async ({ candidate: tested, fixture }) => {
-        tested.skill.procedure.push("runner mutation");
+        (tested.skill.procedure as string[]).push("runner mutation");
         (fixture as { input: string }).input = "runner mutation";
         return result(true);
       },
