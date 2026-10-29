@@ -523,3 +523,22 @@ test("restore staging removes its private temporary root when export fails", asy
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("restore plan target ordering is independent of host locale", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() {
+      return [
+        { path: "a.json", content: Buffer.from("A") },
+        { path: "b.json", content: Buffer.from("B") },
+        { path: "c.json", content: Buffer.from("C") },
+      ];
+    } },
+  ], createdAt);
+  const plan = preflightBackupRestore(bundle, [
+    { name: "z-target", paths: ["a.json"] },
+    { name: "ä-target", paths: ["b.json"] },
+    { name: "A-target", paths: ["c.json"] },
+  ]);
+  assert.deepEqual(plan.targets.map((target) => target.name), ["A-target", "z-target", "ä-target"]);
+});
