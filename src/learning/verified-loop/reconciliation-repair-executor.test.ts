@@ -159,6 +159,20 @@ test("still verifies and records successful repair if intermediate registration 
   assert.equal(journal.entries.get(action.idempotencyKey)?.state, "succeeded");
 });
 
+test("audit failure cannot strand a preflight-rejected repair in running state", async () => {
+  const journal = new MemoryJournal();
+  journal.audit = async (event) => {
+    if (event.event === "repair_failed") throw new Error("audit unavailable");
+  };
+  const host = hostWith(() => snapshot({ policyRevision: "policy-stale" }), async () => {
+    throw new Error("registration must not run");
+  });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /failure audit append failed/);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
+
 test("refuses ineligible plans and cross-scope actions", async () => {
   const journal = new MemoryJournal();
   const host = hostWith(() => snapshot(), async () => {});
