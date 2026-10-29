@@ -137,6 +137,12 @@ export class VerifiedLearningLoop {
       // work and immediately before the short activation transaction.
       const latestPolicy = await this.host.currentPolicyRevision(scope);
       if (latestPolicy !== currentPolicy) return { recorded: true, experienceId: experience.id };
+      // Persisting a row in the learning store is not equivalent to activating
+      // a Sofia platform skill. Require an explicit host adapter that delegates
+      // promotion to VersionedSkillLifecycle (including its evaluator/approval gate).
+      if (!this.host.promoteCandidate) return { recorded: true, experienceId: experience.id };
+      const promotionAllowed = await this.host.promoteCandidate(scope, assessedCandidate);
+      if (promotionAllowed !== true) return { recorded: true, experienceId: experience.id };
       const active: ActiveLearningSkill = {
         ...assessedCandidate, status: "active", activatedAt: new Date().toISOString(),
         policyRevision: latestPolicy,
