@@ -81,3 +81,16 @@ test("benchmark evaluator rejects duplicate or insufficient fixtures at construc
     runner: { run: async () => result(true) },
   }), /unique, valid fixtures/);
 });
+
+
+test("benchmark evaluator fails closed when an isolated runner exceeds its timeout", async () => {
+  const evaluator = createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    timeoutMs: 5,
+    runner: { run: async () => new Promise<SkillBenchmarkRun>(() => undefined) },
+  });
+  const evaluation = await evaluator(candidate);
+  assert.equal(evaluation.passed, false);
+  assert.equal(evaluation.checks.filter((check) => check.name.startsWith("fixture:")).length, fixtures.length);
+  assert.equal(evaluation.checks.some((check) => check.detail?.includes("timed out")), true);
+});
