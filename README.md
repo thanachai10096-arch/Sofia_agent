@@ -124,7 +124,7 @@ Only enable browser capability in environments where its permissions and policy 
 
 ## Model providers and model selection
 
-Sofia's model layer is provider-agnostic at the configuration boundary. It can use any service exposing the **OpenAI Chat Completions-compatible API**, including hosted gateways, compatible third-party APIs, and local servers such as Ollama. Native APIs that do not implement this protocol need a dedicated provider adapter; "every model" cannot be guaranteed by a single universal wire protocol.
+Sofia can use any service exposing the **OpenAI Chat Completions-compatible API**, including compatible gateways and local servers such as Ollama. The gateway also has a native **Anthropic Messages** adapter for Claude models. Providers with other native APIs need an adapter for that protocol; there is no single universal wire protocol for every model.
 
 Configure providers with the server-side `SOFIA_MODEL_PROVIDERS` JSON environment variable and select one provider per task route. Put credentials in environment secrets; use `apiKeyEnv` to reference a secret variable instead of embedding credentials in the manifest.
 
@@ -133,7 +133,14 @@ Configure providers with the server-side `SOFIA_MODEL_PROVIDERS` JSON environmen
   "openrouter": {
     "baseUrl": "https://openrouter.ai/api/v1",
     "apiKeyEnv": "OPENROUTER_API_KEY",
-    "model": "provider/model-name"
+    "model": "provider/model-name",
+    "protocol": "openai-compatible"
+  },
+  "anthropic": {
+    "baseUrl": "https://api.anthropic.com/v1",
+    "apiKeyEnv": "ANTHROPIC_API_KEY",
+    "model": "claude-sonnet-model-id",
+    "protocol": "anthropic-messages"
   },
   "ollama": {
     "baseUrl": "http://localhost:11434/v1",
@@ -153,7 +160,7 @@ export SOFIA_REASONING_MODEL=provider/reasoning-model
 export SOFIA_VISION_PROVIDER=openrouter
 ```
 
-Supported route names are `FAST`, `CODING`, `REASONING`, and `VISION`. Each route can override `BASE_URL`, `MODEL`, and `API_KEY` using `SOFIA_<ROUTE>_BASE_URL`, `SOFIA_<ROUTE>_MODEL`, and `SOFIA_<ROUTE>_API_KEY`. For provider-specific headers and request controls, the manifest also accepts `headers`, `maxConcurrent`, and `requestTimeoutMs`. Remote endpoints must use HTTPS; plain HTTP is permitted only for loopback hosts. Existing `GEMINI_API_KEY` / `Gemini_API_Key` configuration remains supported for backward compatibility.
+Supported route names are `FAST`, `CODING`, `REASONING`, and `VISION`. Each route can override `BASE_URL`, `MODEL`, and `API_KEY` using `SOFIA_<ROUTE>_BASE_URL`, `SOFIA_<ROUTE>_MODEL`, and `SOFIA_<ROUTE>_API_KEY`. For provider-specific headers and request controls, the manifest also accepts `headers`, `maxConcurrent`, and `requestTimeoutMs`. Supported protocol values are `openai-compatible` (default) and `anthropic-messages`; unsupported protocols are rejected rather than silently sent using the wrong API format. Remote endpoints must use HTTPS; plain HTTP is permitted only for loopback hosts. Existing `GEMINI_API_KEY` / `Gemini_API_Key` configuration remains supported for backward compatibility.
 
 This configuration enables user/deployment owners to select models by task route. A future UI/API for per-user model preferences must persist choices in an authenticated, tenant-scoped configuration store; environment variables are deployment-wide and should not be presented as individual-user preferences.
 
