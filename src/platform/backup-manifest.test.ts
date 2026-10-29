@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createBackupManifest,
+  parseBackupManifestJson,
+  serializeBackupManifest,
   validateBackupManifest,
   verifyBackupFiles,
 } from "./backup-manifest.js";
@@ -66,4 +68,17 @@ test("invalid manifests fail closed without verifying files", () => {
   assert.equal(result.valid, false);
   assert.equal(result.verifiedFiles, 0);
   assert.equal(result.errors.length, 1);
+});
+
+test("manifest JSON round-trips deterministically and rejects malformed or oversized input", () => {
+  const manifest = createBackupManifest([
+    { path: "z.txt", content: Buffer.from("last") },
+    { path: "a.txt", content: Buffer.from("first") },
+  ], createdAt);
+  const json = serializeBackupManifest(manifest);
+  assert.equal(json, serializeBackupManifest(parseBackupManifestJson(json)));
+  assert.deepEqual(parseBackupManifestJson(json).entries.map((entry) => entry.path), ["a.txt", "z.txt"]);
+  assert.throws(() => parseBackupManifestJson("{"), /malformed/);
+  assert.throws(() => parseBackupManifestJson(" ".repeat(16 * 1024 * 1024 + 1)), /maximum allowed size/);
+  assert.throws(() => serializeBackupManifest({ format: "wrong" }), /Invalid Sofia backup manifest format/);
 });
