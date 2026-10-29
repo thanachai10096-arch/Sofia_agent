@@ -139,3 +139,18 @@ test("manifest path ordering is locale-independent for mixed-case and Unicode na
     ["A-file.txt", "b-file.txt", "z-file.txt", "ä-file.txt"],
   );
 });
+
+
+test("serialized manifest uses the same locale-independent ordering as manifest creation", () => {
+  const manifest = createBackupManifest([
+    { path: "ä-file.txt", content: Buffer.from("unicode") },
+    { path: "z-file.txt", content: Buffer.from("z") },
+    { path: "A-file.txt", content: Buffer.from("upper") },
+    { path: "b-file.txt", content: Buffer.from("lower") },
+  ], createdAt);
+  const serialized = serializeBackupManifest({ ...manifest, entries: [...manifest.entries].reverse() });
+  assert.deepEqual(
+    parseBackupManifestJson(serialized).entries.map((entry) => entry.path),
+    ["A-file.txt", "b-file.txt", "z-file.txt", "ä-file.txt"],
+  );
+});
