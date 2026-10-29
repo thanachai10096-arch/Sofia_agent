@@ -38,5 +38,9 @@ test("Discord adapter ignores unverified events and bot messages", async () => {
   await onEvent!({ ...base, signatureVerified: false } as unknown as VerifiedDiscordMessage);
   await onEvent!({ ...base, signatureVerified: true, author: { id: "bot", bot: true } });
   await onEvent!({ ...base, signatureVerified: true });
-  assert.equal(received, 1);
+  await onEvent!({
+    id: "m2", channelId: "c1", author: { id: "u2" }, content: "gateway event",
+    createdAt: 2, transportVerified: true,
+  });
+  assert.equal(received, 2);
 });

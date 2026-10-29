@@ -8,6 +8,13 @@ import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allow
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { SofiaClient } from "../sdk/client.js";
+import { redactSecrets } from "../security/guard.js";
+import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
+import { createDiscordAdapter } from "../integrations/messaging/discord.js";
+import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
+import { createMessagingGateway, type MessagingGateway } from "../integrations/messaging/gateway.js";
+import { createMessagingAccessCheck, createSofiaMessagingHandler } from "../integrations/messaging/sofia-handler.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -21,6 +28,8 @@ const deps = sessionDatabasePath
   : createSofiaAgentDependencies(workspace);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
+let discordGateway: MessagingGateway | undefined;
+let discordGatewayTransport: ReturnType<typeof createDiscordGatewayTransport> | undefined;
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -226,12 +235,87 @@ server.listen(port, "0.0.0.0", () => {
   void telegramRuntime?.start().catch((error) => {
     console.error("Telegram integration failed to start:", error instanceof Error ? error.name : "UnknownError");
   });
+  // Ordinary Discord messages are a separate, opt-in Gateway transport. Keep the
+  // signed HTTP interactions route unchanged; both transports share Sofia Core/API.
+  if (process.env.DISCORD_GATEWAY_ENABLED === "true") {
+    const botToken = process.env.DISCORD_BOT_TOKEN?.trim();
+    const rawUsers = process.env.DISCORD_ALLOWED_USER_IDS;
+    const rawChannels = process.env.DISCORD_ALLOWED_CHANNEL_IDS;
+    if (!botToken || !rawUsers?.trim() || !rawChannels?.trim()) {
+      console.error("Discord Gateway disabled: bot token and explicit user/channel allowlists are required.");
+      return;
+    }
+    try {
+      const allowedUsers = parseDiscordIdAllowlist(rawUsers, "DISCORD_ALLOWED_USER_IDS");
+      const allowedChannels = parseDiscordIdAllowlist(rawChannels, "DISCORD_ALLOWED_CHANNEL_IDS");
+      const accessPolicy = {
+        isAllowed(input: { platform: "telegram" | "discord" | "slack"; senderId: string; conversationId: string }) {
+          return input.platform === "discord" &&
+            allowedUsers.includes(input.senderId) &&
+            allowedChannels.includes(input.conversationId);
+        },
+      };
+      const baseUrl = process.env.SOFIA_API_BASE_URL?.trim() || "http://127.0.0.1:" + port;
+      const client = new SofiaClient({ apiKey, baseUrl });
+      const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
+      discordGatewayTransport = createDiscordGatewayTransport({
+        botToken,
+        onError: (event, status) => console.error("Discord Gateway event:", event, status ?? ""),
+      });
+      const handler = createSofiaMessagingHandler({
+        client,
+        accessPolicy,
+        deduplicator,
+        commandPrefix: "/run",
+        onAccepted: ({ runId, message }) => {
+          void client.waitForRun(runId, { timeoutMs: 30 * 60 * 1_000, intervalMs: 1_000 })
+            .then(async (run) => {
+              const output = typeof run.result?.output === "string" ? run.result.output.trim() : "";
+              const safeOutput = String(redactSecrets(output));
+              const resultText = run.status === "completed"
+                ? "Sofia completed the task.\nRun ID: " + runId + (safeOutput ? "\n\n" + safeOutput : "\n\nThe run completed without text output.")
+                : "Sofia task " + run.status + ".\nRun ID: " + runId;
+              await discordGateway?.send("discord", {
+                conversationId: message.identity.conversationId,
+                text: resultText,
+              });
+            })
+            .catch(() => {
+              void discordGateway?.send("discord", {
+                conversationId: message.identity.conversationId,
+                text: "Sofia could not retrieve the final result for run " + runId + ". Check the run status.",
+              });
+            });
+        },
+      });
+      discordGateway = createMessagingGateway({
+        enabled: true,
+        adapters: [createDiscordAdapter(discordGatewayTransport)],
+        allowUser: createMessagingAccessCheck(accessPolicy),
+        onMessage: (message) => handler(message),
+        logger: {
+          info: (event) => console.log("Discord Gateway:", event),
+          warn: (event) => console.error("Discord Gateway warning:", event),
+        },
+      });
+      void discordGateway.start().catch((error) => {
+        console.error("Discord Gateway failed to start:", error instanceof Error ? error.name : "UnknownError");
+        discordGateway = undefined;
+        discordGatewayTransport = undefined;
+      });
+    } catch (error) {
+      console.error("Discord Gateway disabled:", error instanceof Error ? error.name : "configuration_error");
+      discordGateway = undefined;
+      discordGatewayTransport = undefined;
+    }
+  }
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     discordAbort.abort();
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
+    void discordGateway?.stop().catch(() => console.error("Discord Gateway shutdown failed."));
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
     server.close(() => {
       if ("closeSessionStore" in deps && typeof deps.closeSessionStore === "function") deps.closeSessionStore();
