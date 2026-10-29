@@ -55,12 +55,9 @@ export async function reportTelegramRunCompletion(input: {
       (output ? "\n\n" + output : "\n\nThe run completed but returned no text output.");
   } else {
     const status = ["failed", "cancelled", "queued", "running"].includes(run.status) ? run.status : "unknown";
-    const safeError = typeof run.error === "string"
-      ? String(redactSecrets(run.error)).replace(/[\r\n\t]+/g, " ").slice(0, 240).trim()
-      : "";
     text = "Sofia task " + status + ".\nRun ID: " + input.runId +
       (status === "failed"
-        ? (safeError ? "\nReason: " + safeError : "\nNo safe error detail was returned by the API.")
+        ? "\nSofia couldn't complete this task. Please try again or check the run details."
         : "");
   }
 
