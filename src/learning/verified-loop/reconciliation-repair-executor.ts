@@ -34,6 +34,8 @@ export interface LearningRepairJournal {
   get(key: string, scope: LearningScope): Promise<LearningRepairJournalEntry | undefined>;
   begin(entry: LearningRepairJournalEntry): Promise<LearningRepairJournalEntry>;
   finish(key: string, scope: LearningScope, state: LearningRepairState, result?: string, claimToken?: string): Promise<void>;
+  /** Extend an owned running claim; false means the claim was lost or no longer running. */
+  heartbeat?(key: string, scope: LearningScope, claimToken: string, at: string): Promise<boolean>;
   audit(event: LearningRepairAuditEvent): Promise<void>;
 }
 export interface LearningRepairSnapshot {
@@ -76,8 +78,10 @@ function privateFile(file: string): void {
 /** SQLite-backed idempotency journal and append-only audit events. */
 export class SqliteLearningRepairJournal implements LearningRepairJournal {
   private tail: Promise<void> = Promise.resolve();
-  private constructor(private readonly db: Db, private readonly file: string) {}
-  static async open(file: string): Promise<SqliteLearningRepairJournal> {
+  private constructor(private readonly db: Db, private readonly file: string, private readonly leaseMs: number) {}
+  static async open(file: string, options: { leaseMs?: number } = {}): Promise<SqliteLearningRepairJournal> {
+    const leaseMs = options.leaseMs ?? 60_000;
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 5_000 || leaseMs > 3_600_000) throw new Error("Repair lease must be between 5 seconds and 1 hour");
     if (typeof file !== "string" || !file.trim()) throw new Error("Repair journal path is required");
     const absolute = file === ":memory:" ? file : path.resolve(file);
     if (absolute !== ":memory:") {
@@ -93,7 +97,7 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
       const columns = db.prepare("PRAGMA table_info(learning_repair_journal)").all() as Array<{ name?: unknown }>;
       if (!columns.some(column => column.name === "claim_token")) db.exec("ALTER TABLE learning_repair_journal ADD COLUMN claim_token TEXT");
       privateFile(absolute);
-      return new SqliteLearningRepairJournal(db, absolute);
+      return new SqliteLearningRepairJournal(db, absolute, leaseMs);
     } catch (error) { db.close(); throw error; }
   }
   private serial<T>(operation: () => T): Promise<T> {
@@ -118,14 +122,22 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
         const existing = this.db.prepare("SELECT repair_key,tenant_id,principal_id,project_id,skill_id,policy_revision,state,attempts,updated_at,result FROM learning_repair_journal WHERE repair_key=?").get(entry.key) as Record<string, unknown> | undefined;
         if (existing) {
           if (existing.tenant_id !== entry.scope.tenantId || existing.principal_id !== entry.scope.principalId || existing.project_id !== entry.scope.projectId || existing.skill_id !== entry.skillId || existing.policy_revision !== entry.policyRevision) throw new Error("Repair idempotency key conflicts with a different scoped action");
-          if (existing.state === "succeeded" || existing.state === "running") {
-            // A running entry may belong to another live process. Do not steal it:
-            // without a lease/heartbeat protocol, stale-running recovery must be manual.
+          if (existing.state === "succeeded") {
             this.db.exec("COMMIT");
-            return { key: String(existing.repair_key), scope: { ...entry.scope }, skillId: String(existing.skill_id), policyRevision: String(existing.policy_revision), state: existing.state as LearningRepairState, attempts: Number(existing.attempts), updatedAt: String(existing.updated_at), ...(typeof existing.result === "string" ? { result: existing.result } : {}), claimed: false };
+            return { key: String(existing.repair_key), scope: { ...entry.scope }, skillId: String(existing.skill_id), policyRevision: String(existing.policy_revision), state: "succeeded", attempts: Number(existing.attempts), updatedAt: String(existing.updated_at), ...(typeof existing.result === "string" ? { result: existing.result } : {}), claimed: false };
           }
+          if (existing.state === "running") {
+            const lastHeartbeat = Date.parse(String(existing.updated_at));
+            const requestedAt = Date.parse(entry.updatedAt);
+            const stale = Number.isFinite(lastHeartbeat) && Number.isFinite(requestedAt) && requestedAt - lastHeartbeat >= this.leaseMs;
+            if (!stale) {
+              this.db.exec("COMMIT");
+              return { key: String(existing.repair_key), scope: { ...entry.scope }, skillId: String(existing.skill_id), policyRevision: String(existing.policy_revision), state: "running", attempts: Number(existing.attempts), updatedAt: String(existing.updated_at), ...(typeof existing.result === "string" ? { result: existing.result } : {}), claimed: false };
+            }
+          }
+          // Failed attempts and expired running leases may be retried under a new fencing token.
           const claimToken = randomUUID();
-          this.db.prepare("UPDATE learning_repair_journal SET state='running',attempts=attempts+1,updated_at=?,result=NULL,claim_token=? WHERE repair_key=? AND state='failed'").run(entry.updatedAt, claimToken, entry.key);
+          this.db.prepare("UPDATE learning_repair_journal SET state='running',attempts=attempts+1,updated_at=?,result=NULL,claim_token=? WHERE repair_key=? AND state IN ('failed','running')").run(entry.updatedAt, claimToken, entry.key);
           this.db.exec("COMMIT");
           return { ...entry, state: "running", attempts: Number(existing.attempts) + 1, claimed: true, claimToken };
         } else {
@@ -153,6 +165,18 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
           this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=?,claim_token=NULL WHERE repair_key=?").run(state, new Date().toISOString(), result?.slice(0, 1000) ?? null, key);
         }
         this.db.exec("COMMIT");
+      } catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
+    });
+  }
+  heartbeat(key: string, scope: LearningScope, claimToken: string, at: string): Promise<boolean> {
+    assertScope(scope);
+    if (typeof claimToken !== "string" || !claimToken || !Number.isFinite(Date.parse(at))) throw new Error("Invalid repair heartbeat");
+    return this.serial(() => {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const updated = this.db.prepare("UPDATE learning_repair_journal SET updated_at=? WHERE repair_key=? AND tenant_id=? AND principal_id=? AND project_id=? AND state='running' AND claim_token=?").run(at, key, scope.tenantId, scope.principalId, scope.projectId, claimToken);
+        this.db.exec("COMMIT");
+        return Number(updated.changes) === 1;
       } catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
     });
   }
