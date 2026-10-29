@@ -12,7 +12,6 @@ export interface SofiaModelConfig {
 }
 
 interface ProviderSelection {
-  name: "openrouter" | "gemini" | "custom";
   baseUrl: string;
   apiKey: string;
   defaultModel: string;
@@ -71,7 +70,6 @@ function selectProvider(): ProviderSelection {
       throw new Error("Custom model configuration requires SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL (or BASE_URL, API_KEY, and MODEL).");
     }
     return {
-      name: "custom",
       baseUrl: normalizeBaseUrl(customBaseUrl),
       apiKey: customApiKey,
       defaultModel: customModel,
@@ -82,7 +80,6 @@ function selectProvider(): ProviderSelection {
   const chooseOpenRouter = (): ProviderSelection => {
     if (!openRouterKey) throw new Error("SOFIA_MODEL_PROVIDER=openrouter requires OPENROUTER_API_KEY.");
     return {
-      name: "openrouter",
       baseUrl: normalizeBaseUrl(firstEnv("OPENROUTER_BASE_URL") || "https://openrouter.ai/api/v1"),
       apiKey: openRouterKey,
       defaultModel: firstEnv("OPENROUTER_MODEL") || "openrouter/auto",
@@ -93,7 +90,6 @@ function selectProvider(): ProviderSelection {
   const chooseGemini = (): ProviderSelection => {
     if (!geminiKey) throw new Error("SOFIA_MODEL_PROVIDER=gemini requires GEMINI_API_KEY or Gemini_API_Key.");
     return {
-      name: "gemini",
       baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
       apiKey: geminiKey,
       defaultModel: firstEnv("GEMINI_MODEL") || "gemini-2.5-flash",
@@ -105,9 +101,13 @@ function selectProvider(): ProviderSelection {
   if (requested === "openrouter") return chooseOpenRouter();
   if (requested === "gemini") return chooseGemini();
 
-  // An explicit generic tuple takes precedence. Otherwise prefer OpenRouter
-  // when configured (the repository's example default), then legacy Gemini.
+  // A complete custom tuple is an explicit provider choice. If multiple
+  // built-in providers are configured, require an explicit selection so adding
+  // a second credential cannot silently redirect prompts to another vendor.
   if (hasCustomConfig) return chooseCustom();
+  if (openRouterKey && geminiKey) {
+    throw new Error("Both OpenRouter and Gemini credentials are configured; set SOFIA_MODEL_PROVIDER to choose explicitly.");
+  }
   if (openRouterKey) return chooseOpenRouter();
   if (geminiKey) return chooseGemini();
 
