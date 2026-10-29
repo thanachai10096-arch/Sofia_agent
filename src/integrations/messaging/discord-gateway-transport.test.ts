@@ -84,3 +84,32 @@ test("Discord Gateway marks only one-to-one DM channels as direct messages", asy
   assert.deepEqual(delivered, [{ directMessage: true, addressedToBot: undefined }]);
   await transport.stop();
 });
+
+test("Discord Gateway ignores an untrusted resume URL and reconnects only to the official gateway", async () => {
+  const sockets: FakeSocket[] = [];
+  const urls: string[] = [];
+  const transport = createDiscordGatewayTransport({
+    botToken: "x".repeat(30),
+    socketFactory: (url) => {
+      urls.push(url);
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+    fetchImpl: async () => new Response(JSON.stringify({ id: "outgoing-message" }), { status: 200 }),
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  const first = sockets[0];
+  assert.ok(first);
+  first.gateway({ op: 10, d: { heartbeat_interval: 60_000 } });
+  first.gateway({ op: 0, t: "READY", s: 1, d: {
+    session_id: "session-1",
+    resume_gateway_url: "wss://gateway.discord.gg.attacker.example.invalid",
+    user: { id: "999", username: "Sofia" },
+  } });
+  first.gateway({ op: 7 });
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  assert.equal(urls.length, 2);
+  assert.equal(urls[1], "wss://gateway.discord.gg/?v=10&encoding=json");
+  await transport.stop();
+});
