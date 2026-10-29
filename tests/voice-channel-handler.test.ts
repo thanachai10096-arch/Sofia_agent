@@ -71,9 +71,7 @@ test("voice channel handler supports text-only reply mode", async () => {
 });
 
 test("voice channel handler validates event identity before calling policy", async () => {
-  let policyCalls = 0;
   const { handler } = setup();
   const malformed = { ...event, eventId: " ".repeat(1) };
   await assert.rejects(handler(malformed, new AbortController().signal), /eventId/);
-  void policyCalls;
 });
