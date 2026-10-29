@@ -125,3 +125,21 @@ test("benchmark evaluator emits explicit fixture evidence for a valid but failed
   assert.equal(evaluation.passed, false);
   assert.equal(evaluation.checks.find((check) => check.name === "fixture:case-1")?.passed, false);
 });
+
+
+test("benchmark evaluator rejects an active baseline for a different skill identity", async () => {
+  let calls = 0;
+  const evaluator = createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    getActiveBaseline: () => ({
+      ...candidate,
+      skill: { ...candidate.skill, id: "learned:unrelated" },
+      version: "0.9.0",
+    }),
+    runner: { run: async () => { calls++; return result(true); } },
+  });
+  const evaluation = await evaluator(candidate);
+  assert.equal(evaluation.passed, false);
+  assert.equal(calls, 0);
+  assert.equal(evaluation.checks.find((check) => check.name === "baseline-identity")?.passed, false);
+});
