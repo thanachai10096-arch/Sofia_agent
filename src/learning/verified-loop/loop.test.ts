@@ -21,6 +21,7 @@ function makeHost() {
     },
     async listExperiences(s, limit) { return experiences.filter(x => x.scope.tenantId === s.tenantId && x.scope.principalId === s.principalId && x.scope.projectId === s.projectId).slice(-limit); },
     async getExperience(s, id) { return experiences.find(x => x.id === id && x.scope.tenantId === s.tenantId && x.scope.principalId === s.principalId && x.scope.projectId === s.projectId); },
+    async getExperienceByReceipt(s, receiptId) { return experiences.find(x => x.receiptId === receiptId && x.scope.tenantId === s.tenantId && x.scope.principalId === s.principalId && x.scope.projectId === s.projectId); },
     async putCandidate(item) { candidates.set(item.id, item); },
     async getCandidate(s, id) { const item = candidates.get(id); return item && item.scope.tenantId === s.tenantId && item.scope.principalId === s.principalId && item.scope.projectId === s.projectId ? item : undefined; },
     async recordEvaluation(_s, id, evaluation) { evaluations.set(id, evaluation); },
@@ -139,4 +140,26 @@ test("runs policy assessment and regression outside the persistence transaction"
   await loop.recordVerifiedCompletion(scope, "tx-2", "Fix TypeScript build");
   const result = await loop.recordVerifiedCompletion(scope, "tx-3", "Fix TypeScript build");
   assert.ok(result.skillActivated);
+});
+
+test("resumes candidate evaluation when an earlier attempt persisted the receipt experience only", async () => {
+  const state = makeHost();
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "resume-1", "run1");
+  addReceipt(state, "resume-2", "run2");
+  addReceipt(state, "resume-3", "run3");
+  await loop.recordVerifiedCompletion(scope, "resume-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "resume-2", "Fix TypeScript build");
+
+  // Simulate a crash after the third experience committed but before the
+  // candidate was assessed or persisted.
+  const receipt = state.receipts.get("resume-3")!;
+  state.experiences.push({
+    id: "interrupted-experience", scope, receiptId: receipt.id, runId: receipt.runId,
+    evidenceIds: [...receipt.evidenceIds], summary: "Fix TypeScript build",
+    taskFingerprint: state.experiences[0].taskFingerprint, createdAt: new Date().toISOString(),
+  });
+  const resumed = await loop.recordVerifiedCompletion(scope, "resume-3", "Fix TypeScript build");
+  assert.ok(resumed.skillActivated);
+  assert.equal(state.active.length, 1);
 });
