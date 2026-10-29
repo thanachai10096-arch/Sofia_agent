@@ -61,10 +61,14 @@ if (discordConfigured) {
     });
   }
   if (discordGatewayConfigured) {
-    discordGatewayTransport = createDiscordGatewayTransport({
-      botToken: discordBotToken,
-      onError: (event, status) => console.error("Discord Gateway error:", event, status ?? ""),
-    });
+    try {
+      discordGatewayTransport = createDiscordGatewayTransport({
+        botToken: discordBotToken,
+        onError: (event, status) => console.error("Discord Gateway error:", event, status ?? ""),
+      });
+    } catch (error) {
+      console.error("Discord Gateway disabled:", error instanceof Error ? error.name : "UnknownError");
+    }
   }
   const sendDiscordMessage = async (
     message: VerifiedDiscordMessage,
