@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import type { FailureCategory, Strategy } from "./types.js";
 import { redactSecrets } from "../security/guard.js";
@@ -97,7 +97,7 @@ export class FileSkillLedger implements SkillLedger {
       throw new Error("Skill ledger file must not be a symbolic link");
     }
     const payload: PersistedSkillLedger = { schemaVersion: 1, entries: this.list() as LearnedSkillCandidate[] };
-    const temporary = this.file + "." + process.pid + "." + createHash("sha256").update(String(Date.now()) + Math.random()).digest("hex") + ".tmp";
+    const temporary = this.file + "." + process.pid + "." + randomUUID() + ".tmp";
     try {
       writeFileSync(temporary, JSON.stringify(payload, null, 2) + "\n", { encoding: "utf8", flag: "wx", mode: 0o600 });
       renameSync(temporary, this.file);
