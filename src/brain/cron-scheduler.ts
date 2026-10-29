@@ -92,7 +92,13 @@ export class FileCronStore implements CronStore {
         handle = await fs.open(this.lock, "wx", 0o600);
         await handle.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }));
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const openCode = (error as NodeJS.ErrnoException).code;
+        // Windows may report EPERM/EACCES/EBUSY when concurrent exclusive opens
+        // contend for a lock file. Treat these as contention only on Windows, then
+        // follow the same owner-read/wait path as EEXIST; never enter without a lock.
+        const transientOpenError = process.platform === "win32" &&
+          (openCode === "EPERM" || openCode === "EACCES" || openCode === "EBUSY");
+        if (openCode !== "EEXIST" && !transientOpenError) throw error;
         try {
           const owner = JSON.parse(await fs.readFile(this.lock, "utf8")) as { pid?: number };
           if (!Number.isInteger(owner.pid) || (owner.pid ?? 0) < 1) {
