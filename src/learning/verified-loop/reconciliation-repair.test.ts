@@ -17,7 +17,7 @@ const auth = (overrides: Partial<LearningRepairAuthorization> = {}): LearningRep
 
 test("plans only explicitly approved missing runtime registration with current policy and trusted evidence", () => {
   const result = planLearningReconciliationRepair(report([{ kind: "missing-runtime-registration", skillId: "skill-1" }]), auth());
-  assert.equal(result.executable, true);
+  assert.equal(result.eligibleForExecutor, true);
   assert.equal(result.actions.length, 1);
   assert.deepEqual(result.actions[0], {
     kind: "register-missing-runtime-skill", skillId: "skill-1", expectedPolicyRevision: "policy-7",
@@ -30,7 +30,7 @@ test("blocks repair without explicit approval or trusted evidence", () => {
   assert.deepEqual(noApproval.blocked, [{ skillId: "skill-1", reason: "not-explicitly-approved" }]);
   const noEvidence = planLearningReconciliationRepair(report([{ kind: "missing-runtime-registration", skillId: "skill-1" }]), auth({ trustedEvidenceSkillIds: [] }));
   assert.deepEqual(noEvidence.blocked, [{ skillId: "skill-1", reason: "trusted-evidence-missing" }]);
-  assert.equal(noEvidence.executable, false);
+  assert.equal(noEvidence.eligibleForExecutor, false);
 });
 
 test("blocks policy drift, duplicates, and mixed issues rather than guessing a repair", () => {
