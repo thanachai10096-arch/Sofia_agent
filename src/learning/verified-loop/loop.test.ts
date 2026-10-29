@@ -181,3 +181,32 @@ test("does not activate a learned skill without the existing lifecycle promotion
   assert.equal(result.skillActivated, undefined);
   assert.equal(state.active.length, 0);
 });
+
+ 
+test("duplicate receipt cannot be reinterpreted with a different task summary", async () => {
+  const state = makeHost();
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "replay-1", "run1");
+  addReceipt(state, "replay-2", "run2");
+  addReceipt(state, "replay-3", "run3");
+
+  // Establish a repeated task pattern without promoting it, then persist a
+  // different task for the third receipt. Replaying that receipt with the
+  // repeated summary must not attach the receipt to the unrelated task pattern.
+  state.host.assessCandidate = async () => ({ allowed: false, confidence: 0.9 });
+  await loop.recordVerifiedCompletion(scope, "replay-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "replay-2", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "replay-3", "Deploy production");
+
+  state.host.assessCandidate = async (_scope, candidate) => ({
+    allowed: true,
+    confidence: Math.max(candidate.confidence, 0.9),
+  });
+  const replay = await loop.recordVerifiedCompletion(scope, "replay-3", "Fix TypeScript build");
+  assert.equal(replay.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+  assert.equal(
+    state.experiences.find(item => item.receiptId === "replay-3")?.summary,
+    "Deploy production",
+  );
+});
