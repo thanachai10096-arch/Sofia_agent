@@ -10,6 +10,9 @@ export interface LearningRepairAuthorization {
   /** Explicitly approved skill IDs. Approval is scoped to this plan and does not itself execute repair. */
   approvedSkillIds: string[];
   /** Current authoritative policy revision per skill, fetched immediately before planning. */
+  /** Policy revision from the freshly re-read authoritative learning record. */
+  learningPolicyRevisions: Record<string, string>;
+  /** Current policy revision from the authoritative policy service. */
   currentPolicyRevisions: Record<string, string>;
   /** Skill IDs for which authoritative trusted evidence has been re-resolved. */
   trustedEvidenceSkillIds: string[];
@@ -38,6 +41,7 @@ const sameScope = (a: LearningScope, b: LearningScope) =>
   a.tenantId === b.tenantId && a.principalId === b.principalId && a.projectId === b.projectId;
 const validText = (value: unknown, max = 500): value is string =>
   typeof value === "string" && value.trim().length > 0 && value.length <= max;
+const validScope = (scope: LearningScope): boolean => Boolean(scope && [scope.tenantId, scope.principalId, scope.projectId].every(value => validText(value, 200)));
 
 /**
  * Creates a conservative, non-mutating repair plan. Only a missing runtime
@@ -50,7 +54,7 @@ export function planLearningReconciliationRepair(
   report: LearningReconciliationReport,
   authorization: LearningRepairAuthorization,
 ): LearningRepairPlan {
-  if (!report || !report.scope || !authorization?.scope || !sameScope(report.scope, authorization.scope)) {
+  if (!report || !validScope(report.scope) || !validScope(authorization?.scope) || !sameScope(report.scope, authorization.scope)) {
     throw new Error("Invalid reconciliation report scope");
   }
   if (!validText(authorization?.actorId, 200) || !validText(authorization?.idempotencyKey, 200) ||
@@ -58,8 +62,8 @@ export function planLearningReconciliationRepair(
       !authorization.approvedSkillIds.every(id => validText(id, 200)) ||
       !Array.isArray(authorization.trustedEvidenceSkillIds) ||
       !authorization.trustedEvidenceSkillIds.every(id => validText(id, 200)) ||
-      !authorization.currentPolicyRevisions || typeof authorization.currentPolicyRevisions !== "object" ||
-      Array.isArray(authorization.currentPolicyRevisions)) {
+      !authorization.learningPolicyRevisions || typeof authorization.learningPolicyRevisions !== "object" || Array.isArray(authorization.learningPolicyRevisions) ||
+      !authorization.currentPolicyRevisions || typeof authorization.currentPolicyRevisions !== "object" || Array.isArray(authorization.currentPolicyRevisions)) {
     throw new Error("Invalid learning repair authorization");
   }
   const scope = report.scope;
@@ -85,11 +89,9 @@ export function planLearningReconciliationRepair(
       continue;
     }
     const expectedPolicyRevision = authorization.currentPolicyRevisions[skillId];
+    const learningPolicyRevision = authorization.learningPolicyRevisions[skillId];
     const learningIssue = skillIssues[0];
-    // The report itself does not carry the learning policy revision. Therefore a
-    // caller must provide a non-empty current revision; the executor must compare it
-    // against a freshly loaded authoritative learning record before any mutation.
-    if (!validText(expectedPolicyRevision, 200) || !learningIssue) {
+    if (!validText(expectedPolicyRevision, 200) || !validText(learningPolicyRevision, 200) || expectedPolicyRevision !== learningPolicyRevision || !learningIssue) {
       blocked.push({ skillId, reason: "policy-revision-stale" });
       continue;
     }
