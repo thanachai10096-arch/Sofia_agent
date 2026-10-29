@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBackupBundle, preflightBackupRestore, projectMemoryBackupSource, readBackupBundleDirectory, sqliteSessionBackupSource, stageBackupBundleForRestore, userMemoryBackupSource, verifyBackupBundle, writeBackupBundleDirectory } from "./backup-coordinator.js";
+import { createBackupBundle, executeBackupRestoreTransaction, preflightBackupRestore, projectMemoryBackupSource, readBackupBundleDirectory, sqliteSessionBackupSource, stageBackupBundleForRestore, userMemoryBackupSource, verifyBackupBundle, writeBackupBundleDirectory } from "./backup-coordinator.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -340,4 +340,98 @@ test("restore preflight rejects incomplete, overlapping, unknown, and invalid as
   assert.throws(() => preflightBackupRestore({ ...bundle, files: new Map() }, [
     { name: "one", paths: ["a.json", "b.json"] },
   ]), /invalid bundle/i);
+});
+
+
+test("restore transaction preflights and captures every rollback snapshot before applying", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() {
+      return [
+        { path: "a.json", content: Buffer.from("A") },
+        { path: "b.json", content: Buffer.from("B") },
+      ];
+    } },
+  ], createdAt);
+  const events: string[] = [];
+  const makeAdapter = (name: string, targetPath: string) => ({
+    name,
+    paths: [targetPath],
+    async preflight() { events.push(`preflight:${name}`); },
+    async captureRollback() { events.push(`snapshot:${name}`); return `old-${name}`; },
+    async apply() { events.push(`apply:${name}`); },
+    async rollback(snapshot: unknown) { events.push(`rollback:${name}:${String(snapshot)}`); },
+  });
+  const result = await executeBackupRestoreTransaction(bundle, [
+    makeAdapter("a-target", "a.json"),
+    makeAdapter("b-target", "b.json"),
+  ]);
+  assert.deepEqual(events, [
+    "preflight:a-target", "preflight:b-target",
+    "snapshot:a-target", "snapshot:b-target",
+    "apply:a-target", "apply:b-target",
+  ]);
+  assert.deepEqual(result.appliedTargets, ["a-target", "b-target"]);
+});
+
+test("restore transaction rolls back in reverse order when an apply partially fails", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() {
+      return [
+        { path: "a.json", content: Buffer.from("A") },
+        { path: "b.json", content: Buffer.from("B") },
+      ];
+    } },
+  ], createdAt);
+  const events: string[] = [];
+  const adapter = (name: string, targetPath: string, fail = false) => ({
+    name,
+    paths: [targetPath],
+    async preflight() { events.push(`preflight:${name}`); },
+    async captureRollback() { events.push(`snapshot:${name}`); return `old-${name}`; },
+    async apply() {
+      events.push(`apply:${name}`);
+      if (fail) throw new Error("simulated partial write");
+    },
+    async rollback(snapshot: unknown) { events.push(`rollback:${name}:${String(snapshot)}`); },
+  });
+  await assert.rejects(executeBackupRestoreTransaction(bundle, [
+    adapter("a-target", "a.json"),
+    adapter("b-target", "b.json", true),
+  ]), /rollback was attempted/i);
+  assert.deepEqual(events, [
+    "preflight:a-target", "preflight:b-target",
+    "snapshot:a-target", "snapshot:b-target",
+    "apply:a-target", "apply:b-target",
+    "rollback:b-target:old-b-target", "rollback:a-target:old-a-target",
+  ]);
+});
+
+test("restore transaction refuses preflight failures before snapshots or writes", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() { return [{ path: "a.json", content: Buffer.from("A") }]; } },
+  ], createdAt);
+  const events: string[] = [];
+  await assert.rejects(executeBackupRestoreTransaction(bundle, [{
+    name: "target",
+    paths: ["a.json"],
+    async preflight() { events.push("preflight"); throw new Error("unsafe destination"); },
+    async captureRollback() { events.push("snapshot"); return "old"; },
+    async apply() { events.push("apply"); },
+    async rollback() { events.push("rollback"); },
+  }]), /unsafe destination/);
+  assert.deepEqual(events, ["preflight"]);
+});
+
+test("restore transaction reports rollback failures without hiding the apply failure", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() { return [{ path: "a.json", content: Buffer.from("A") }]; } },
+  ], createdAt);
+  await assert.rejects(executeBackupRestoreTransaction(bundle, [{
+    name: "target",
+    paths: ["a.json"],
+    async preflight() {},
+    async captureRollback() { return "old"; },
+    async apply() { throw new Error("apply broke"); },
+    async rollback() { throw new Error("rollback broke"); },
+  }]), /rollback was incomplete.*apply broke.*rollback broke/i);
 });
