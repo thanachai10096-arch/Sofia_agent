@@ -329,3 +329,89 @@ export function verifyBackupBundle(bundle: unknown): BackupBundleVerification {
   const result = verifyBackupFiles(bundle.manifest, bundle.files as ReadonlyMap<string, Uint8Array>);
   return result;
 }
+
+
+export interface BackupRestoreTargetSelection {
+  /** Stable, non-secret adapter identifier. */
+  name: string;
+  /** Exact manifest paths this adapter is responsible for restoring. */
+  paths: readonly string[];
+}
+
+export interface BackupRestorePreflightPlan {
+  format: "sofia-agent-restore-plan";
+  version: 1;
+  createdAt: string;
+  verifiedFiles: number;
+  verifiedBytes: number;
+  targets: Array<{ name: string; paths: string[]; bytes: number }>;
+}
+
+/**
+ * Build a non-mutating restore plan from a fully verified bundle and an
+ * explicit path-to-adapter assignment. This deliberately does not invoke
+ * adapters, write files, or mutate live stores. Every bundle entry must be
+ * assigned to exactly one target before a later restore executor is allowed
+ * to proceed.
+ */
+export function preflightBackupRestore(
+  bundle: unknown,
+  selections: readonly BackupRestoreTargetSelection[],
+): BackupRestorePreflightPlan {
+  const verification = verifyBackupBundle(bundle);
+  if (!verification.valid) {
+    throw new Error(`Restore preflight rejected an invalid bundle: ${verification.errors.join("; ")}`);
+  }
+  if (!Array.isArray(selections)) throw new Error("Restore target selections must be an array.");
+
+  const record = bundle as BackupBundle;
+  const manifestPaths = new Set(record.manifest.entries.map((entry) => entry.path));
+  const targetNames = new Set<string>();
+  const assignedPaths = new Map<string, string>();
+  const targets: BackupRestorePreflightPlan["targets"] = [];
+
+  for (const selection of selections) {
+    if (!selection || typeof selection.name !== "string" || !selection.name.trim()) {
+      throw new Error("Every restore target must have a non-empty name.");
+    }
+    if (targetNames.has(selection.name)) {
+      throw new Error(`Duplicate restore target name: ${selection.name}`);
+    }
+    targetNames.add(selection.name);
+    if (!Array.isArray(selection.paths)) {
+      throw new Error(`Restore target ${selection.name} must provide an array of paths.`);
+    }
+
+    const paths: string[] = [];
+    let bytes = 0;
+    for (const entryPath of selection.paths) {
+      if (typeof entryPath !== "string" || !manifestPaths.has(entryPath)) {
+        throw new Error(`Restore target ${selection.name} references a path not in the verified bundle.`);
+      }
+      if (assignedPaths.has(entryPath)) {
+        throw new Error(`Restore path is assigned more than once: ${entryPath}`);
+      }
+      assignedPaths.set(entryPath, selection.name);
+      const entry = record.manifest.entries.find((candidate) => candidate.path === entryPath);
+      if (!entry) throw new Error(`Restore path is missing from manifest: ${entryPath}`);
+      paths.push(entryPath);
+      bytes += entry.size;
+    }
+    targets.push({ name: selection.name, paths: paths.sort(), bytes });
+  }
+
+  const unassigned = [...manifestPaths].filter((entryPath) => !assignedPaths.has(entryPath));
+  if (unassigned.length > 0) {
+    throw new Error(`Restore preflight has unassigned bundle paths: ${unassigned.join(", ")}`);
+  }
+
+  targets.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    format: "sofia-agent-restore-plan",
+    version: 1,
+    createdAt: record.manifest.createdAt,
+    verifiedFiles: verification.verifiedFiles,
+    verifiedBytes: verification.verifiedBytes,
+    targets,
+  };
+}
