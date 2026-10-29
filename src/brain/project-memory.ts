@@ -160,7 +160,7 @@ export class PersistentSkillLedger implements SkillLedger {
     // Serialize writes and observe failures instead of creating an unhandled rejection.
     this.pendingWrites += 1;
     this.pending = this.pending.then(() => this.store.save(entry)).then(
-      () => { this.persistenceError = null; },
+      () => undefined,
       error => { this.persistenceError = error instanceof Error ? error.message : String(error); },
     ).finally(() => { this.pendingWrites = Math.max(0, this.pendingWrites - 1); });
   }
