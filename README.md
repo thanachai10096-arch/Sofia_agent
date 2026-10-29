@@ -121,6 +121,42 @@ npm ci\nnpx playwright install chromium
 
 Only enable browser capability in environments where its permissions and policy are configured appropriately. Playwright traffic is routed through a local egress proxy that validates DNS answers and connects to the selected numeric IP, blocks private/internal destinations, and limits web traffic to HTTP port 80 and HTTPS port 443. Chromium QUIC and non-proxied WebRTC UDP are disabled to reduce direct-network bypasses. Sites that require non-standard ports may not work. Keep host/container egress controls enabled for defense in depth.
 
+
+## Model providers and model selection
+
+Sofia's model layer is provider-agnostic at the configuration boundary. It can use any service exposing the **OpenAI Chat Completions-compatible API**, including hosted gateways, compatible third-party APIs, and local servers such as Ollama. Native APIs that do not implement this protocol need a dedicated provider adapter; "every model" cannot be guaranteed by a single universal wire protocol.
+
+Configure providers with the server-side `SOFIA_MODEL_PROVIDERS` JSON environment variable and select one provider per task route. Put credentials in environment secrets; use `apiKeyEnv` to reference a secret variable instead of embedding credentials in the manifest.
+
+```json
+{
+  "openrouter": {
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "apiKeyEnv": "OPENROUTER_API_KEY",
+    "model": "provider/model-name"
+  },
+  "ollama": {
+    "baseUrl": "http://localhost:11434/v1",
+    "model": "qwen2.5:14b"
+  }
+}
+```
+
+Then set route choices on the Sofia server (examples):
+
+```bash
+export SOFIA_FAST_PROVIDER=openrouter
+export SOFIA_FAST_MODEL=provider/fast-model
+export SOFIA_CODING_PROVIDER=ollama
+export SOFIA_REASONING_PROVIDER=openrouter
+export SOFIA_REASONING_MODEL=provider/reasoning-model
+export SOFIA_VISION_PROVIDER=openrouter
+```
+
+Supported route names are `FAST`, `CODING`, `REASONING`, and `VISION`. Each route can override `BASE_URL`, `MODEL`, and `API_KEY` using `SOFIA_<ROUTE>_BASE_URL`, `SOFIA_<ROUTE>_MODEL`, and `SOFIA_<ROUTE>_API_KEY`. For provider-specific headers and request controls, the manifest also accepts `headers`, `maxConcurrent`, and `requestTimeoutMs`. Remote endpoints must use HTTPS; plain HTTP is permitted only for loopback hosts. Existing `GEMINI_API_KEY` / `Gemini_API_Key` configuration remains supported for backward compatibility.
+
+This configuration enables user/deployment owners to select models by task route. A future UI/API for per-user model preferences must persist choices in an authenticated, tenant-scoped configuration store; environment variables are deployment-wide and should not be presented as individual-user preferences.
+
 ## `> API — reconnectable runs`
 
 Sofia supports long-running work for desktop and mobile browser clients:
