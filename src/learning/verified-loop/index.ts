@@ -13,3 +13,6 @@ export type { LearningLifecyclePromotionOptions } from "./lifecycle-promoter.js"
 
 export { reconcileLearningActivationState } from "./reconciliation.js";
 export type { RuntimeLearningSkill, LearningReconciliationIssue, LearningReconciliationReport } from "./reconciliation.js";
+
+export { planLearningReconciliationRepair } from "./reconciliation-repair.js";
+export type { LearningRepairAuthorization, LearningRepairAction, LearningRepairBlock, LearningRepairPlan } from "./reconciliation-repair.js";
