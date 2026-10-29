@@ -7,15 +7,40 @@ Status: opt-in gateway, command bridge, Telegram Bot API long polling transport,
 - Messaging is disabled unless `enabled: true` is explicitly supplied.
 - Unknown users/channels are denied unless an explicit `allowUser` policy permits them.
 - The gateway calls an injected message handler. Adapters never invoke tools or a separate agent runtime directly.
-- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Verified direct messages can start a run through natural chat without `/run`; group messages require trusted transport metadata marking them as explicitly addressed to Sofia. Platform slash commands such as `/start` are ignored, and `/run <task>` remains supported. In the current built-in transports, this natural-chat path is available for Telegram private chats; Discord's built-in HTTP interaction transport currently receives registered slash commands only.
+- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Verified direct messages can start a run through natural chat without `/run`; group messages require trusted transport metadata marking them as explicitly addressed to Sofia. Platform slash commands such as `/start` are ignored, and `/run <task>` remains supported. Telegram private chat is supported by the built-in Telegram transport. Discord has a separate Gateway transport factory for message events; it must be explicitly composed into the existing messaging gateway and is not automatically enabled by the HTTP interaction route.
 - Use `createMessagingAccessCheck` to adapt the existing `ChatAccessPolicy` to the gateway allowlist callback. The existing command handler performs its own authorization check too. Do not pass the same deduplicator to both `createMessagingGateway` and `createSofiaMessagingHandler`, because the existing command handler claims the provider/channel/message key itself.
 - Keep bot tokens and Sofia API keys in server-side environment variables or an approved secret provider. Never expose them in client bundles, tests, errors, or logs.
 - The Telegram HTTP transport uses HTTPS long polling against the official Telegram Bot API. Choose either polling or a separately implemented webhook deployment, not both for the same bot.
 - The Discord interaction transport verifies the signature against the exact raw request body and timestamp before parsing. It can be mounted through the existing `createSofiaApi` using the optional `discordInteractionRoute` config; the route helper preserves raw bytes and enforces the body limit. The route is disabled unless a transport is explicitly configured. The host must expose the route over HTTPS. Unexpected transport errors return a generic 503, and no second server is created.
-- Discord slash commands are deferred immediately. The transport edits the deferred original response and uses interaction webhooks for extra message chunks, clearing the Discord loading state. Register the matching application command (default `/run` with a string option named `task`) in Discord. Natural chat in Discord requires a separate Gateway/message-event transport with the appropriate privileged Message Content intent; setting `addressedToBot` on a test event alone does not enable message events in the HTTP interaction transport.
+- Discord slash commands are deferred immediately by the HTTP interaction transport. Register the matching application command (default `/run` with a string option named `task`) in Discord. For natural chat, use `createDiscordGatewayTransport` plus `createDiscordAdapter`; enable the privileged Message Content intent in the Discord Developer Portal. The Gateway transport requests GUILDS, GUILD_MESSAGES, DIRECT_MESSAGES, and MESSAGE_CONTENT intents, authenticates with the bot token, reconnects/resumes Gateway sessions, ignores bot-authored messages, and marks a group message addressed only when Discord metadata contains a mention of Sofia or a reply to Sofia. Only channel type 1 is treated as a one-to-one DM; group DMs are not treated as private DMs.
 - The standalone API entrypoint requires both `DISCORD_ALLOWED_USER_IDS` and `DISCORD_ALLOWED_CHANNEL_IDS` whenever Discord is enabled. Both must be comma-separated numeric Discord IDs; empty, malformed, or duplicate entries fail startup. Do not omit the user allowlist: channel membership alone must not grant permission to execute Sofia tasks.
 - Treat attachment URLs as untrusted; do not download or open them without a separately secured downloader that blocks private/loopback/link-local destinations, re-checks redirects and DNS, caps response size/time, and avoids forwarding credentials.
 - The default gateway rate limiter is in-memory and per process. For shared deployments, `RedisMessagingRateLimiter` provides an atomic fixed-window implementation using a node-redis v4-compatible `eval(script, { keys, arguments })` client; inject it as `rateLimiter: new RedisMessagingRateLimiter({ client })`. The Lua counter operation is atomic across workers, raw scope identifiers are SHA-256 hashed before being used as Redis keys, and Redis errors fail closed (the message is rate-limited). For cross-worker message deduplication, `RedisChatMessageDeduplicator` provides atomic `SET NX PX` claims and ownership-checked release; inject it into the command handler, not twice in both layers.
+
+## Discord Gateway natural-chat transport
+
+The Gateway transport is a library factory, not an automatic API-entrypoint setting. Compose it with the existing adapter/gateway and the same owner/user/channel access policy; do not create a second Sofia runtime. For example:
+
+```ts
+const transport = createDiscordGatewayTransport({
+  botToken: process.env.DISCORD_BOT_TOKEN!,
+});
+const adapter = createDiscordAdapter(transport);
+const gateway = createMessagingGateway({
+  enabled: true,
+  adapters: [adapter],
+  allowUser: createMessagingAccessCheck(existingChatAccessPolicy),
+  onMessage: createSofiaMessagingHandler({
+    client: existingSofiaClient,
+    accessPolicy: existingChatAccessPolicy,
+    deduplicator: existingChatMessageDeduplicator,
+  }),
+});
+```
+
+The example names are placeholders for the application's existing instances, not new APIs. The default transport uses the runtime's global WebSocket when available. On runtimes without a global WebSocket, pass `socketFactory` backed by a maintained WebSocket implementation. Configure the bot token only as a server-side secret. Enable the privileged **Message Content Intent** in the Discord Developer Portal; otherwise ordinary message content may be unavailable. Keep explicit user and channel allowlists in the existing access policy. The transport never downloads attachment URLs.
+
+The Gateway path is separate from Discord's HTTP interaction route: configure either or both intentionally. The Gateway transport uses the bot REST API for replies; the interaction transport uses interaction webhooks for slash-command replies.
 
 ## Standalone Telegram runtime configuration
 
