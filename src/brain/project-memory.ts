@@ -135,6 +135,21 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
 
 export class PersistentSkillLedger implements SkillLedger {
   private cache: LearnedSkillCandidate[];
+  private readonly pendingWrites = new Set<Promise<void>>();
+  private persistenceFailed = false;
+
+  /** Persistence health for hosts that need to surface skill-learning durability. */
+  get persistenceStatus(): "healthy" | "pending" | "failed" {
+    if (this.persistenceFailed) return "failed";
+    return this.pendingWrites.size > 0 ? "pending" : "healthy";
+  }
+
+  /** Wait for writes started by record(); reject if any persistence attempt failed. */
+  async flush(): Promise<void> {
+    await Promise.all([...this.pendingWrites]);
+    if (this.persistenceFailed) throw new Error("One or more learned-skill persistence writes failed.");
+  }
+
   constructor(private readonly store: ProjectMemoryStore) {
     const syncStore = store as FileProjectMemoryStore;
     this.cache = typeof syncStore.readSync === "function"
@@ -146,7 +161,20 @@ export class PersistentSkillLedger implements SkillLedger {
     if (!this.cache.some(x=>x.name===candidate.name&&x.category===candidate.category&&x.trigger===candidate.trigger)) this.cache.push(candidate);
     const now=new Date().toISOString();
     const id=createHash("sha256").update(JSON.stringify({category:candidate.category,strategy:candidate.strategy,trigger:candidate.trigger,procedure:candidate.procedure})).digest("hex");
-    void this.store.save({id,project:"skill",kind:"repair",content:JSON.stringify(candidate),source:candidate.evidenceIds.join(","),confidence:0.8,createdAt:now,updatedAt:now,uses:0});
+    const entry: ProjectMemoryEntry = {
+      id, project: "skill", kind: "repair", content: JSON.stringify(candidate),
+      source: candidate.evidenceIds.join(","), confidence: 0.8,
+      createdAt: now, updatedAt: now, uses: 0,
+    };
+    // record() is intentionally synchronous for the SkillLedger contract. Capture
+    // persistence failures instead of creating an unhandled rejection; hosts can
+    // inspect persistenceStatus and await flush() at a durability boundary.
+    let pending!: Promise<void>;
+    pending = Promise.resolve()
+      .then(() => this.store.save(entry))
+      .catch(() => { this.persistenceFailed = true; })
+      .finally(() => { this.pendingWrites.delete(pending); });
+    this.pendingWrites.add(pending);
   }
   list(): readonly LearnedSkillCandidate[] { return [...this.cache]; }
 }
