@@ -11,8 +11,22 @@ export interface SofiaRunInput {
   task: string;
   workspace?: string;
   context?: string | Record<string, unknown>;
+  /** Configured model route ID from listModels(); omit or use auto for automatic selection. */
+  modelRouteId?: string;
   maxSteps?: number;
   acceptanceCriteria?: Array<{ id: string; description: string; probe: { tool: string; input: Record<string, unknown> } }>;
+}
+
+export interface SofiaModelOption {
+  id: string;
+  model: string;
+  capabilities: string[];
+  healthy: boolean;
+}
+
+export interface SofiaModelList {
+  automaticSelection: boolean;
+  models: SofiaModelOption[];
 }
 
 export type SofiaRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -135,6 +149,12 @@ export class SofiaClient {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", onAbort);
     }
+  }
+
+  async listModels(signal?: AbortSignal): Promise<SofiaModelList> {
+    return this.request<SofiaModelList>("/v1/models", {
+      headers: { authorization: "Bearer " + this.options.apiKey },
+    }, signal);
   }
 
   async run(input: SofiaRunInput, signal?: AbortSignal): Promise<SofiaRunResponse> {
