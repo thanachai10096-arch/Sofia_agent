@@ -68,7 +68,7 @@ By default, separate sessions by platform/account/conversation. Any optional cro
 1. Verify Telegram and Discord transport paths with unit and integration tests; keep provider smoke-test evidence separate.
 2. Finish Slack receiver configuration and real test-workspace smoke tests without touching production.
 3. Add per-adapter health/configuration reporting and explicit account/session binding.
-4. Add WhatsApp as the next separate concrete adapter after reviewing official API access, business-account requirements, webhook verification, idempotency, and provider terms. LINE now has a guarded runtime and mounted API webhook, but still needs a real-account smoke test.
+4. WhatsApp now has a guarded Cloud API transport/adapter/runtime, GET verification challenge, raw-body HMAC verification, explicit Graph API version, phone-number binding, mounted API webhook, and fail-closed allowlists. It still needs CI confirmation and a real Meta-account smoke test before it should be considered operational. LINE also still needs a real-account smoke test.
 5. Add Google Chat, Microsoft Teams, Matrix, Signal, Messenger, WeChat, and other requested channels as separate adapters when supported APIs and deployment models are confirmed.
 6. Extend the setup wizard to configure multiple accounts, validate credentials without exposing them, and report real connection state.
 7. Expand attachment/media support only with secured download and storage paths.
