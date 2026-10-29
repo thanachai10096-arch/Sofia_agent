@@ -5,6 +5,8 @@ import type { FailureCategory, Strategy } from "./types.js";
 export interface LearnedSkillCandidate {
   name: string;
   trigger: string;
+  /** Additional observed trigger phrases merged from repeated verified runs. */
+  triggers?: string[];
   category: FailureCategory;
   strategy: Strategy;
   procedure: string[];
@@ -15,6 +17,8 @@ export interface LearnedSkillCandidate {
 export interface SkillLedger {
   record(candidate: LearnedSkillCandidate): void;
   list(): readonly LearnedSkillCandidate[];
+  /** Flush durable implementations before a run reports successful learning. */
+  flush?(): Promise<void>;
 }
 
 export class InMemorySkillLedger implements SkillLedger {
@@ -22,13 +26,22 @@ export class InMemorySkillLedger implements SkillLedger {
 
   record(candidate: LearnedSkillCandidate): void {
     const key = createHash("sha256")
-      .update(JSON.stringify({
-        name: candidate.name,
-        category: candidate.category,
-        procedure: candidate.procedure,
-      }))
+      .update(JSON.stringify({ name: candidate.name, category: candidate.category }))
       .digest("hex");
-    if (!this.entries.has(key)) this.entries.set(key, candidate);
+    const previous = this.entries.get(key);
+    const merged: LearnedSkillCandidate = previous ? {
+      ...candidate,
+      trigger: previous.trigger,
+      triggers: [...new Set([previous.trigger, ...(previous.triggers ?? []), candidate.trigger, ...(candidate.triggers ?? [])])].slice(0, 12),
+      procedure: [...new Set(candidate.procedure)].slice(0, 12),
+      verification: [...new Set([...previous.verification, ...candidate.verification])],
+      evidenceIds: [...new Set([...previous.evidenceIds, ...candidate.evidenceIds])].slice(-50),
+    } : {
+      ...candidate,
+      triggers: [...new Set([candidate.trigger, ...(candidate.triggers ?? [])])].slice(0, 12),
+      evidenceIds: [...new Set(candidate.evidenceIds)].slice(-50),
+    };
+    this.entries.set(key, merged);
   }
 
   list(): readonly LearnedSkillCandidate[] {

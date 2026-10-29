@@ -23,7 +23,25 @@ A model-agnostic AI agent runtime with internal model routing, policy-controlled
 
 Sofia Agent is a standalone agent runtime and platform. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
 
-> **Model routing is an internal policy.** End users do not choose models; Sofia decides how requests are handled.
+## Quick start: run Sofia locally
+
+**Prerequisites:** Node.js 22.5 or newer (for the built-in SQLite session store) and access to a supported model provider. This source-checkout path is for developers/testers; it is not yet a claim that `npx sofia` is published and ready.
+
+```bash
+git clone https://github.com/thanachai10096-arch/Sofia_agent.git
+cd Sofia_agent
+npm ci
+npm run cli -- setup
+npm run cli -- chat
+```
+
+The setup wizard supports Gemini, OpenAI, OpenRouter, xAI, Mistral, Groq, DeepSeek, Together AI, Fireworks AI, Cerebras, Perplexity, and local Ollama, plus a generic `openai-compatible` endpoint for other compatible services. Named providers use their fixed official API origins; use `openai-compatible` for a custom gateway. The wizard asks for the API key and model ID, and the base URL for generic compatible endpoints. It writes the local config to `~/.sofia/config.json` with owner-only file permissions. **Do not commit API keys or paste them into issues or chat.**
+
+In chat, type a task normally. Enter `/exit` to leave. Local conversation sessions are stored under `~/.sofia/sessions.sqlite`. This is a local single-user CLI flow; it does not configure a hosted account or connect Telegram/Discord by itself.
+
+For contributors, run `npm run typecheck`, `npm test`, and `npm run build` before proposing changes. These checks must pass on the exact commit before the PR is considered ready.
+
+> **Model setup has two separate scopes.** Local setup affects only one installation. Shared hosted accounts can configure an encrypted per-API-key model profile through the API when the server encryption key is configured; see the section below.
 
 
 ## Open source and contribution
@@ -36,6 +54,13 @@ Sofia Agent is distributed under the [MIT License](LICENSE). Review third-party 
 - **Shared access architecture:** [docs/UNIFIED_ACCESS_ARCHITECTURE.md](docs/UNIFIED_ACCESS_ARCHITECTURE.md)
 
 Hosted and enterprise services described in the roadmap are potential offerings, not a claim that they are currently available.
+
+### Self-hosted configuration vs. shared hosted accounts
+
+- **Self-hosted / personal instance:** `sofia setup` configures only that installation. Its local provider settings and SQLite sessions do not configure other users.
+- **Shared hosted service:** per-API-key model profiles are available through `GET/PUT/DELETE /v1/model-profile` when `SOFIA_MODEL_PROFILE_ENCRYPTION_KEY` is configured. Provider keys are encrypted at rest with AES-256-GCM, keyed by a hash of the authenticated API principal, and never returned by the profile API. Grant `model:profile:read` and `model:profile:write` scopes to use the profile endpoints.
+- **Provider support:** Built-in OpenAI-compatible presets include Gemini, OpenAI, OpenRouter, xAI, Mistral, Groq, DeepSeek, Together AI, Fireworks AI, Cerebras, and Perplexity; local Ollama is allowed over loopback HTTP. Named providers are pinned to their official API origin to prevent forwarding credentials to an unrelated host. Use `openai-compatible` for other compatible APIs or custom gateways; public endpoints must use HTTPS. The profile's provider/model/API key override the server default only for that authenticated API principal; users without a profile continue using the server-owned default.
+- **Still required before calling the hosted product fully multi-user/Hermes-like:** persistent per-user cost/usage budgets, a durable shared profile database for horizontal scaling, a profile-management UX for users who arrive only through a shared chat bot identity, and live tests with real provider credentials. Keep server-owned provider options separate from user-owned BYOK credentials.
 
 
 
@@ -252,7 +277,7 @@ try {
 }
 ```
 
-Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Session transcript persistence does not automatically replay history into model context or add transcript retrieval endpoints. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
+Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. In the unified-agent implementation, bounded prior turns may be replayed as untrusted context when the session-enabled runtime is used; transcript persistence alone does not provide a general transcript-search or retrieval endpoint. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
 
 ## User memory
 

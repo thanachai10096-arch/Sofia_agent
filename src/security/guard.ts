@@ -23,7 +23,7 @@ export interface SecurityDecision {
 }
 
 const SECRET_PATH = /(^|[\\/])(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx|crt)|id_(?:rsa|ed25519)|credentials(?:\.json)?|secrets?(?:\.json|\.ya?ml)?)$/i;
-const SECRET_TOKEN = /(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|password|authorization)\s*[:=]/i;
+const SECRET_TOKEN = /(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|encryption[_-]?key|password|authorization)\s*[:=]/i;
 const INJECTION = /(?:ignore|disregard|override)\s+(?:all\s+)?(?:previous|prior|system|developer)\s+(?:instructions?|rules?)|reveal\s+(?:the\s+)?(?:system|developer)\s+(?:prompt|instructions?)|disable\s+(?:security|safety|policy)|upload\s+(?:the\s+)?(?:\.env|credentials|secrets?)/i;
 
 export function canonicalJson(value: unknown): string {
@@ -207,13 +207,13 @@ export function redactSecrets(value: unknown): unknown {
       .replace(/\b(?:xox[baprs]-[A-Za-z0-9-]{10,})\b/gi, "[REDACTED]")
       .replace(/(?:Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]")
       .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{12,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[0-9A-Z]{16})\b/g, "[REDACTED]")
-      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|password|authorization|token|secret[_-]?key|session[_-]?token|aws_secret_access_key)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
+      .replace(/(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|encryption[_-]?key|password|authorization|token|secret[_-]?key|session[_-]?token|aws_secret_access_key)\s*[:=]\s*[^\s,}"']+/gi, "$1=[REDACTED]");
   }
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      result[key] = /(?:token|secret|password|credential|private.?key|authorization|api.?key)/i.test(key) ? "[REDACTED]" : redactSecrets(item);
+      result[key] = /(?:token|secret|password|credential|private.?key|encryption.?key|authorization|api.?key)/i.test(key) ? "[REDACTED]" : redactSecrets(item);
     }
     return result;
   }

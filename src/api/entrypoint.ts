@@ -1,23 +1,49 @@
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
-import { createSofiaAgentDependencies } from "../models/factory.js";
+import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { createMatrixMessagingRuntime } from "../integrations/messaging/matrix-runtime.js";
+import { createSlackMessagingRuntime } from "../integrations/messaging/slack-runtime.js";
+import { createLineMessagingRuntime } from "../integrations/messaging/line-runtime.js";
+import { createWhatsAppMessagingRuntime } from "../integrations/messaging/whatsapp-runtime.js";
+import { sendDiscordText } from "../integrations/messaging/discord-delivery.js";
+import { redactSecrets } from "../security/guard.js";
+import { ContinuousWorkSupervisor, FileContinuousWorkStore, hasVerifiedCompletionEvidence } from "../brain/continuous-work.js";
+
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
-const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read,model:profile:read,model:profile:write").split(",").map((s) => s.trim()).filter(Boolean);
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
-const deps = createSofiaAgentDependencies(workspace);
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, undefined, process.env.SOFIA_SESSION_DB_PATH?.trim() || undefined);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
+// Matrix polling bridge reuses the existing Sofia API and shared messaging gateway.
+const matrixRuntime = createMatrixMessagingRuntime(process.env, workspace);
+const slackRuntime = createSlackMessagingRuntime(process.env, workspace);
+const lineRuntime = createLineMessagingRuntime(process.env, workspace);
+const whatsAppRuntime = createWhatsAppMessagingRuntime(process.env, workspace);
+
+const continuousWorkStore = new FileContinuousWorkStore(workspace);
+const continuousWorkSupervisor = deps.jobRuntime
+  ? new ContinuousWorkSupervisor(deps.jobRuntime, continuousWorkStore, {
+      // Never infer completion from a model's summary alone. Require a completed
+      // Brain report with passing verification evidence and no remaining risks.
+      isComplete: (_record, job) => hasVerifiedCompletionEvidence(job),
+      ...(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS?.trim()
+        ? { maxLifetimeIterations: Number(process.env.SOFIA_CONTINUOUS_WORK_MAX_LIFETIME_ITERATIONS) }
+        : {}),
+    })
+  : undefined;
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -46,7 +72,7 @@ if (discordConfigured) {
     publicKeyHex: discordPublicKey,
     botToken: discordBotToken,
     commandName: process.env.DISCORD_COMMAND_NAME?.trim() || "run",
-    additionalCommandNames: ["status", "cancel", "resume"],
+    additionalCommandNames: ["status", "cancel", "resume", "work"],
     allowedUserIds: discordUserIds,
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
@@ -58,6 +84,76 @@ if (discordConfigured) {
       const principalId = "discord:" + message.author.id;
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
       const argument = message.content.trim().slice(command.length).trim();
+      if (command === "/work") {
+        const [action, ...rest] = argument.split(/\s+/);
+        const value = rest.join(" ").trim();
+        const owner = "chat:" + createHash("sha256").update(JSON.stringify(["discord", message.author.id])).digest("hex");
+        const sendWorkReply = async (text: string) => {
+          if (discordTransport) await sendDiscordText(discordTransport, message.channelId, text, message.id);
+        };
+        if (!continuousWorkSupervisor) {
+          await sendWorkReply("Sofia continuous work is unavailable.");
+          return;
+        }
+        try {
+          if (action === "create" && value) {
+            const work = await continuousWorkSupervisor.create(owner, value);
+            await sendWorkReply("Sofia created a paused objective.\nWork ID: " + work.id + "\nUse /work continue " + work.id + " to keep working.");
+            return;
+          }
+          if (action === "list" && !value) {
+            const work = await continuousWorkSupervisor.list(owner);
+            await sendWorkReply(work.length
+              ? work.map((item) => item.id + " — " + item.status + " — " + item.task.slice(0, 120)).join("\n")
+              : "You have no Sofia work objectives.");
+            return;
+          }
+          const match = value.match(/^([^\s]+)(?:\s+.*)?$/);
+          const workId = match?.[1];
+          if (!workId || !["status", "continue", "resume", "pause", "stop"].includes(action ?? "")) {
+            await sendWorkReply("Usage: /work create <task> | list | status <id> | continue <id> | resume <id> | pause <id> | stop <id>");
+            return;
+          }
+          const work = await continuousWorkSupervisor.get(workId, owner);
+          if (!work) {
+            await sendWorkReply("Work objective not found or not accessible to this Discord user.");
+            return;
+          }
+          if (action === "status") {
+            await sendWorkReply("Work " + work.id + ": " + work.status + "\nIteration: " + work.iteration + "\nTask: " + work.task);
+            return;
+          }
+          if (action === "continue") {
+            const started = await continuousWorkSupervisor.runContinuously(workId, owner);
+            await sendWorkReply(started ? "Continuous work accepted for " + workId + "." : "Cannot continue objective in status " + work.status + ".");
+            return;
+          }
+          if (action === "resume") {
+            if (continuousWorkSupervisor.isContinuous(workId) || (work.status === "active" && continuousWorkSupervisor.isRunning(workId))) {
+              await sendWorkReply("This objective is already active.");
+              return;
+            }
+            if (work.status === "stopped" || work.status === "completed") {
+              await sendWorkReply("This objective is already terminal: " + work.status + ".");
+              return;
+            }
+            void continuousWorkSupervisor.resume(workId, owner).catch(() => undefined);
+            await sendWorkReply("Resume accepted for " + workId + ".");
+            return;
+          }
+          const changed = action === "pause"
+            ? await continuousWorkSupervisor.pause(workId, owner)
+            : await continuousWorkSupervisor.stop(workId, owner);
+          const latest = await continuousWorkSupervisor.get(workId, owner);
+          await sendWorkReply(changed
+            ? "Objective " + workId + " is now " + (latest?.status ?? action) + "."
+            : "Objective could not be changed; current status: " + (latest?.status ?? "unknown") + ".");
+        } catch (error) {
+          console.error("Discord continuous-work command failed:", error instanceof Error ? error.name : "UnknownError");
+          await sendWorkReply("Sofia could not process that work command. Check redacted server logs.");
+        }
+        return;
+      }
       if (command === "/status" || command === "/cancel" || command === "/resume") {
         if (!/^([0-9a-f]{8}-[0-9a-f-]{27,})$/i.test(argument)) {
           await discordTransport?.sendMessage(
@@ -96,7 +192,7 @@ if (discordConfigured) {
           void deps.jobRuntime.resume(job.id).then(async (resumed) => {
             const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
-            await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
+            if (discordTransport) await sendDiscordText(discordTransport, message.channelId, content);
             await deps.jobRuntime?.markNotificationDelivered?.(resumed.id);
           }).catch(async () => {
             try {
@@ -132,6 +228,7 @@ if (discordConfigured) {
         : task;
       const handle = await submitDiscordTask(deps.jobRuntime, taskWithMemory, principalId, discordAbort.signal, {
         channelId: message.channelId,
+        userId: message.author.id,
         sessionKey,
         sessionTask: task,
       });
@@ -146,8 +243,7 @@ if (discordConfigured) {
       void waitForDiscordTask(handle, { signal: discordAbort.signal }).then(async (result) => {
         const prefix = result.status === "completed" ? "Sofia completed the task." : "Sofia job " + result.status + ".";
         const response = prefix + "\nJob ID: " + result.id + "\n" + result.summary;
-        const safeResponse = response.length > 1700 ? response.slice(0, 1690) + "… (truncated)" : response;
-        await discordTransport?.sendMessage(message.channelId, safeResponse);
+        if (discordTransport) await sendDiscordText(discordTransport, message.channelId, response);
         await deps.jobRuntime?.markNotificationDelivered?.(result.id);
       }).catch(async () => {
         try {
@@ -213,8 +309,37 @@ const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(path.join(workspace, ".sofia", "api-runs")),
+  ...(continuousWorkSupervisor ? { continuousWorkSupervisor } : {}),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
+  ...(process.env.SOFIA_MESSAGING_CONTEXT_SECRET?.trim() ? { messagingContextSecret: process.env.SOFIA_MESSAGING_CONTEXT_SECRET.trim() } : {}),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
+  ...(slackRuntime ? { slackEventsRoute: { transport: slackRuntime.transport } } : {}),
+  ...(lineRuntime ? { lineWebhookRoute: { transport: lineRuntime.transport } } : {}),
+  ...(whatsAppRuntime ? { whatsAppWebhookRoute: { transport: whatsAppRuntime.transport } } : {}),
+  onCronExecutionFinished: async (schedule, execution, job) => {
+    const target = schedule.notificationTarget;
+    if (!target) return false;
+    // Re-check the immutable owner binding for every provider before sending.
+    // The target was HMAC-verified at ingress, but persisted state is still treated as untrusted.
+    if (schedule.ownerKeyId !== target.platform + ":" + target.userId) return false;
+    const summary = typeof job?.result?.summary === "string" ? String(redactSecrets(job.result.summary)).trim() : "";
+    const status = execution.status;
+    const message = status === "completed"
+      ? "⏰ Sofia scheduled task completed.\nSchedule: " + schedule.name + "\n" + (summary || "The task completed without a text summary.")
+      : "⏰ Sofia scheduled task " + status + ".\nSchedule: " + schedule.name + "\nCheck Sofia schedule history for details.";
+    const outbound = { conversationId: target.conversationId, text: message };
+    switch (target.platform) {
+      case "discord":
+        if (!discordTransport) return false;
+        await sendDiscordText(discordTransport, target.conversationId, outbound.text);
+        return true;
+      case "telegram": return telegramRuntime ? telegramRuntime.send(outbound) : false;
+      case "matrix": return matrixRuntime ? matrixRuntime.send(outbound) : false;
+      case "slack": return slackRuntime ? slackRuntime.send(outbound) : false;
+      case "line": return lineRuntime ? lineRuntime.send(outbound) : false;
+      case "whatsapp": return whatsAppRuntime ? whatsAppRuntime.send(outbound) : false;
+    }
+  },
 });
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
@@ -223,13 +348,34 @@ server.listen(port, "0.0.0.0", () => {
   void telegramRuntime?.start().catch((error) => {
     console.error("Telegram integration failed to start:", error instanceof Error ? error.name : "UnknownError");
   });
+  void matrixRuntime?.start().catch((error) => {
+    console.error("Matrix integration failed to start:", error instanceof Error ? error.name : "UnknownError");
+  });
+  void slackRuntime?.start().catch((error) => {
+    console.error("Slack integration failed to start:", error instanceof Error ? error.name : "UnknownError");
+  });
+  void lineRuntime?.start().catch((error) => {
+    console.error("LINE integration failed to start:", error instanceof Error ? error.name : "UnknownError");
+  });
+  void whatsAppRuntime?.start().catch((error) => {
+    console.error("WhatsApp integration failed to start:", error instanceof Error ? error.name : "UnknownError");
+  });
 });
+void continuousWorkSupervisor?.resumeInterrupted().then((count) => {
+  if (count > 0) console.log("Sofia continuous-work recovery scheduled " + count + " objective(s).");
+}).catch(() => console.error("Sofia continuous-work recovery could not be initialized."));
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     discordAbort.abort();
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
-    server.close();
+    void matrixRuntime?.stop().catch(() => console.error("Matrix integration shutdown failed."));
+    void slackRuntime?.stop().catch(() => console.error("Slack integration shutdown failed."));
+    void lineRuntime?.stop().catch(() => console.error("LINE integration shutdown failed."));
+    void whatsAppRuntime?.stop().catch(() => console.error("WhatsApp integration shutdown failed."));
+    server.close(() => {
+      void deps.closeSessionStore().catch(() => console.error("Sofia session/MCP shutdown failed."));
+    });
   });
 }

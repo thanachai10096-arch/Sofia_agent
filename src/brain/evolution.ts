@@ -1,5 +1,6 @@
-import { promises as fs, readFileSync } from "node:fs";
+import { promises as fs, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { redactSecrets } from "../security/guard.js";
 import { randomUUID } from "node:crypto";
 
 export interface SkillPerformance {
@@ -58,6 +59,14 @@ function setOwnValue<T>(record: Record<string, T>, key: string, value: T): void 
   });
 }
 
+function lstatSyncSafe(file: string): boolean {
+  try { return lstatSync(file).isSymbolicLink(); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 function normalizeTaskType(taskType: string): string {
   const normalized = taskType.trim().toLowerCase().replace(/\s+/g, "-").slice(0, 80);
   return normalized || "general";
@@ -73,6 +82,7 @@ export class EvolutionEngine {
     this.snapshot = { version: 1, skills: {}, taskTypes: {} };
     if (file) {
       try {
+        if (lstatSync(file).isSymbolicLink()) throw new Error("Evolution state file must not be a symbolic link");
         const loaded = JSON.parse(readFileSync(file, "utf8")) as Partial<EvolutionSnapshot>;
         const skills = loaded.skills ?? {};
         this.snapshot = {
@@ -163,7 +173,7 @@ export class EvolutionEngine {
     local.failures++;
     s.confidence = clamp(s.confidence * 0.75 - 0.05, 0.05, 0.95);
     s.lastFailureAt = new Date().toISOString();
-    s.lastFailure = message.slice(0, 500);
+    s.lastFailure = String(redactSecrets(message)).slice(0, 500);
     s.failureHistory.push({ at: s.lastFailureAt, message: s.lastFailure });
     s.failureHistory = s.failureHistory.slice(-20);
     void this.persist();
@@ -216,8 +226,11 @@ export class EvolutionEngine {
     this.persistChain = this.persistChain.then(async () => {
       const tmp = this.file! + "." + process.pid + "." + randomUUID() + ".tmp";
       try {
-        await fs.mkdir(path.dirname(this.file!), { recursive: true });
-        await fs.writeFile(tmp, serialized, { encoding: "utf8", flag: "wx" });
+        const directory = path.dirname(this.file!);
+        await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+        await fs.chmod(directory, 0o700);
+        if (lstatSyncSafe(this.file!)) throw new Error("Evolution state file must not be a symbolic link");
+        await fs.writeFile(tmp, serialized, { encoding: "utf8", flag: "wx", mode: 0o600 });
         await fs.rename(tmp, this.file!);
       } catch {
         // Learning is best-effort; execution semantics never depend on persistence.

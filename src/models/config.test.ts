@@ -3,92 +3,144 @@ import { afterEach, test } from "node:test";
 import { loadModelConfigFromEnv } from "./config.js";
 
 const names = [
-  "OPENROUTER_API_KEY",
-  "OPENROUTER",
-  "OPENROUTER_MODEL",
-  "OPENROUTER_FAST_MODEL",
-  "OPENROUTER_CODING_MODEL",
-  "OPENROUTER_REASONING_MODEL",
-  "OPENROUTER_VISION_MODEL",
-  "GEMINI_API_KEY",
-  "Gemini_API_Key",
-  "GEMINI_MODEL",
-  "GEMINI_FAST_MODEL",
-  "GEMINI_CODING_MODEL",
-  "GEMINI_REASONING_MODEL",
-  "GEMINI_VISION_MODEL",
-  "SOFIA_AI_GATEWAY_API_KEY",
-  "AI_GATEWAY_API_KEY",
-  "SOFIA_AI_GATEWAY_URL",
-  "SOFIA_FAST_MODEL",
-  "SOFIA_CODING_MODEL",
-  "SOFIA_REASONING_MODEL",
-  "SOFIA_VISION_MODEL",
+  "SOFIA_MODEL_PROVIDER", "SOFIA_MODEL_BASE_URL", "SOFIA_MODEL_API_KEY", "SOFIA_MODEL_NAME",
+  "SOFIA_FAST_MODEL", "SOFIA_CODING_MODEL", "SOFIA_REASONING_MODEL", "SOFIA_VISION_MODEL",
+  "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENROUTER_MODEL", "OPENAI_API_KEY", "XAI_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY", "DEEPSEEK_API_KEY", "TOGETHER_API_KEY", "FIREWORKS_API_KEY", "CEREBRAS_API_KEY", "PERPLEXITY_API_KEY",
+  "OPENROUTER_FAST_MODEL", "OPENROUTER_CODING_MODEL", "OPENROUTER_REASONING_MODEL", "OPENROUTER_VISION_MODEL",
+  "GEMINI_API_KEY", "Gemini_API_Key", "GEMINI_MODEL",
+  "GEMINI_FAST_MODEL", "GEMINI_CODING_MODEL", "GEMINI_REASONING_MODEL", "GEMINI_VISION_MODEL",
+  "SOFIA_FAST_COST", "SOFIA_FAST_LATENCY", "SOFIA_FAST_QUALITY",
 ];
 
 const original = new Map(names.map((name) => [name, process.env[name]]));
-
-function clear() {
-  for (const name of names) delete process.env[name];
-}
-
+function clear() { for (const name of names) delete process.env[name]; }
 afterEach(() => {
   clear();
-  for (const [name, value] of original) {
-    if (value !== undefined) process.env[name] = value;
-  }
+  for (const [name, value] of original) if (value !== undefined) process.env[name] = value;
 });
 
-test("Gemini key selects direct Google Gemini API by default", () => {
+test("generic OpenAI-compatible endpoint uses BASE_URL, KEY, and MODEL", () => {
   clear();
-  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
+  process.env.SOFIA_MODEL_BASE_URL = "https://api.example.test/v1";
+  process.env.SOFIA_MODEL_API_KEY = "test-key";
+  process.env.SOFIA_MODEL_NAME = "example-model";
+  process.env.SOFIA_CODING_MODEL = "coding-model";
   const config = loadModelConfigFromEnv();
   assert.equal(config.routes.length, 4);
   for (const route of config.routes) {
-    const provider = config.providers[route.id];
-    assert.equal(provider?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai/");
-    assert.equal(provider?.apiKey, "gemini-test-key");
-    assert.equal(provider?.model, "gemini-2.5-flash");
+    assert.equal(config.providers[route.id]?.baseUrl, "https://api.example.test/v1");
+    assert.equal(config.providers[route.id]?.apiKey, "test-key");
   }
+  assert.equal(config.providers.fast?.model, "example-model");
+  assert.equal(config.providers.coding?.model, "coding-model");
 });
 
-test("existing Gemini_API_Key deployment secret remains supported", () => {
+test("Gemini remains an explicit provider option and supports the legacy key name", () => {
   clear();
-  process.env.Gemini_API_Key = "gemini-existing-test-key";
-  process.env.GEMINI_MODEL = "gemini-custom-model";
+  process.env.SOFIA_MODEL_PROVIDER = "gemini";
+  process.env.Gemini_API_Key = "gemini-test-key";
   const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.fast?.apiKey, "gemini-existing-test-key");
-  assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai/");
-  assert.equal(config.providers.fast?.model, "gemini-custom-model");
-});
-
-test("Gemini route-specific model overrides the shared Gemini model", () => {
-  clear();
-  process.env.GEMINI_API_KEY = "gemini-test-key";
-  process.env.GEMINI_MODEL = "gemini-shared-model";
-  process.env.GEMINI_CODING_MODEL = "gemini-coding-model";
-  const config = loadModelConfigFromEnv();
-  assert.equal(config.providers.fast?.model, "gemini-shared-model");
-  assert.equal(config.providers.coding?.model, "gemini-coding-model");
-  assert.equal(config.providers.reasoning?.model, "gemini-shared-model");
-});
-
-test("OpenRouter and legacy gateway credentials cannot override Gemini", () => {
-  clear();
-  process.env.GEMINI_API_KEY = "gemini-test-key";
-  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
-  process.env.OPENROUTER_MODEL = "openai-test-model";
-  process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
-  process.env.SOFIA_FAST_MODEL = "legacy-fast-model";
-  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
   assert.equal(config.providers.fast?.apiKey, "gemini-test-key");
-  assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai/");
   assert.equal(config.providers.fast?.model, "gemini-2.5-flash");
 });
 
-test("fails closed when no Gemini API key is configured", () => {
+test("Gemini route model override takes precedence over the shared model", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "gemini";
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.SOFIA_MODEL_NAME = "shared-model";
+  process.env.SOFIA_CODING_MODEL = "coding-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.model, "shared-model");
+  assert.equal(config.providers.coding?.model, "coding-model");
+});
+
+test("OpenRouter legacy configuration remains supported without provider fallback", () => {
   clear();
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
-  process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
-  assert.throws(loadModelConfigFromEnv, /GEMINI_API_KEY/);
+  process.env.OPENROUTER_MODEL = "openrouter/auto";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(config.providers.fast?.apiKey, "openrouter-test-key");
+  assert.equal(config.providers.fast?.model, "openrouter/auto");
+});
+
+test("named OpenAI-compatible provider presets work without custom endpoints", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai";
+  process.env.OPENAI_API_KEY = "openai-test-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.openai.com/v1");
+  assert.equal(config.providers.fast?.apiKey, "openai-test-key");
+  assert.equal(config.providers.fast?.model, "gpt-4.1-mini");
+});
+
+test("Ollama can be configured without an API key", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "ollama";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "http://127.0.0.1:11434/v1");
+  assert.equal(config.providers.fast?.model, "llama3.2");
+  assert.equal(config.providers.fast?.apiKey, "");
+});
+
+test("named providers reject unrelated base URLs to prevent credential forwarding", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai";
+  process.env.OPENAI_API_KEY = "openai-test-key";
+  process.env.SOFIA_MODEL_BASE_URL = "https://attacker.example/v1";
+  assert.throws(loadModelConfigFromEnv, /must use https:\/\/api.openai.com/);
+});
+
+test("custom gateways require the explicit openai-compatible provider", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
+  process.env.SOFIA_MODEL_BASE_URL = "https://gateway.example/v1";
+  process.env.SOFIA_MODEL_API_KEY = "gateway-test-key";
+  process.env.SOFIA_MODEL_NAME = "gateway-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://gateway.example/v1");
+});
+
+
+test("all named provider presets resolve to their configured API origins", () => {
+  const cases = [
+    ["gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY"],
+    ["openai", "https://api.openai.com/v1", "OPENAI_API_KEY"],
+    ["openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"],
+    ["xai", "https://api.x.ai/v1", "XAI_API_KEY"],
+    ["mistral", "https://api.mistral.ai/v1", "MISTRAL_API_KEY"],
+    ["groq", "https://api.groq.com/openai/v1", "GROQ_API_KEY"],
+    ["deepseek", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"],
+    ["together", "https://api.together.xyz/v1", "TOGETHER_API_KEY"],
+    ["fireworks", "https://api.fireworks.ai/inference/v1", "FIREWORKS_API_KEY"],
+    ["cerebras", "https://api.cerebras.ai/v1", "CEREBRAS_API_KEY"],
+    ["perplexity", "https://api.perplexity.ai", "PERPLEXITY_API_KEY"],
+  ] as const;
+  for (const [provider, expectedOrigin, keyName] of cases) {
+    clear();
+    process.env.SOFIA_MODEL_PROVIDER = provider;
+    process.env[keyName] = "provider-test-key";
+    process.env.SOFIA_MODEL_NAME = "provider-test-model";
+    const config = loadModelConfigFromEnv();
+    assert.equal(config.providers.fast?.baseUrl, expectedOrigin, `${provider} API origin`);
+    assert.equal(config.providers.fast?.apiKey, "provider-test-key", `${provider} API key`);
+    assert.equal(config.providers.fast?.model, "provider-test-model", `${provider} model`);
+  }
+});
+
+test("unknown provider is rejected", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "unknown";
+  assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_PROVIDER/);
+});
+
+test("missing required credentials fail with actionable configuration errors", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
+  process.env.SOFIA_MODEL_BASE_URL = "https://api.example.test/v1";
+  process.env.SOFIA_MODEL_NAME = "model";
+  assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_API_KEY/);
 });

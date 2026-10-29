@@ -1,6 +1,6 @@
 import type { RiskLevel } from "./guard.js";
 
-export type ToolEffect = "read" | "write" | "shell" | "network" | "destructive" | "browser";
+export type ToolEffect = "read" | "write" | "shell" | "network" | "destructive" | "browser" | "memory";
 export interface ToolPermission { allow?: boolean; requireApproval?: boolean; maxRisk?: RiskLevel; }
 export interface ExecutionPolicy {
   allowTools:boolean; allowNetwork:boolean; allowShell:boolean; allowFileWrite:boolean; allowBrowser:boolean;
@@ -49,6 +49,7 @@ export { riskRank };
 
 /** Shared effect classification for both Brain and legacy execution paths. */
 export function classifyToolEffects(name: string): ToolEffect[] {
+  if (name.startsWith("memory.")) return ["memory"];
   if (name.startsWith("browser.")) return ["browser", "network"];
   if (name === "desktop.system.discover" || name === "desktop.workspace.list_files" ||
       name === "desktop.workspace.read_file" || name === "desktop.screen.capture") return ["read"];

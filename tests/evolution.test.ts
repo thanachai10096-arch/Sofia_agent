@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EvolutionEngine } from "../src/brain/evolution.js";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -192,4 +192,21 @@ test("evolution treats prototype property names as ordinary skill and task IDs",
   assert.equal(engine.getSkill("constructor")?.failures, 1);
   assert.equal(engine.getSnapshot().taskTypes["__proto__"]?.successes, 1);
   assert.equal((Object.prototype as { attempts?: number }).attempts, before);
+});
+
+
+test("per-user evolution snapshots are stored with private POSIX permissions", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sofia-evolution-private-"));
+  const file = join(directory, "users", "hashed-principal", "evolution.json");
+  try {
+    const engine = new EvolutionEngine(file);
+    engine.recordFailure("private-skill", "failure with no secrets", "coding");
+    await engine.flush();
+    if (process.platform !== "win32") {
+      assert.equal((await stat(join(directory, "users", "hashed-principal"))).mode & 0o777, 0o700);
+      assert.equal((await stat(file)).mode & 0o777, 0o600);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

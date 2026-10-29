@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { UserModelProfileStore } from "./profile-store.js";
 import type {
   ChatMessage,
   ModelProvider,
@@ -106,6 +108,7 @@ export class SofiaModelGateway implements ModelProvider {
 
   constructor(
     private readonly providers: Record<string, GatewayProviderConfig>,
+    private readonly profileStore?: UserModelProfileStore,
   ) {
     for (const [id, config] of Object.entries(providers)) {
       const limit = config.maxConcurrent ?? 8;
@@ -120,12 +123,22 @@ export class SofiaModelGateway implements ModelProvider {
     }
   }
 
+  forPrincipal(principalId?: string): ModelProvider {
+    return {
+      generate: (request, route, options) => this.generate({ ...request, ...(principalId ? { principalId } : {}) }, route, options),
+    };
+  }
+
   async generate(
     request: ModelRequest,
     route: ModelRoute,
     options: { signal?: AbortSignal; maxOutputTokens?: number } = {},
   ): Promise<ModelResponse> {
-    const config = this.providers[route.providerId ?? route.id];
+    const sharedConfig = this.providers[route.providerId ?? route.id];
+    const profile = request.principalId ? await this.profileStore?.get(request.principalId) : undefined;
+    const config: GatewayProviderConfig | undefined = profile
+      ? { baseUrl: profile.baseUrl, apiKey: profile.apiKey, model: profile.model, maxConcurrent: 2, requestTimeoutMs: sharedConfig?.requestTimeoutMs }
+      : sharedConfig;
     if (!config) {
       throw new Error(`No provider configuration for route ${route.id}`);
     }
@@ -183,18 +196,24 @@ export class SofiaModelGateway implements ModelProvider {
         : {}),
     };
 
-    const providerId = route.providerId ?? route.id;
+    const providerId = profile && request.principalId
+      ? "profile:" + createHash("sha256").update(request.principalId).digest("hex")
+      : route.providerId ?? route.id;
     const timeoutMs = config.requestTimeoutMs ?? 45_000;
     const requestSignal = options.signal
       ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)])
       : AbortSignal.timeout(timeoutMs);
-    const gate = this.gates.get(providerId);
+    let gate = this.gates.get(providerId);
+    if (!gate) {
+      gate = new ConcurrencyGate(config.maxConcurrent ?? 2);
+      this.gates.set(providerId, gate);
+    }
     const circuit = this.circuits.get(providerId) ?? { failures: 0, openedAt: 0, probeInFlight: false };
     this.circuits.set(providerId, circuit);
 
     if (circuit.openedAt) {
       if (Date.now() - circuit.openedAt < 15_000) {
-        route.healthy = false;
+        if (!profile) route.healthy = false;
         throw new Error(`Model provider ${providerId} temporarily unavailable.`);
       }
       if (circuit.probeInFlight) throw new Error(`Model provider ${providerId} recovery probe already in progress.`);
@@ -217,6 +236,7 @@ export class SofiaModelGateway implements ModelProvider {
                 "content-type": "application/json",
               },
               body: JSON.stringify(body),
+              redirect: "error",
               signal: requestSignal,
             },
           );
@@ -227,7 +247,8 @@ export class SofiaModelGateway implements ModelProvider {
           const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
           retryableFailure = retryable;
           const detail = await response.text();
-          lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
+          // A user-supplied provider may echo sensitive request details; never return its raw error body.
+          lastError = new Error(profile ? `Model gateway request failed (${response.status}).` : `Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
           if (!retryable || attempt === maxAttempts || options.signal?.aborted) throw lastError;
           const retryAfter = Number(response.headers.get("retry-after") ?? "");
           const delay = Number.isFinite(retryAfter) && retryAfter > 0
@@ -256,7 +277,7 @@ export class SofiaModelGateway implements ModelProvider {
         circuit.failures++;
         if (circuit.failures >= 3 || circuit.openedAt) {
           circuit.openedAt = Date.now();
-          route.healthy = false;
+          if (!profile) route.healthy = false;
         }
       }
       throw error;
@@ -264,18 +285,18 @@ export class SofiaModelGateway implements ModelProvider {
 
     if (!response.ok) {
       const detail = await response.text();
-      throw new Error(
-        `Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`,
-      );
+      throw new Error(profile
+        ? `Model gateway request failed (${response.status}).`
+        : `Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
     }
 
     const failResponse = (message: string): never => {
       circuit.probeInFlight = false;
-      route.healthy = false;
+      if (!profile) route.healthy = false;
       circuit.failures++;
       if (circuit.failures >= 3 || circuit.openedAt) {
         circuit.openedAt = Date.now();
-        route.healthy = false;
+        if (!profile) route.healthy = false;
       }
       throw new Error(message);
     };
@@ -337,7 +358,7 @@ export class SofiaModelGateway implements ModelProvider {
     circuit.failures = 0;
     circuit.openedAt = 0;
     circuit.probeInFlight = false;
-    route.healthy = true;
+    if (!profile) route.healthy = true;
 
     const inputTokens = data.usage?.prompt_tokens;
     const outputTokens = data.usage?.completion_tokens;

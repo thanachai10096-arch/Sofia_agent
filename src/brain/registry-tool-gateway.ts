@@ -93,7 +93,7 @@ export class RegistryToolGateway implements ToolGateway {
       const boundSignal=this.security.bindSignal(context.signal);
       let data:unknown;
       try {
-        data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
+        data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal,...(context.principalId?{principalId:context.principalId}:{}),...(context.notificationTarget?{notificationTarget:context.notificationTarget}:{})});
       } finally {
         boundSignal.dispose();
       }

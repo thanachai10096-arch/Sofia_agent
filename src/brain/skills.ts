@@ -1,6 +1,8 @@
 import type { FailureCategory, Strategy } from "./types.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 
+export type SkillVerification = "typecheck" | "test" | "build" | `acceptance:${string}`;
+
 export interface SofiaSkill {
   id: string;
   name: string;
@@ -9,7 +11,7 @@ export interface SofiaSkill {
   categories: readonly FailureCategory[];
   strategy: Strategy;
   procedure: readonly string[];
-  verification: readonly ("typecheck" | "test" | "build")[];
+  verification: readonly SkillVerification[];
 }
 
 const BUILTIN_SKILLS: readonly SofiaSkill[] = [
@@ -49,14 +51,15 @@ function learnedToSkill(skill: LearnedSkillCandidate): SofiaSkill {
   return {
     id: `learned:${skill.name}:${skill.category}`,
     name: skill.name,
-    description: "Learned from a previously verified repair.",
-    triggers: [skill.trigger],
+    description: "Learned from a previously verified workflow or repair.",
+    triggers: [...new Set([skill.trigger, ...(skill.triggers ?? [])])].slice(0, 12),
     categories: [skill.category],
     strategy: skill.strategy,
     procedure: skill.procedure,
     verification: skill.verification.filter(
-      (item): item is "typecheck" | "test" | "build" =>
-        item === "typecheck" || item === "test" || item === "build",
+      (item): item is SkillVerification =>
+        item === "typecheck" || item === "test" || item === "build" ||
+        (item.startsWith("acceptance:") && /^[A-Za-z0-9._:-]{1,160}$/.test(item.slice("acceptance:".length))),
     ),
   };
 }
@@ -76,8 +79,8 @@ export function matchSkills(
     .map((skill) => ({
       skill,
       score:
-        (skill.categories.includes(category) ? 100 : 0) +
-        skill.triggers.filter((trigger) => lower.includes(trigger.toLowerCase())).length * 10,
+        (skill.categories.includes(category) ? 20 : 0) +
+        skill.triggers.filter((trigger) => lower.includes(trigger.toLowerCase())).length * 15,
     }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.skill.id.localeCompare(b.skill.id))

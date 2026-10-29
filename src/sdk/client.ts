@@ -15,7 +15,58 @@ export interface SofiaRunInput {
   acceptanceCriteria?: Array<{ id: string; description: string; probe: { tool: string; input: Record<string, unknown> } }>;
 }
 
+export type SofiaModelProvider = "openai-compatible" | "gemini" | "openrouter";
+export interface SofiaModelProfileInput {
+  provider: SofiaModelProvider;
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+}
+export interface SofiaModelProfileMetadata {
+  provider: SofiaModelProvider;
+  model: string;
+  baseUrl: string;
+  updatedAt: string;
+}
+
+export type SofiaContinuousWorkStatus = "active" | "paused" | "stopped" | "completed" | "failed";
+
+export interface SofiaContinuousWorkRecord {
+  id: string;
+  ownerKeyId: string;
+  task: string;
+  status: SofiaContinuousWorkStatus;
+  iteration: number;
+  maxIterationsPerActivation: number;
+  maxLifetimeIterations?: number;
+  currentJobId?: string;
+  lastSummary?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type SofiaRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+/** Per-API-key counters for the current 24-hour accounting window. */
+export interface SofiaUsageSnapshot {
+  keyId: string;
+  runs: number;
+  toolCalls: number;
+  startedAt: number;
+  /** Completed Brain runs with structured usage reports; excludes legacy runs. */
+  brainRuns?: number;
+  /** Model calls reported by completed Brain runs. */
+  brainModelCalls?: number;
+  /** Reserved-or-used token estimate reported by Brain; not provider-billed usage. */
+  brainReservedOrUsedTokens?: number;
+  /** Provider-reported input tokens; absent if the provider did not supply usage. */
+  providerInputTokens?: number;
+  /** Provider-reported output tokens; absent if the provider did not supply usage. */
+  providerOutputTokens?: number;
+  /** Number of model calls contributing provider-reported token counts. */
+  providerUsageCalls?: number;
+}
 
 export interface SofiaRunResponse {
   id: string;
@@ -144,7 +195,7 @@ export class SofiaClient {
   }
 
   /** Starts a durable async run so a mobile client can reconnect and poll by ID. */
-  async start(input: SofiaRunInput, signal?: AbortSignal, options: { idempotencyKey?: string } = {}): Promise<SofiaRunResponse> {
+  async start(input: SofiaRunInput, signal?: AbortSignal, options: { idempotencyKey?: string; messagingContext?: import("../integrations/chat-adapter.js").SignedMessagingContext } = {}): Promise<SofiaRunResponse> {
     const headers: Record<string, string> = this.headers();
     if (options.idempotencyKey) {
       if (options.idempotencyKey.length > 128 || /[\x00-\x1f\x7f]/.test(options.idempotencyKey)) {
@@ -153,7 +204,90 @@ export class SofiaClient {
       headers["idempotency-key"] = options.idempotencyKey;
     }
     return this.request<SofiaRunResponse>("/v1/agent/runs", {
-      method: "POST", headers, body: JSON.stringify({ ...input, async: true }),
+      method: "POST", headers, body: JSON.stringify({ ...input, async: true, ...(options.messagingContext ? { _messagingContext: options.messagingContext } : {}) }),
+    }, signal);
+  }
+
+  /** Read this API key's model profile. Provider credentials are never returned. */
+  /** Read this API key's current usage counters; no provider credentials or raw key are returned. */
+  async getUsage(signal?: AbortSignal): Promise<SofiaUsageSnapshot> {
+    return this.request<SofiaUsageSnapshot>("/v1/usage", { headers: this.headers() }, signal);
+  }
+
+  async getModelProfile(signal?: AbortSignal): Promise<{ profile: SofiaModelProfileMetadata | null }> {
+    return this.request("/v1/model-profile", {
+      headers: this.headers(),
+    }, signal);
+  }
+
+  /** Set this API key's encrypted provider/model profile. The response contains metadata only. */
+  async setModelProfile(input: SofiaModelProfileInput, signal?: AbortSignal): Promise<{ profile: SofiaModelProfileMetadata }> {
+    return this.request("/v1/model-profile", {
+      method: "PUT", headers: this.headers(), body: JSON.stringify(input),
+    }, signal);
+  }
+
+  async deleteModelProfile(signal?: AbortSignal): Promise<{ deleted: boolean }> {
+    return this.request("/v1/model-profile", {
+      method: "DELETE", headers: this.headers(),
+    }, signal);
+  }
+
+  /** Execute a chat action bound to a signed platform/user identity; intended for trusted server-side bridges only. */
+  async continuousWorkChatAction(input: {
+    signedTask: string;
+    messagingContext: {
+      platform: "telegram" | "discord" | "slack" | "line" | "whatsapp" | "matrix";
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      taskHash: string;
+      signature: string;
+    };
+  }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("/v1/continuous-work/chat", {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ signedTask: input.signedTask, _messagingContext: input.messagingContext }),
+    }, signal);
+  }
+
+  /** Create a paused, owner-scoped objective that can be resumed in bounded work slices. */
+  async createContinuousWork(task: string, signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord }> {
+    return this.request("/v1/continuous-work", {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ task }),
+    }, signal);
+  }
+
+  async listContinuousWork(signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord[] }> {
+    return this.request("/v1/continuous-work", { headers: this.headers() }, signal);
+  }
+
+  async getContinuousWork(id: string, signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord }> {
+    return this.request(`/v1/continuous-work/${encodeURIComponent(id)}`, { headers: this.headers() }, signal);
+  }
+
+  /** Run one bounded activation; poll getContinuousWork for progress and resume later if paused. */
+  async resumeContinuousWork(id: string, signal?: AbortSignal): Promise<{ accepted: boolean; workId: string; status: string }> {
+    return this.request(`/v1/continuous-work/${encodeURIComponent(id)}/resume`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  /** Keep resuming bounded activations server-side until completed, failed, paused, or stopped. */
+  async continueContinuousWork(id: string, signal?: AbortSignal): Promise<{ accepted: boolean; workId: string; mode: "continuous" }> {
+    return this.request(`/v1/continuous-work/${encodeURIComponent(id)}/continue`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  async pauseContinuousWork(id: string, signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord }> {
+    return this.request(`/v1/continuous-work/${encodeURIComponent(id)}/pause`, {
+      method: "POST", headers: this.headers(),
+    }, signal);
+  }
+
+  async stopContinuousWork(id: string, signal?: AbortSignal): Promise<{ work: SofiaContinuousWorkRecord }> {
+    return this.request(`/v1/continuous-work/${encodeURIComponent(id)}/stop`, {
+      method: "POST", headers: this.headers(),
     }, signal);
   }
 

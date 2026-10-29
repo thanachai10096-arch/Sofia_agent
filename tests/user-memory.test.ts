@@ -87,3 +87,25 @@ test("concurrent memory writes across store instances do not lose entries", asyn
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("user memory search ranks phrase and multi-term matches above weak partial matches", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-ranking-"));
+  try {
+    const store = new FileUserMemoryStore(root);
+    const weak = createUserMemoryEntry("fact", "Uses TypeScript in a small utility");
+    const phrase = createUserMemoryEntry("preference", "Prefers TypeScript for core agent logic");
+    const multi = createUserMemoryEntry("goal", "Build a TypeScript agent platform with persistent memory");
+    await store.save("user", weak);
+    await store.save("user", multi);
+    await store.save("user", phrase);
+
+    const ranked = await store.find("user", "TypeScript core agent", 3);
+    assert.equal(ranked[0]?.id, phrase.id);
+    assert.equal(ranked[1]?.id, multi.id);
+    assert.equal(ranked[2]?.id, weak.id);
+    assert.deepEqual(await store.find("another-user", "TypeScript core agent"), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

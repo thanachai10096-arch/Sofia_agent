@@ -35,6 +35,22 @@ test("creating a schedule cannot assign it to another owner", async () => {
   assert.equal(state.schedules.length, 0);
 });
 
+test("creating a schedule rejects a notification target owned by a different messaging identity", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const runtime = { async submit() { throw new Error("unused"); } } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store });
+  await assert.rejects(() => scheduler.create({
+    name: "spoofed target",
+    task: "task",
+    runAt: "2026-10-18T00:00:00.000Z",
+    timeZone: "UTC",
+    ownerKeyId: "telegram:alice",
+    notificationTarget: { platform: "telegram", userId: "bob", conversationId: "chat-bob" },
+  }, "telegram:alice"), /notification target must match/i);
+  assert.equal(state.schedules.length, 0);
+});
+
 test("schedule quota is enforced atomically per owner", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
@@ -79,6 +95,88 @@ test("two scheduler instances cannot claim the same occurrence through a transac
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(submitted, 1);
 });
+test("completed scheduled jobs deliver to their trusted target and retry until accepted", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const job = { id: "job-delivery", status: "completed", task: "scheduled task", result: { summary: "Scheduled result" } } as unknown as JobRecord;
+  const runtime = {
+    async submit() { return job; },
+    async get() { return job; },
+    async cancel() { return true; },
+    async list() { return [job]; },
+    async resume() { return job; },
+  } as unknown as JobRuntime;
+  let attempts = 0;
+  let now = new Date("2026-10-28T13:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, {
+    store,
+    now: () => now,
+    onExecutionFinished: async (schedule, execution, deliveredJob) => {
+      attempts++;
+      assert.equal(schedule.notificationTarget?.conversationId, "channel-1");
+      assert.equal(execution.status, "completed");
+      assert.equal(deliveredJob?.id, job.id);
+      return attempts > 1;
+    },
+  });
+  await scheduler.create({
+    name: "deliver result", task: "scheduled task", runAt: "2026-10-28T12:00:00.000Z",
+    timeZone: "UTC", ownerKeyId: "discord:user-1", misfirePolicy: "run-once",
+    notificationTarget: { platform: "discord", userId: "user-1", conversationId: "channel-1" },
+  }, "discord:user-1");
+  await scheduler.tick();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(attempts, 1);
+  now = new Date(now.getTime() + 60_000);
+  await scheduler.tick();
+  assert.equal(attempts, 2);
+  assert.equal(state.history[0].notificationDelivered, true);
+});
+
+test("pending cron notification delivery survives scheduler restart", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const job = { id: "restart-delivery-job", status: "completed", task: "scheduled task", result: { summary: "Scheduled result" } } as unknown as JobRecord;
+  const runtime = {
+    async submit() { return job; },
+    async get() { return job; },
+    async cancel() { return true; },
+    async list() { return [job]; },
+    async resume() { return job; },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-28T13:00:00.000Z");
+  let firstAttempts = 0;
+  const firstScheduler = new CronScheduler(runtime, {
+    store,
+    now: () => now,
+    onExecutionFinished: async () => { firstAttempts++; return false; },
+  });
+  await firstScheduler.create({
+    name: "restart delivery", task: "scheduled task", runAt: "2026-10-28T12:00:00.000Z",
+    timeZone: "UTC", ownerKeyId: "telegram:user-1", misfirePolicy: "run-once",
+    notificationTarget: { platform: "telegram", userId: "user-1", conversationId: "chat-1" },
+  }, "telegram:user-1");
+  await firstScheduler.tick();
+  for (let i = 0; i < 30 && (state.history[0]?.notificationAttempts ?? 0) < 1; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(firstAttempts, 1);
+  assert.equal(state.history[0]?.notificationDelivered, undefined);
+  assert.equal(state.history[0]?.notificationAttempts, 1);
+
+  now = new Date(now.getTime() + 3_000);
+  let restartedAttempts = 0;
+  const restartedScheduler = new CronScheduler(runtime, {
+    store,
+    now: () => now,
+    onExecutionFinished: async () => { restartedAttempts++; return true; },
+  });
+  await restartedScheduler.tick();
+  assert.equal(restartedAttempts, 1);
+  assert.equal(state.history[0]?.notificationDelivered, true);
+  assert.equal(state.history[0]?.notificationNextAttemptAt, undefined);
+});
+
 test("authorization prevents another owner from disabling a schedule", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
@@ -187,10 +285,16 @@ test("recovery reconciles persisted jobs and suppresses indeterminate resubmissi
     async cancel() { return true; }, async list() { return []; }, async resume() { throw new Error("unused"); },
   } as unknown as JobRuntime;
   const now = new Date("2026-10-17T00:00:00.000Z");
-  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const deliveredStatuses: string[] = [];
+  const scheduler = new CronScheduler(runtime, {
+    store, now: () => now,
+    onExecutionFinished: async (_schedule, execution) => { deliveredStatuses.push(execution.status); return true; },
+  });
   const schedule = await scheduler.create({
-    name: "recover", task: "recovery task", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice",
-  }, "alice");
+    name: "recover", task: "recovery task", cron: "* * * * *", timeZone: "UTC",
+    ownerKeyId: "telegram:user-1",
+    notificationTarget: { platform: "telegram", userId: "user-1", conversationId: "chat-1" },
+  }, "telegram:user-1");
   state.history.push(
     { id: "lost-claim", scheduleId: schedule.id, scheduledFor: "2026-10-16T23:58:00.000Z",
       startedAt: "2026-10-16T23:58:00.000Z", status: "claimed", attempt: 0 },
@@ -203,6 +307,9 @@ test("recovery reconciles persisted jobs and suppresses indeterminate resubmissi
   assert.equal(state.history.find((item: any) => item.id === "lost-claim").status, "failed");
   assert.match(state.history.find((item: any) => item.id === "lost-claim").error, /indeterminate/i);
   assert.equal(state.history.find((item: any) => item.id === "known-job").status, "completed");
+  assert.deepEqual(deliveredStatuses.sort(), ["completed", "failed"]);
+  assert.equal(state.history.find((item: any) => item.id === "lost-claim").notificationDelivered, true);
+  assert.equal(state.history.find((item: any) => item.id === "known-job").notificationDelivered, true);
 });
 
 

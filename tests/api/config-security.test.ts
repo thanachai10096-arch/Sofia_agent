@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
@@ -46,6 +46,9 @@ test("UsageLimiter returns defensive copies so callers cannot mutate quota count
     runs: 1,
     toolCalls: 2,
     startedAt: limiter.get("key").startedAt,
+    brainRuns: 0,
+    brainModelCalls: 0,
+    brainReservedOrUsedTokens: 0,
   });
   assert.throws(() => limiter.consume("key"), /API usage quota exceeded/);
 });
@@ -67,6 +70,9 @@ test("UsageLimiter counts tool-call attempts without incrementing run count", ()
     runs: 1,
     toolCalls: 1,
     startedAt: limiter.get("key").startedAt,
+    brainRuns: 0,
+    brainModelCalls: 0,
+    brainReservedOrUsedTokens: 0,
   });
   limiter.consumeToolCall("key");
   assert.throws(() => limiter.consumeToolCall("key"), /API usage quota exceeded/);
@@ -83,6 +89,32 @@ test("UsageLimiter persists counters across instances and enforces the shared qu
     const second = new UsageLimiter(10, 1, storePath);
     assert.equal(second.get("key").toolCalls, 1);
     assert.throws(() => second.consumeToolCall("key"), /API usage quota exceeded/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("UsageLimiter normalizes persisted records written before Brain usage counters existed", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-usage-legacy-"));
+  const storePath = path.join(directory, "usage.json");
+  try {
+    writeFileSync(storePath, JSON.stringify([{
+      keyId: "legacy-key",
+      runs: 3,
+      toolCalls: 4,
+      startedAt: Date.now(),
+    }]), { mode: 0o600 });
+    const limiter = new UsageLimiter(10, 10, storePath);
+    assert.deepEqual(limiter.get("legacy-key"), {
+      keyId: "legacy-key",
+      runs: 3,
+      toolCalls: 4,
+      startedAt: limiter.get("legacy-key").startedAt,
+      brainRuns: 0,
+      brainModelCalls: 0,
+      brainReservedOrUsedTokens: 0,
+    });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

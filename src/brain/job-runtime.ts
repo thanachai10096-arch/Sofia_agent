@@ -51,6 +51,41 @@ async function renameStateFile(source: string, destination: string): Promise<voi
 
 function isJobCancelled(record: JobRecord): boolean { return record.status === "cancelled"; }
 
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error("Job execution aborted.");
+}
+
+/** Stop waiting for a worker that ignores AbortSignal so leases and heartbeats are released. */
+function awaitWithAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      },
+    );
+    if (signal.aborted) onAbort();
+  });
+}
+
 function redactJobRecord(record: JobRecord): JobRecord {
   return {
     ...record,
@@ -93,7 +128,11 @@ async function isExclusiveFileCollision(error: unknown, file: string): Promise<b
     await fs.stat(file);
     return true;
   } catch (statError) {
-    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return false;
+    // The competing process may have released and removed the lock between
+    // open("wx") failing and this stat. Treat that as transient contention:
+    // the caller will re-read the lock and retry, rather than surfacing a
+    // spurious EPERM on Windows or mistaking it for a real permission failure.
+    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return true;
     throw statError;
   }
 }
@@ -562,14 +601,27 @@ export class DurableJobRuntime implements JobRuntime {
     // Register cancellation before the first await so cancel() cannot miss startup.
     const controller = new AbortController();
     this.controllers.set(record.id, controller);
+    let heartbeatInFlight: Promise<void> = Promise.resolve();
+    let heartbeatStopped = false;
     const heartbeat = setInterval(() => {
-      void this.state.heartbeat(record.id, leaseToken, leaseMs).then((ok) => {
+      if (heartbeatStopped) return;
+      heartbeatInFlight = this.state.heartbeat(record.id, leaseToken, leaseMs).then((ok) => {
         if (!ok) controller.abort(new Error("Job execution lease was lost"));
       }).catch(() => {
         // A transient store error is not proof of lease loss; a later heartbeat retries.
       });
     }, Math.floor(leaseMs / 3));
     heartbeat.unref?.();
+    const stopHeartbeat = async (): Promise<void> => {
+      if (!heartbeatStopped) {
+        heartbeatStopped = true;
+        clearInterval(heartbeat);
+      }
+      // Do not publish a terminal job state while a heartbeat still owns an
+      // in-flight file-lock operation. Readers may otherwise observe completion,
+      // clean up temporary state, and race that final heartbeat.
+      await heartbeatInFlight;
+    };
     let onExternalAbort: (() => void) | undefined;
     if (externalSignal) {
       onExternalAbort = () => controller.abort(externalSignal.reason);
@@ -612,12 +664,15 @@ export class DurableJobRuntime implements JobRuntime {
       }
 
       const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot });
-      const result = await brain.run({
-        ...input,
-        ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
-        signal: controller.signal,
-        resume,
-      });
+      const result = await awaitWithAbort(
+        Promise.resolve().then(() => brain.run({
+          ...input,
+          ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
+          signal: controller.signal,
+          resume,
+        })),
+        controller.signal,
+      );
       const resultState: string = result.state;
       if (controller.signal.aborted || resultState === "cancelled" || isJobCancelled(record)) {
         // Cancellation is terminal: discard any result that arrives after abort.
@@ -629,6 +684,7 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = result.completed ? "completed" : "failed";
       }
       record.updatedAt = new Date().toISOString();
+      await stopHeartbeat();
       await this.state.save(record);
     } catch (error) {
       if (record.status !== "cancelled") {
@@ -636,9 +692,10 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = controller.signal.aborted ? "cancelled" : "failed";
         record.updatedAt = new Date().toISOString();
       }
+      await stopHeartbeat();
       await this.state.save(record);
     } finally {
-      clearInterval(heartbeat);
+      await stopHeartbeat();
       if (externalSignal && onExternalAbort) {
         externalSignal.removeEventListener("abort", onExternalAbort);
       }

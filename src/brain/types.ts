@@ -68,9 +68,16 @@ export interface ToolResult {
   error?: { category: FailureCategory; message: string };
 }
 
+export interface NotificationTarget {
+  platform: "telegram" | "discord" | "slack" | "line" | "whatsapp" | "matrix";
+  userId: string;
+  conversationId: string;
+}
+
 export interface ToolExecutionContext {
   runId: string;
   principalId?: string | undefined;
+  notificationTarget?: NotificationTarget;
   signal: AbortSignal;
   requireApproval: boolean;
   notifyApproval(waiting: boolean): void;
@@ -88,9 +95,9 @@ export interface WorkspaceSnapshot {
 }
 
 export interface ToolGateway {
-  listTools?(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[] }>;
+  listTools?(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive" | "memory")[] }>;
   describe(name: string): {
-    effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[];
+    effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive" | "memory")[];
   } | undefined;
   execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolResult>;
   snapshot(signal: AbortSignal): Promise<WorkspaceSnapshot>;
@@ -101,10 +108,12 @@ export interface ToolGateway {
 
 export interface PreparedInference {
   inputTokens: number;
+  /** True only when invoke() returns token counts supplied by the model provider. */
+  providerReportedUsage?: boolean;
   invoke(options: {
     signal: AbortSignal;
     maxOutputTokens: number;
-  }): Promise<{ value: unknown; usage: { inputTokens: number; outputTokens: number } }>;
+  }): Promise<{ value: unknown; usage: { inputTokens: number; outputTokens: number; configuredCostNanoUsd?: string } }>;
 }
 
 export interface BrainReasoner {
@@ -172,6 +181,12 @@ export interface CompletionReport {
     toolCalls: number;
     modelCalls: number;
     reservedOrUsedTokens: number;
+    /** Provider-reported totals; omitted when the reasoner cannot prove provenance. */
+    providerInputTokens?: number;
+    providerOutputTokens?: number;
+    providerUsageCalls?: number;
+    /** Sum of configured route-price estimates in nano-USD; not provider-billed cost. */
+    configuredCostNanoUsd?: string;
     replans: number;
   };
 }

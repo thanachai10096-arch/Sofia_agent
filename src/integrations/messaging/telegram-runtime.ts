@@ -11,6 +11,7 @@ import { redactSecrets } from "../../security/guard.js";
 export interface TelegramMessagingRuntime {
   start(): Promise<void>;
   stop(): Promise<void>;
+  send(message: OutboundMessage): Promise<boolean>;
 }
 
 interface TelegramRunResult {
@@ -55,23 +56,51 @@ export async function reportTelegramRunCompletion(input: {
       (output ? "\n\n" + output : "\n\nThe run completed but returned no text output.");
   } else {
     const status = ["failed", "cancelled", "queued", "running"].includes(run.status) ? run.status : "unknown";
-    const safeError = typeof run.error === "string"
-      ? String(redactSecrets(run.error)).replace(/[\r\n\t]+/g, " ").slice(0, 240).trim()
-      : "";
+    // Provider/runtime errors may reveal infrastructure details. Keep them in the
+    // authenticated run history and send only a safe user-facing status to chat.
     text = "Sofia task " + status + ".\nRun ID: " + input.runId +
-      (status === "failed"
-        ? (safeError ? "\nReason: " + safeError : "\nNo safe error detail was returned by the API.")
-        : "");
+      (status === "failed" ? "\nCheck the Sofia run history for details." : "");
   }
 
-  try {
-    const delivered = await input.send({ conversationId: input.conversationId, text });
-    if (!delivered) input.onWarning?.("telegram_completion_delivery_failed");
-  } catch {
-    input.onWarning?.("telegram_completion_delivery_failed");
-  }
+  await sendTelegramText(text, input.send, input.conversationId, input.onWarning);
 }
 
+
+/** Telegram limits text messages to 4096 characters. Keep headroom for provider parsing and avoid splitting UTF-16 surrogate pairs. */
+function splitTelegramText(text: string, maxCharacters = 3_500): string[] {
+  if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 1 || maxCharacters > 4_096) {
+    throw new Error("Invalid Telegram message chunk size.");
+  }
+  const characters = Array.from(text);
+  const chunks: string[] = [];
+  for (let offset = 0; offset < characters.length; offset += maxCharacters) {
+    chunks.push(characters.slice(offset, offset + maxCharacters).join(""));
+  }
+  return chunks.length ? chunks : [""];
+}
+
+async function sendTelegramText(
+  text: string,
+  send: (message: OutboundMessage) => Promise<boolean>,
+  conversationId: string,
+  onWarning?: (event: string) => void,
+): Promise<void> {
+  const chunks = splitTelegramText(text);
+  for (let index = 0; index < chunks.length; index += 1) {
+    const prefix = chunks.length > 1 && index > 0
+      ? "↪️ Sofia result (continued):\n"
+      : "";
+    try {
+      const delivered = await send({
+        conversationId,
+        text: prefix + chunks[index],
+      });
+      if (!delivered) onWarning?.("telegram_completion_delivery_failed");
+    } catch {
+      onWarning?.("telegram_completion_delivery_failed");
+    }
+  }
+}
 
 /** Parse immutable Telegram user IDs; reject empty, malformed, or duplicate entries. */
 export function parseTelegramUserAllowlist(value: string): ReadonlySet<string> {
@@ -98,6 +127,7 @@ export interface TelegramMessagingEnvironment {
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
+  SOFIA_MESSAGING_CONTEXT_SECRET?: string;
   SOFIA_API_KEY?: string;
   SOFIA_API_BASE_URL?: string;
   RAILWAY_PUBLIC_DOMAIN?: string;
@@ -106,7 +136,8 @@ export interface TelegramMessagingEnvironment {
 /**
  * Build the optional Telegram bridge using the existing Sofia API and command
  * dispatcher. Missing/invalid optional configuration disables Telegram without
- * taking the core API offline. Only /run commands can start agent work.
+ * taking the core API offline. Plain-text tasks are enabled; unsupported slash
+ * commands are ignored.
  */
 export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
@@ -134,7 +165,7 @@ export function createTelegramMessagingRuntime(
     const allowedChats = parseTelegramChatAllowlist(rawChats);
     const client = new SofiaClient({ apiKey, baseUrl });
     const accessPolicy = {
-      isAllowed(input: { platform: "telegram" | "discord" | "slack"; senderId: string; conversationId: string }) {
+      isAllowed(input: { platform: "telegram" | "discord" | "slack" | "line" | "whatsapp"; senderId: string; conversationId: string }) {
         return input.platform === "telegram" &&
           allowedUsers.has(input.senderId) &&
           allowedChats.has(input.conversationId);
@@ -143,7 +174,7 @@ export function createTelegramMessagingRuntime(
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
-      client, accessPolicy, deduplicator, commandPrefix: "/run",
+      client, accessPolicy, deduplicator, messagingContextSecret: env.SOFIA_MESSAGING_CONTEXT_SECRET?.trim(), commandPrefix: "/run", allowPlainText: true,
       onAccepted: ({ runId, message }) => {
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
@@ -160,7 +191,9 @@ export function createTelegramMessagingRuntime(
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
       token,
       onError: (event, status) => onWarning(
-        "Telegram transport " + event + (status ? " (HTTP " + status + ")" : "") + ".",
+        event === "poll_conflict"
+          ? "Telegram polling stopped after HTTP 409: another getUpdates poller may be using this bot token. Ensure only one active polling instance uses the token."
+          : "Telegram transport " + event + (status ? " (HTTP " + status + ")" : "") + ".",
       ),
     }));
     gateway = createMessagingGateway({
@@ -179,6 +212,7 @@ export function createTelegramMessagingRuntime(
     return {
       start: () => gateway.start(),
       stop: () => gateway.stop(),
+      send: (message) => gateway.send("telegram", message),
     };
   } catch (error) {
     // Report only the static validation message from our own constructors. Never log

@@ -1,5 +1,6 @@
 import { fenceUntrustedOutput } from "../security/untrusted.js";
-import { randomUUID } from "node:crypto";
+import { redactSecrets } from "../security/guard.js";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   digest,
@@ -104,6 +105,7 @@ export interface BrainRunInput {
   /** Prior conversation/project context; always passed to the model as untrusted reference data. */
   context?: string;
   principalId?: string;
+  notificationTarget?: import("./types.js").NotificationTarget;
   understanding?: unknown;
   plan?: unknown;
   acceptanceCriteria?: AcceptanceCriterion[];
@@ -240,7 +242,7 @@ export class SofiaBrain {
   private readonly limits: BrainLimits;
   private readonly trace = new ExecutionTrace();
 
-  private readonly usage = {
+  private readonly usage: CompletionReport["usage"] = {
     steps: 0,
     toolCalls: 0,
     modelCalls: 0,
@@ -452,6 +454,18 @@ export class SofiaBrain {
       }
 
       this.usage.reservedOrUsedTokens += actual;
+      if (prepared.providerReportedUsage) {
+        this.usage.providerInputTokens = (this.usage.providerInputTokens ?? 0) + result.usage.inputTokens;
+        this.usage.providerOutputTokens = (this.usage.providerOutputTokens ?? 0) + result.usage.outputTokens;
+        this.usage.providerUsageCalls = (this.usage.providerUsageCalls ?? 0) + 1;
+        const configuredCost = result.usage.configuredCostNanoUsd;
+        if (configuredCost !== undefined) {
+          if (!/^(0|[1-9][0-9]*)$/.test(configuredCost)) throw new Stop("Invalid configured model cost");
+          this.usage.configuredCostNanoUsd = (
+            BigInt(this.usage.configuredCostNanoUsd ?? "0") + BigInt(configuredCost)
+          ).toString();
+        }
+      }
 
       if (this.usage.reservedOrUsedTokens > this.limits.maxTokens) {
         throw new Stop("Token budget exhausted");
@@ -578,10 +592,27 @@ export class SofiaBrain {
       );
     }
 
+    const taskType = understanding.requiredCapabilities[0] ?? "general";
+    let skills = matchSkills(
+      "unknown",
+      [input.task, understanding.objective, ...understanding.requiredCapabilities].join("\n").slice(0, 2_000),
+      5,
+      this.dependencies.skillLedger,
+    );
+    if (this.dependencies.evolution) {
+      const ranking = new Map(this.dependencies.evolution.rank(skills.map(skill => skill.id), taskType).map(item => [item.id, item.score]));
+      skills = [...skills].sort((a, b) => (ranking.get(b.id) ?? 0) - (ranking.get(a.id) ?? 0));
+    }
+    if (skills[0]) {
+      this.selectedSkillIds.add(skills[0].id);
+      this.activeSkillId = skills[0].id;
+    }
+
     const value = await this.infer("plan", {
       task: input.task,
       referenceContext: priorReferenceContext(input.context),
       understanding,
+      matchedSkills: compactSkillContext(skills),
       availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
@@ -591,7 +622,7 @@ export class SofiaBrain {
     );
   }
 
-  private async executeStep(step: ExecutionPlan["steps"][number], principalId?: string): Promise<Observation> {
+  private async executeStep(step: ExecutionPlan["steps"][number], principalId?: string, notificationTarget?: import("./types.js").NotificationTarget): Promise<Observation> {
     this.signal.throwIfAborted();
 
     if (this.usage.steps >= this.limits.maxSteps) {
@@ -626,6 +657,7 @@ export class SofiaBrain {
         this.dependencies.tools.execute(step.call, {
           runId: this.runId,
           ...(principalId ? { principalId } : {}),
+          ...(notificationTarget ? { notificationTarget } : {}),
           signal: this.signal,
           requireApproval:
             descriptor.effects.includes("destructive") ||
@@ -824,7 +856,19 @@ export class SofiaBrain {
       changedFilesKnown,
       verification,
       remainingRisks,
-      usage: { ...this.usage },
+      usage: {
+        steps: this.usage.steps,
+        toolCalls: this.usage.toolCalls,
+        modelCalls: this.usage.modelCalls,
+        reservedOrUsedTokens: this.usage.reservedOrUsedTokens,
+        replans: this.usage.replans,
+        ...(this.usage.providerUsageCalls ? {
+          providerInputTokens: this.usage.providerInputTokens ?? 0,
+          providerOutputTokens: this.usage.providerOutputTokens ?? 0,
+          providerUsageCalls: this.usage.providerUsageCalls,
+          ...(this.usage.configuredCostNanoUsd !== undefined ? { configuredCostNanoUsd: this.usage.configuredCostNanoUsd } : {}),
+        } : {}),
+      },
     };
   }
 
@@ -901,6 +945,7 @@ export class SofiaBrain {
         this.usage.toolCalls = resumed.usage.toolCalls;
         this.usage.modelCalls = resumed.usage.modelCalls;
         this.usage.reservedOrUsedTokens = resumed.usage.reservedOrUsedTokens;
+        this.usage.configuredCostNanoUsd = resumed.usage.configuredCostNanoUsd;
         this.usage.replans = resumed.usage.replans;
         this.state = "planning";
         this.emit({ type: "brain.run.resumed" });
@@ -967,7 +1012,7 @@ export class SofiaBrain {
               }
             }
 
-            await this.executeStep(step, input.principalId);
+            await this.executeStep(step, input.principalId, input.notificationTarget);
             done.add(step.id);
             completedStepIds.add(step.id);
             await checkpointState(currentPlan);
@@ -1167,37 +1212,70 @@ export class SofiaBrain {
           ? "Task completed and all acceptance criteria passed."
           : "Task completed.";
 
-      if (this.dependencies.skillLedger && this.diagnoses.length > 0 && verification.every((item) => item.passed)) {
-        const last = this.diagnoses[this.diagnoses.length - 1]!;
-        const strategy = this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation";
+      if (this.dependencies.skillLedger && verification.length > 0 && verification.every((item) => item.passed)) {
+        const last = this.diagnoses[this.diagnoses.length - 1];
+        const strategy = this.decisions[this.decisions.length - 1]?.strategy ?? currentPlan.strategy;
         const evidenceIds = verification.flatMap((item) => item.evidenceIds);
-        const learnedCandidate: LearnedSkillCandidate = {
-          name: "repair-" + last.category,
-          trigger: last.message.slice(0, 240),
-          category: last.category,
-          strategy,
-          procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
-          verification: verification.map((item) => item.criterionId),
-          evidenceIds,
-        };
-        // Learning is opt-in: absence of an explicit host approval callback must fail closed.
-        let mayActivate = false;
-        if (this.dependencies.onSkillCandidate) {
-          try {
-            mayActivate = await this.dependencies.onSkillCandidate(learnedCandidate, this.runId, input.principalId);
-          } catch {
-            mayActivate = false;
+        // Repair candidates retain their evidence-based form. For other completed
+        // workflows, learn only when a non-empty plan and trusted verification exist.
+        const taskType = (understanding.requiredCapabilities[0] ?? "general")
+          .toLowerCase().replace(/[^a-z0-9-]+/g, "-").split("-").filter(Boolean).join("-").slice(0, 48) || "general";
+        const workflowTrigger = String(redactSecrets(String(understanding.objective || input.task)))
+          .replace(/[\r\n\t]+/g, " ").trim().slice(0, 160);
+        const learnedCandidate: LearnedSkillCandidate | undefined = last
+          ? {
+              name: "repair-" + last.category + "-" + createHash("sha256").update(last.fingerprint).digest("hex").slice(0, 10),
+              trigger: last.message.slice(0, 240),
+              category: last.category,
+              strategy,
+              procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
+              verification: verification.map((item) => item.criterionId),
+              evidenceIds,
+            }
+          : currentPlan.steps.length > 0 && evidenceIds.length > 0 && workflowTrigger.length >= 12
+            ? {
+                name: "workflow-" + taskType + "-" + createHash("sha256").update(workflowTrigger.toLowerCase()).digest("hex").slice(0, 10),
+                trigger: workflowTrigger,
+                category: "unknown",
+                strategy,
+                procedure: [
+                  "re-check the current objective and constraints",
+                  ...currentPlan.steps.slice(0, 8).map((step) => String(redactSecrets(String(step.objective))).replace(/[\r\n\t]+/g, " ").slice(0, 240)),
+                  "verify the outcome using the trusted checks recorded for this workflow",
+                ].filter((step) => step.trim().length > 0),
+                verification: verification.map((item) => item.criterionId),
+                evidenceIds,
+              }
+            : undefined;
+        let learningPersisted = false;
+        if (learnedCandidate) {
+          // The host wires the managed lifecycle for automatic verified promotion. If no handler is configured, fail closed and do not persist a candidate.
+          let mayActivate = false;
+          if (this.dependencies.onSkillCandidate) {
+            try {
+              mayActivate = await this.dependencies.onSkillCandidate(learnedCandidate, this.runId, input.principalId);
+            } catch {
+              mayActivate = false;
+            }
+          }
+          if (mayActivate) {
+            this.dependencies.skillLedger.record(learnedCandidate);
+            try {
+              await this.dependencies.skillLedger.flush?.();
+              learningPersisted = true;
+            } catch {
+              // Do not fail the user's completed task if learning storage is unavailable.
+            }
           }
         }
-        if (mayActivate) this.dependencies.skillLedger.record(learnedCandidate);
-        if (this.dependencies.projectMemory && this.projectContext) {
+        if (last && this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
           const entry: ProjectMemoryEntry = { id, project: this.projectContext.root, kind: "repair", content: "Failure: " + last.category + "\nStrategy: " + strategy + "\nResolution: " + last.message.slice(0, 1200), source: "brain-recovery", confidence: 0.85, createdAt: now, updatedAt: now, uses: 0 };
           await this.wait(() => this.dependencies.projectMemory!.save(entry));
           this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
         }
-        this.emit({ type: "brain.learning.recorded" });
+        if (learnedCandidate && learningPersisted) this.emit({ type: "brain.learning.recorded" });
       }
 
       return this.report(

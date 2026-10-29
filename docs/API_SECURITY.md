@@ -52,3 +52,19 @@ Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `ma
 ## Current limitations
 
 API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities until a dedicated implementation is merged. Approval behavior depends on the configured approval handler and tool gateway. Audit the exact composition used by your deployment rather than assuming every adapter has identical controls.
+
+## Usage reporting
+
+- `GET /v1/usage` reports per-API-key request and tool-call counters for the current accounting window.
+- `brainRuns`, `brainModelCalls`, and `brainReservedOrUsedTokens` are aggregate counters from successful Brain completion reports, persisted when `usageStorePath` is configured.
+- `brainReservedOrUsedTokens` is the Brain budget's reserved-or-used token count. It is **not** guaranteed to equal provider-billed tokens. Legacy runs and failed Brain runs may not contribute a completed Brain usage report.
+- `providerInputTokens`, `providerOutputTokens`, and `providerUsageCalls` aggregate input/output token counts explicitly reported by the configured model provider and surfaced through the token-aware Brain route. They are omitted when provenance is not established; they do not substitute estimates for missing provider usage.
+- `configuredCostNanoUsd` is the sum of configured route-price estimates for calls with verified provider token usage, expressed in nano-USD (1 USD = 1,000,000,000 nano-USD). It is omitted when no non-zero configured route price is available. The value is a local estimate, not provider-billed cost; BYOK model profiles or provider billing rules may use different rates. Do not treat this endpoint as an invoice or billing ledger.
+
+### Configure price estimates and understand budget scope
+
+- Set `SOFIA_FAST_INPUT_NANO_USD` / `SOFIA_FAST_OUTPUT_NANO_USD`, and the equivalent `SOFIA_CODING_*`, `SOFIA_REASONING_*`, and `SOFIA_VISION_*` variables, to the price per input/output token for each route. Values are integer nano-USD; for example, `1000` means 0.000001 USD per token. Confirm the provider's current pricing and units before setting them.
+- An unset or zero route price means Sofia omits `configuredCostNanoUsd` for that run rather than reporting the route as free.
+- `SOFIA_BRAIN_MAX_COST_NANO_USD` configures the Brain's **per-run** estimated-cost ceiling. `SOFIA_BRAIN_MAX_TOKENS` and `SOFIA_BRAIN_MAX_MODEL_CALLS` configure per-run token/call ceilings. These are not a durable daily budget shared across all runs for an API key.
+- `usageStorePath` persists per-key aggregate reporting and API request/tool-call quotas; it does not by itself create a hard per-account spending cap. A strict account-wide spending limit needs durable per-key budget reservations that coordinate concurrent runs and reconcile actual usage before more provider calls are allowed.
+- When a user supplies their own model profile, route-price estimates configured for the server's standard routes may not match that user's provider/model price. Do not use these estimates as the basis for charging customers without a separate, verified billing source.

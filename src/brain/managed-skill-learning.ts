@@ -1,29 +1,82 @@
-import { actionHash } from "../security/guard.js";
+import { actionHash, containsPromptInjection, redactSecrets } from "../security/guard.js";
 import type { ApprovalHandler } from "../agent/approval.js";
 import type { LearnedSkillCandidate } from "./learning.js";
 import { runSkillLifecycleWorkflow } from "./skill-lifecycle-workflow.js";
 import type { VersionedSkillLifecycle } from "./skill-lifecycle.js";
 import type { SkillPackage } from "../skills/platform.js";
+import type { SkillVerification } from "./skills.js";
+
+export interface ManagedSkillLearningOptions {
+  /**
+   * Opt-in approval gate for skill promotion. Defaults to false so verified,
+   * metadata-only skills can be promoted automatically, like Hermes.
+   * Set SOFIA_SKILL_WRITE_APPROVAL=true to require the host approval handler.
+   */
+  requireApproval?: boolean;
+}
 
 /**
  * Connects verified Brain repair candidates to the persisted skill lifecycle.
- * Approval is fail-closed: without a configured approval handler, no skill is activated.
+ * A trusted authenticated principal is always required. By default, promotion
+ * is automatic only after the lifecycle evaluator passes; skill instructions
+ * remain metadata and are not executed by this handler. Hosts can opt into an
+ * explicit, action-hash-bound approval gate for promotion.
  */
 export function createManagedSkillLearningHandler(
   lifecycle: VersionedSkillLifecycle,
   approval?: ApprovalHandler,
+  options: ManagedSkillLearningOptions = {},
 ): (candidate: LearnedSkillCandidate, runId: string, principalId?: string) => Promise<boolean> {
   return async (candidate, runId, principalId) => {
+    const authenticatedPrincipalId = principalId?.trim();
+    // Never promote skills for anonymous work, even when approval is disabled.
+    if (!authenticatedPrincipalId) return false;
+    // Promotion must be tied to real successful verification evidence; never
+    // fabricate typecheck/test/build claims for arbitrary acceptance criteria.
+    if (candidate.evidenceIds.length === 0 || candidate.procedure.length < 2 || candidate.verification.length === 0) return false;
+
+    // Learned metadata is later reused in model context. Reject instruction-shaped
+    // content and redact secret-shaped strings before persistence or activation.
+    const untrustedMetadata = [
+      candidate.name,
+      candidate.trigger,
+      ...(candidate.triggers ?? []),
+      ...candidate.procedure,
+    ];
+    if (untrustedMetadata.some((value) => containsPromptInjection(value))) return false;
+
+    const safeName = String(redactSecrets(candidate.name)).trim().slice(0, 200);
+    const safeIdName = safeName.replace(/[^A-Za-z0-9._:-]/g, "-").slice(0, 160);
+    const safeTrigger = String(redactSecrets(candidate.trigger)).trim().slice(0, 500);
+    const safeTriggers = [...new Set([
+      safeTrigger,
+      ...(candidate.triggers ?? []).map((trigger) => String(redactSecrets(trigger)).trim().slice(0, 500)),
+    ])].filter(Boolean).slice(0, 12);
+    const safeProcedure = candidate.procedure
+      .map((step) => String(redactSecrets(step)).trim().slice(0, 2_000))
+      .filter(Boolean).slice(0, 12);
+    if (!safeName || !safeIdName || !safeTrigger || safeProcedure.length < 2) return false;
+
+    const requireApproval = options.requireApproval ?? process.env.SOFIA_SKILL_WRITE_APPROVAL === "true";
+    if (requireApproval && !approval) return false;
+
     const skillPackage: SkillPackage = {
       skill: {
-        id: `learned:${candidate.name}:${candidate.category}`,
-        name: candidate.name,
-        description: "Learned from a repair that passed trusted verification.",
-        triggers: [candidate.trigger],
+        id: `learned:${safeIdName}:${candidate.category}`,
+        name: safeName,
+        description: "Learned from a workflow that passed trusted verification.",
+        triggers: safeTriggers,
         categories: [candidate.category],
         strategy: candidate.strategy,
-        procedure: [...candidate.procedure],
-        verification: ["typecheck", "test", "build"],
+        procedure: safeProcedure,
+        verification: [...new Set(candidate.verification.map((item): SkillVerification => {
+          if (item === "typecheck" || item === "test" || item === "build") return item;
+          const rawId = String(item).startsWith("acceptance:")
+            ? String(item).slice("acceptance:".length)
+            : String(item);
+          const safeId = rawId.replace(/[^A-Za-z0-9._:-]/g, "-").slice(0, 160);
+          return `acceptance:${safeId || "verified-check"}`;
+        }))],
       },
       source: "learned",
       version: "1.0.0",
@@ -33,13 +86,14 @@ export function createManagedSkillLearningHandler(
       lifecycle,
       skillPackage,
       {
-        source: "verified-brain-repair",
+        source: candidate.name.startsWith("repair-") ? "verified-brain-repair" : "verified-brain-workflow",
         evidenceIds: [...candidate.evidenceIds],
         confidence: 0.8,
       },
       {
         approvePromotion: async (record) => {
-          if (!approval) return false;
+          if (!requireApproval) return true;
+          // The guard above ensures approval is present when required.
           const toolName = "skill.lifecycle.promote";
           const input: Record<string, unknown> = {
             candidateId: record.id,
@@ -49,13 +103,13 @@ export function createManagedSkillLearningHandler(
             evidenceIds: [...record.provenance.evidenceIds],
             confidence: record.provenance.confidence,
           };
-          return approval({
+          return approval!({
             runId,
-            ...(principalId ? { principalId } : {}),
+            principalId: authenticatedPrincipalId,
             toolName,
             input,
-            actionHash: actionHash(runId, toolName, input, principalId),
-            risk: "high",
+            actionHash: actionHash(runId, toolName, input, authenticatedPrincipalId),
+            risk: "medium",
           });
         },
       },

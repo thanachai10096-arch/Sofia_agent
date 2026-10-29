@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { FileProjectMemoryStore, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
+import { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
+import type { LearnedSkillCandidate } from "./learning.js";
+import { matchSkills } from "./skills.js";
 
 test("project memory survives a new store instance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-test-"));
@@ -86,4 +88,124 @@ test("project memory ranks entries matching more query terms ahead of weaker mat
   const results = await store.find("build test typecheck");
   assert.equal(results[0]?.id, "strong");
   assert.equal(results.some((entry) => entry.id === "weak"), true);
+});
+
+
+test("persistent skill ledger merges repeated verified workflows and restores trigger variants", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-skill-ledger-"));
+  const firstStore = new FileProjectMemoryStore("skill-ledger-owner-a", root);
+  const ledger = new PersistentSkillLedger(firstStore);
+  const first: LearnedSkillCandidate = {
+    name: "workflow-code-review-a1b2",
+    trigger: "Review this TypeScript pull request",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect changed files", "check tests and security", "summarize verified findings"],
+    verification: ["test", "build"],
+    evidenceIds: ["run-1"],
+  };
+  const repeat: LearnedSkillCandidate = {
+    ...first,
+    trigger: "Review a TypeScript PR for regressions",
+    procedure: ["inspect changed files", "check CI evidence", "summarize verified findings"],
+    evidenceIds: ["run-2"],
+  };
+  ledger.record(first);
+  ledger.record(repeat);
+  await ledger.flush();
+
+  assert.equal(ledger.list().length, 1);
+  const merged = ledger.list()[0]!;
+  assert.ok(merged.triggers?.includes(first.trigger));
+  assert.ok(merged.triggers?.includes(repeat.trigger));
+  assert.ok(merged.procedure.includes("check CI evidence"));
+  assert.deepEqual(new Set(merged.evidenceIds), new Set(["run-1", "run-2"]));
+
+  const restored = new PersistentSkillLedger(new FileProjectMemoryStore("skill-ledger-owner-a", root));
+  assert.equal(restored.list().length, 1);
+  assert.ok(restored.list()[0]?.triggers?.includes(repeat.trigger));
+  const reused = matchSkills("unknown", repeat.trigger, 3, restored);
+  assert.ok(reused.some((skill) => skill.id === "learned:workflow-code-review-a1b2:unknown"),
+    "a new ledger instance must make the durable skill available to the matcher after restart");
+});
+
+
+test("persistent skill ledger retains custom acceptance checks when repeated workflows merge and reload", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-skill-acceptance-"));
+  const store = new FileProjectMemoryStore("skill-ledger-acceptance", root);
+  const ledger = new PersistentSkillLedger(store);
+  ledger.record({
+    name: "workflow-acceptance",
+    trigger: "Summarize the source faithfully",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect source", "draft summary", "verify each claim against source"],
+    verification: ["acceptance:summary-matches-source"],
+    evidenceIds: ["run-acceptance-1"],
+  });
+  ledger.record({
+    name: "workflow-acceptance",
+    trigger: "Check summary against source evidence",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect source", "verify each claim against source"],
+    verification: ["test", "acceptance:all-claims-grounded"],
+    evidenceIds: ["run-acceptance-2"],
+  });
+  await ledger.flush();
+
+  const restored = new PersistentSkillLedger(new FileProjectMemoryStore("skill-ledger-acceptance", root));
+  assert.deepEqual(
+    new Set(restored.list()[0]?.verification),
+    new Set(["acceptance:summary-matches-source", "test", "acceptance:all-claims-grounded"]),
+  );
+  assert.deepEqual(
+    new Set(restored.list()[0]?.evidenceIds),
+    new Set(["run-acceptance-1", "run-acceptance-2"]),
+  );
+});
+
+test("persistent skill ledger does not hide a failed write after a later successful write", async () => {
+  let saves = 0;
+  const flakyStore = {
+    async save() {
+      saves += 1;
+      if (saves === 1) throw new Error("first write failed");
+    },
+    async list() { return []; },
+    async find() { return []; },
+  };
+  const ledger = new PersistentSkillLedger(flakyStore);
+  const makeCandidate = (name: string): LearnedSkillCandidate => ({
+    name,
+    trigger: "Run a verified persistence check",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect the target", "perform the check", "verify the result"],
+    verification: ["test"],
+    evidenceIds: ["trusted-check-1"],
+  });
+  ledger.record(makeCandidate("workflow-first-write"));
+  ledger.record(makeCandidate("workflow-second-write"));
+  await assert.rejects(ledger.flush(), /Failed to persist learned skill/);
+  assert.equal(saves, 2);
+});
+
+test("persistent skill ledger reports durable storage failures when flushed", async () => {
+  const brokenStore = {
+    async save() { throw new Error("simulated disk failure"); },
+    async list() { return []; },
+    async find() { return []; },
+  };
+  const ledger = new PersistentSkillLedger(brokenStore);
+  ledger.record({
+    name: "workflow-persistence-test",
+    trigger: "Run a verified persistence check",
+    category: "unknown",
+    strategy: "initial",
+    procedure: ["inspect the target", "perform the check", "verify the result"],
+    verification: ["test"],
+    evidenceIds: ["trusted-check-1"],
+  });
+  await assert.rejects(ledger.flush(), /Failed to persist learned skill/);
 });

@@ -1,13 +1,13 @@
 # Messaging Gateway (incremental integration)
 
-Status: opt-in gateway, command bridge, Telegram Bot API long polling transport, and Discord interaction verification/REST transport. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
+Status: opt-in gateway with Telegram, Discord, Slack, LINE, WhatsApp Cloud API, and Matrix runtime/transport code. The standalone API entrypoint now mounts configured Slack/LINE/WhatsApp signed webhook routes and starts/stops their runtimes with the existing server lifecycle; Matrix uses authenticated polling. Public factory functions and configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
 
 ## Safety defaults
 
 - Messaging is disabled unless `enabled: true` is explicitly supplied.
 - Unknown users/channels are denied unless an explicit `allowUser` policy permits them.
 - The gateway calls an injected message handler. Adapters never invoke tools or a separate agent runtime directly.
-- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client contract. Only explicit `/run <task>` messages (or a configured exact prefix such as `/run@SofiaBot`) start a run. Ordinary chat and attachments do not trigger execution.
+- `createSofiaMessagingHandler` bridges to the existing `createChatCommandHandler` and Sofia SDK/API client. `allowPlainText` is opt-in at the handler level; Telegram, Slack, LINE, WhatsApp Cloud API, and Matrix runtimes enable it in the current draft branch. Explicit `/run <task>` remains supported. Discord's current HTTP Interactions transport is slash-command-only and does not receive ordinary channel messages.
 - Use `createMessagingAccessCheck` to adapt the existing `ChatAccessPolicy` to the gateway allowlist callback. The existing command handler performs its own authorization check too. Do not pass the same deduplicator to both `createMessagingGateway` and `createSofiaMessagingHandler`, because the existing command handler claims the provider/channel/message key itself.
 - Keep bot tokens and Sofia API keys in server-side environment variables or an approved secret provider. Never expose them in client bundles, tests, errors, or logs.
 - The Telegram HTTP transport uses HTTPS long polling against the official Telegram Bot API. Choose either polling or a separately implemented webhook deployment, not both for the same bot.
@@ -27,9 +27,76 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Only explicit `/run <task>` commands dispatch work; ordinary messages do not start runs. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. In the current draft branch, Telegram is configured for chat-first mode: ordinary text starts a run without `/run`; explicit `/run <task>` remains supported, and unsupported slash commands are ignored. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs. This branch is not merged or live-tested yet.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
+
+## Slack Events API integration
+
+Sofia now includes `createSlackEventsTransport`, `createSlackAdapter`, `createSlackMessagingRuntime`, and an optional `slackEventsRoute` on `createSofiaApi`. The transport verifies Slack's `X-Slack-Signature` against the exact raw request bytes, enforces a five-minute timestamp window, handles URL verification and event retry de-duplication, ignores bot/subtype messages, and sends replies through `chat.postMessage` with a server-side bot token. The API route is bounded and returns generic errors.
+
+Required environment:
+- `SOFIA_MESSAGING_ENABLED=true`
+- `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`
+- `SLACK_ALLOWED_USER_IDS`, `SLACK_ALLOWED_CHANNEL_IDS` (both required; no wildcard access)
+- `SOFIA_API_KEY`, `SOFIA_API_BASE_URL`
+
+Composition outline:
+1. The standalone API entrypoint creates `createSlackMessagingRuntime(process.env, workspace)` and passes its transport to the existing API route when configuration is valid.
+2. Start/stop is tied to the existing API lifecycle. The route defaults to `/v1/integrations/slack/events`.
+4. In Slack API settings, enable Event Subscriptions, use that HTTPS Request URL, subscribe to `message.channels` and/or `message.im` as appropriate, install the app, and grant only needed scopes such as `chat:write` and the relevant message history/event scopes. Do not grant broad scopes unnecessarily.
+5. Test URL verification, allowed and denied user/channel pairs, retries, duplicate events, and actual outbound replies in a non-production workspace before enabling production.
+
+This adds a signed HTTP transport and app composition path, but **live workspace installation and end-to-end validation have not been performed here**. The runtime uses a local file deduplicator by default; multi-replica deployments should inject a shared atomic deduplicator.
+
+## LINE Messaging API integration
+
+Sofia also includes `createLineWebhookTransport`, `createLineAdapter`, `createLineMessagingRuntime`, and the optional `lineWebhookRoute` on `createSofiaApi`. It verifies LINE's `X-Line-Signature` against the raw request body before parsing, de-duplicates webhook event IDs, accepts text messages, and sends text through LINE's push API. Sender and conversation allowlists are mandatory.
+
+Required environment:
+- `SOFIA_MESSAGING_ENABLED=true`
+- `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`
+- `LINE_ALLOWED_USER_IDS`, `LINE_ALLOWED_CONVERSATION_IDS`
+- `SOFIA_API_KEY`, `SOFIA_API_BASE_URL`
+
+Composition outline:
+1. Call `createLineMessagingRuntime(process.env, workspace)`.
+2. Pass `lineRuntime.transport` to `createSofiaApi(deps, { ...config, lineWebhookRoute: { transport: lineRuntime.transport } })`.
+3. Start and stop the runtime with the API lifecycle. The route defaults to `/v1/integrations/line/webhook`.
+4. In LINE Developers Console, set that HTTPS webhook URL, enable webhook use, and validate the endpoint. Test only in a non-production channel first.
+
+The code and deterministic transport tests are present, but live LINE channel setup and real-account end-to-end testing have not been performed. Push messages are subject to LINE channel/account eligibility and platform limits.
+
+## WhatsApp Cloud API integration
+
+Sofia now includes a Meta WhatsApp Cloud API adapter, signed webhook transport, bounded HTTP route, and allowlisted runtime. It supports Meta's GET webhook challenge verification, validates `X-Hub-Signature-256` against raw POST bytes, accepts text messages for the configured phone-number ID, de-duplicates message IDs, and sends outbound text via the Graph API. The Graph API version is explicitly configured rather than silently defaulted.
+
+Required environment:
+- `SOFIA_MESSAGING_ENABLED=true`
+- `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`
+- `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_API_VERSION`
+- `WHATSAPP_ALLOWED_PHONE_IDS` (explicit allowlist; no wildcard)
+- `SOFIA_API_KEY`, `SOFIA_API_BASE_URL`
+
+Composition:
+1. Create the runtime with `createWhatsAppMessagingRuntime(process.env, workspace)`.
+2. Mount `whatsAppRuntime.transport` using `createSofiaApi(deps, { ...config, whatsAppWebhookRoute: { transport: whatsAppRuntime.transport } })`.
+3. Start/stop the runtime with the API. The route defaults to `/v1/integrations/whatsapp/webhook`; configure this HTTPS URL in Meta's app dashboard.
+4. Set the same verify token in Meta's webhook configuration, subscribe only to the required WhatsApp message fields, and test against a non-production number first.
+
+This is the **WhatsApp Cloud API** path, not QR-based WhatsApp Web. The code and deterministic transport tests are present; Meta business/app setup and live end-to-end validation have not been performed. Messaging windows, template requirements, quotas, and account eligibility remain governed by Meta.
+
+## Natural-language scheduled tasks
+
+When the authenticated agent exposes the `schedule_task` tool, users can ask for simple schedules in ordinary language, for example:
+
+- "Every day at 8 am, summarize the news."
+- "Every weekday at 9:30 am, check my project status."
+- "In 30 minutes, remind me to review the build."
+
+The parser intentionally accepts a small, deterministic set of phrases (daily/morning, weekdays, named weekdays, and relative minute/hour/day delays). Ambiguous wording is rejected rather than guessed. Recurring schedules use the explicit `timeZone` supplied by the model or `SOFIA_DEFAULT_TIME_ZONE`; if neither is set, the safe documented default is UTC. Configure the timezone to the user's intended locale.
+
+A scheduled result is sent to a chat only when the originating integration supplied a verified, signed messaging identity and destination. The destination is captured by the trusted host; it cannot be selected or overridden by model-generated tool arguments. Without a verified destination, results remain available through durable schedule/job history. Live provider acceptance and real-account delivery still require platform-specific smoke tests.
 
 ## Composition contract
 
@@ -56,7 +123,7 @@ The code outline above is not a claim that the repository's API server is alread
 ## Production acceptance checklist
 
 - [ ] Typecheck, build, and full test suite pass on the PR head.
-- [ ] Telegram test bot receives a message, rejects an unallowlisted user, and returns a long reply in bounded chunks.
+- [ ] Telegram Test bot accepts plain text without `/run`, rejects an unallowlisted user, and returns a long reply in bounded chunks.
 - [ ] Duplicate Telegram updates do not start duplicate runs, including after process restart when a durable dedupe store is configured.
 - [ ] Discord application command is registered; signature verification rejects invalid/stale signatures and accepts a genuine interaction.
 - [ ] Discord deferred response is edited and all follow-up chunks are delivered within the interaction token lifetime.
@@ -74,3 +141,34 @@ The code outline above is not a claim that the repository's API server is alread
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+
+## Matrix Client-Server API integration
+
+Sofia includes an opt-in Matrix adapter and client-server API polling transport. It authenticates with the configured homeserver using a server-side access token, uses `/_matrix/client/v3/sync` for incoming events, ignores its own messages and non-text events, and sends replies through the Matrix send-event API. The homeserver must be a public HTTPS origin; redirects are rejected, and the transport resolves the hostname before each request and rejects DNS answers containing private, loopback, link-local, or other non-public IP ranges. This DNS preflight is defense-in-depth; deployments exposed to hostile DNS should also enforce outbound network egress rules because DNS can change between validation and connection. User and room allowlists are both mandatory and there is no wildcard mode.
+
+Required environment:
+- `SOFIA_MESSAGING_ENABLED=true`
+- `MATRIX_HOMESERVER_URL` — public HTTPS origin, such as your Matrix homeserver origin
+- `MATRIX_ACCESS_TOKEN` — server-side bot account access token
+- `MATRIX_ALLOWED_USER_IDS` — comma-separated immutable Matrix user IDs beginning with `@`
+- `MATRIX_ALLOWED_ROOM_IDS` — comma-separated room IDs beginning with `!`
+- `SOFIA_API_KEY`, `SOFIA_API_BASE_URL`
+
+Create `createMatrixMessagingRuntime(process.env, workspace)` and start/stop it with the existing application lifecycle. Messages may be submitted as plain text or with `!run <task>` in an allowlisted room. Invite the bot account only to the rooms it needs, and test with a non-production account first. The code includes deterministic transport tests; live homeserver setup and end-to-end validation have not been performed.
+
+
+## Scheduled result delivery
+
+- Set `SOFIA_MESSAGING_CONTEXT_SECRET` to a random secret of at least 32 characters in the trusted Sofia API/messaging process. Keep it server-side and never send it to the model or a client app.
+- Messaging adapters sign the normalized platform, immutable sender ID, conversation ID, message ID, and task hash. The API verifies the HMAC and binds the trusted destination and user principal before executing the task.
+- `schedule_task` stores the verified destination with the schedule. Completion notices are sent through the configured messaging adapter and retried on later scheduler ticks until the provider accepts the send. Delivery is at-least-once if the process crashes after provider acceptance but before the durable delivery marker is saved.
+- If the secret is unset or invalid, ordinary chat tasks still work, but scheduled results are not bound to a chat destination; they remain in durable schedule history.
+
+
+## Per-user model profiles
+
+- Set `SOFIA_MODEL_PROFILE_ENCRYPTION_KEY` to a randomly generated base64-encoded 32-byte key to enable encrypted profiles. Do not commit it. Without it, profile endpoints return `503 model_profile_storage_not_configured` and Sofia uses the operator's server-side provider configuration.
+- The authenticated API key owns its own profile. Grant `model:profile:read` to read metadata and `model:profile:write` to set/delete it. The API never returns a stored provider key.
+- `PUT /v1/model-profile` accepts `provider`, `model`, `apiKey`, and (only for `openai-compatible`) `baseUrl`. Gemini and OpenRouter use fixed HTTPS endpoints. Custom OpenAI-compatible endpoints must use HTTPS and an operator-allowlisted hostname; add exact hostnames to `SOFIA_MODEL_PROFILE_ALLOWED_HOSTS`.
+- Profile keys are encrypted with AES-256-GCM and keyed by a hash of the authenticated principal. When `SOFIA_STATE_DIR` is set, profiles are stored under `$SOFIA_STATE_DIR/sofia-agents/model-profiles.json`; otherwise they live in the workspace `.sofia` directory. Use a persistent volume for hosted deployments. Per-user model profiles are separate from local `sofia setup` and from the operator's default provider environment.

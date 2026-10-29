@@ -8,6 +8,18 @@ export interface UsageRecord {
   runs: number;
   toolCalls: number;
   startedAt: number;
+  /** Successful Brain runs with provider-reported token accounting. */
+  brainRuns?: number;
+  /** Model calls reported by Brain; excludes legacy runs without structured usage. */
+  brainModelCalls?: number;
+  /** Brain reserved-or-used tokens; not guaranteed to equal provider-billed tokens. */
+  brainReservedOrUsedTokens?: number;
+  /** Tokens reported by model providers, excluding estimates/reservations. */
+  providerInputTokens?: number;
+  providerOutputTokens?: number;
+  providerUsageCalls?: number;
+  /** Configured route-price estimate in nano-USD; not provider-billed cost. */
+  configuredCostNanoUsd?: string;
 }
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -20,7 +32,14 @@ function validRecord(value: unknown): value is UsageRecord {
   return typeof record.keyId === "string" &&
     Number.isSafeInteger(record.runs) && (record.runs ?? -1) >= 0 &&
     Number.isSafeInteger(record.toolCalls) && (record.toolCalls ?? -1) >= 0 &&
-    Number.isSafeInteger(record.startedAt) && (record.startedAt ?? -1) >= 0;
+    Number.isSafeInteger(record.startedAt) && (record.startedAt ?? -1) >= 0 &&
+    (record.brainRuns === undefined || (Number.isSafeInteger(record.brainRuns) && record.brainRuns >= 0)) &&
+    (record.brainModelCalls === undefined || (Number.isSafeInteger(record.brainModelCalls) && record.brainModelCalls >= 0)) &&
+    (record.brainReservedOrUsedTokens === undefined || (Number.isSafeInteger(record.brainReservedOrUsedTokens) && record.brainReservedOrUsedTokens >= 0)) &&
+    (record.providerInputTokens === undefined || (Number.isSafeInteger(record.providerInputTokens) && record.providerInputTokens >= 0)) &&
+    (record.providerOutputTokens === undefined || (Number.isSafeInteger(record.providerOutputTokens) && record.providerOutputTokens >= 0)) &&
+    (record.providerUsageCalls === undefined || (Number.isSafeInteger(record.providerUsageCalls) && record.providerUsageCalls >= 0)) &&
+    (record.configuredCostNanoUsd === undefined || (typeof record.configuredCostNanoUsd === "string" && /^(0|[1-9][0-9]*)$/.test(record.configuredCostNanoUsd)));
 }
 
 /**
@@ -111,7 +130,10 @@ export class UsageLimiter {
     if (!Array.isArray(parsed) || !parsed.every(validRecord)) {
       throw new Error("Usage quota store is invalid; refusing to reset counters.");
     }
-    for (const record of parsed) this.records.set(record.keyId, { ...record });
+    for (const record of parsed) {
+      // Preserve legacy persisted record shapes; Brain counters are added only when Brain usage is recorded.
+      this.records.set(record.keyId, { ...record });
+    }
   }
 
   private persistRecords(): void {
@@ -139,7 +161,7 @@ export class UsageLimiter {
   private currentRecord(keyId: string, now = Date.now()): UsageRecord {
     const current = this.records.get(keyId);
     if (!current) {
-      const created = { keyId, runs: 0, toolCalls: 0, startedAt: now };
+      const created: UsageRecord = { keyId, runs: 0, toolCalls: 0, startedAt: now };
       this.records.set(keyId, created);
       return created;
     }
@@ -147,6 +169,15 @@ export class UsageLimiter {
       current.runs = 0;
       current.toolCalls = 0;
       current.startedAt = now;
+      if (current.brainRuns !== undefined) current.brainRuns = 0;
+      if (current.brainModelCalls !== undefined) current.brainModelCalls = 0;
+      if (current.brainReservedOrUsedTokens !== undefined) current.brainReservedOrUsedTokens = 0;
+      if (current.providerInputTokens !== undefined) current.providerInputTokens = 0;
+      if (current.providerOutputTokens !== undefined) current.providerOutputTokens = 0;
+      if (current.providerUsageCalls !== undefined) current.providerUsageCalls = 0;
+      // Cost is optional provenance-backed reporting: after the window rolls over,
+      // omit it until a call with configured prices and provider-reported usage is recorded.
+      delete current.configuredCostNanoUsd;
     }
     return current;
   }
@@ -170,10 +201,68 @@ export class UsageLimiter {
     }, true);
   }
 
+  /** Record aggregate Brain usage only when a completed report contains valid counters. */
+  recordBrainUsage(keyId: string, usage: { modelCalls: number; reservedOrUsedTokens: number; providerInputTokens?: number; providerOutputTokens?: number; providerUsageCalls?: number; configuredCostNanoUsd?: string }): void {
+    if (!Number.isSafeInteger(usage.modelCalls) || usage.modelCalls < 0 ||
+        !Number.isSafeInteger(usage.reservedOrUsedTokens) || usage.reservedOrUsedTokens < 0) {
+      throw new Error("Invalid Brain usage metrics.");
+    }
+    const providerValues = [usage.providerInputTokens, usage.providerOutputTokens, usage.providerUsageCalls];
+    if (providerValues.some((value) => value !== undefined && (!Number.isSafeInteger(value) || value < 0)) ||
+        ((usage.providerInputTokens === undefined) !== (usage.providerOutputTokens === undefined)) ||
+        (usage.providerUsageCalls !== undefined && usage.providerInputTokens === undefined) ||
+        (usage.configuredCostNanoUsd !== undefined && (usage.providerInputTokens === undefined || typeof usage.configuredCostNanoUsd !== "string" || !/^(0|[1-9][0-9]*)$/.test(usage.configuredCostNanoUsd)))) {
+      throw new Error("Invalid provider-reported token metrics.");
+    }
+    this.transaction(() => {
+      const current = this.currentRecord(keyId);
+      // Validate every prospective total before mutating any field. Without this,
+      // individually valid provider reports could overflow the persisted safe-integer
+      // counters and make the ledger unreadable after a restart.
+      const next = {
+        brainRuns: (current.brainRuns ?? 0) + 1,
+        brainModelCalls: (current.brainModelCalls ?? 0) + usage.modelCalls,
+        brainReservedOrUsedTokens: (current.brainReservedOrUsedTokens ?? 0) + usage.reservedOrUsedTokens,
+        providerInputTokens: usage.providerInputTokens === undefined
+          ? current.providerInputTokens
+          : (current.providerInputTokens ?? 0) + usage.providerInputTokens,
+        providerOutputTokens: usage.providerOutputTokens === undefined
+          ? current.providerOutputTokens
+          : (current.providerOutputTokens ?? 0) + usage.providerOutputTokens,
+        providerUsageCalls: usage.providerInputTokens === undefined
+          ? current.providerUsageCalls
+          : (current.providerUsageCalls ?? 0) + (usage.providerUsageCalls ?? 0),
+        configuredCostNanoUsd: usage.configuredCostNanoUsd === undefined
+          ? current.configuredCostNanoUsd
+          : (BigInt(current.configuredCostNanoUsd ?? "0") + BigInt(usage.configuredCostNanoUsd)).toString(),
+      };
+      if (Object.values(next).some((value) => typeof value === "number" && !Number.isSafeInteger(value))) {
+        throw new Error("Aggregated usage metrics exceed the safe integer range.");
+      }
+      current.brainRuns = next.brainRuns;
+      current.brainModelCalls = next.brainModelCalls;
+      current.brainReservedOrUsedTokens = next.brainReservedOrUsedTokens;
+      if (next.providerInputTokens !== undefined) current.providerInputTokens = next.providerInputTokens;
+      if (next.providerOutputTokens !== undefined) current.providerOutputTokens = next.providerOutputTokens;
+      if (next.providerUsageCalls !== undefined) current.providerUsageCalls = next.providerUsageCalls;
+      if (next.configuredCostNanoUsd !== undefined) current.configuredCostNanoUsd = next.configuredCostNanoUsd;
+    }, true);
+  }
+
   get(keyId: string): UsageRecord {
     return this.transaction(() => {
       const current = this.records.get(keyId);
-      return current ? { ...current } : { keyId, runs: 0, toolCalls: 0, startedAt: Date.now() };
+      return current
+        ? {
+            ...current,
+            brainRuns: current.brainRuns ?? 0,
+            brainModelCalls: current.brainModelCalls ?? 0,
+            brainReservedOrUsedTokens: current.brainReservedOrUsedTokens ?? 0,
+          }
+        : {
+            keyId, runs: 0, toolCalls: 0, startedAt: Date.now(),
+            brainRuns: 0, brainModelCalls: 0, brainReservedOrUsedTokens: 0,
+          };
     }, false);
   }
 }
