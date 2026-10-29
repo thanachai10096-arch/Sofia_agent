@@ -91,6 +91,14 @@ export type { LineTransport, VerifiedLineMessage } from "./integrations/messagin
 export { createLineHttpTransport, verifyLineSignature } from "./integrations/messaging/line-http-transport.js";
 export type { LineHttpTransportOptions, LineWebhookResult } from "./integrations/messaging/line-http-transport.js";
 export { handleLineWebhookHttpRequest } from "./integrations/messaging/line-http-route.js";
+export { createWhatsAppAdapter } from "./integrations/messaging/whatsapp.js";
+export type { WhatsAppTransport, VerifiedWhatsAppMessage } from "./integrations/messaging/whatsapp.js";
+export { createWhatsAppHttpTransport, verifyWhatsAppSignature, verifyWhatsAppWebhookChallenge } from "./integrations/messaging/whatsapp-http-transport.js";
+export type { WhatsAppHttpTransportOptions, WhatsAppWebhookResult } from "./integrations/messaging/whatsapp-http-transport.js";
+export { handleWhatsAppWebhookHttpRequest } from "./integrations/messaging/whatsapp-http-route.js";
+export type { WhatsAppWebhookRouteTransport } from "./integrations/messaging/whatsapp-http-route.js";
+export { createWhatsAppMessagingRuntime } from "./integrations/messaging/whatsapp-runtime.js";
+export type { WhatsAppMessagingEnvironment, WhatsAppMessagingRuntime } from "./integrations/messaging/whatsapp-runtime.js";
 export type { LineWebhookTransport } from "./integrations/messaging/line-http-route.js";
 export type { SlackTransport, VerifiedSlackMessage } from "./integrations/messaging/slack.js";
 export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
