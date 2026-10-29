@@ -1002,7 +1002,7 @@ test("DurableJobRuntime preserves the selected model route when resuming a check
       run: async (input) => {
         runCount += 1;
         if (runCount === 1) {
-          await input.onRunSnapshot?.(snapshot);
+          await options.onRunSnapshot?.(snapshot);
           return { completed: false, state: "failed", summary: "checkpoint saved" };
         }
         assert.ok(input.resume, "resume must receive the saved checkpoint");
