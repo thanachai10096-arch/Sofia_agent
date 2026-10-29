@@ -11,7 +11,7 @@ const fixtures: SkillBenchmarkFixture[] = [
 const candidate: SkillPackage = {
   skill: {
     id: "learned:test", name: "Test skill", description: "Benchmark test candidate",
-    triggers: ["repair"], categories: ["testing"], strategy: "inspect-evidence",
+    triggers: ["repair"], categories: ["type_error"], strategy: "inspect-evidence",
     procedure: ["inspect evidence", "verify result"], verification: ["test"],
   },
   source: "learned", version: "1.0.0",
@@ -77,7 +77,7 @@ test("benchmark evaluator rejects duplicate or insufficient fixtures at construc
     runner: { run: async () => result(true) },
   }), /unique, valid fixtures/);
   assert.throws(() => createIsolatedSkillBenchmarkEvaluator({
-    fixtures: [fixtures[0], fixtures[0], fixtures[2]],
+    fixtures: [fixtures[0] as SkillBenchmarkFixture, fixtures[0] as SkillBenchmarkFixture, fixtures[2] as SkillBenchmarkFixture],
     runner: { run: async () => result(true) },
   }), /unique, valid fixtures/);
 });
