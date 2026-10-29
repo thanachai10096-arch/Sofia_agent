@@ -56,7 +56,7 @@ The code outline above is not a claim that the repository's API server is alread
 
 ## Telegram HTTP 409 troubleshooting
 
-Telegram returns HTTP 409 for a long-polling conflict when another consumer is using `getUpdates`, or when webhook delivery conflicts with polling. This transport requests `deleteWebhook` without dropping pending updates before polling, so repeated 409 responses should be investigated rather than retried indefinitely.
+Telegram returns HTTP 409 for a long-polling conflict when another consumer is using `getUpdates`, or when webhook delivery conflicts with polling. Before polling, this transport checks `getWebhookInfo` and refuses to poll when a webhook URL is configured; it does not silently delete an intentional webhook. Repeated HTTP 409 responses should be investigated rather than retried indefinitely.
 
 1. Confirm that only one running process/service uses this exact bot token. Check local development terminals, old Railway services, preview deployments, background workers, and any other host where the bot was tested. Do not paste the token into chat, issues, screenshots, or shell history.
 2. Check the bot's webhook state with Telegram's official `getWebhookInfo` API using a trusted secret-handling method. Never share the full request URL because the bot token is embedded in it. If a webhook is intentionally required, do not use this long-polling transport for that bot.
