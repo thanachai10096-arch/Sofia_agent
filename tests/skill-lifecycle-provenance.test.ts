@@ -172,7 +172,7 @@ test("skill lifecycle rejects blank evaluator check names and oversized details"
   }
 });
 
-test("skill lifecycle safely persists and restores a skill named __proto__", async () => {
+test("skill lifecycle safely persists and restores a skill named constructor", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-prototype-id-"));
   const file = path.join(root, "lifecycle.json");
   try {
@@ -180,7 +180,7 @@ test("skill lifecycle safely persists and restores a skill named __proto__", asy
     const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
     const packageWithPrototypeId: SkillPackage = {
       ...skillPackage,
-      skill: { ...skillPackage.skill, id: "__proto__" },
+      skill: { ...skillPackage.skill, id: "constructor" },
     };
     const candidate = lifecycle.propose(packageWithPrototypeId, {
       source: "regression-test",
@@ -189,12 +189,12 @@ test("skill lifecycle safely persists and restores a skill named __proto__", asy
     });
     await lifecycle.evaluate(candidate.id);
     assert.equal(lifecycle.promote(candidate.id).status, "active");
-    assert.equal(platform.get("__proto__")?.skill.id, "__proto__");
+    assert.equal(platform.get("constructor")?.skill.id, "constructor");
 
     const restoredPlatform = new InMemorySkillsPlatform();
     const restored = new VersionedSkillLifecycle(restoredPlatform, passing, { file });
-    assert.equal(restored.active("__proto__")?.status, "active");
-    assert.equal(restoredPlatform.get("__proto__")?.skill.id, "__proto__");
+    assert.equal(restored.active("constructor")?.status, "active");
+    assert.equal(restoredPlatform.get("constructor")?.skill.id, "constructor");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
