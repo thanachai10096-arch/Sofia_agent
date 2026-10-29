@@ -117,7 +117,15 @@ export function createIsolatedSkillBenchmarkEvaluator(
     const baselineRuns: SkillBenchmarkRun[] = [];
     for (const fixture of fixtures) {
       try {
-        candidateRuns.push(await runBounded(options.runner, candidate, fixture, timeoutMs));
+        const run = await runBounded(options.runner, candidate, fixture, timeoutMs);
+        candidateRuns.push(run);
+        if (!run.passed) {
+          checks.push({
+            name: "fixture:" + fixture.id,
+            passed: false,
+            detail: "Candidate did not satisfy the fixture outcome; score=" + run.score.toFixed(3),
+          });
+        }
       } catch (error) {
         candidateRuns.push({ passed: false, score: 0, durationMs: timeoutMs });
         checks.push({
@@ -137,13 +145,22 @@ export function createIsolatedSkillBenchmarkEvaluator(
     });
 
     if (baseline) {
+      let baselineFailures = 0;
       for (const fixture of fixtures) {
         try {
           baselineRuns.push(await runBounded(options.runner, baseline, fixture, timeoutMs));
-        } catch {
+        } catch (error) {
+          baselineFailures++;
           baselineRuns.push({ passed: false, score: 0, durationMs: timeoutMs });
         }
       }
+      checks.push({
+        name: "baseline-evidence",
+        passed: baselineFailures === 0,
+        detail: baselineFailures === 0
+          ? "All active-baseline fixtures produced valid metrics."
+          : "Baseline evidence incomplete: " + baselineFailures + " fixture run(s) failed or timed out.",
+      });
       const baselinePassRate = baselineRuns.filter((run) => run.passed).length / fixtures.length;
       const baselineMeanScore = baselineRuns.reduce((sum, run) => sum + run.score, 0) / fixtures.length;
       const passRateDelta = candidatePassRate - baselinePassRate;
