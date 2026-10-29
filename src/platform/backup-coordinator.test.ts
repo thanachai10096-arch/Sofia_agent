@@ -154,23 +154,25 @@ test("backup directory export verifies bytes, writes manifest last, and uses pri
   }
 });
 
-test("backup directory export refuses invalid bundles and cleans partial output on write failure", async () => {
+test("backup directory export rejects path conflicts and invalid bundles before writing", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-export-fail-"));
   try {
-    const bundle = await createBackupBundle([
+    await assert.rejects(createBackupBundle([
       { name: "state", async snapshot() {
         return [
           { path: "a", content: Buffer.from("file") },
           { path: "a/b", content: Buffer.from("conflicting nested file") },
         ];
       } },
+    ], createdAt), /conflict as both files and directories/);
+
+    const bundle = await createBackupBundle([
+      { name: "state", async snapshot() { return [{ path: "state.json", content: Buffer.from("verified") }]; } },
     ], createdAt);
-    const destination = path.join(root, "partial");
-    await assert.rejects(writeBackupBundleDirectory(bundle, destination));
-    await assert.rejects((await import("node:fs/promises")).stat(destination), { code: "ENOENT" });
     const invalid = { ...bundle, files: new Map() };
-    await assert.rejects(writeBackupBundleDirectory(invalid, path.join(root, "invalid")), /invalid backup bundle/i);
-    await assert.rejects((await import("node:fs/promises")).stat(path.join(root, "invalid")), { code: "ENOENT" });
+    const destination = path.join(root, "invalid");
+    await assert.rejects(writeBackupBundleDirectory(invalid, destination), /invalid backup bundle/i);
+    await assert.rejects((await import("node:fs/promises")).stat(destination), { code: "ENOENT" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
