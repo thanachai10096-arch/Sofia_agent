@@ -183,6 +183,26 @@ test("does not activate a learned skill without the existing lifecycle promotion
 });
 
  
+test("does not activate a skill if policy changes during lifecycle promotion", async () => {
+  const state = makeHost();
+  state.host.promoteCandidate = async () => {
+    // Simulate policy changing while the lifecycle gate is doing external work.
+    state.host.currentPolicyRevision = async () => "policy-2";
+    return true;
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "policy-race-1", "run1");
+  addReceipt(state, "policy-race-2", "run2");
+  addReceipt(state, "policy-race-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "policy-race-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "policy-race-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "policy-race-3", "Fix TypeScript build");
+
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
 test("duplicate receipt cannot be reinterpreted with a different task summary", async () => {
   const state = makeHost();
   const loop = new VerifiedLearningLoop(state.host);
