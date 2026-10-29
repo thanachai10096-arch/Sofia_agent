@@ -109,13 +109,13 @@ export class VerifiedLearningLoop {
       if (!assessment || typeof assessment.allowed !== "boolean" ||
           typeof assessment.confidence !== "number" || !Number.isFinite(assessment.confidence) ||
           assessment.confidence < 0 || assessment.confidence > 1) {
-        return { recorded: true, experienceId: experience.id };
+        return { recorded: true, experienceId: prepared.experienceId };
       }
       const confidence = Math.min(candidate.confidence, assessment.confidence);
       const assessedCandidate = { ...candidate, confidence };
       await this.host.transaction(scope, tx => tx.putCandidate(assessedCandidate));
       if (!assessment.allowed || confidence < this.options.minimumConfidence) {
-        return { recorded: true, experienceId: experience.id };
+        return { recorded: true, experienceId: prepared.experienceId };
       }
 
       const evaluation = await this.host.verification.runRegression(scope, assessedCandidate);
@@ -134,19 +134,19 @@ export class VerifiedLearningLoop {
       await this.host.transaction(scope, tx => tx.recordEvaluation(scope, candidate.id, recordedEvaluation));
       if (!evaluation.passed || !regressionPassed || evaluation.checks.length === 0 ||
           !evaluation.checks.every(check => check.passed)) {
-        return { recorded: true, experienceId: experience.id };
+        return { recorded: true, experienceId: prepared.experienceId };
       }
 
       // Policy may change while regression checks run; re-check after all external
       // work and immediately before the short activation transaction.
       const latestPolicy = await this.host.currentPolicyRevision(scope);
-      if (latestPolicy !== currentPolicy) return { recorded: true, experienceId: experience.id };
+      if (latestPolicy !== currentPolicy) return { recorded: true, experienceId: prepared.experienceId };
       // Persisting a row in the learning store is not equivalent to activating
       // a Sofia platform skill. Require an explicit host adapter that delegates
       // promotion to VersionedSkillLifecycle (including its evaluator/approval gate).
-      if (!this.host.promoteCandidate) return { recorded: true, experienceId: experience.id };
+      if (!this.host.promoteCandidate) return { recorded: true, experienceId: prepared.experienceId };
       const promotionAllowed = await this.host.promoteCandidate(scope, assessedCandidate);
-      if (promotionAllowed !== true) return { recorded: true, experienceId: experience.id };
+      if (promotionAllowed !== true) return { recorded: true, experienceId: prepared.experienceId };
       const active: ActiveLearningSkill = {
         ...assessedCandidate, status: "active", activatedAt: new Date().toISOString(),
         policyRevision: latestPolicy,
@@ -157,7 +157,7 @@ export class VerifiedLearningLoop {
         await tx.activateSkill(active);
         return true;
       });
-      return { recorded: true, experienceId: experience.id, ...(activated ? { skillActivated: active.id } : {}) };
+      return { recorded: true, experienceId: prepared.experienceId, ...(activated ? { skillActivated: active.id } : {}) };
     } catch (error) {
       throw safeError(this.host, error);
     }
