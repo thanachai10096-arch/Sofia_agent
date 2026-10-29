@@ -24,6 +24,10 @@ export class ModelRouter {
       let best = -Infinity;
       for (const route of this.routes) {
         if (!route.healthy) continue;
+        // Respect only explicit negative declarations; unknown capability metadata
+        // remains eligible for backward compatibility with existing route configs.
+        if (kind === "vision" && route.featureSupport?.vision === false) continue;
+        if ((kind === "coding" || kind === "debugging" || kind === "research") && route.featureSupport?.toolCalling === false) continue;
         let capabilityScore = 0;
         for (const capability of required) {
           if (route.capabilities.includes(capability as never)) capabilityScore += 3;
