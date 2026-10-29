@@ -105,13 +105,15 @@ function validateLearnedCandidate(candidate: LearnedSkillCandidate): LearnedSkil
       new Set(candidate.evidenceIds).size !== candidate.evidenceIds.length) {
     throw new Error("Invalid learned skill candidate");
   }
+  const name = String(redactSecrets(candidate.name)).slice(0, 200);
   const trigger = String(redactSecrets(candidate.trigger)).slice(0, 240);
   const procedure = candidate.procedure.map(step => String(redactSecrets(step)).slice(0, 2000));
-  if (containsPromptInjection(trigger) || procedure.some(step => containsPromptInjection(step))) {
+  if (containsPromptInjection(name) || containsPromptInjection(trigger) ||
+      procedure.some(step => containsPromptInjection(step))) {
     throw new Error("Learned skill candidate rejected by prompt-injection guard");
   }
   return {
-    name: candidate.name.slice(0, 200),
+    name,
     trigger,
     category: candidate.category,
     strategy: candidate.strategy,
