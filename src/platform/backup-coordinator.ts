@@ -1,3 +1,4 @@
+import type { FileProjectMemoryStore } from "../brain/project-memory.js";
 import {
   createBackupManifest,
   MAX_BACKUP_MANIFEST_ENTRIES,
@@ -63,6 +64,20 @@ export async function createBackupBundle(
     throw new Error(`Backup bundle failed self-verification: ${verification.errors.join("; ")}`);
   }
   return { manifest, files: fileMap };
+}
+
+/**
+ * Adapt the existing file-backed project-memory store into an explicit backup
+ * source. Missing memory is represented as an empty source, not an error.
+ */
+export function projectMemoryBackupSource(store: FileProjectMemoryStore): BackupSnapshotSource {
+  return {
+    name: "project-memory",
+    async snapshot() {
+      const snapshot = await store.backupSnapshot();
+      return snapshot ? [snapshot] : [];
+    },
+  };
 }
 
 /** Verify bundle bytes against the manifest before any future restore step. */
