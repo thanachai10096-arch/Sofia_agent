@@ -75,3 +75,25 @@ test("voice channel handler validates event identity before calling policy", asy
   const malformed = { ...event, eventId: " ".repeat(1) };
   await assert.rejects(handler(malformed, new AbortController().signal), /eventId/);
 });
+
+
+test("voice channel handler rejects malformed audio before claiming an event", async () => {
+  let claimCount = 0;
+  let policyCount = 0;
+  const handler = createVoiceChannelHandler({
+    workflow: new VoiceWorkflow(
+      { async transcribe() { return "hello"; } },
+      async () => ({ text: "reply" }),
+    ),
+    accessPolicy: { isAllowed: async () => { policyCount++; return true; } },
+    deduplicator: { claim: async () => { claimCount++; return true; } },
+    delivery: { deliver: async () => undefined },
+  });
+
+  await assert.rejects(
+    handler({ ...event, eventId: "bad-audio", audio: { ...audio, bytes: new Uint8Array() } }, new AbortController().signal),
+    /Invalid voice event audio metadata/,
+  );
+  assert.equal(policyCount, 0);
+  assert.equal(claimCount, 0);
+});
