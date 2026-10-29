@@ -215,3 +215,30 @@ test("benchmark evidence reports measured duration and token usage", async () =>
   assert.match(evidence?.detail ?? "", /baselineDurationMs=21/);
   assert.match(evidence?.detail ?? "", /baselineTokens=39/);
 });
+
+test("benchmark evaluator enforces a total wall-clock budget across fixtures", async () => {
+  let calls = 0;
+  const evaluator = createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    timeoutMs: 100,
+    maxTotalDurationMs: 1,
+    runner: {
+      run: async () => {
+        calls++;
+        return new Promise<SkillBenchmarkRun>((resolve) => setTimeout(() => resolve(result(true)), 10));
+      },
+    },
+  });
+  const evaluation = await evaluator(candidate);
+  assert.equal(evaluation.passed, false);
+  assert.ok(calls < fixtures.length);
+  assert.equal(evaluation.checks.filter((check) => check.name.startsWith("fixture:") && !check.passed).length, fixtures.length);
+});
+
+test("benchmark evaluator validates the total wall-clock budget", () => {
+  assert.throws(() => createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    maxTotalDurationMs: 0,
+    runner: { run: async () => result(true) },
+  }), /maxTotalDurationMs/);
+});
