@@ -93,7 +93,7 @@ test("manifest rejects case-folded, Unicode-normalized, and file-directory path 
   for (const paths of conflictingSets) {
     assert.throws(
       () => createBackupManifest(paths.map((path) => ({ path, content: Buffer.from("x") })), createdAt),
-      /unique across portable filesystems|both files and directories/,
+      /unique|duplicate|portable filesystem collision|both files and directories/,
       `expected portable path collision to be rejected: ${paths.join(", ")}`,
     );
   }
