@@ -96,7 +96,7 @@ test("SofiaAgent replays bounded prior session turns into the next model request
   await agent.run({ task: "What is my project called?", sessionId: "memory-session" });
 
   assert.ok(observed[1]?.some((message) => message.includes("My project is called Sofia")));
-  assert.ok(observed[1]?.some((message) => message.includes("Prior conversation")));
+  assert.ok(observed[1]?.some((message) => message.includes("Recent prior conversation")));
   assert.deepEqual(sessions.get("memory-session")?.messages, [
     "user: My project is called Sofia",
     "assistant: Reply with context.",
