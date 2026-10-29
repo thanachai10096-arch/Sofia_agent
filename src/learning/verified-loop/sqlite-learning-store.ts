@@ -35,11 +35,19 @@ function hardenSqliteFiles(file: string): void {
   }
 }
 
+/** Serialize SQLite transactions across store instances sharing a file. Because DatabaseSync is synchronous,
+ * waiting inside BEGIN IMMEDIATE can block the event loop that must resume the current transaction and COMMIT.
+ * A per-file in-process queue prevents that same-process deadlock; SQLite busy_timeout remains the cross-process guard. */
+const transactionTails = new Map<string | object, Promise<void>>();
+
 /** Durable SQLite transaction adapter for the VerifiedLearningHost transaction port.
  * Receipt/evidence lookup, policy decisions, and real regression execution remain owned by authoritative Sofia services. */
 export class SqliteLearningTransactionStore {
   private tail: Promise<void> = Promise.resolve();
-  private constructor(private readonly db: Db, private readonly file: string) {}
+  private readonly transactionKey: string | object;
+  private constructor(private readonly db: Db, private readonly file: string) {
+    this.transactionKey = file === ":memory:" ? this : file;
+  }
 
   static async open(file: string): Promise<SqliteLearningTransactionStore> {
     if (typeof file !== "string" || !file.trim()) throw new Error("Learning database path is required");
@@ -62,8 +70,16 @@ export class SqliteLearningTransactionStore {
 
   transaction<T>(scope: LearningScope, operation: (tx: LearningTransaction) => Promise<T>): Promise<T> {
     assertScope(scope);
-    const run = this.tail.then(() => this.withTransaction(scope, operation));
-    this.tail = run.then(() => undefined, () => undefined);
+    // Keep per-instance ordering and also queue sibling connections for the same file.
+    const local = this.tail;
+    const shared = transactionTails.get(this.transactionKey) ?? Promise.resolve();
+    const run = Promise.all([local, shared]).then(() => this.withTransaction(scope, operation));
+    const settled = run.then(() => undefined, () => undefined);
+    this.tail = settled;
+    transactionTails.set(this.transactionKey, settled);
+    void settled.then(() => {
+      if (transactionTails.get(this.transactionKey) === settled) transactionTails.delete(this.transactionKey);
+    });
     return run;
   }
 
