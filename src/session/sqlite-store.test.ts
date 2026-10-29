@@ -40,6 +40,20 @@ test("SQLite transcript pagination and full-text search work", async () => {
   }
 });
 
+test("session search rejects non-string and oversized queries before querying SQLite", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-search-input-"));
+  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  try {
+    store.save({ id: "search-input", messages: ["safe transcript"], updatedAt: 0 });
+    assert.throws(() => store.search(42 as unknown as string), /query must be a string/);
+    assert.throws(() => store.search("x".repeat(1001)), /must not exceed 1000 characters/);
+    assert.deepEqual(store.search("safe").map((session) => session.id), ["search-input"]);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("invalid transcript writes do not replace stored messages", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-test-"));
   const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
