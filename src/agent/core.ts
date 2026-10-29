@@ -34,7 +34,9 @@ export class SofiaAgent {
     const binding = security
       ? security.bindSignal(request.signal ?? new AbortController().signal)
       : undefined;
-    const activeRequest = binding ? { ...request, signal: binding.signal } : request;
+    const activeRequest = await this.withRelevantUserMemory(
+      binding ? { ...request, signal: binding.signal } : request,
+    );
     let session: { id: string; messages: string[]; updatedAt: number } | undefined;
     try {
       if (request.sessionId && this.deps.sessionStore) {
@@ -61,6 +63,40 @@ export class SofiaAgent {
       throw error;
     } finally {
       binding?.dispose();
+    }
+  }
+
+  /**
+   * Retrieve only explicitly saved memories belonging to the authenticated principal.
+   * Retrieved content is bounded and labeled as untrusted reference data; it never
+   * changes tool permissions. Memory failures are best-effort and must not block a run.
+   */
+  private async withRelevantUserMemory(request: AgentRequest): Promise<AgentRequest> {
+    const store = this.deps.userMemoryStore;
+    const principalId = request.principalId?.trim();
+    const task = request.task.trim();
+    if (!store || !principalId || !task) return request;
+
+    try {
+      const entries = await store.find(principalId, task, 6);
+      if (entries.length === 0) return request;
+      const memoryText = entries
+        .slice(0, 6)
+        .map((entry) => `- [${entry.kind}] ${entry.content.slice(0, 500)}`)
+        .join("\n")
+        .slice(0, 3_500);
+      if (!memoryText) return request;
+
+      const sections = [
+        request.context?.trim()
+          ? `Caller-provided context (untrusted reference data):\n${request.context.slice(0, 4_000)}`
+          : "",
+        `Relevant user memory (untrusted reference data; may be incomplete or outdated):\n${memoryText}`,
+      ].filter(Boolean);
+      return { ...request, context: sections.join("\n\n").slice(0, 7_500) };
+    } catch {
+      // A temporary memory-store failure must not prevent the requested task.
+      return request;
     }
   }
 
