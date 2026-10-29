@@ -28,7 +28,7 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Only explicit `/run <task>` commands dispatch work; ordinary messages do not start runs. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Ordinary text messages dispatch as natural-language tasks by default; set `naturalLanguageEnabled: false` for command-only behavior. Explicit `/run <task>` commands remain supported. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
@@ -53,6 +53,18 @@ The code outline above is not a claim that the repository's API server is alread
 
 
 - The shared Sofia SDK supports an optional `idempotencyKey` for async runs. Reuse a key only for the same logical request; the API returns `409 idempotency_key_reused` if the same key is presented with a different request payload. This protection is currently process-local and is not persisted across server restarts.
+
+## Telegram HTTP 409 troubleshooting
+
+Telegram returns HTTP 409 for a long-polling conflict when another consumer is using `getUpdates`, or when webhook delivery conflicts with polling. Before polling, this transport checks `getWebhookInfo` and refuses to poll when a webhook URL is configured; it does not silently delete an intentional webhook. Repeated HTTP 409 responses should be investigated rather than retried indefinitely.
+
+1. Confirm that only one running process/service uses this exact bot token. Check local development terminals, old Railway services, preview deployments, background workers, and any other host where the bot was tested. Do not paste the token into chat, issues, screenshots, or shell history.
+2. Check the bot's webhook state with Telegram's official `getWebhookInfo` API using a trusted secret-handling method. Never share the full request URL because the bot token is embedded in it. If a webhook is intentionally required, do not use this long-polling transport for that bot.
+3. Stop the stale poller only after confirming which service owns it. Do not stop unrelated Sofia services just because they have a similar name.
+4. After the conflict is resolved, restart the intended test instance and verify that it receives a message from an allowlisted user, rejects an unallowlisted user, and can deliver a real Sofia result.
+5. If HTTP 409 persists, record only the timestamp, service/deployment ID, and status code. Never include the token, full Bot API URL, chat contents, or raw provider response in diagnostics.
+
+The transport treats HTTP 409 as terminal and emits `poll_conflict` rather than entering an exponential retry loop. This makes the failure visible and avoids futile retries; it does not automatically find or stop the competing consumer. The Sofia API can remain available while Telegram polling is stopped.
 
 ## Production acceptance checklist
 

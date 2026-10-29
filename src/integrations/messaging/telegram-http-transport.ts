@@ -10,7 +10,7 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "update_failed" | "delivery_failed", status?: number) => void;
+  onError?: (event: "poll_failed" | "poll_conflict" | "webhook_conflict" | "update_failed" | "delivery_failed", status?: number) => void;
 }
 
 /**
@@ -98,6 +98,13 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         if (signal.aborted || stopped) break;
         const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
           ? error.status : undefined;
+        if (status === 409) {
+          // Telegram rejects concurrent getUpdates consumers with HTTP 409.
+          // Retrying cannot resolve the conflict and can create a noisy restart loop;
+          // stop polling and require the operator to identify the other consumer.
+          try { options.onError?.("poll_conflict", status); } catch { /* diagnostics must not terminate cleanup */ }
+          break;
+        }
         try { options.onError?.("poll_failed", status); } catch { /* logging must not terminate polling */ }
         await wait(backoffMs, signal);
         backoffMs = Math.min(30_000, backoffMs * 2);
@@ -109,25 +116,42 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
     async start(signal, onUpdate) {
       if (!stopped) return;
       stopped = false;
-      controller = new AbortController();
-      const stopFromParent = () => controller?.abort(signal.reason);
+      const activeController = new AbortController();
+      controller = activeController;
+      const stopFromParent = () => activeController.abort(signal.reason);
       signal.addEventListener("abort", stopFromParent, { once: true });
       if (signal.aborted) stopFromParent();
-      // This runtime uses long polling, so remove any stale Telegram webhook
-      // configuration before getUpdates. Preserve queued updates.
-      if (!controller.signal.aborted) {
+      // Long polling and webhook delivery are mutually exclusive. Inspect the
+      // current webhook first and never delete an intentionally configured one.
+      if (!activeController.signal.aborted) {
         try {
-          await request<boolean>("deleteWebhook", { drop_pending_updates: false }, controller.signal);
-        } catch {
-          // Do not log token or provider response bodies. Polling will emit a
-          // safe status-only diagnostic if Telegram still rejects getUpdates.
+          const webhook = await request<{ url: string }>("getWebhookInfo", undefined, activeController.signal);
+          if (webhook.url) {
+            try { options.onError?.("webhook_conflict"); } catch { /* diagnostics must not terminate cleanup */ }
+            signal.removeEventListener("abort", stopFromParent);
+            stopped = true;
+            controller = undefined;
+            return;
+          }
+        } catch (error) {
+          if (!activeController.signal.aborted) {
+            const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
+              ? error.status : undefined;
+            try { options.onError?.("poll_failed", status); } catch { /* diagnostics must not terminate cleanup */ }
+          }
+          signal.removeEventListener("abort", stopFromParent);
+          stopped = true;
+          controller = undefined;
+          return;
         }
       }
-      if (controller.signal.aborted) {
+      if (activeController.signal.aborted) {
         signal.removeEventListener("abort", stopFromParent);
+        stopped = true;
+        controller = undefined;
         return;
       }
-      loop = poll(controller.signal, onUpdate).finally(() => {
+      loop = poll(activeController.signal, onUpdate).finally(() => {
         signal.removeEventListener("abort", stopFromParent);
       });
       // Return after launching the loop; the polling promise is joined by stop().
