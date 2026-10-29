@@ -78,8 +78,8 @@ function privateFile(file: string): void {
 /** SQLite-backed idempotency journal and append-only audit events. */
 export class SqliteLearningRepairJournal implements LearningRepairJournal {
   private tail: Promise<void> = Promise.resolve();
-  private constructor(private readonly db: Db, private readonly file: string, private readonly leaseMs: number) {}
-  static async open(file: string, options: { leaseMs?: number } = {}): Promise<SqliteLearningRepairJournal> {
+  private constructor(private readonly db: Db, private readonly file: string, private readonly leaseMs: number, private readonly clock: () => Date) {}
+  static async open(file: string, options: { leaseMs?: number; now?: () => Date } = {}): Promise<SqliteLearningRepairJournal> {
     const leaseMs = options.leaseMs ?? 60_000;
     if (!Number.isSafeInteger(leaseMs) || leaseMs < 5_000 || leaseMs > 3_600_000) throw new Error("Repair lease must be between 5 seconds and 1 hour");
     if (typeof file !== "string" || !file.trim()) throw new Error("Repair journal path is required");
@@ -97,7 +97,7 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
       const columns = db.prepare("PRAGMA table_info(learning_repair_journal)").all() as Array<{ name?: unknown }>;
       if (!columns.some(column => column.name === "claim_token")) db.exec("ALTER TABLE learning_repair_journal ADD COLUMN claim_token TEXT");
       privateFile(absolute);
-      return new SqliteLearningRepairJournal(db, absolute, leaseMs);
+      return new SqliteLearningRepairJournal(db, absolute, leaseMs, options.now ?? (() => new Date()));
     } catch (error) { db.close(); throw error; }
   }
   private serial<T>(operation: () => T): Promise<T> {
@@ -128,8 +128,8 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
           }
           if (existing.state === "running") {
             const lastHeartbeat = Date.parse(String(existing.updated_at));
-            const requestedAt = Date.parse(entry.updatedAt);
-            const stale = Number.isFinite(lastHeartbeat) && Number.isFinite(requestedAt) && requestedAt - lastHeartbeat >= this.leaseMs;
+            const journalNow = this.clock().getTime();
+            const stale = Number.isFinite(lastHeartbeat) && Number.isFinite(journalNow) && journalNow - lastHeartbeat >= this.leaseMs;
             if (!stale) {
               this.db.exec("COMMIT");
               return { key: String(existing.repair_key), scope: { ...entry.scope }, skillId: String(existing.skill_id), policyRevision: String(existing.policy_revision), state: "running", attempts: Number(existing.attempts), updatedAt: String(existing.updated_at), ...(typeof existing.result === "string" ? { result: existing.result } : {}), claimed: false };
@@ -137,14 +137,16 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
           }
           // Failed attempts and expired running leases may be retried under a new fencing token.
           const claimToken = randomUUID();
-          this.db.prepare("UPDATE learning_repair_journal SET state='running',attempts=attempts+1,updated_at=?,result=NULL,claim_token=? WHERE repair_key=? AND state IN ('failed','running')").run(entry.updatedAt, claimToken, entry.key);
+          const claimedAt = this.clock().toISOString();
+          this.db.prepare("UPDATE learning_repair_journal SET state='running',attempts=attempts+1,updated_at=?,result=NULL,claim_token=? WHERE repair_key=? AND state IN ('failed','running')").run(claimedAt, claimToken, entry.key);
           this.db.exec("COMMIT");
-          return { ...entry, state: "running", attempts: Number(existing.attempts) + 1, claimed: true, claimToken };
+          return { ...entry, state: "running", attempts: Number(existing.attempts) + 1, updatedAt: claimedAt, claimed: true, claimToken };
         } else {
           const claimToken = randomUUID();
-          this.db.prepare("INSERT INTO learning_repair_journal (repair_key,tenant_id,principal_id,project_id,skill_id,policy_revision,state,attempts,updated_at,result,claim_token) VALUES (?,?,?,?,?,?,'running',1,?,NULL,?)").run(entry.key, entry.scope.tenantId, entry.scope.principalId, entry.scope.projectId, entry.skillId, entry.policyRevision, entry.updatedAt, claimToken);
+          const claimedAt = this.clock().toISOString();
+          this.db.prepare("INSERT INTO learning_repair_journal (repair_key,tenant_id,principal_id,project_id,skill_id,policy_revision,state,attempts,updated_at,result,claim_token) VALUES (?,?,?,?,?,?,'running',1,?,NULL,?)").run(entry.key, entry.scope.tenantId, entry.scope.principalId, entry.scope.projectId, entry.skillId, entry.policyRevision, claimedAt, claimToken);
           this.db.exec("COMMIT");
-          return { ...entry, state: "running", attempts: 1, claimed: true, claimToken };
+          return { ...entry, state: "running", attempts: 1, updatedAt: claimedAt, claimed: true, claimToken };
         }
       } catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
     });
@@ -178,7 +180,7 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
     return this.serial(() => {
       this.db.exec("BEGIN IMMEDIATE");
       try {
-        const updated = this.db.prepare("UPDATE learning_repair_journal SET updated_at=? WHERE repair_key=? AND tenant_id=? AND principal_id=? AND project_id=? AND state='running' AND claim_token=?").run(at, key, scope.tenantId, scope.principalId, scope.projectId, claimToken);
+        const updated = this.db.prepare("UPDATE learning_repair_journal SET updated_at=? WHERE repair_key=? AND tenant_id=? AND principal_id=? AND project_id=? AND state='running' AND claim_token=?").run(this.clock().toISOString(), key, scope.tenantId, scope.principalId, scope.projectId, claimToken);
         this.db.exec("COMMIT");
         return Number(updated.changes) === 1;
       } catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
