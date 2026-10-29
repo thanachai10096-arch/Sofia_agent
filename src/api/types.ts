@@ -63,4 +63,10 @@ export interface SofiaApiConfig {
     path?: string;
     maxBodyBytes?: number;
   };
+  /** Optional LINE webhook route; transport verifies signatures against raw request bytes. */
+  lineWebhookRoute?: {
+    transport: LineWebhookTransport;
+    path?: string;
+    maxBodyBytes?: number;
+  };
 }
