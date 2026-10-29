@@ -165,7 +165,7 @@ test("managed learning redacts secret-shaped values before storing skill metadat
     assert.equal(await handler(secretBearing, "run-secret-redaction", "operator-1"), true);
     const active = f.platform.get("learned:workflow-secret-redaction:type_error");
     assert.ok(active);
-    assert.match(active.skill.triggers.join("\\n"), /api_key=\\[REDACTED\\]/i);
+    assert.match(active.skill.triggers.join("\n"), /api_key=\[REDACTED\]/i);
     assert.doesNotMatch(JSON.stringify(active.skill), /secret-value/);
   } finally {
     rmSync(f.directory, { recursive: true, force: true });
