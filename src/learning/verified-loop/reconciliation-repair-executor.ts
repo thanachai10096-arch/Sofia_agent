@@ -307,10 +307,17 @@ export async function executeLearningRepairPlan(
       continue;
     }
     let auditWarning: string | undefined;
+    let heartbeatLost = false;
+    const heartbeatTimer = journal.heartbeat ? setInterval(() => {
+      void journal.heartbeat!(action.idempotencyKey, action.scope, entry.claimToken!, now().toISOString())
+        .then(owned => { if (!owned) heartbeatLost = true; })
+        .catch(() => { heartbeatLost = true; });
+    }, 15_000) : undefined;
     try {
       // Require a durable start audit before any mutation.
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
       await host.registerThroughLifecycle(action);
+      if (heartbeatLost) throw new Error("Repair lease heartbeat lost; authoritative reconciliation required");
       // Registration may already have succeeded; do not skip authoritative
       // postcondition verification merely because this intermediate audit failed.
       try {
@@ -318,6 +325,7 @@ export async function executeLearningRepairPlan(
       } catch {
         auditWarning = "registration audit append failed";
       }
+      if (heartbeatLost) throw new Error("Repair lease heartbeat lost; authoritative reconciliation required");
       const after = await host.revalidate(action);
       if (!after || !validScope(after.scope) || !sameScope(after.scope, action.scope) ||
           !after.exists || !after.active || after.policyRevision !== action.expectedPolicyRevision ||
@@ -325,6 +333,7 @@ export async function executeLearningRepairPlan(
         throw new Error("Post-repair authoritative verification failed");
       }
       await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Postcondition verified", entry.claimToken);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
       const successResult: LearningRepairExecutionResult = { key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", ...(auditWarning ? { reason: auditWarning } : {}) };
       results.push(successResult);
       // The repair is already durably finalized. A later audit append failure must
@@ -335,6 +344,7 @@ export async function executeLearningRepairPlan(
         successResult.reason = [successResult.reason, "success audit append failed"].filter(Boolean).join("; ") || "success audit append failed";
       }
     } catch (error) {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
       const reason = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
       // Finalize the owned attempt first so an audit backend failure cannot strand
       // it in running. A stale token cannot mutate a newer attempt.
