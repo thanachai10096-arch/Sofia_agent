@@ -76,3 +76,21 @@ test("verified-completion bridge persists an authoritative receipt before delive
   assert.deepEqual(delivered, [{ scope, receiptId: "receipt-authoritative-1", summary: "Repair and verify the build" }]);
   assert.equal(checkpoint.getState().lastSequence, 1);
 });
+
+
+test("verified-completion bridge rejects malformed callback shapes without throwing or persisting", async () => {
+  const checkpoint = checkpointFixture();
+  let persisted = false;
+  const handler = createVerifiedCompletionHandler({
+    loop: { async recordVerifiedCompletion() { assert.fail("malformed callback must not enter learning"); } } as unknown as VerifiedLearningLoop,
+    resolveScope: async () => scope,
+    persistFinalizedReceipt: async () => { persisted = true; return { receiptId: "receipt-1", sequence: 1 }; },
+    checkpoints: checkpoint.checkpoints,
+    redact: value => value,
+  });
+
+  await handler({ ...completion(), evidenceIds: undefined } as unknown as FinalizedBrainCompletion);
+  await handler({ ...completion(), verification: [{ ...completion().verification[0], evidenceIds: undefined }] } as unknown as FinalizedBrainCompletion);
+  assert.equal(persisted, false);
+  assert.equal(checkpoint.getState().lastSequence, 0);
+});
