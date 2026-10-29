@@ -1,4 +1,5 @@
 import test from "node:test";
+import { createVoiceProviderRegistry, loadVoiceProviderSelectionFromEnv } from "../src/voice/provider-registry.js";
 import assert from "node:assert/strict";
 import { VoiceWorkflow } from "../src/voice/workflow.js";
 
@@ -43,7 +44,6 @@ test("voice workflow supports text-only replies and respects cancellation", asyn
 });
 
 
-import { createVoiceProviderRegistry, loadVoiceProviderSelectionFromEnv } from "../src/voice/provider-registry.js";
 
 test("voice provider registry is disabled by default and does not couple to model routing", () => {
   const registry = createVoiceProviderRegistry();
