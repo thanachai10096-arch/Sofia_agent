@@ -124,8 +124,18 @@ export function createIsolatedSkillBenchmarkEvaluator(
     const deadline = Date.now() + maxTotalDurationMs;
     const checks: SkillEvaluationResult["checks"] = [];
     let baseline: SkillPackage | undefined;
+    let baselineLookupTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      baseline = await options.getActiveBaseline?.(candidate.skill.id);
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw new Error("Total benchmark time budget exhausted before baseline lookup");
+      const lookup = Promise.resolve().then(() => options.getActiveBaseline?.(candidate.skill.id));
+      const lookupTimeout = new Promise<never>((_, reject) => {
+        baselineLookupTimer = setTimeout(
+          () => reject(new Error("Active baseline lookup timed out")),
+          remainingMs,
+        );
+      });
+      baseline = await Promise.race([lookup, lookupTimeout]);
     } catch (error) {
       return {
         passed: false,
@@ -137,6 +147,8 @@ export function createIsolatedSkillBenchmarkEvaluator(
         }],
         evaluatedAt: new Date().toISOString(),
       };
+    } finally {
+      if (baselineLookupTimer) clearTimeout(baselineLookupTimer);
     }
     if (baseline && baseline.skill?.id !== candidate.skill.id) {
       return {
