@@ -30,3 +30,8 @@ The `learning_active_skills` table is the loop's durable record, **not** proof t
 - Regression evaluation must execute real checks. Metadata labels such as `typecheck`, `test`, and `build` are not evidence that those checks passed.
 - The Brain callback is best-effort and cannot change a verified task into a failed task.
 - This change does not automatically deploy or enable production learning. A production adapter must be reviewed and tested against the actual durable stores and policy gateway before activation.
+
+
+## Read-only activation reconciliation
+
+`reconcileLearningActivationState(scope, learningSkills, runtimeSkills)` compares scope-filtered records from the learning SQLite store and an authoritative runtime/lifecycle adapter. It reports missing runtime registration (possible crash after learning-store/runtime divergence), runtime-active skills without a learning record, policy-revision drift, duplicate IDs, and cross-scope input. The function is deliberately read-only: it never activates, unregisters, deletes, or overwrites a skill. The caller must obtain runtime records from an authoritative adapter that can prove tenant/principal/project ownership; a global lifecycle listing without scope provenance must not be passed as if it were scoped. Repair should be implemented separately as an audited, idempotent operation after the report is reviewed. This detects inconsistencies but does not claim to make two separate stores atomic.
