@@ -33,6 +33,24 @@ function firstEnv(...names: string[]): string {
   return "";
 }
 
+function optionalBooleanEnv(name: string): boolean | undefined {
+  const value = process.env[name]?.trim().toLowerCase();
+  if (!value) return undefined;
+  if (value === "true" || value === "1" || value === "yes") return true;
+  if (value === "false" || value === "0" || value === "no") return false;
+  throw new Error(name + " must be true or false.");
+}
+
+function optionalPositiveIntegerEnv(name: string): number | undefined {
+  const value = process.env[name]?.trim();
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(name + " must be a positive safe integer.");
+  }
+  return parsed;
+}
+
 function normalizeBaseUrl(value: string): string {
   let parsed: URL;
   try {
@@ -165,6 +183,18 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     const routeModelName = selected.routeModelPrefix + "_" + id.toUpperCase() + "_MODEL";
     const model = firstEnv(routeModelName) || selected.defaultModel;
 
+    const featurePrefix = "SOFIA_" + id.toUpperCase() + "_SUPPORTS_";
+    const toolCalling = optionalBooleanEnv(featurePrefix + "TOOL_CALLING");
+    const vision = optionalBooleanEnv(featurePrefix + "VISION");
+    const structuredOutput = optionalBooleanEnv(featurePrefix + "STRUCTURED_OUTPUT");
+    const contextWindow = optionalPositiveIntegerEnv("SOFIA_" + id.toUpperCase() + "_CONTEXT_WINDOW");
+    const featureSupport = {
+      ...(toolCalling !== undefined ? { toolCalling } : {}),
+      ...(vision !== undefined ? { vision } : {}),
+      ...(structuredOutput !== undefined ? { structuredOutput } : {}),
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
+    };
+
     routes.push({
       id,
       providerId: id,
@@ -174,6 +204,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       latencyWeight: numberEnv("SOFIA_" + id.toUpperCase() + "_LATENCY", latency),
       qualityWeight: numberEnv("SOFIA_" + id.toUpperCase() + "_QUALITY", quality),
       healthy: true,
+      ...(Object.keys(featureSupport).length ? { featureSupport } : {}),
     });
     providers[id] = {
       baseUrl: selected.baseUrl,
