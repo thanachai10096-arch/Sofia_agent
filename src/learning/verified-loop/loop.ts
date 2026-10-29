@@ -147,6 +147,13 @@ export class VerifiedLearningLoop {
       if (!this.host.promoteCandidate) return { recorded: true, experienceId: prepared.experienceId };
       const promotionAllowed = await this.host.promoteCandidate(scope, assessedCandidate);
       if (promotionAllowed !== true) return { recorded: true, experienceId: prepared.experienceId };
+      // Promotion may involve an evaluator or human approval and can take time.
+      // Re-check after that external work so a policy revision during promotion
+      // cannot activate a skill assessed under the previous policy.
+      const policyAfterPromotion = await this.host.currentPolicyRevision(scope);
+      if (policyAfterPromotion !== currentPolicy) {
+        return { recorded: true, experienceId: prepared.experienceId };
+      }
       const active: ActiveLearningSkill = {
         ...assessedCandidate, status: "active", activatedAt: new Date().toISOString(),
         policyRevision: latestPolicy,
