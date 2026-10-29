@@ -18,7 +18,7 @@ The main branch currently exports `VoiceWorkflow` and its provider contracts fro
 The current tests in `tests/voice-workflow.test.ts` cover the workflow using mock providers, validation, text-only replies, and cancellation. These are unit-level tests, not proof of live STT/TTS integration.
 
 Known boundaries:
-- No concrete STT or TTS provider is bundled by the workflow itself.
+- `src/voice/openai-compatible-provider.ts` now supplies an opt-in adapter for OpenAI-style audio transcription and speech endpoints. It is not auto-registered, and unit tests with mocked `fetch` do not establish live compatibility with any particular vendor. No live provider has been configured or tested.
 - Duration is supplied by the host; production adapters must inspect/decode media independently and enforce actual duration and decode/resource limits.
 - The workflow itself is not a browser microphone UI, a Telegram voice-message adapter, or a Discord real-time voice connection.
 - The workflow is exported from the package entry point, but that alone does not prove it is wired into a running API or desktop application.
@@ -75,8 +75,9 @@ Use the existing `src/voice/workflow.ts` as the workflow foundation; do not repl
 - `src/voice/workflow.ts`: existing provider-injected STT → Sofia callback → optional TTS workflow.
 - `src/voice/channel-handler.ts`: shared handler for verified normalized voice events, access policy, deduplication, workflow invocation, and text/audio delivery.
 - `src/voice/provider-registry.ts`: explicit STT/TTS provider registration and selection, plus non-secret environment routing settings; voice stays disabled by default.
+- `src/voice/openai-compatible-provider.ts`: opt-in adapter for OpenAI-style `/audio/transcriptions` and `/audio/speech` endpoints; no automatic registration or credentials are bundled.
 - `src/integrations/voice/...`: future platform-specific adapters that verify platform events, safely acquire media, decode/inspect duration, and deliver responses.
-- Media decoder, session controller, concrete STT/TTS providers, and live channel adapters remain future work; do not claim they exist until added and tested.
+- Independent media decoding, actual duration verification, a production host wiring path, and live provider/channel tests remain future work; do not claim these are complete.
 - `docs/VOICE-WORKFLOW.md`: integration contract and safety requirements.
 
 The channel handler is a shared contract, not a claim that transport adapters for all listed channels already exist. Extend existing adapters where possible and avoid parallel messaging/runtime abstractions.
@@ -114,7 +115,7 @@ Suggested configuration shape (names are illustrative; align with existing confi
 - No credential values in client bundles, logs, error messages, trace payloads, or persisted session transcripts.
 - Provider failover is allowed only to another explicitly enabled provider; otherwise return a clear text fallback when safe.
 
-Do not add a dependency or commit a provider implementation until its license, data handling, supported formats, timeout behavior, and environment compatibility have been reviewed.
+The generic compatible-endpoint adapter adds no dependency. Before enabling any concrete provider in a deployment, review that provider's API compatibility, license/terms, data handling, supported formats, timeout behavior, and environment compatibility.
 
 ## Session and privacy contract
 
@@ -152,8 +153,8 @@ Realtime transport must still use the same Sofia request/session and policy cont
 - Exit: typecheck/build/tests pass; disabled voice does not change current behavior.
 
 ### P1 — one real provider pair and message channels
-- Select one STT and one TTS provider behind the existing interfaces; add no provider-specific logic to the core workflow.
-- Add explicit provider registration and provider contract tests.
+- A generic OpenAI-compatible STT/TTS adapter and mocked provider-contract tests are now on the feature branch; it is not live-certified for any vendor.
+- Select and validate one actual provider behind the existing interfaces; add no provider-specific logic to the core workflow.
 - Wire a single API/SDK host entry point; test one real audio turn end-to-end in a non-production environment.
 - Add Telegram voice-message handling; then Discord text attachment support only after SSRF-safe media fetching exists.
 - Exit: real provider smoke test, allowlist and replay tests, provider failure fallback, no secrets in logs.
