@@ -42,7 +42,17 @@ export class ModelRouter {
     }
   }
 
-  select(kind: TaskKind): ModelRoute {
+  listRoutes(): ModelRoute[] {
+    return this.routes.map((route) => ({ ...route, capabilities: [...route.capabilities] }));
+  }
+
+  select(kind: TaskKind, preferredRouteId?: string): ModelRoute {
+    if (preferredRouteId && preferredRouteId !== "auto") {
+      const preferred = this.routes.find((route) => route.id === preferredRouteId);
+      if (!preferred) throw new Error("Unknown model route: " + preferredRouteId);
+      if (!preferred.healthy) throw new Error("Requested model route is unhealthy: " + preferredRouteId);
+      return preferred;
+    }
     const winner = this.winners.get(kind);
     if (!winner || !winner.healthy) {
       this.rebuild();

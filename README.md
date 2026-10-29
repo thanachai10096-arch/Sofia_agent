@@ -23,7 +23,7 @@ A model-agnostic AI agent runtime with internal model routing, policy-controlled
 
 Sofia Agent is a standalone agent runtime and platform. It turns a request into a managed execution lifecycle: understand the goal, plan the work, perform actions through approved capabilities, verify the outcome, and recover when something fails.
 
-> **Model routing is an internal policy.** End users do not choose models; Sofia decides how requests are handled.
+> **Model routing is automatic by default.** Authenticated users may select one of the server-configured routes via `GET /v1/models` and `modelRouteId`. Clients cannot submit provider URLs or API keys, and an explicit route is not silently replaced.
 
 
 ## Open source and contribution
@@ -32,6 +32,7 @@ Sofia Agent is distributed under the [MIT License](LICENSE). Review third-party 
 
 - **Contribute:** [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Report security issues:** [SECURITY.md](SECURITY.md)
+- **Model providers and user route selection:** [docs/MODEL_SELECTION.md](docs/MODEL_SELECTION.md)
 - **Open-source and commercial roadmap boundaries:** [docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md](docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md)
 - **Shared access architecture:** [docs/UNIFIED_ACCESS_ARCHITECTURE.md](docs/UNIFIED_ACCESS_ARCHITECTURE.md)
 
@@ -213,7 +214,7 @@ Before exposing Sofia to external clients, follow the [API Security and Deployme
 
 ## `> Integration principle`
 
-Clients should use Sofia Agent's stable API/SDK and let Sofia apply internal model routing and execution policy. Keep model selection and privileged capabilities out of the end-user interface.
+Clients should use Sofia Agent's stable API/SDK and let Sofia enforce execution policy. They may choose only from the configured model routes returned by `GET /v1/models`, or omit `modelRouteId` to let Sofia route automatically. Never accept provider URLs, API keys, or privileged capabilities from an untrusted client.
 
 ---
 

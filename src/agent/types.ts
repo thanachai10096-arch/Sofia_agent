@@ -12,6 +12,8 @@ import type { DesktopCapability } from "../desktop/types.js";
 export interface AgentRequest {
   task: string;
   context?: string;
+  /** Explicit configured route ID, or auto/omitted for Sofia's automatic routing. */
+  modelRouteId?: string;
   sessionId?: string;
   principalId?: string;
   /** Desktop capabilities are derived by the trusted host from authenticated scopes. */
@@ -33,13 +35,13 @@ export interface AgentResult {
 }
 export interface AgentDependencies {
  provider:ModelProvider;
- router:{select(kind:TaskKind):ModelRoute;markUnhealthy(id:string):void};
+ router:{select(kind:TaskKind,preferredRouteId?:string):ModelRoute;listRoutes?():ModelRoute[];markUnhealthy(id:string):void};
  reviewer:{review(task:string,output:string):Promise<{approved:boolean;reason:string}>};
  runtime?:WorkspaceRuntime;
  tools?:ToolRegistry;
  policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
- brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
+ brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
  jobRuntime?: JobRuntime;
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;

@@ -973,3 +973,27 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("DurableJobRuntime preserves the selected model route on submitted jobs", async () => {
+  const namespace = "job-runtime-model-route-" + randomUUID();
+  let selectedRoute: string | undefined;
+  const brain = {
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime((options) => {
+    selectedRoute = options.modelRouteId;
+    return brain;
+  }, undefined, namespace);
+
+  const submitted = await runtime.submit({ task: "run with selected model", modelRouteId: "coding" });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(selectedRoute, "coding");
+  assert.equal(current?.modelRouteId, "coding");
+  assert.equal(current?.status, "completed");
+});

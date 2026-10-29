@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
+import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
 
 const route: ModelRoute = {
@@ -70,6 +71,78 @@ test("API sessions are persisted and scoped to the authenticated API key", async
       "assistant: Task completed.",
     ]);
     assert.equal(sessions.get("shared-client-session"), undefined);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API lists configured models and honors an explicit model route", async () => {
+  const routes: ModelRoute[] = [
+    { id: "fast", model: "vendor/fast-model", capabilities: ["fast"], costWeight: 1, latencyWeight: 1, qualityWeight: 5, healthy: true },
+    { id: "coding", model: "vendor/coding-model", capabilities: ["coding", "tool-use", "reasoning"], costWeight: 2, latencyWeight: 2, qualityWeight: 8, healthy: true },
+  ];
+  const router = new ModelRouter(routes);
+  const selected: string[] = [];
+  const server = createSofiaApi({
+    provider: {
+      generate: async (_request, route) => {
+        selected.push(route.id);
+        return { text: "Task completed." };
+      },
+    },
+    router,
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, {
+    apiKeys: { "model-key": ["agent:run", "agent:read"] },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  try {
+    const listed = await fetch(baseUrl + "/v1/models", {
+      headers: { authorization: "Bearer model-key" },
+    });
+    assert.equal(listed.status, 200);
+    const payload = await listed.json() as { automaticSelection: boolean; models: Array<{ id: string; model: string }> };
+    assert.equal(payload.automaticSelection, true);
+    assert.deepEqual(payload.models.map((model) => ({ id: model.id, model: model.model })), [
+      { id: "fast", model: "vendor/fast-model" },
+      { id: "coding", model: "vendor/coding-model" },
+    ]);
+
+    const response = await fetch(baseUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer model-key", "content-type": "application/json" },
+      body: JSON.stringify({ task: "do a general task", modelRouteId: "coding" }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(selected, ["coding"]);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("API rejects unknown model routes before starting a run", async () => {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Should not run." }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, { apiKeys: { "model-key": ["agent:run"] } });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer model-key", "content-type": "application/json" },
+      body: JSON.stringify({ task: "do a task", modelRouteId: "not-configured" }),
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "invalid_model_route" });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

@@ -101,6 +101,8 @@ interface Dependencies {
 
 export interface BrainRunInput {
   task: string;
+  /** Optional configured model route; omitted/auto lets the gateway choose. */
+  modelRouteId?: string;
   /** Prior conversation/project context; always passed to the model as untrusted reference data. */
   context?: string;
   principalId?: string;

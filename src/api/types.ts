@@ -6,6 +6,8 @@ export interface AgentRunInput {
   task: string;
   workspace?: string;
   context?: string;
+  /** Configured route ID from GET /v1/models; omit or use auto for automatic routing. */
+  modelRouteId?: string;
   maxSteps?: number;
   stream?: boolean;
   sessionId?: string;

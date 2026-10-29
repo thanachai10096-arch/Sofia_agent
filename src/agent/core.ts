@@ -112,6 +112,7 @@ export class SofiaAgent {
       ...(request.signal ? { signal: request.signal } : {}),
       ...(request.maxSteps !== undefined ? { maxSteps: request.maxSteps } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
+      ...(request.modelRouteId && request.modelRouteId !== "auto" ? { modelRouteId: request.modelRouteId } : {}),
       ...(request.desktopCapabilities?.length ? { desktopCapabilities: request.desktopCapabilities } : {}),
       onEvent: (event) => {
         if (event.type === "brain.tool.started") {
@@ -224,7 +225,7 @@ export class SofiaAgent {
     for (let step = 1; step <= maxSteps; step += 1) {
       try {
         assertSafeStep(policy, step);
-        const route = this.deps.router.select(kind);
+        const route = this.deps.router.select(kind, request.modelRouteId);
 
         emit({
           type: "model.selected",

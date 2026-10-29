@@ -196,6 +196,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     ...(run.error ? { error: run.error } : {}),
   });
 
+  const modelSelectionError = (input: AgentRunInput): { status: number; error: string } | undefined => {
+    const requested = input.modelRouteId?.trim();
+    if (!requested || requested === "auto") return undefined;
+    const routes = deps.router.listRoutes?.();
+    if (!routes) return { status: 503, error: "model_selection_unavailable" };
+    const route = routes.find((item) => item.id === requested);
+    if (!route) return { status: 400, error: "invalid_model_route" };
+    if (!route.healthy) return { status: 409, error: "model_route_unavailable" };
+    return undefined;
+  };
+
   const startRun = (run: ActiveRun, input: AgentRunInput) => {
     void (async () => {
       run.status = "running";
@@ -207,6 +218,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
+          ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
           ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -369,6 +381,19 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const adminScope = config.securityAdminScope ?? "security:admin";
       const isSecurityAdmin = auth.scopes.includes(adminScope);
+      if (req.method === "GET" && req.url === "/v1/models") {
+        const routes = deps.router.listRoutes?.();
+        if (!routes) return json(res, 503, { error: "model_selection_unavailable" }, origin, config);
+        return json(res, 200, {
+          automaticSelection: true,
+          models: routes.map((route) => ({
+            id: route.id,
+            model: route.model ?? route.id,
+            capabilities: [...route.capabilities],
+            healthy: route.healthy,
+          })),
+        }, origin, config);
+      }
       if (req.method === "GET" && req.url === "/v1/learning/diagnostics") {
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         if (!deps.learningDiagnostics) return json(res, 503, { error: "learning_diagnostics_unavailable" }, origin, config);
@@ -421,6 +446,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
+        const selectionError = modelSelectionError(input);
+        if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch {
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
@@ -449,6 +476,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+            ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -483,6 +511,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
+        const selectionError = modelSelectionError(input);
+        if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
 
         // Async mode is the reliable path for phones: the browser may sleep,
@@ -503,6 +533,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
             ...(input.context !== undefined ? { context: input.context } : {}),
             ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
+            ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.acceptanceCriteria !== undefined ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
             ...(input.priority !== undefined ? { priority: input.priority } : {}),
             ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
@@ -561,6 +592,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+            ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
@@ -700,11 +732,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
+        const selectionError = modelSelectionError(input);
+        if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
           const job = await deps.jobRuntime.submit({
             task: input.task,
+            ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });

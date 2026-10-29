@@ -45,3 +45,17 @@ test("API run validation rejects duplicate acceptance criterion IDs", () => {
     acceptanceCriteria: [criterion, { ...criterion, description: "Second criterion" }],
   }).valid, false);
 });
+
+
+test("API run validation accepts configured model route IDs and automatic routing", () => {
+  assert.equal(validateAgentRunInput({ task: "inspect", modelRouteId: "coding" }).valid, true);
+  assert.equal(validateAgentRunInput({ task: "inspect", modelRouteId: "auto" }).valid, true);
+});
+
+test("API run validation rejects malformed model route selectors", () => {
+  assert.deepEqual(validateAgentRunInput({ task: "inspect", modelRouteId: "../secret" }), {
+    valid: false,
+    error: "invalid_model_route",
+  });
+  assert.equal(validateAgentRunInput({ task: "inspect", modelRouteId: 123 }).valid, false);
+});
