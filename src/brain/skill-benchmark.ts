@@ -116,7 +116,21 @@ export function createIsolatedSkillBenchmarkEvaluator(
 
   return async (candidate): Promise<SkillEvaluationResult> => {
     const checks: SkillEvaluationResult["checks"] = [];
-    const baseline = await options.getActiveBaseline?.(candidate.skill.id);
+    let baseline: SkillPackage | undefined;
+    try {
+      baseline = await options.getActiveBaseline?.(candidate.skill.id);
+    } catch (error) {
+      return {
+        passed: false,
+        checks: [{
+          name: "baseline-evidence",
+          passed: false,
+          detail: "Unable to load active baseline: " +
+            (error instanceof Error ? error.message.slice(0, 250) : "unknown error"),
+        }],
+        evaluatedAt: new Date().toISOString(),
+      };
+    }
     if (baseline && baseline.skill?.id !== candidate.skill.id) {
       return {
         passed: false,
