@@ -1167,6 +1167,55 @@ export class SofiaBrain {
           ? "Task completed and all acceptance criteria passed."
           : "Task completed.";
 
+      // Keep a compact, reusable workflow trace only when trusted verification
+      // produced evidence. Never persist tool inputs or outputs, which may contain
+      // user data or secrets; this memory is advisory context, not an executable skill.
+      const workflowEvidence = verification.flatMap((item) => item.evidenceIds).filter(Boolean).slice(0, 12);
+      if (
+        this.dependencies.projectMemory &&
+        this.projectContext &&
+        verification.length > 0 &&
+        verification.every((item) => item.passed) &&
+        workflowEvidence.length > 0
+      ) {
+        const workflowSteps = currentPlan.steps.slice(0, 12).map((step) => ({
+          tool: step.call.tool.slice(0, 160),
+          objective: step.objective.slice(0, 160),
+        }));
+        const objective = understanding.objective.slice(0, 300);
+        const content = [
+          "Verified workflow pattern (advisory reference only)",
+          "Objective: " + objective,
+          "Task type: " + (understanding.requiredCapabilities[0] ?? "general"),
+          "Successful steps:",
+          ...workflowSteps.map((step, index) => (index + 1) + ". " + step.tool + ": " + step.objective),
+          "Verification evidence: " + workflowEvidence.join(", "),
+        ].join("\n").slice(0, 3_500);
+        const id = "workflow:" + digest({
+          project: this.projectContext.root,
+          objective: objective.toLocaleLowerCase(),
+          tools: workflowSteps.map((step) => step.tool),
+        });
+        const now = new Date().toISOString();
+        const entry: ProjectMemoryEntry = {
+          id,
+          project: this.projectContext.root,
+          kind: "decision",
+          content,
+          source: "verified-workflow",
+          confidence: 0.8,
+          createdAt: now,
+          updatedAt: now,
+          uses: 0,
+        };
+        try {
+          await this.wait(() => this.dependencies.projectMemory!.save(entry));
+          this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
+        } catch {
+          // Workflow learning is best-effort and must not invalidate completed work.
+        }
+      }
+
       if (this.dependencies.skillLedger && this.diagnoses.length > 0 && verification.every((item) => item.passed)) {
         const last = this.diagnoses[this.diagnoses.length - 1]!;
         const strategy = this.decisions[this.decisions.length - 1]?.strategy ?? "fix-implementation";
