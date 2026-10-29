@@ -41,6 +41,13 @@ export function createVerifiedCompletionHandler(options: {
 
     const scope = await options.resolveScope(input);
     if (!scope || ![scope.tenantId, scope.principalId, scope.projectId].every(value => typeof value === "string" && value.trim().length > 0)) throw new Error("Scope resolver returned an invalid authenticated scope");
+    // The callback's principal is untrusted metadata, not an authority source.
+    // If present, it must agree with the host-authenticated scope to prevent a
+    // confused-deputy mismatch between the originating run and learning owner.
+    if (input.principalId !== undefined &&
+        (typeof input.principalId !== "string" || input.principalId !== scope.principalId)) {
+      throw new Error("Verified completion principal does not match authenticated learning scope");
+    }
     const key = JSON.stringify([scope.tenantId, scope.principalId, scope.projectId]);
     let worker = workers.get(key);
     if (!worker) {
@@ -49,8 +56,9 @@ export function createVerifiedCompletionHandler(options: {
       });
       workers.set(key, worker);
     }
-    const persisted = await options.persistFinalizedReceipt(input, scope);
-    if (!Number.isSafeInteger(persisted.sequence) || persisted.sequence < 1 || !persisted.receiptId) {
+    const persisted: PersistedCompletionReceipt = await options.persistFinalizedReceipt(input, scope);
+    if (!persisted || !Number.isSafeInteger(persisted.sequence) || persisted.sequence < 1 ||
+        typeof persisted.receiptId !== "string" || !persisted.receiptId.trim() || persisted.receiptId.length > 500) {
       throw new Error("Receipt adapter returned invalid sequence or receipt id");
     }
     await worker.onVerifiedExecution({
