@@ -31,3 +31,30 @@ test("explicit route selection honors a user preference and exposes safe route m
   ]);
   assert.throws(() => router.select("general", "missing"), /Unknown model route/);
 });
+
+
+test("router skips a route explicitly declared without vision support", () => {
+  const router = new ModelRouter([
+    { id: "preferred-but-no-vision", capabilities: ["vision", "reasoning"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true, featureSupport: { vision: false } },
+    { id: "vision-capable", capabilities: ["vision", "reasoning"], costWeight: 2, latencyWeight: 2, qualityWeight: 5, healthy: true, featureSupport: { vision: true } },
+  ]);
+
+  assert.equal(router.select("vision").id, "vision-capable");
+});
+
+test("router skips a route explicitly declared without tool calling for coding tasks", () => {
+  const router = new ModelRouter([
+    { id: "no-tools", capabilities: ["coding", "tool-use", "reasoning"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true, featureSupport: { toolCalling: false } },
+    { id: "with-tools", capabilities: ["coding", "tool-use", "reasoning"], costWeight: 2, latencyWeight: 2, qualityWeight: 5, healthy: true, featureSupport: { toolCalling: true } },
+  ]);
+
+  assert.equal(router.select("coding").id, "with-tools");
+});
+
+test("router preserves backward compatibility when capability metadata is unknown", () => {
+  const router = new ModelRouter([
+    { id: "legacy", capabilities: ["vision", "reasoning"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+  ]);
+
+  assert.equal(router.select("vision").id, "legacy");
+});
