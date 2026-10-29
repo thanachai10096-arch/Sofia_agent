@@ -65,7 +65,15 @@ export async function createBackupBundle(
     if (files.length + snapshotFiles.length > MAX_BACKUP_MANIFEST_ENTRIES) {
       throw new Error("Backup contains too many entries.");
     }
-    for (const file of snapshotFiles) files.push(file);
+    for (const file of snapshotFiles) {
+      if (typeof file !== "object" || file === null ||
+          typeof file.path !== "string" || !(file.content instanceof Uint8Array)) {
+        throw new Error(`Backup snapshot source ${source.name} returned an invalid file entry.`);
+      }
+      // Own the bytes: source stores may reuse or mutate their buffers after
+      // snapshot() resolves, and a backup bundle must not silently drift.
+      files.push({ path: file.path, content: new Uint8Array(file.content) });
+    }
   }
 
   const manifest = createBackupManifest(files, createdAt);
