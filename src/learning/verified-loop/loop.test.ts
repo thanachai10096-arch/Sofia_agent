@@ -111,3 +111,32 @@ test("does not activate a candidate when assessment confidence is not finite", a
   assert.equal(result.skillActivated, undefined);
   assert.equal(state.active.length, 0);
 });
+
+test("runs policy assessment and regression outside the persistence transaction", async () => {
+  const state = makeHost();
+  let transactionDepth = 0;
+  const transaction = state.host.transaction.bind(state.host);
+  state.host.transaction = async (requestedScope, operation) => {
+    transactionDepth++;
+    try { return await transaction(requestedScope, operation); }
+    finally { transactionDepth--; }
+  };
+  const assess = state.host.assessCandidate.bind(state.host);
+  state.host.assessCandidate = async (requestedScope, candidate) => {
+    assert.equal(transactionDepth, 0, "policy assessment must not run under a write transaction");
+    return assess(requestedScope, candidate);
+  };
+  const regression = state.host.verification.runRegression.bind(state.host.verification);
+  state.host.verification.runRegression = async (requestedScope, candidate) => {
+    assert.equal(transactionDepth, 0, "regression execution must not run under a write transaction");
+    return regression(requestedScope, candidate);
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "tx-1", "run1");
+  addReceipt(state, "tx-2", "run2");
+  addReceipt(state, "tx-3", "run3");
+  await loop.recordVerifiedCompletion(scope, "tx-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "tx-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "tx-3", "Fix TypeScript build");
+  assert.ok(result.skillActivated);
+});
