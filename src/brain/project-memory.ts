@@ -21,14 +21,35 @@ export interface ProjectMemoryStore {
   find(query: string): Promise<ProjectMemoryEntry[]>;
 }
 
+function isProjectMemoryEntry(value: unknown): value is ProjectMemoryEntry {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entry = value as Partial<ProjectMemoryEntry>;
+  return typeof entry.id === "string" && entry.id.length > 0 &&
+    typeof entry.project === "string" && entry.project.length > 0 &&
+    (entry.kind === "convention" || entry.kind === "repair" || entry.kind === "decision") &&
+    typeof entry.content === "string" && entry.content.length <= 4000 &&
+    (entry.source === undefined || typeof entry.source === "string") &&
+    typeof entry.confidence === "number" && Number.isFinite(entry.confidence) &&
+    typeof entry.createdAt === "string" && typeof entry.updatedAt === "string" &&
+    typeof entry.uses === "number" && Number.isFinite(entry.uses) && entry.uses >= 0;
+}
+
 export class FileProjectMemoryStore implements ProjectMemoryStore {
   private readonly file: string;
   constructor(project: string, root = sofiaStateDirectory("memory")) {
     const key = createHash("sha256").update(project).digest("hex"); this.file = path.join(root, key + ".json");
   }
   private async read(): Promise<ProjectMemoryEntry[]> {
-    try { return JSON.parse(await fs.readFile(this.file, "utf8")) as ProjectMemoryEntry[]; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    try {
+      const parsed: unknown = JSON.parse(await fs.readFile(this.file, "utf8"));
+      if (!Array.isArray(parsed)) throw new Error("Project memory file must contain a JSON array.");
+      // Ignore malformed records rather than allowing a single damaged entry to
+      // crash list/find or become model context. Keep parse/I/O failures visible.
+      return parsed.filter(isProjectMemoryEntry);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
   }
   async save(entry: ProjectMemoryEntry): Promise<void> {
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
@@ -101,8 +122,14 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
       .slice(0, 12);
   }
   readSync(): ProjectMemoryEntry[] {
-    try { const entries=JSON.parse(readFileSync(this.file,"utf8")) as ProjectMemoryEntry[]; return entries.filter(entry=>!containsPromptInjection(entry.content)); }
-    catch { return []; }
+    try {
+      const entries: unknown = JSON.parse(readFileSync(this.file, "utf8"));
+      return Array.isArray(entries)
+        ? entries.filter(isProjectMemoryEntry).filter((entry) => !containsPromptInjection(entry.content))
+        : [];
+    } catch {
+      return [];
+    }
   }
 }
 
