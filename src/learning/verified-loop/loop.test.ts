@@ -43,6 +43,7 @@ function makeHost() {
     async currentPolicyRevision() { return "policy-1"; },
     redact(value) { return value.replace(/secret/gi, "[redacted]"); },
     async assessCandidate(_scope, candidate) { return { allowed: true, confidence: Math.max(candidate.confidence, 0.9) }; },
+    async promoteCandidate() { return true; },
   };
   return { host, receipts, evidence, experiences, active, evaluations };
 }
@@ -162,4 +163,19 @@ test("resumes candidate evaluation when an earlier attempt persisted the receipt
   const resumed = await loop.recordVerifiedCompletion(scope, "resume-3", "Fix TypeScript build");
   assert.ok(resumed.skillActivated);
   assert.equal(state.active.length, 1);
+});
+
+
+test("does not activate a learned skill without the existing lifecycle promotion gate", async () => {
+  const state = makeHost();
+  delete state.host.promoteCandidate;
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "no-gate-1", "run1");
+  addReceipt(state, "no-gate-2", "run2");
+  addReceipt(state, "no-gate-3", "run3");
+  await loop.recordVerifiedCompletion(scope, "no-gate-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "no-gate-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "no-gate-3", "Fix TypeScript build");
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
 });
