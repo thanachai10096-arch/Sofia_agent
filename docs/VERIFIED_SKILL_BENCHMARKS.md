@@ -8,7 +8,7 @@ Sofia already has a versioned skill lifecycle, persistent provenance, evaluator 
 - The caller supplies an `IsolatedSkillBenchmarkRunner`. It must run the skill inside an isolated workspace/sandbox and enforce Sofia's existing tool policy, permissions, and execution limits. This module does not execute procedure text.
 - The candidate is run against every fixture. The evaluator records per-fixture pass/fail evidence, aggregate pass rate, and mean score.
 - If an active baseline is supplied, the candidate and baseline run on the same fixtures. Promotion evidence fails if pass rate or score regresses beyond the configured tolerance.
-- Invalid metrics, per-fixture timeouts, exhausted total wall-clock budget, failed fixtures, duplicate fixtures, or insufficient fixtures fail closed. The total benchmark budget defaults to 120 seconds and is capped at 30 minutes; each individual fixture also has its own timeout.
+- Invalid metrics, per-fixture timeouts, exhausted total wall-clock budget, failed fixtures, duplicate fixtures, or insufficient fixtures fail closed. The total benchmark budget defaults to 120 seconds and is capped at 30 minutes; each individual fixture also has its own timeout. Active-baseline lookup receives an AbortSignal and is cancelled when the budget expires; lookup adapters should honor it to release held resources.
 - The lifecycle still owns persistence, confidence thresholds, approval, promotion, and rollback. Passing a benchmark does not itself activate a skill.
 
 ## Current integration boundary
