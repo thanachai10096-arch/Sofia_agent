@@ -62,14 +62,22 @@ export class VerifiedLearningLoop {
 
       const prepared = await this.host.transaction(scope, async tx => {
         const inserted = await tx.insertExperienceIfAbsent(experience);
-        if (!inserted) return { inserted: false as const, experienceId: experience.id, candidate: undefined };
+        // A prior attempt may have committed the experience and then crashed before
+        // candidate evaluation. Recover that durable row instead of permanently
+        // losing the learning opportunity on an idempotent receipt retry.
+        const persistedExperience = inserted
+          ? experience
+          : await tx.getExperienceByReceipt(scope, receipt.id);
+        if (!persistedExperience) {
+          return { inserted: false as const, experienceId: experience.id, candidate: undefined };
+        }
         const history = await tx.listExperiences(scope, this.options.historyLimit);
         const repeats = history.filter(item => item.taskFingerprint === taskFingerprint);
-        if (repeats.length < 2) return { inserted: true as const, experienceId: experience.id, candidate: undefined };
+        if (repeats.length < 2) return { inserted, experienceId: persistedExperience.id, candidate: undefined };
         const skillName = `learned-${taskFingerprint.slice(0, 12)}`;
         const activeSkills = await tx.listActiveSkills(scope);
         if (activeSkills.some(skill => skill.name === skillName && skill.policyRevision === currentPolicy)) {
-          return { inserted: true as const, experienceId: experience.id, candidate: undefined };
+          return { inserted, experienceId: persistedExperience.id, candidate: undefined };
         }
         const procedure = [
           "Inspect current task context and trusted evidence; do not rely on memory alone.",
@@ -80,14 +88,13 @@ export class VerifiedLearningLoop {
         ].slice(0, this.options.maxSkillProcedureSteps);
         const scopeFingerprint = fingerprint([scope.tenantId, scope.principalId, scope.projectId, taskFingerprint].join("\\n"));
         const candidate: SkillCandidate = {
-          id: `learned:${scopeFingerprint}`, scope: { ...scope }, experienceId: experience.id,
+          id: `learned:${scopeFingerprint}`, scope: { ...scope }, experienceId: persistedExperience.id,
           name: skillName, trigger: safeSummary.slice(0, 240), procedure,
           confidence: Math.min(0.95, 0.65 + 0.05 * repeats.length),
         };
-        return { inserted: true as const, experienceId: experience.id, candidate };
+        return { inserted, experienceId: persistedExperience.id, candidate };
       });
-      if (!prepared.inserted) return { recorded: false, experienceId: prepared.experienceId };
-      if (!prepared.candidate) return { recorded: true, experienceId: prepared.experienceId };
+      if (!prepared.candidate) return { recorded: prepared.inserted, experienceId: prepared.experienceId };
 
       // Never hold SQLite's BEGIN IMMEDIATE write lock while invoking policy or
       // regression adapters; those may perform slow I/O or execute external checks.
