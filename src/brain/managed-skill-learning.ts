@@ -1,4 +1,4 @@
-import { actionHash } from "../security/guard.js";
+import { actionHash, containsPromptInjection, redactSecrets } from "../security/guard.js";
 import type { ApprovalHandler } from "../agent/approval.js";
 import type { LearnedSkillCandidate } from "./learning.js";
 import { runSkillLifecycleWorkflow } from "./skill-lifecycle-workflow.js";
@@ -35,6 +35,26 @@ export function createManagedSkillLearningHandler(
     // fabricate typecheck/test/build claims for arbitrary acceptance criteria.
     if (candidate.evidenceIds.length === 0 || candidate.procedure.length < 2 || candidate.verification.length === 0) return false;
 
+    // Learned metadata is later reused in model context. Reject instruction-shaped
+    // content and redact secret-shaped strings before persistence or activation.
+    const untrustedMetadata = [
+      candidate.name,
+      candidate.trigger,
+      ...(candidate.triggers ?? []),
+      ...candidate.procedure,
+    ];
+    if (untrustedMetadata.some((value) => containsPromptInjection(value))) return false;
+
+    const safeTrigger = String(redactSecrets(candidate.trigger)).trim().slice(0, 500);
+    const safeTriggers = [...new Set([
+      safeTrigger,
+      ...(candidate.triggers ?? []).map((trigger) => String(redactSecrets(trigger)).trim().slice(0, 500)),
+    ])].filter(Boolean).slice(0, 12);
+    const safeProcedure = candidate.procedure
+      .map((step) => String(redactSecrets(step)).trim().slice(0, 2_000))
+      .filter(Boolean).slice(0, 12);
+    if (!safeTrigger || safeProcedure.length < 2) return false;
+
     const requireApproval = options.requireApproval ?? process.env.SOFIA_SKILL_WRITE_APPROVAL === "true";
     if (requireApproval && !approval) return false;
 
@@ -43,13 +63,10 @@ export function createManagedSkillLearningHandler(
         id: `learned:${candidate.name}:${candidate.category}`,
         name: candidate.name,
         description: "Learned from a workflow that passed trusted verification.",
-        triggers: [...new Set([candidate.trigger, ...(candidate.triggers ?? [])])]
-          .map((trigger) => String(trigger).trim().slice(0, 500))
-          .filter(Boolean)
-          .slice(0, 12),
+        triggers: safeTriggers,
         categories: [candidate.category],
         strategy: candidate.strategy,
-        procedure: [...candidate.procedure].slice(0, 12),
+        procedure: safeProcedure,
         verification: [...new Set(candidate.verification.map((item): SkillVerification => {
           if (item === "typecheck" || item === "test" || item === "build") return item;
           const rawId = String(item).startsWith("acceptance:")
