@@ -194,6 +194,22 @@ export class FileUserMemoryStore implements UserMemoryStore {
     });
   }
 
+  /**
+   * Read-only snapshot of exactly one user's persisted memory file. The
+   * filename contains only the hashed identity; no directory enumeration or
+   * mutation occurs. Raw bytes are preserved for integrity verification.
+   */
+  async backupSnapshot(userId: string): Promise<{ path: string; content: Uint8Array } | undefined> {
+    const identityKey = userKey(userId);
+    try {
+      const content = await fs.readFile(this.fileFor(userId));
+      return { path: `user-memory/${identityKey}.json`, content };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
   private async writeEntries(userId: string, entries: UserMemoryEntry[]): Promise<void> {
     await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
     await fs.chmod(this.root, 0o700);

@@ -77,6 +77,17 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
       .map((item) => item.entry)
       .slice(0, 12);
   }
+  /** Return an explicit, read-only snapshot of this project's persisted memory file. */
+  async backupSnapshot(): Promise<{ path: string; content: Uint8Array } | undefined> {
+    try {
+      const content = await fs.readFile(this.file);
+      return { path: `memory/${path.basename(this.file)}`, content };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
   readSync(): ProjectMemoryEntry[] {
     try { const entries=JSON.parse(readFileSync(this.file,"utf8")) as ProjectMemoryEntry[]; return entries.filter(entry=>!containsPromptInjection(entry.content)); }
     catch { return []; }

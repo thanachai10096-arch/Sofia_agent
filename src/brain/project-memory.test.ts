@@ -17,6 +17,17 @@ test("project memory survives a new store instance", async () => {
   assert.ok((await second.find("type_error")).length > 0);
 });
 
+test("project memory backup snapshot contains only its persisted file and returns undefined when absent", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-backup-"));
+  const store = new FileProjectMemoryStore("backup-project", root);
+  assert.equal(await store.backupSnapshot(), undefined);
+  await store.save(memoryEntryFromConvention("backup-project", "Keep backup contents private"));
+  const snapshot = await store.backupSnapshot();
+  assert.ok(snapshot);
+  assert.match(snapshot.path, /^memory\/[a-f0-9]{64}\.json$/u);
+  assert.equal(JSON.parse(Buffer.from(snapshot.content).toString("utf8")).length, 1);
+});
+
 test("project memory writes valid JSON", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-json-"));
   const store = new FileProjectMemoryStore("project-b", root);
