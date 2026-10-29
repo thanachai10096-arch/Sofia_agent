@@ -63,6 +63,8 @@ export interface LearningTransaction {
   insertExperienceIfAbsent(experience: LearningExperience): Promise<boolean>;
   listExperiences(scope: LearningScope, limit: number): Promise<LearningExperience[]>;
   getExperience(scope: LearningScope, id: string): Promise<LearningExperience | undefined>;
+  /** Recover a previously committed experience when processing was interrupted after receipt deduplication. */
+  getExperienceByReceipt(scope: LearningScope, receiptId: string): Promise<LearningExperience | undefined>;
   putCandidate(candidate: SkillCandidate): Promise<void>;
   getCandidate(scope: LearningScope, id: string): Promise<SkillCandidate | undefined>;
   recordEvaluation(scope: LearningScope, candidateId: string, evaluation: SkillEvaluation): Promise<void>;
