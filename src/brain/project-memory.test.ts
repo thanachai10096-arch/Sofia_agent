@@ -138,7 +138,7 @@ test("persistent skill ledger exposes storage failures without unhandled rejecti
   const ledger = new PersistentSkillLedger(failureStore);
   ledger.record(learnedCandidate);
   await assert.rejects(ledger.flush(), /disk unavailable/);
-  assert.match(ledger.getPersistenceStatus().lastError ?? "", /disk unavailable/);
+  assert.equal(ledger.getPersistenceStatus().pending, false, "the failed write must settle before flush rejects");
   assert.equal(ledger.list().length, 0, "a candidate whose durable write failed must not remain available for matching");
 });
 
