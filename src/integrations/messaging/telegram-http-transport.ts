@@ -10,7 +10,7 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "update_failed" | "delivery_failed", status?: number) => void;
+  onError?: (event: "poll_failed" | "poll_conflict" | "update_failed" | "delivery_failed", status?: number) => void;
 }
 
 /**
@@ -98,6 +98,13 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         if (signal.aborted || stopped) break;
         const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
           ? error.status : undefined;
+        if (status === 409) {
+          // Telegram rejects concurrent getUpdates consumers with HTTP 409.
+          // Retrying cannot resolve the conflict and can create a noisy restart loop;
+          // stop polling and require the operator to identify the other consumer.
+          try { options.onError?.("poll_conflict", status); } catch { /* diagnostics must not terminate cleanup */ }
+          break;
+        }
         try { options.onError?.("poll_failed", status); } catch { /* logging must not terminate polling */ }
         await wait(backoffMs, signal);
         backoffMs = Math.min(30_000, backoffMs * 2);
