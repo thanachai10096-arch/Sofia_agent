@@ -129,3 +129,28 @@ test("async start forwards a validated idempotency key", async () => {
     /control characters/,
   );
 });
+
+
+test("SDK lists configured model routes and forwards a user-selected route", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new SofiaClient({
+    apiKey: "test-key",
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (input, init) => {
+      calls.push({ url: String(input), init });
+      if (String(input).endsWith("/v1/models")) {
+        return response(200, {
+          automaticSelection: true,
+          models: [{ id: "coding", model: "vendor/coder", capabilities: ["coding"], healthy: true }],
+        });
+      }
+      return response(200, { id: "run-1", status: "completed" });
+    },
+  });
+
+  const available = await client.listModels();
+  assert.equal(available.automaticSelection, true);
+  assert.equal(available.models[0]?.model, "vendor/coder");
+  await client.run({ task: "review code", modelRouteId: "coding" });
+  assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), { task: "review code", modelRouteId: "coding" });
+});
