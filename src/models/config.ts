@@ -123,7 +123,6 @@ function selectProvider(): ProviderSelection {
  * implement the OpenAI Chat Completions-compatible API.
  */
 export function loadModelConfigFromEnv(): SofiaModelConfig {
-  const selected = selectProvider();
   const definitions = [
     ["fast", ["fast"], 1, 1, 5],
     ["coding", ["coding", "tool-use", "reasoning"], 2, 2, 8],
@@ -131,12 +130,42 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     ["vision", ["vision", "reasoning"], 3, 3, 8],
   ] as const;
 
+  // A route can use its own OpenAI-compatible endpoint. Require the endpoint,
+  // credential, and model together so a partial override never silently sends
+  // requests to a different provider or reuses the wrong provider's model ID.
+  const routeOverrides = new Map<string, SofiaModelProviderConfig>();
+  for (const [id] of definitions) {
+    const prefix = "SOFIA_ROUTE_" + id.toUpperCase();
+    const baseUrl = firstEnv(prefix + "_BASE_URL");
+    const apiKey = firstEnv(prefix + "_API_KEY");
+    const model = firstEnv(prefix + "_MODEL");
+    const configuredFields = [baseUrl, apiKey, model].filter(Boolean).length;
+    if (configuredFields !== 0 && configuredFields !== 3) {
+      throw new Error(prefix + "_BASE_URL, " + prefix + "_API_KEY, and " + prefix + "_MODEL must be configured together.");
+    }
+    if (configuredFields === 3) {
+      routeOverrides.set(id, { baseUrl: normalizeBaseUrl(baseUrl), apiKey, model });
+    }
+  }
+
+  const everyRouteHasOverride = definitions.every(([id]) => routeOverrides.has(id));
+  const selected = everyRouteHasOverride ? undefined : selectProvider();
   const routes: ModelRoute[] = [];
   const providers: SofiaModelConfig["providers"] = {};
 
   for (const [id, capabilities, cost, latency, quality] of definitions) {
-    const routeModelName = selected.routeModelPrefix + "_" + id.toUpperCase() + "_MODEL";
-    const model = firstEnv(routeModelName) || selected.defaultModel;
+    const override = routeOverrides.get(id);
+    const routeModelName = selected
+      ? selected.routeModelPrefix + "_" + id.toUpperCase() + "_MODEL"
+      : undefined;
+    const model = override?.model ?? (routeModelName ? firstEnv(routeModelName) || selected?.defaultModel : undefined);
+    if (!model) throw new Error("No model configured for route " + id + ".");
+    const providerConfig = override ?? (selected ? {
+      baseUrl: selected.baseUrl,
+      apiKey: selected.apiKey,
+      model,
+    } : undefined);
+    if (!providerConfig) throw new Error("No provider configured for route " + id + ".");
 
     routes.push({
       id,
@@ -148,11 +177,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       qualityWeight: numberEnv("SOFIA_" + id.toUpperCase() + "_QUALITY", quality),
       healthy: true,
     });
-    providers[id] = {
-      baseUrl: selected.baseUrl,
-      apiKey: selected.apiKey,
-      model,
-    };
+    providers[id] = providerConfig;
   }
 
   return { routes, providers };
