@@ -104,7 +104,7 @@ test("Discord Gateway ignores an untrusted resume URL and reconnects only to the
   first.gateway({ op: 10, d: { heartbeat_interval: 60_000 } });
   first.gateway({ op: 0, t: "READY", s: 1, d: {
     session_id: "session-1",
-    resume_gateway_url: "wss://attacker.example.invalid",
+    resume_gateway_url: "wss://gateway.discord.gg.attacker.example.invalid",
     user: { id: "999", username: "Sofia" },
   } });
   first.gateway({ op: 7 });
