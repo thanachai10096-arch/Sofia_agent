@@ -62,7 +62,8 @@ export class InMemorySkillLedger implements SkillLedger {
       evidenceIds: candidate.evidenceIds.map(id => String(redactSecrets(id)).slice(0, 500)),
     });
     if (containsPromptInjection(safe.name) || containsPromptInjection(safe.trigger) ||
-        safe.procedure.some(step => containsPromptInjection(step))) {
+        safe.procedure.some(step => containsPromptInjection(step)) ||
+        safe.evidenceIds.some(id => containsPromptInjection(id))) {
       throw new Error("Learned skill candidate rejected by prompt-injection guard");
     }
     if (new Set(safe.evidenceIds).size !== safe.evidenceIds.length) {
