@@ -23,6 +23,12 @@ export type SkillCandidateEvaluator = (candidate: SkillPackage) => Promise<Skill
 interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[]; activeBySkill: Record<string, string>; }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
+function getOwnRecordValue<T>(record: Record<string, T>, key: string): T | undefined {
+  return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
+}
+function setOwnRecordValue<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, { value, enumerable: true, configurable: true, writable: true });
+}
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
 function hasValidEvidenceIds(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 && value.length <= 100 &&
@@ -151,7 +157,7 @@ export class VersionedSkillLifecycle {
     if (candidate.provenance.confidence < this.minimumConfidence) throw new Error("Skill candidate confidence is below the promotion threshold");
     const before = clone(this.snapshot);
     const previousPackage = this.platform.get(candidate.skillId);
-    const previousId = this.snapshot.activeBySkill[candidate.skillId];
+    const previousId = getOwnRecordValue(this.snapshot.activeBySkill, candidate.skillId);
     // Do not overwrite a skill this lifecycle does not own: there is no
     // managed prior version to restore if promotion or rollback later fails.
     if (!previousId && previousPackage) {
@@ -166,7 +172,7 @@ export class VersionedSkillLifecycle {
     const current = this.requireRecord(candidateId);
     current.status = "active";
     current.updatedAt = now;
-    this.snapshot.activeBySkill[current.skillId] = current.id;
+    setOwnRecordValue(this.snapshot.activeBySkill, current.skillId, current.id);
     try {
       this.platform.register(clone(current.package));
       this.persist();
@@ -182,7 +188,7 @@ export class VersionedSkillLifecycle {
   }
 
   rollback(skillId: string): SkillLifecycleRecord {
-    const activeId = this.snapshot.activeBySkill[skillId];
+    const activeId = getOwnRecordValue(this.snapshot.activeBySkill, skillId);
     if (!activeId) throw new Error("No managed active skill to roll back: " + skillId);
     const active = this.requireRecord(activeId);
     const previous = this.snapshot.records
@@ -196,7 +202,7 @@ export class VersionedSkillLifecycle {
     active.updatedAt = now;
     previous.status = "active";
     previous.updatedAt = now;
-    this.snapshot.activeBySkill[skillId] = previous.id;
+    setOwnRecordValue(this.snapshot.activeBySkill, skillId, previous.id);
     try {
       this.platform.register(clone(previous.package));
       this.persist();
@@ -217,7 +223,7 @@ export class VersionedSkillLifecycle {
     return this.snapshot.records.filter((item) => !skillId || item.skillId === skillId).map(clone);
   }
   active(skillId: string): SkillLifecycleRecord | undefined {
-    const id = this.snapshot.activeBySkill[skillId];
+    const id = getOwnRecordValue(this.snapshot.activeBySkill, skillId);
     return id ? this.get(id) : undefined;
   }
 
@@ -273,7 +279,7 @@ export class VersionedSkillLifecycle {
       const record = records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
       if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
       if (Object.prototype.hasOwnProperty.call(activeBySkill, skillId)) throw new Error("Duplicate skill lifecycle active pointer");
-      activeBySkill[skillId] = recordId;
+      setOwnRecordValue(activeBySkill, skillId, recordId);
     }
     for (const record of records) {
       if (record.status === "active" && activeBySkill[record.skillId] !== record.id) {
