@@ -24,6 +24,20 @@ export function createLearningLifecyclePromoter(
 ): (scope: LearningScope, candidate: SkillCandidate) => Promise<boolean> {
   return async (scope, candidate) => {
     if (!options.approval) return false;
+    // The promoter is a public adapter boundary: do not rely solely on the
+    // learning loop having validated a candidate before it reaches this call.
+    if (!scope || !candidate || !candidate.scope ||
+        candidate.scope.tenantId !== scope.tenantId ||
+        candidate.scope.principalId !== scope.principalId ||
+        candidate.scope.projectId !== scope.projectId) return false;
+    if (![scope.tenantId, scope.principalId, scope.projectId].every(value => typeof value === "string" && value.trim().length > 0)) return false;
+    if (typeof candidate.id !== "string" || !candidate.id.trim() || candidate.id.length > 200 ||
+        typeof candidate.name !== "string" || !candidate.name.trim() || candidate.name.length > 120 ||
+        typeof candidate.trigger !== "string" || !candidate.trigger.trim() || candidate.trigger.length > 500 ||
+        typeof candidate.experienceId !== "string" || !candidate.experienceId.trim() || candidate.experienceId.length > 200 ||
+        !Array.isArray(candidate.procedure) || candidate.procedure.length < 1 || candidate.procedure.length > 30 ||
+        !candidate.procedure.every(step => typeof step === "string" && step.trim().length > 0 && step.length <= 1000) ||
+        !Number.isFinite(candidate.confidence) || candidate.confidence < 0 || candidate.confidence > 1) return false;
     const evidenceIds = await options.resolveEvidenceIds(scope, candidate.experienceId);
     if (!Array.isArray(evidenceIds) || evidenceIds.length === 0 ||
         !evidenceIds.every(id => typeof id === "string" && id.trim().length > 0 && id.length <= 500)) return false;
