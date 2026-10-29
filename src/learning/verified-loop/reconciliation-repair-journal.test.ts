@@ -211,3 +211,52 @@ test("SQLite journal atomically refuses a second executor claiming a running rep
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("SQLite lease heartbeat keeps a live claim from being reclaimed, then permits stale recovery", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-lease-"));
+  const file = path.join(dir, "repair.sqlite");
+  const first = await SqliteLearningRepairJournal.open(file, { leaseMs: 5_000 });
+  const second = await SqliteLearningRepairJournal.open(file, { leaseMs: 5_000 });
+  const entry = {
+    key: "repair-lease", scope, skillId: "skill-lease", policyRevision: "policy-1",
+    state: "running" as const, attempts: 0, updatedAt: "2026-10-29T00:00:00.000Z",
+  };
+  try {
+    const owner = await first.begin(entry);
+    assert.equal(owner.claimed, true);
+    assert.ok(owner.claimToken);
+
+    assert.equal(await first.heartbeat(entry.key, scope, owner.claimToken!, "2026-10-29T00:00:04.000Z"), true);
+    const stillLive = await second.begin({ ...entry, updatedAt: "2026-10-29T00:00:06.000Z" });
+    assert.equal(stillLive.claimed, false);
+    assert.equal(stillLive.state, "running");
+
+    const recovered = await second.begin({ ...entry, updatedAt: "2026-10-29T00:00:10.000Z" });
+    assert.equal(recovered.claimed, true);
+    assert.equal(recovered.state, "running");
+    assert.equal(recovered.attempts, 2);
+    assert.notEqual(recovered.claimToken, owner.claimToken);
+    assert.equal(await first.heartbeat(entry.key, scope, owner.claimToken!, "2026-10-29T00:00:11.000Z"), false);
+    await assert.rejects(
+      () => first.finish(entry.key, scope, "succeeded", "stale worker", owner.claimToken),
+      /claim lost/,
+    );
+    await second.finish(entry.key, scope, "succeeded", "recovered and verified", recovered.claimToken);
+    assert.equal((await first.get(entry.key, scope))?.result, "recovered and verified");
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("SQLite repair lease configuration rejects unsafe values", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-lease-config-"));
+  try {
+    await assert.rejects(() => SqliteLearningRepairJournal.open(path.join(dir, "repair.sqlite"), { leaseMs: 1_000 }), /between 5 seconds and 1 hour/);
+    await assert.rejects(() => SqliteLearningRepairJournal.open(path.join(dir, "repair.sqlite"), { leaseMs: 3_600_001 }), /between 5 seconds and 1 hour/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
