@@ -163,9 +163,9 @@ export function createWhatsAppHttpTransport(options: WhatsAppHttpTransportOption
       }
       return { status: failed ? 503 : 200, acceptedEvents };
     },
-    async sendText(recipientId, targetPhoneNumberId, text) {
+    async sendText(recipientId, text) {
       if (stopped || activeSignal?.aborted) throw new Error("WhatsApp transport is stopped.");
-      if (targetPhoneNumberId !== phoneNumberId || !/^[0-9]{1,32}$/.test(recipientId) || !text || text.length > 4_096) {
+      if (!/^[0-9]{1,32}$/.test(recipientId) || !text || text.length > 4_096) {
         throw new Error("WhatsApp outbound message is invalid.");
       }
       return request(phoneNumberId + "/messages", {
