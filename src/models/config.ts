@@ -94,7 +94,9 @@ function parseProviderManifest(raw: string): ProviderManifest {
       throw new Error(`Provider ${id} protocol must be "openai-compatible" or "anthropic-messages".`);
     }
     const apiKeyEnv = typeof item.apiKeyEnv === "string" ? item.apiKeyEnv.trim() : undefined;
-    const apiKey = typeof item.apiKey === "string" ? item.apiKey : undefined;
+    if (item.apiKey !== undefined) {
+      throw new Error(`Provider ${id} must not embed apiKey in SOFIA_MODEL_PROVIDERS; use apiKeyEnv to reference a server-side secret.`);
+    }
     const headers: Record<string, string> = {};
     if (item.headers !== undefined) {
       if (!item.headers || typeof item.headers !== "object" || Array.isArray(item.headers)) {
@@ -124,7 +126,6 @@ function parseProviderManifest(raw: string): ProviderManifest {
       model,
       protocol,
       ...(apiKeyEnv ? { apiKeyEnv } : {}),
-      ...(apiKey !== undefined ? { apiKey } : {}),
       ...(Object.keys(headers).length ? { headers } : {}),
       ...(maxConcurrent !== undefined ? { maxConcurrent: maxConcurrent as number } : {}),
       ...(requestTimeoutMs !== undefined ? { requestTimeoutMs: requestTimeoutMs as number } : {}),
