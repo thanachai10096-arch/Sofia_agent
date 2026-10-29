@@ -140,11 +140,14 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
     const mentioned = Boolean(botId && raw.mentions?.some((mention) => mention.id === botId));
     const repliedToBot = Boolean(botId && raw.referenced_message?.author?.bot === true &&
       raw.referenced_message.author.id === botId);
+    const content = botId
+      ? (raw.content ?? "").replace(new RegExp("<@!?" + botId + ">", "g"), "").trim()
+      : raw.content ?? "";
     const event: VerifiedDiscordMessage = {
       transportVerified: true,
       id: raw.id, channelId: raw.channel_id,
       author: { id: raw.author.id, ...(raw.author.username ? { username: raw.author.username } : {}) },
-      content: raw.content ?? "",
+      content,
       createdAt: typeof raw.timestamp === "string" && Number.isFinite(Date.parse(raw.timestamp)) ? Date.parse(raw.timestamp) : Date.now(),
       directMessage,
       ...(!directMessage && (mentioned || repliedToBot) ? { addressedToBot: true } : {}),
