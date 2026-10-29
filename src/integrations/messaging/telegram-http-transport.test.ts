@@ -157,7 +157,7 @@ test("Telegram transport rejects malformed tokens and poll timeouts", () => {
 test("Telegram delivery errors are sanitized and surfaced to the caller", async () => {
   const errorEvents: string[] = [];
   const fetchImpl: typeof fetch = async (input) => {
-    if (String(input).endsWith("/deleteWebhook")) return ok(true);
+    if (String(input).endsWith("/getWebhookInfo")) return ok({ url: "" });
     return new Response(JSON.stringify({ ok: false, description: "secret-bearing provider detail" }), { status: 403 });
   };
   const transport = createTelegramHttpTransport({ token, fetchImpl, onError(event) { errorEvents.push(event); } });
