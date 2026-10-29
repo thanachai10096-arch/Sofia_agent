@@ -170,6 +170,42 @@ test("Brain route adapter enforces explicitly declared feature support", () => {
   assert.deepEqual(legacy.capabilities, route.capabilities);
 });
 
+test("Brain route adapter rejects invalid token limit environment overrides", () => {
+  const originalContext = process.env.SOFIA_CODING_CONTEXT;
+  const originalMaxOutput = process.env.SOFIA_CODING_MAX_OUTPUT;
+  const modelProvider = {
+    async generate() {
+      return { text: "{}", usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  };
+
+  try {
+    process.env.SOFIA_CODING_CONTEXT = "0";
+    assert.throws(
+      () => createInternalRoute({ modelProvider, route }),
+      /Invalid SOFIA_CODING_CONTEXT: expected a positive safe integer/,
+    );
+
+    delete process.env.SOFIA_CODING_CONTEXT;
+    process.env.SOFIA_CODING_MAX_OUTPUT = "1.5";
+    assert.throws(
+      () => createInternalRoute({ modelProvider, route }),
+      /Invalid SOFIA_CODING_MAX_OUTPUT: expected a positive safe integer/,
+    );
+
+    process.env.SOFIA_CODING_MAX_OUTPUT = "not-a-number";
+    assert.throws(
+      () => createInternalRoute({ modelProvider, route }),
+      /Invalid SOFIA_CODING_MAX_OUTPUT: expected a positive safe integer/,
+    );
+  } finally {
+    if (originalContext === undefined) delete process.env.SOFIA_CODING_CONTEXT;
+    else process.env.SOFIA_CODING_CONTEXT = originalContext;
+    if (originalMaxOutput === undefined) delete process.env.SOFIA_CODING_MAX_OUTPUT;
+    else process.env.SOFIA_CODING_MAX_OUTPUT = originalMaxOutput;
+  }
+});
+
 test("Brain route adapter honors declared model context window and preserves legacy override", async () => {
   const originalContext = process.env.SOFIA_CODING_CONTEXT;
   const modelProvider = {
