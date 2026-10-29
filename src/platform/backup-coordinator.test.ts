@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBackupBundle, projectMemoryBackupSource, verifyBackupBundle } from "./backup-coordinator.js";
+import { createBackupBundle, projectMemoryBackupSource, userMemoryBackupSource, verifyBackupBundle } from "./backup-coordinator.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileProjectMemoryStore, memoryEntryFromConvention } from "../brain/project-memory.js";
+import { FileUserMemoryStore, createUserMemoryEntry } from "../brain/user-memory.js";
 
 const createdAt = "2026-10-29T04:00:00.000Z";
 
@@ -31,6 +32,32 @@ test("project-memory source includes only the explicit store snapshot", async ()
     assert.equal(bundle.manifest.entries.length, 1);
     assert.match(bundle.manifest.entries[0]!.path, /^memory\/[a-f0-9]{64}\.json$/u);
     assert.equal(verifyBackupBundle(bundle).valid, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("user-memory backup source snapshots only the explicitly selected user's file", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-user-memory-"));
+  try {
+    const store = new FileUserMemoryStore(root);
+    const userId = "private-user-identifier";
+    const source = userMemoryBackupSource(store, userId);
+    assert.equal(source.name.includes(userId), false);
+    assert.deepEqual(await source.snapshot(), []);
+
+    await store.save(userId, createUserMemoryEntry("preference", "Prefers concise explanations"));
+    await store.save("different-user", createUserMemoryEntry("fact", "Separate user's private note"));
+
+    const bundle = await createBackupBundle([source], createdAt);
+    assert.equal(bundle.manifest.entries.length, 1);
+    assert.match(bundle.manifest.entries[0]!.path, /^user-memory\/[a-f0-9]{64}\.json$/u);
+    assert.equal(verifyBackupBundle(bundle).valid, true);
+    const bytes = bundle.files.get(bundle.manifest.entries[0]!.path)!;
+    const entries = JSON.parse(Buffer.from(bytes).toString("utf8")) as Array<{ content: string }>;
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0]!.content, "Prefers concise explanations");
+    assert.equal(Buffer.from(bytes).toString("utf8").includes("Separate user's private note"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
