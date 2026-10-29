@@ -89,6 +89,20 @@ test("does not learn from missing or cross-scope evidence and deduplicates recei
   assert.equal((await loop.recordVerifiedCompletion(scope, "r1", "task")).recorded, false);
   assert.equal(state.experiences.length, 1);
 });
+test("rejects a receipt whose stored ID differs from the requested receipt ID", async () => {
+  const state = makeHost();
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "requested-id", "run1");
+  state.receipts.set("requested-id", {
+    ...state.receipts.get("requested-id")!,
+    id: "different-id",
+  });
+
+  const result = await loop.recordVerifiedCompletion(scope, "requested-id", "Fix TypeScript build");
+  assert.equal(result.recorded, false);
+  assert.equal(state.experiences.length, 0);
+});
+
 test("rejects stale policy receipts and untrusted evidence", async () => {
   const state = makeHost();
   const loop = new VerifiedLearningLoop(state.host);
