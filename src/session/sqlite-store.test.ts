@@ -33,6 +33,8 @@ test("SQLite transcript pagination and full-text search work", async () => {
     store.save({ id: "beta", messages: ["unrelated note", "planning recovery"], updatedAt: 0 });
     assert.deepEqual(store.listMessages("alpha", { limit: 1, offset: 1 }), ["deploy safely"]);
     assert.deepEqual(store.search("recovery").map((session) => session.id), ["beta"]);
+    assert.deepEqual(store.search("planning").map((session) => session.id), ["beta", "alpha"]);
+    assert.deepEqual(store.search("planning", { limit: 1, offset: 1 }).map((session) => session.id), ["alpha"]);
     assert.deepEqual(store.search("  "), []);
   } finally {
     store.close();
