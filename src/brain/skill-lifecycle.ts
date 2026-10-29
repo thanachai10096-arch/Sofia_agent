@@ -282,7 +282,7 @@ export class VersionedSkillLifecycle {
       setOwnRecordValue(activeBySkill, skillId, recordId);
     }
     for (const record of records) {
-      if (record.status === "active" && activeBySkill[record.skillId] !== record.id) {
+      if (record.status === "active" && getOwnRecordValue(activeBySkill, record.skillId) !== record.id) {
         throw new Error("Active skill lifecycle record is missing its active pointer: " + record.skillId);
       }
     }
