@@ -278,10 +278,18 @@ export async function executeLearningRepairPlan(
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or journal does not support safe claim fencing; manual reconciliation required" });
       continue;
     }
-    await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
+    let auditWarning: string | undefined;
     try {
+      // Require a durable start audit before any mutation.
+      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
       await host.registerThroughLifecycle(action);
-      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_registered", at: now() });
+      // Registration may already have succeeded; do not skip authoritative
+      // postcondition verification merely because this intermediate audit failed.
+      try {
+        await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_registered", at: now() });
+      } catch {
+        auditWarning = "registration audit append failed";
+      }
       const after = await host.revalidate(action);
       if (!after || !validScope(after.scope) || !sameScope(after.scope, action.scope) ||
           !after.exists || !after.active || after.policyRevision !== action.expectedPolicyRevision ||
@@ -289,7 +297,7 @@ export async function executeLearningRepairPlan(
         throw new Error("Post-repair authoritative verification failed");
       }
       await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Postcondition verified", entry.claimToken);
-      const successResult: LearningRepairExecutionResult = { key: action.idempotencyKey, skillId: action.skillId, state: "succeeded" };
+      const successResult: LearningRepairExecutionResult = { key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", ...(auditWarning ? { reason: auditWarning } : {}) };
       results.push(successResult);
       // The repair is already durably finalized. A later audit append failure must
       // not misreport it as failed or try to finalize the consumed token again.
