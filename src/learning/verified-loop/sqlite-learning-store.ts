@@ -20,7 +20,19 @@ function hardenFile(file: string): void {
   if (process.platform === "win32" || file === ":memory:") return;
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Learning database must be a regular file");
-  fs.chmodSync(file, 0o600);
+  // Tighten permissions only; never grant owner permissions that were absent.
+  const currentMode = stat.mode & 0o777;
+  const privateMode = currentMode & 0o600;
+  if (privateMode !== currentMode) fs.chmodSync(file, privateMode);
+}
+function hardenSqliteFiles(file: string): void {
+  if (file === ":memory:" || process.platform === "win32") return;
+  for (const candidate of [file, file + "-wal", file + "-shm"]) {
+    try { hardenFile(candidate); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
 }
 
 /** Durable SQLite transaction adapter for the VerifiedLearningHost transaction port.
@@ -43,7 +55,7 @@ export class SqliteLearningTransactionStore {
     try {
       db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
       db.exec("CREATE TABLE IF NOT EXISTS learning_experiences (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, receipt_id TEXT NOT NULL, experience_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, receipt_id), UNIQUE (tenant_id, principal_id, project_id, experience_id)); CREATE TABLE IF NOT EXISTS learning_candidates (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, candidate_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, candidate_id)); CREATE TABLE IF NOT EXISTS learning_evaluations (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, candidate_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, candidate_id)); CREATE TABLE IF NOT EXISTS learning_active_skills (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, skill_id TEXT NOT NULL, skill_name TEXT NOT NULL, policy_revision TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, skill_id)); CREATE INDEX IF NOT EXISTS learning_active_skill_name ON learning_active_skills(tenant_id, principal_id, project_id, skill_name, policy_revision);");
-      if (absolute !== ":memory:") hardenFile(absolute);
+      hardenSqliteFiles(absolute);
       return new SqliteLearningTransactionStore(db, absolute);
     } catch (error) { db.close(); throw error; }
   }
@@ -103,7 +115,7 @@ export class SqliteLearningTransactionStore {
     try {
       const result = await operation(tx);
       db.exec("COMMIT");
-      if (this.file !== ":memory:") hardenFile(this.file);
+      hardenSqliteFiles(this.file);
       return result;
     } catch (error) {
       try { db.exec("ROLLBACK"); } catch { /* preserve original error */ }
