@@ -86,6 +86,13 @@ export class VerifiedLearningLoop {
           confidence: Math.min(0.95, 0.65 + 0.05 * repeats.length),
         };
         const assessment = await this.host.assessCandidate(scope, candidate);
+        // Treat policy/evaluator output as untrusted: NaN bypasses ordinary threshold
+        // comparisons, and out-of-range confidence must never be persisted as trusted.
+        if (!assessment || typeof assessment.allowed !== "boolean" ||
+            typeof assessment.confidence !== "number" || !Number.isFinite(assessment.confidence) ||
+            assessment.confidence < 0 || assessment.confidence > 1) {
+          return { recorded: true, experienceId: experience.id };
+        }
         const confidence = Math.min(candidate.confidence, assessment.confidence);
         const assessedCandidate = { ...candidate, confidence };
         await tx.putCandidate(assessedCandidate);
