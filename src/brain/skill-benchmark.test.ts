@@ -158,3 +158,39 @@ test("benchmark evaluator fails closed when active baseline lookup throws", asyn
   assert.equal(evaluation.checks.find((check) => check.name === "baseline-evidence")?.passed, false);
   assert.match(evaluation.checks[0]?.detail ?? "", /lifecycle store unavailable/);
 });
+
+test("benchmark runner receives isolated candidate and fixture copies", async () => {
+  const originalProcedure = [...candidate.skill.procedure];
+  const originalInput = fixtures[0]!.input;
+  const evaluator = createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    runner: {
+      run: async ({ candidate: tested, fixture }) => {
+        tested.skill.procedure.push("runner mutation");
+        (fixture as { input: string }).input = "runner mutation";
+        return result(true);
+      },
+    },
+  });
+  const evaluation = await evaluator(candidate);
+  assert.equal(evaluation.passed, true);
+  assert.deepEqual(candidate.skill.procedure, originalProcedure);
+  assert.equal(fixtures[0]!.input, originalInput);
+});
+
+test("benchmark timeout aborts the isolated runner signal", async () => {
+  let signal: AbortSignal | undefined;
+  const evaluator = createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    timeoutMs: 5,
+    runner: {
+      run: async ({ signal: runSignal }) => {
+        signal = runSignal;
+        return new Promise<SkillBenchmarkRun>(() => undefined);
+      },
+    },
+  });
+  const evaluation = await evaluator(candidate);
+  assert.equal(evaluation.passed, false);
+  assert.equal(signal?.aborted, true);
+});
