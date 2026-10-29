@@ -7,6 +7,7 @@ import type { FileProjectMemoryStore } from "../brain/project-memory.js";
 import type { FileUserMemoryStore } from "../brain/user-memory.js";
 import {
   createBackupManifest,
+  serializeBackupManifest,
   MAX_BACKUP_MANIFEST_ENTRIES,
   verifyBackupFiles,
   type BackupInputFile,
@@ -127,6 +128,58 @@ export function userMemoryBackupSource(store: FileUserMemoryStore, userId: strin
       return snapshot ? [snapshot] : [];
     },
   };
+}
+
+/**
+ * Export a verified bundle as a private directory tree. This is a portable
+ * directory export, not a compressed archive and not a restore operation.
+ * The destination must not exist; a failed export removes only the directory
+ * created by this call.
+ */
+export async function writeBackupBundleDirectory(
+  bundle: unknown,
+  destinationPath: string,
+): Promise<string> {
+  const verification = verifyBackupBundle(bundle);
+  if (!verification.valid) {
+    throw new Error(`Refusing to export an invalid backup bundle: ${verification.errors.join("; ")}`);
+  }
+  if (typeof destinationPath !== "string" || destinationPath.trim().length === 0) {
+    throw new Error("A backup destination path is required.");
+  }
+
+  const destination = path.resolve(destinationPath);
+  const parent = path.dirname(destination);
+  const parentInfo = await fs.lstat(parent).catch(() => undefined);
+  if (!parentInfo?.isDirectory() || parentInfo.isSymbolicLink()) {
+    throw new Error("Backup destination parent must be an existing real directory.");
+  }
+
+  const record = bundle as BackupBundle;
+  if (record.files.has("manifest.json")) {
+    throw new Error('Backup file path "manifest.json" is reserved for the manifest.');
+  }
+
+  await fs.mkdir(destination, { recursive: false, mode: 0o700 });
+  try {
+    for (const entry of record.manifest.entries) {
+      const target = path.join(destination, ...entry.path.split("/"));
+      const directory = path.dirname(target);
+      await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      const content = record.files.get(entry.path);
+      if (!content) throw new Error(`Backup file disappeared during export: ${entry.path}`);
+      await fs.writeFile(target, content, { flag: "wx", mode: 0o600 });
+    }
+    await fs.writeFile(
+      path.join(destination, "manifest.json"),
+      serializeBackupManifest(record.manifest),
+      { flag: "wx", mode: 0o600 },
+    );
+    return destination;
+  } catch (error) {
+    await fs.rm(destination, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 /** Verify bundle bytes against the manifest before any future restore step. */
