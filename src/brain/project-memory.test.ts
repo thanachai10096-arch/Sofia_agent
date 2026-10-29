@@ -17,6 +17,20 @@ test("project memory survives a new store instance", async () => {
   assert.ok((await second.find("type_error")).length > 0);
 });
 
+test("concurrent project memory saves do not lose entries across store instances", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-concurrent-writes-"));
+  const writers = Array.from({ length: 24 }, (_, index) => {
+    const store = new FileProjectMemoryStore("concurrent-project", root);
+    return store.save(memoryEntryFromConvention("concurrent-project", `concurrent convention ${index}`));
+  });
+  await Promise.all(writers);
+
+  const reader = new FileProjectMemoryStore("concurrent-project", root);
+  const entries = await reader.list();
+  assert.equal(entries.length, 24);
+  assert.equal(new Set(entries.map((entry) => entry.id)).size, 24);
+});
+
 test("project memory writes valid JSON", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-json-"));
   const store = new FileProjectMemoryStore("project-b", root);
