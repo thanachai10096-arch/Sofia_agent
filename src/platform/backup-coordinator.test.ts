@@ -506,3 +506,20 @@ test("restore transaction does not apply any target when rollback snapshot captu
     "snapshot:a", "snapshot:b",
   ]);
 });
+
+
+test("restore staging removes its private temporary root when export fails", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-backup-stage-failure-"));
+  try {
+    const bundle = await createBackupBundle([
+      { name: "reserved-path", async snapshot() {
+        return [{ path: "manifest.json", content: Buffer.from("payload must not shadow manifest") }];
+      } },
+    ], createdAt);
+    await assert.rejects(stageBackupBundleForRestore(bundle, root), /reserved for the manifest/i);
+    const remaining = await (await import("node:fs/promises")).readdir(root);
+    assert.deepEqual(remaining, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
