@@ -155,10 +155,12 @@ test("resumes candidate evaluation when an earlier attempt persisted the receipt
   // Simulate a crash after the third experience committed but before the
   // candidate was assessed or persisted.
   const receipt = state.receipts.get("resume-3")!;
+  const firstExperience = state.experiences[0];
+  assert.ok(firstExperience, "expected prior verified experience before simulating recovery");
   state.experiences.push({
     id: "interrupted-experience", scope, receiptId: receipt.id, runId: receipt.runId,
     evidenceIds: [...receipt.evidenceIds], summary: "Fix TypeScript build",
-    taskFingerprint: state.experiences[0].taskFingerprint, createdAt: new Date().toISOString(),
+    taskFingerprint: firstExperience.taskFingerprint, createdAt: new Date().toISOString(),
   });
   const resumed = await loop.recordVerifiedCompletion(scope, "resume-3", "Fix TypeScript build");
   assert.ok(resumed.skillActivated);
