@@ -108,7 +108,7 @@ export function createBackupManifest(
     return { path, size: content.byteLength, sha256: digest(content) };
   });
 
-  entries.sort((a, b) => a.path.localeCompare(b.path));
+  entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { format: "sofia-agent-backup", formatVersion: SOFIA_BACKUP_FORMAT_VERSION, createdAt, entries };
 }
 
