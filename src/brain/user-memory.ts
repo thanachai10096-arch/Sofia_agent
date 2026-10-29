@@ -145,7 +145,25 @@ export class FileUserMemoryStore implements UserMemoryStore {
 
   async find(userId: string, query: string, limit = 8): Promise<UserMemoryEntry[]> {
     userKey(userId);
-    const terms = query.toLowerCase().split(/\s+/).filter((term) => term.length > 1).slice(0, 32);
+    const normalized = query.toLocaleLowerCase().trim();
+    const rawTerms = normalized.split(/\s+/).flatMap((part) => part.match(/[\p{L}\p{N}_-]+/gu) ?? []);
+    const termSet = new Set<string>();
+    for (const term of rawTerms) {
+      if (term.length <= 1) continue;
+      const characters = Array.from(term);
+      // Thai, CJK, and other unspaced scripts often arrive as one token.
+      // Add bounded character trigrams so a short task can retrieve a related
+      // memory without requiring whitespace-based word segmentation.
+      if (characters.length >= 4 && /[^\u0000-\u024F]/u.test(term)) {
+        for (let index = 0; index <= characters.length - 3 && termSet.size < 32; index += 1) {
+          termSet.add(characters.slice(index, index + 3).join(""));
+        }
+      } else {
+        termSet.add(term);
+      }
+      if (termSet.size >= 32) break;
+    }
+    const terms = [...termSet].slice(0, 32);
     if (terms.length === 0) return [];
     const matches = (await this.read(userId)).map((entry) => {
       const text = (entry.kind + " " + entry.content).toLowerCase();
