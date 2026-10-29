@@ -91,6 +91,39 @@ test("repair audit journal rejects malformed events and prevents update/delete",
   }
 });
 
+test("SQLite journal adds fencing column to a legacy database without losing rows", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-journal-migrate-"));
+  const file = path.join(dir, "legacy.sqlite");
+  const { DatabaseSync } = await import("node:sqlite");
+  const legacy = new DatabaseSync(file);
+  try {
+    legacy.exec("CREATE TABLE learning_repair_journal (repair_key TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, skill_id TEXT NOT NULL, policy_revision TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('running','succeeded','failed')), attempts INTEGER NOT NULL, updated_at TEXT NOT NULL, result TEXT)");
+    legacy.prepare("INSERT INTO learning_repair_journal VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+      "legacy-repair", scope.tenantId, scope.principalId, scope.projectId,
+      "legacy-skill", "policy-legacy", "failed", 3, "2026-10-28T00:00:00.000Z", "previous failure",
+    );
+  } finally {
+    legacy.close();
+  }
+  const journal = await SqliteLearningRepairJournal.open(file);
+  try {
+    const restored = await journal.get("legacy-repair", scope);
+    assert.equal(restored?.state, "failed");
+    assert.equal(restored?.attempts, 3);
+    assert.equal(restored?.result, "previous failure");
+    const db = new DatabaseSync(file);
+    try {
+      const columns = db.prepare("PRAGMA table_info(learning_repair_journal)").all() as Array<{ name?: unknown }>;
+      assert.ok(columns.some(column => column.name === "claim_token"));
+    } finally {
+      db.close();
+    }
+  } finally {
+    journal.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("SQLite fencing token prevents a stale attempt from finalizing a newer retry", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-journal-fence-"));
   const file = path.join(dir, "repair.sqlite");
