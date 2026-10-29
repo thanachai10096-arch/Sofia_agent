@@ -208,11 +208,21 @@ export function createIsolatedSkillBenchmarkEvaluator(
       });
     }
 
+    const candidateTotalDurationMs = candidateRuns.reduce((sum, run) => sum + run.durationMs, 0);
+    const candidateKnownTokenRuns = candidateRuns.filter((run) => run.tokensUsed !== undefined);
+    const candidateTotalTokens = candidateKnownTokenRuns.reduce((sum, run) => sum + (run.tokensUsed ?? 0), 0);
+    const baselineTotalDurationMs = baselineRuns.reduce((sum, run) => sum + run.durationMs, 0);
+    const baselineKnownTokenRuns = baselineRuns.filter((run) => run.tokensUsed !== undefined);
+    const baselineTotalTokens = baselineKnownTokenRuns.reduce((sum, run) => sum + (run.tokensUsed ?? 0), 0);
     checks.push({
       name: "benchmark-evidence",
       passed: candidateRuns.length === fixtures.length && candidateRuns.every((run) => Number.isFinite(run.score)),
       detail: "fixtures=" + fixtures.length + "; candidateMeanScore=" + candidateMeanScore.toFixed(3) +
-        "; baselineRuns=" + baselineRuns.length,
+        "; candidateDurationMs=" + candidateTotalDurationMs +
+        "; candidateTokens=" + (candidateKnownTokenRuns.length === candidateRuns.length ? candidateTotalTokens : "incomplete") +
+        "; baselineRuns=" + baselineRuns.length +
+        "; baselineDurationMs=" + baselineTotalDurationMs +
+        "; baselineTokens=" + (baselineKnownTokenRuns.length === baselineRuns.length ? baselineTotalTokens : "incomplete"),
     });
     return { passed: checks.every((check) => check.passed), checks, evaluatedAt: new Date().toISOString() };
   };
