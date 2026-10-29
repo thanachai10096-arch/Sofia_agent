@@ -206,6 +206,10 @@ test("duplicate receipt cannot be reinterpreted with a different task summary", 
   assert.equal(replay.skillActivated, undefined);
   assert.equal(state.active.length, 0);
   assert.equal(
+    replay.experienceId,
+    state.experiences.find(item => item.receiptId === "replay-3")?.id,
+  );
+  assert.equal(
     state.experiences.find(item => item.receiptId === "replay-3")?.summary,
     "Deploy production",
   );
