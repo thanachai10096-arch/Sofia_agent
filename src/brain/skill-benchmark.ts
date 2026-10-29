@@ -35,6 +35,8 @@ export interface SkillBenchmarkEvaluatorOptions {
   minimumPassRate?: number;
   maximumRegression?: number;
   timeoutMs?: number;
+  /** Maximum wall-clock time for the complete benchmark, including baseline runs. */
+  maxTotalDurationMs?: number;
   minimumFixtures?: number;
 }
 
@@ -95,6 +97,7 @@ export function createIsolatedSkillBenchmarkEvaluator(
   const minimumPassRate = options.minimumPassRate ?? 1;
   const maximumRegression = options.maximumRegression ?? 0;
   const timeoutMs = options.timeoutMs ?? 30_000;
+  const maxTotalDurationMs = options.maxTotalDurationMs ?? 120_000;
   const minimumFixtures = options.minimumFixtures ?? 3;
   if (!Number.isFinite(minimumPassRate) || minimumPassRate < 0 || minimumPassRate > 1) {
     throw new Error("minimumPassRate must be between 0 and 1");
@@ -104,6 +107,9 @@ export function createIsolatedSkillBenchmarkEvaluator(
   }
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) {
     throw new Error("timeoutMs must be between 1 and 300000");
+  }
+  if (!Number.isSafeInteger(maxTotalDurationMs) || maxTotalDurationMs < 1 || maxTotalDurationMs > 1_800_000) {
+    throw new Error("maxTotalDurationMs must be between 1 and 1800000");
   }
   if (!Number.isSafeInteger(minimumFixtures) || minimumFixtures < 1 || minimumFixtures > 100) {
     throw new Error("minimumFixtures must be between 1 and 100");
@@ -115,6 +121,7 @@ export function createIsolatedSkillBenchmarkEvaluator(
   }
 
   return async (candidate): Promise<SkillEvaluationResult> => {
+    const deadline = Date.now() + maxTotalDurationMs;
     const checks: SkillEvaluationResult["checks"] = [];
     let baseline: SkillPackage | undefined;
     try {
@@ -145,8 +152,14 @@ export function createIsolatedSkillBenchmarkEvaluator(
     const candidateRuns: SkillBenchmarkRun[] = [];
     const baselineRuns: SkillBenchmarkRun[] = [];
     for (const fixture of fixtures) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        candidateRuns.push({ passed: false, score: 0, durationMs: maxTotalDurationMs });
+        checks.push({ name: "fixture:" + fixture.id, passed: false, detail: "Total benchmark time budget exhausted before fixture execution." });
+        continue;
+      }
       try {
-        const run = await runBounded(options.runner, candidate, fixture, timeoutMs);
+        const run = await runBounded(options.runner, candidate, fixture, Math.min(timeoutMs, remainingMs));
         candidateRuns.push(run);
         if (!run.passed) {
           checks.push({
@@ -176,8 +189,14 @@ export function createIsolatedSkillBenchmarkEvaluator(
     if (baseline) {
       let baselineFailures = 0;
       for (const fixture of fixtures) {
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+          baselineFailures++;
+          baselineRuns.push({ passed: false, score: 0, durationMs: maxTotalDurationMs });
+          continue;
+        }
         try {
-          baselineRuns.push(await runBounded(options.runner, baseline, fixture, timeoutMs));
+          baselineRuns.push(await runBounded(options.runner, baseline, fixture, Math.min(timeoutMs, remainingMs)));
         } catch (error) {
           baselineFailures++;
           baselineRuns.push({ passed: false, score: 0, durationMs: timeoutMs });
