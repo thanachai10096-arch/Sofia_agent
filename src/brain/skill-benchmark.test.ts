@@ -242,3 +242,18 @@ test("benchmark evaluator validates the total wall-clock budget", () => {
     runner: { run: async () => result(true) },
   }), /maxTotalDurationMs/);
 });
+
+test("benchmark evaluator bounds a hung active baseline lookup", async () => {
+  let calls = 0;
+  const evaluator = createIsolatedSkillBenchmarkEvaluator({
+    fixtures,
+    maxTotalDurationMs: 5,
+    getActiveBaseline: () => new Promise<SkillPackage>(() => undefined),
+    runner: { run: async () => { calls++; return result(true); } },
+  });
+  const evaluation = await evaluator(candidate);
+  assert.equal(evaluation.passed, false);
+  assert.equal(calls, 0);
+  assert.equal(evaluation.checks[0]?.name, "baseline-evidence");
+  assert.match(evaluation.checks[0]?.detail ?? "", /timed out|budget exhausted/);
+});
