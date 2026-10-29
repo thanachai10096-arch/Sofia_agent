@@ -11,7 +11,7 @@ const skill: SkillPackage = {
     name: "Regression fixture skill",
     description: "Synthetic evaluator test",
     triggers: ["fixture"],
-    categories: ["test"],
+    categories: ["tool_error"],
     strategy: "inspect-evidence",
     procedure: ["inspect synthetic evidence", "verify result"],
     verification: ["test"],
