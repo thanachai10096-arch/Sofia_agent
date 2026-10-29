@@ -405,7 +405,7 @@ export function preflightBackupRestore(
     throw new Error(`Restore preflight has unassigned bundle paths: ${unassigned.join(", ")}`);
   }
 
-  targets.sort((a, b) => a.name.localeCompare(b.name));
+  targets.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return {
     format: "sofia-agent-restore-plan",
     version: 1,
