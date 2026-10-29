@@ -9,7 +9,6 @@ export interface LearningRepairAuthorization {
   idempotencyKey: string;
   /** Explicitly approved skill IDs. Approval is scoped to this plan and does not itself execute repair. */
   approvedSkillIds: string[];
-  /** Current authoritative policy revision per skill, fetched immediately before planning. */
   /** Policy revision from the freshly re-read authoritative learning record. */
   learningPolicyRevisions: Record<string, string>;
   /** Current policy revision from the authoritative policy service. */
@@ -35,7 +34,7 @@ export interface LearningRepairPlan {
   actions: LearningRepairAction[];
   blocked: LearningRepairBlock[];
   /** A plan is never proof of execution; a separate audited executor must revalidate state. */
-  executable: boolean;
+  eligibleForExecutor: boolean;
 }
 const sameScope = (a: LearningScope, b: LearningScope) =>
   a.tenantId === b.tenantId && a.principalId === b.principalId && a.projectId === b.projectId;
@@ -101,5 +100,5 @@ export function planLearningReconciliationRepair(
     }
     actions.push({ kind: "register-missing-runtime-skill", skillId, expectedPolicyRevision, scope: { ...scope }, actorId: authorization.actorId, idempotencyKey: authorization.idempotencyKey + ":" + skillId });
   }
-  return { planId: authorization.idempotencyKey, scope: { ...scope }, actions, blocked, executable: actions.length > 0 && blocked.length === 0 };
+  return { planId: authorization.idempotencyKey, scope: { ...scope }, actions, blocked, eligibleForExecutor: actions.length > 0 && blocked.length === 0 };
 }
