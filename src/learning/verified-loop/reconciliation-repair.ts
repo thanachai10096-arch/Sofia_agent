@@ -103,7 +103,7 @@ export function planLearningReconciliationRepair(
       blocked.push({ skillId, reason: "trusted-evidence-missing" });
       continue;
     }
-    actions.push({ kind: "register-missing-runtime-skill", skillId, expectedPolicyRevision, scope: { ...scope }, actorId: authorization.actorId, idempotencyKey: authorization.idempotencyKey + ":" + skillId });
+    actions.push({ kind: "register-missing-runtime-skill", skillId, expectedPolicyRevision, scope: { ...scope }, actorId: authorization.actorId, idempotencyKey: JSON.stringify([authorization.idempotencyKey, skillId]) });
   }
   return { planId: authorization.idempotencyKey, scope: { ...scope }, actions, blocked, eligibleForExecutor: actions.length > 0 && blocked.length === 0 };
 }
