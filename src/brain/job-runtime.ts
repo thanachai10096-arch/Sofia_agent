@@ -93,7 +93,13 @@ async function isExclusiveFileCollision(error: unknown, file: string): Promise<b
     await fs.stat(file);
     return true;
   } catch (statError) {
-    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((statError as NodeJS.ErrnoException).code === "ENOENT") {
+      // Another process may have removed the lock between open(..., "wx")
+      // returning EPERM and this stat. Treat it as transient contention so
+      // the bounded acquisition loop retries; persistent permission failures
+      // still time out and fail closed.
+      return true;
+    }
     throw statError;
   }
 }
