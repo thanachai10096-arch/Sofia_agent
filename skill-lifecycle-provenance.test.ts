@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VersionedSkillLifecycle } from "../src/brain/skill-lifecycle.js";
@@ -48,6 +48,21 @@ test("skill lifecycle rejects missing, blank, duplicate, and unbounded evidence 
       );
     }
     assert.equal(lifecycle.list().length, 0, "invalid provenance must not create lifecycle records");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skill lifecycle rejects persisted records with missing evidence IDs", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-persisted-evidence-"));
+  const file = path.join(root, "lifecycle.json");
+  try {
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    lifecycle.propose(skillPackage, { source: "repair", evidenceIds: ["evidence-1"], confidence: 0.9 });
+    const persisted = JSON.parse(readFileSync(file, "utf8")) as { records: Array<{ provenance: { evidenceIds: string[] } }> };
+    persisted.records[0]!.provenance.evidenceIds = [];
+    writeFileSync(file, JSON.stringify(persisted));
+    assert.throws(() => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }), /Invalid skill lifecycle record/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
