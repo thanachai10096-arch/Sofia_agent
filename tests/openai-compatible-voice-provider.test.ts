@@ -114,3 +114,38 @@ test("OpenAI-compatible voice provider forwards cancellation and rejects non-aud
   );
   await assert.rejects(providers.tts!.synthesize("hello", new AbortController().signal), /non-audio content type/);
 });
+
+
+test("OpenAI-compatible voice provider stops streaming once response exceeds limit", async () => {
+  const providers = createOpenAICompatibleVoiceProviders({
+    baseUrl: "https://voice.example.test/v1",
+    apiKey: "secret",
+    sttModel: "stt",
+    maxResponseBytes: 8,
+    fetchImpl: async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(9));
+        controller.close();
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  await assert.rejects(
+    providers.stt.transcribe({ bytes: new Uint8Array([1]), mimeType: "audio/wav", durationMs: 1000 }, new AbortController().signal),
+    /exceeds configured byte limit/,
+  );
+});
+
+test("OpenAI-compatible voice provider does not expose provider error response bodies", async () => {
+  const providers = createOpenAICompatibleVoiceProviders({
+    baseUrl: "https://voice.example.test/v1",
+    apiKey: "secret",
+    sttModel: "stt",
+    fetchImpl: async () => mockResponse("sensitive-provider-error-body", 500),
+  });
+  await assert.rejects(
+    providers.stt.transcribe({ bytes: new Uint8Array([1]), mimeType: "audio/wav", durationMs: 1000 }, new AbortController().signal),
+    (error: unknown) => error instanceof Error
+      && /HTTP 500/.test(error.message)
+      && !error.message.includes("sensitive-provider-error-body"),
+  );
+});
