@@ -69,6 +69,16 @@ export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/gua
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
 export { VoiceWorkflow } from "./voice/workflow.js";
 export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpeechProvider, VoiceAgentReply, VoiceTurnResult, VoiceWorkflowOptions } from "./voice/workflow.js";
+export type { VoiceProviderSelection, VoiceProviderRegistry } from "./voice/provider-registry.js";
+export { createVoiceProviderRegistry, loadVoiceProviderSelectionFromEnv } from "./voice/provider-registry.js";
+export {
+  createOpenAICompatibleVoiceProviders,
+  loadOpenAICompatibleVoiceConfigFromEnv,
+} from "./voice/openai-compatible-provider.js";
+export type {
+  OpenAICompatibleVoiceConfig,
+  VoiceProviderEnvironment,
+} from "./voice/openai-compatible-provider.js";
 
 export { createChatCommandHandler } from "./integrations/chat-adapter.js";
 export { FileChatMessageDeduplicator } from "./integrations/file-chat-deduplicator.js";
@@ -126,3 +136,6 @@ export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHA
 export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
+
+export { createVoiceChannelHandler } from "./voice/channel-handler.js";
+export type { VoiceChannel, VerifiedVoiceEvent, VoiceEventDeduplicator, VoiceChannelAccessPolicy, VoiceChannelDelivery, VoiceChannelResult, VoiceChannelHandlerOptions } from "./voice/channel-handler.js";
