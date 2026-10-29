@@ -160,3 +160,24 @@ test("persistent skill ledger recovers after a failed write and persists subsequ
   assert.equal(ledger.list().length, 1, "only the candidate whose write succeeded should remain available");
   assert.equal(ledger.getPersistenceStatus().lastError, null);
 });
+
+test("persistent skill ledger does not hide a failed write behind a later success in the same batch", async () => {
+  let attempts = 0;
+  const batchStore = {
+    save: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("first write failed");
+    },
+    list: async () => [],
+    find: async () => [],
+  };
+  const ledger = new PersistentSkillLedger(batchStore);
+  ledger.record(learnedCandidate);
+  ledger.record({ ...learnedCandidate, trigger: "second verified failure" });
+
+  await assert.rejects(ledger.flush(), /first write failed/);
+  assert.equal(ledger.list().length, 1);
+  assert.equal(ledger.list()[0]?.trigger, "second verified failure");
+  assert.equal(ledger.getPersistenceStatus().lastError, null, "flush reports and clears the batch failure");
+  await ledger.flush();
+});
