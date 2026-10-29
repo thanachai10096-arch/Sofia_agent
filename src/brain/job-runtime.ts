@@ -418,6 +418,7 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly controllers = new Map<string, AbortController>();
   private readonly resuming = new Set<string>();
   private readonly starting = new Set<string>();
+  private readonly executions = new Map<string, Promise<void>>();
   private readonly state: FileJobStateStore;
 
   constructor(
@@ -447,8 +448,21 @@ export class DurableJobRuntime implements JobRuntime {
     };
     this.jobs.set(id, record);
     await this.state.save(record);
-    void this.execute(record, input);
+    const execution = this.execute(record, input)
+      .catch(() => {
+        // execute() handles normal run failures itself; this guard also prevents
+        // unexpected persistence/setup failures from becoming unhandled rejections.
+      })
+      .finally(() => {
+        if (this.executions.get(record.id) === execution) this.executions.delete(record.id);
+      });
+    this.executions.set(record.id, execution);
     return publicJobRecord(record);
+  }
+
+  /** Wait for currently scheduled local executions to finish, e.g. during graceful shutdown. */
+  async waitForIdle(): Promise<void> {
+    await Promise.all([...this.executions.values()]);
   }
 
   private async recoverInterrupted(record: JobRecord): Promise<JobRecord> {
