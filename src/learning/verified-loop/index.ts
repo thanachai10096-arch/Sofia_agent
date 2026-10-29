@@ -5,3 +5,4 @@ export { createVerifiedCompletionHandler } from "./brain-adapter.js";
 export type { FinalizedBrainCompletion, PersistedCompletionReceipt } from "./brain-adapter.js";
 export { ScopedSelfImprovement } from "./self-improvement.js";
 export type { SelfImprovementCheckpointStore, VerifiedExecutionNotification } from "./self-improvement.js";
+export { SqliteSelfImprovementCheckpointStore } from "./sqlite-checkpoint-store.js";
