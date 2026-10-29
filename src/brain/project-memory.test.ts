@@ -181,3 +181,22 @@ test("persistent skill ledger does not hide a failed write behind a later succes
   assert.equal(ledger.getPersistenceStatus().lastError, null, "flush reports and clears the batch failure");
   await ledger.flush();
 });
+
+test("persistent skill ledger does not expose candidates before durable persistence completes", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const blockingStore = {
+    save: async () => { await gate; },
+    list: async () => [],
+    find: async () => [],
+  };
+  const ledger = new PersistentSkillLedger(blockingStore);
+  ledger.record(learnedCandidate);
+  assert.equal(ledger.getPersistenceStatus().pending, true);
+  assert.equal(ledger.list().length, 0, "pending candidates must not be available for skill matching");
+
+  release();
+  await ledger.flush();
+  assert.equal(ledger.list().length, 1);
+  assert.equal(ledger.getPersistenceStatus().pending, false);
+});
