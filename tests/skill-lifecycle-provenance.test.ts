@@ -172,3 +172,30 @@ test("skill lifecycle rejects blank evaluator check names and oversized details"
   }
 });
 
+test("skill lifecycle safely persists and restores a skill named __proto__", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-prototype-id-"));
+  const file = path.join(root, "lifecycle.json");
+  try {
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
+    const packageWithPrototypeId: SkillPackage = {
+      ...skillPackage,
+      skill: { ...skillPackage.skill, id: "__proto__" },
+    };
+    const candidate = lifecycle.propose(packageWithPrototypeId, {
+      source: "regression-test",
+      evidenceIds: ["prototype-id-test"],
+      confidence: 0.9,
+    });
+    await lifecycle.evaluate(candidate.id);
+    assert.equal(lifecycle.promote(candidate.id).status, "active");
+    assert.equal(platform.get("__proto__")?.skill.id, "__proto__");
+
+    const restoredPlatform = new InMemorySkillsPlatform();
+    const restored = new VersionedSkillLifecycle(restoredPlatform, passing, { file });
+    assert.equal(restored.active("__proto__")?.status, "active");
+    assert.equal(restoredPlatform.get("__proto__")?.skill.id, "__proto__");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
