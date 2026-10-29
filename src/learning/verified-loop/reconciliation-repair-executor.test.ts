@@ -129,6 +129,21 @@ test("fails closed when a journal claims work without a fencing token", async ()
   assert.equal(registrations, 0);
 });
 
+test("does not start lifecycle mutation after the repair lease is lost during start audit", async () => {
+  const journal = new MemoryJournal();
+  journal.heartbeat = async () => false;
+  journal.audit = async (event) => {
+    if (event.event === "repair_started") await new Promise(resolve => setTimeout(resolve, 1_200));
+  };
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /heartbeat lost before lifecycle mutation/);
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
+
 test("does not mutate when the required repair-start audit cannot be persisted", async () => {
   const journal = new MemoryJournal();
   const audit = journal.audit.bind(journal);
