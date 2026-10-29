@@ -159,3 +159,42 @@ test("Discord Gateway ignores an untrusted resume URL outside Discord domains", 
   assert.equal(urls[1], "wss://gateway.discord.gg/?v=10&encoding=json");
   await transport.stop();
 });
+
+test("Discord Gateway resumes the prior session after a transient disconnect", async () => {
+  const sockets: FakeSocket[] = [];
+  const urls: string[] = [];
+  const transport = createDiscordGatewayTransport({
+    botToken: "BotToken_1234567890.abcdef-XYZ",
+    reconnectBaseMs: 100,
+    webSocketFactory: (url) => {
+      urls.push(url);
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      queueMicrotask(() => socket.emit("message", { data: JSON.stringify({ op: 10, d: { heartbeat_interval: 45_000 } }) }));
+      const originalSend = socket.send.bind(socket);
+      socket.send = (data: string) => {
+        originalSend(data);
+        const payload = JSON.parse(data) as { op: number };
+        if (payload.op === 6) {
+          queueMicrotask(() => socket.emit("message", { data: JSON.stringify({ op: 0, s: 2, t: "RESUMED", d: {} }) }));
+        }
+      };
+      return socket;
+    },
+  });
+
+  await transport.start(new AbortController().signal, async () => {});
+  assert.equal(sockets.length, 1);
+  sockets[0].close(1006, "temporary network disconnect");
+  for (let attempt = 0; attempt < 50 && sockets.length < 2; attempt++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(sockets.length, 2);
+  const resume = sockets[1].sent.map((entry) => JSON.parse(entry) as { op: number; d?: { session_id?: string; seq?: number } })
+    .find((entry) => entry.op === 6);
+  assert.ok(resume);
+  assert.equal(resume.d?.session_id, "session-1");
+  assert.equal(resume.d?.seq, 1);
+  assert.equal(urls[1], "wss://gateway.discord.gg/?v=10&encoding=json");
+  await transport.stop();
+});
