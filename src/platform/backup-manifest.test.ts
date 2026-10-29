@@ -83,6 +83,31 @@ test("manifest JSON round-trips deterministically and rejects malformed or overs
   assert.throws(() => serializeBackupManifest({ format: "wrong" }), /Invalid Sofia backup manifest format/);
 });
 
+test("manifest rejects case-folded, Unicode-normalized, and file-directory path collisions", () => {
+  const conflictingSets = [
+    ["State.json", "state.json"],
+    ["café.json", "cafe\u0301.json"],
+    ["state", "state/session.json"],
+    ["state/session.json", "state"],
+  ];
+  for (const paths of conflictingSets) {
+    assert.throws(
+      () => createBackupManifest(paths.map((path) => ({ path, content: Buffer.from("x") })), createdAt),
+      /unique across portable filesystems|both files and directories/,
+      `expected portable path collision to be rejected: ${paths.join(", ")}`,
+    );
+  }
+
+  const manifest = createBackupManifest([{ path: "State.json", content: Buffer.from("x") }], createdAt);
+  assert.throws(() => validateBackupManifest({
+    ...manifest,
+    entries: [...manifest.entries, {
+      ...manifest.entries[0],
+      path: "state.json",
+    }],
+  }), /unique across portable filesystems/);
+});
+
 test("manifest paths reject Windows device names, alternate streams, controls, and non-portable segments", () => {
   for (const path of [
     "CON", "con.txt", "NUL.json", "folder/COM1.log", "folder/LPT9",
