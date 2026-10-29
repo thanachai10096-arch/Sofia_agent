@@ -10,7 +10,7 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "poll_conflict" | "update_failed" | "delivery_failed", status?: number) => void;
+  onError?: (event: "poll_failed" | "poll_conflict" | "webhook_conflict" | "update_failed" | "delivery_failed", status?: number) => void;
 }
 
 /**
@@ -120,14 +120,24 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       const stopFromParent = () => controller?.abort(signal.reason);
       signal.addEventListener("abort", stopFromParent, { once: true });
       if (signal.aborted) stopFromParent();
-      // This runtime uses long polling, so remove any stale Telegram webhook
-      // configuration before getUpdates. Preserve queued updates.
+      // Long polling and webhook delivery are mutually exclusive. Inspect the
+      // current webhook first and never delete an intentionally configured one.
       if (!controller.signal.aborted) {
         try {
-          await request<boolean>("deleteWebhook", { drop_pending_updates: false }, controller.signal);
-        } catch {
-          // Do not log token or provider response bodies. Polling will emit a
-          // safe status-only diagnostic if Telegram still rejects getUpdates.
+          const webhook = await request<{ url: string }>("getWebhookInfo", undefined, controller.signal);
+          if (webhook.url) {
+            try { options.onError?.("webhook_conflict"); } catch { /* diagnostics must not terminate cleanup */ }
+            signal.removeEventListener("abort", stopFromParent);
+            return;
+          }
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
+              ? error.status : undefined;
+            try { options.onError?.("poll_failed", status); } catch { /* diagnostics must not terminate cleanup */ }
+          }
+          signal.removeEventListener("abort", stopFromParent);
+          return;
         }
       }
       if (controller.signal.aborted) {
