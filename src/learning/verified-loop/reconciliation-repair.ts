@@ -2,6 +2,7 @@ import type { LearningScope } from "./ports.js";
 import type { LearningReconciliationIssue, LearningReconciliationReport } from "./reconciliation.js";
 
 export interface LearningRepairAuthorization {
+  scope: LearningScope;
   /** Authenticated operator identity; never accept this from a model-generated candidate. */
   actorId: string;
   /** Caller-provided key persisted by the eventual repair executor for idempotent replay. */
@@ -49,7 +50,7 @@ export function planLearningReconciliationRepair(
   report: LearningReconciliationReport,
   authorization: LearningRepairAuthorization,
 ): LearningRepairPlan {
-  if (!report || !report.scope || !sameScope(report.scope, authorization?.scope ?? report.scope)) {
+  if (!report || !report.scope || !authorization?.scope || !sameScope(report.scope, authorization.scope)) {
     throw new Error("Invalid reconciliation report scope");
   }
   if (!validText(authorization?.actorId, 200) || !validText(authorization?.idempotencyKey, 200) ||
