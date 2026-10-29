@@ -28,6 +28,20 @@ const GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
 const GATEWAY_INTENTS = 1 | (1 << 9) | (1 << 12) | (1 << 15);
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
+function trustedResumeGatewayUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 2_048) return undefined;
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "wss:" || url.username || url.password ||
+        (url.port !== "" && url.port !== "443") ||
+        !(host === "discord.gg" || host.endsWith(".discord.gg"))) return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Discord Gateway transport for normal message events. Gateway session authentication
  * is distinct from HTTP interaction signatures. Authorization remains in Sofia policy.
@@ -203,7 +217,8 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
       if (payload.t === "READY") {
         const ready = payload.d as GatewayReady | undefined;
         if (ready?.session_id) sessionId = ready.session_id;
-        if (ready?.resume_gateway_url) resumeUrl = ready.resume_gateway_url;
+        const trustedResumeUrl = trustedResumeGatewayUrl(ready?.resume_gateway_url);
+        if (trustedResumeUrl) resumeUrl = trustedResumeUrl;
         if (ready?.user?.id) botId = ready.user.id;
         reconnectAttempt = 0;
       } else if (payload.t === "MESSAGE_CREATE" && payload.d && typeof payload.d === "object") {
