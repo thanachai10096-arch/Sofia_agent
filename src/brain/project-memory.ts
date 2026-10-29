@@ -161,7 +161,11 @@ export class PersistentSkillLedger implements SkillLedger {
     this.pendingWrites += 1;
     this.pending = this.pending.then(() => this.store.save(entry)).then(
       () => undefined,
-      error => { this.persistenceError = error instanceof Error ? error.message : String(error); },
+      error => {
+        this.persistenceError = error instanceof Error ? error.message : String(error);
+        // A failed durable write must not leave a phantom skill available to later matching.
+        this.cache = this.cache.filter(item => item !== safe);
+      },
     ).finally(() => { this.pendingWrites = Math.max(0, this.pendingWrites - 1); });
   }
 
