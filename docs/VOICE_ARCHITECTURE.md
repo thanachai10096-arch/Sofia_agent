@@ -73,9 +73,10 @@ Important boundaries:
 Use the existing `src/voice/workflow.ts` as the workflow foundation; do not replace it or create a second runtime.
 
 - `src/voice/workflow.ts`: existing provider-injected STT → Sofia callback → optional TTS workflow.
-- `src/voice/channel-handler.ts`: added shared handler for verified normalized voice events, access policy, deduplication, workflow invocation, and text/audio delivery.
+- `src/voice/channel-handler.ts`: shared handler for verified normalized voice events, access policy, deduplication, workflow invocation, and text/audio delivery.
+- `src/voice/provider-registry.ts`: explicit STT/TTS provider registration and selection, plus non-secret environment routing settings; voice stays disabled by default.
 - `src/integrations/voice/...`: future platform-specific adapters that verify platform events, safely acquire media, decode/inspect duration, and deliver responses.
-- Provider registry, media decoder, session controller, and real provider implementations remain future work; do not claim they exist until added and tested.
+- Media decoder, session controller, concrete STT/TTS providers, and live channel adapters remain future work; do not claim they exist until added and tested.
 - `docs/VOICE-WORKFLOW.md`: integration contract and safety requirements.
 
 The channel handler is a shared contract, not a claim that transport adapters for all listed channels already exist. Extend existing adapters where possible and avoid parallel messaging/runtime abstractions.
@@ -146,7 +147,7 @@ Realtime transport must still use the same Sofia request/session and policy cont
 ### P0 — audit and core contract
 - Review current main and any voice-related PRs/diffs before integrating anything.
 - Confirm the current `VoiceWorkflow` contract and export; a shared `createVoiceChannelHandler` and focused unit tests are now added on the feature branch.
-- Next: add provider-neutral configuration validation and a safe feature-off default.
+- Added provider-neutral registry/config selection with explicit provider IDs and feature-off default. Next: wire a real provider in Test Environment and add independent media decoding/validation.
 - Add media validation independent of untrusted duration metadata.
 - Exit: typecheck/build/tests pass; disabled voice does not change current behavior.
 
