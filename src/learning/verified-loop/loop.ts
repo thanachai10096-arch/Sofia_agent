@@ -62,10 +62,10 @@ export class VerifiedLearningLoop {
 
       const prepared = await this.host.transaction(scope, async tx => {
         const inserted = await tx.insertExperienceIfAbsent(experience);
-        if (!inserted) return { inserted: false as const, experienceId: experience.id };
+        if (!inserted) return { inserted: false as const, experienceId: experience.id, candidate: undefined };
         const history = await tx.listExperiences(scope, this.options.historyLimit);
         const repeats = history.filter(item => item.taskFingerprint === taskFingerprint);
-        if (repeats.length < 2) return { inserted: true as const, experienceId: experience.id };
+        if (repeats.length < 2) return { inserted: true as const, experienceId: experience.id, candidate: undefined };
         const skillName = `learned-${taskFingerprint.slice(0, 12)}`;
         const activeSkills = await tx.listActiveSkills(scope);
         if (activeSkills.some(skill => skill.name === skillName && skill.policyRevision === currentPolicy)) {
