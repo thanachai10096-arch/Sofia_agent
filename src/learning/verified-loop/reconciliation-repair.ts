@@ -67,7 +67,12 @@ export function planLearningReconciliationRepair(
   }
   const scope = report.scope;
   const issues = report.issues;
-  if (!Array.isArray(issues)) throw new Error("Invalid reconciliation report issues");
+  if (!Array.isArray(issues) || typeof report.safe !== "boolean" ||
+      !Number.isSafeInteger(report.checkedLearningSkills) || report.checkedLearningSkills < 0 ||
+      !Number.isSafeInteger(report.checkedRuntimeSkills) || report.checkedRuntimeSkills < 0 ||
+      report.safe !== (issues.length === 0)) {
+    throw new Error("Invalid reconciliation report");
+  }
   const actions: LearningRepairAction[] = [];
   const blocked: LearningRepairBlock[] = [];
   const bySkill = new Map<string, LearningReconciliationIssue[]>();
