@@ -17,6 +17,15 @@ export interface SkillLedger {
   list(): readonly LearnedSkillCandidate[];
 }
 
+function copySkillCandidate(candidate: LearnedSkillCandidate): LearnedSkillCandidate {
+  return {
+    ...candidate,
+    procedure: [...candidate.procedure],
+    verification: [...candidate.verification],
+    evidenceIds: [...candidate.evidenceIds],
+  };
+}
+
 export class InMemorySkillLedger implements SkillLedger {
   private readonly entries = new Map<string, LearnedSkillCandidate>();
 
@@ -28,11 +37,11 @@ export class InMemorySkillLedger implements SkillLedger {
         procedure: candidate.procedure,
       }))
       .digest("hex");
-    if (!this.entries.has(key)) this.entries.set(key, candidate);
+    if (!this.entries.has(key)) this.entries.set(key, copySkillCandidate(candidate));
   }
 
   list(): readonly LearnedSkillCandidate[] {
-    return [...this.entries.values()];
+    return [...this.entries.values()].map(copySkillCandidate);
   }
 }
 
