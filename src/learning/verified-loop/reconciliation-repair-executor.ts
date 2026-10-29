@@ -309,7 +309,7 @@ export async function executeLearningRepairPlan(
     let auditWarning: string | undefined;
     let heartbeatLost = false;
     const heartbeatTimer = journal.heartbeat ? setInterval(() => {
-      void journal.heartbeat!(action.idempotencyKey, action.scope, entry.claimToken!, now().toISOString())
+      void journal.heartbeat!(action.idempotencyKey, action.scope, entry.claimToken!, now())
         .then(owned => { if (!owned) heartbeatLost = true; })
         .catch(() => { heartbeatLost = true; });
     }, 1_000) : undefined;
