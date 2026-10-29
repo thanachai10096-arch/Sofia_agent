@@ -21,7 +21,7 @@ test("Telegram HTTP transport polls, advances update offset, sends replies and s
       });
     }
     if (url.endsWith("/sendMessage")) return ok({ message_id: 9 });
-    if (url.endsWith("/deleteWebhook")) return ok(true);
+    if (url.endsWith("/getWebhookInfo")) return ok({ url: "" });
     throw new Error("Unexpected Telegram endpoint.");
   };
   const transport = createTelegramHttpTransport({ token, fetchImpl, pollTimeoutSeconds: 2 });
@@ -58,7 +58,7 @@ test("a failed update handler does not block later updates or repeat the failed 
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     requests.push({ url, init });
-    if (url.endsWith("/deleteWebhook")) return ok(true);
+    if (url.endsWith("/getWebhookInfo")) return ok({ url: "" });
     if (url.endsWith("/getUpdates")) {
       pollCount++;
       if (pollCount === 1) return ok([{ update_id: 40 }, { update_id: 41 }]);
@@ -99,7 +99,7 @@ test("HTTP 409 stops polling instead of retrying a competing getUpdates consumer
   let pollCount = 0;
   const fetchImpl: typeof fetch = async (input) => {
     const url = String(input);
-    if (url.endsWith("/deleteWebhook")) return ok(true);
+    if (url.endsWith("/getWebhookInfo")) return ok({ url: "" });
     if (url.endsWith("/getUpdates")) {
       pollCount++;
       return new Response(JSON.stringify({
@@ -126,6 +126,27 @@ test("HTTP 409 stops polling instead of retrying a competing getUpdates consumer
   await transport.stop();
   assert.equal(pollCount, 1);
   assert.deepEqual(errorEvents, [{ event: "poll_conflict", status: 409 }]);
+});
+
+test("an existing webhook is preserved and prevents long polling", async () => {
+  const requests: string[] = [];
+  const events: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/getWebhookInfo")) return ok({ url: "https://example.invalid/telegram-hook" });
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event) { events.push(event); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  assert.deepEqual(events, ["webhook_conflict"]);
+  assert.equal(requests.some((url) => url.endsWith("/deleteWebhook")), false);
+  assert.equal(requests.some((url) => url.endsWith("/getUpdates")), false);
+  await transport.stop();
 });
 
 test("Telegram transport rejects malformed tokens and poll timeouts", () => {
