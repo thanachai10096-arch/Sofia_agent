@@ -159,8 +159,10 @@ export class PersistentSkillLedger implements SkillLedger {
 
     // Serialize writes and observe failures instead of creating an unhandled rejection.
     this.pendingWrites += 1;
-    this.pending = this.pending.then(() => this.store.save(entry)).then(
-      () => undefined,
+    this.pending = this.pending.then(
+      () => this.store.save(entry),
+    ).then(
+      () => { this.persistenceError = null; },
       error => {
         this.persistenceError = error instanceof Error ? error.message : String(error);
         // A failed durable write must not leave a phantom skill available to later matching.
