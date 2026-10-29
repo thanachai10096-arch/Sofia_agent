@@ -37,3 +37,17 @@ An explicitly selected route is not silently replaced by another route. If the r
 - Route-specific environment variables can assign different model IDs to fast, coding, reasoning, and vision routes.
 
 Custom endpoints use the OpenAI Chat Completions-compatible protocol by default. Set `SOFIA_MODEL_PROTOCOL=anthropic-messages` only when the configured custom endpoint implements the Anthropic Messages API. Built-in OpenRouter and Gemini use OpenAI-compatible requests; Anthropic uses its native Messages request/response format. Other native protocols still need a dedicated adapter; Sofia does not claim every model API is protocol-identical.
+
+
+### Declaring route capabilities
+
+Capability metadata is optional and must be declared by the operator; Sofia does not infer it from a model name. For example:
+
+```dotenv
+SOFIA_CODING_SUPPORTS_TOOL_CALLING=true
+SOFIA_CODING_SUPPORTS_VISION=false
+SOFIA_CODING_SUPPORTS_STRUCTURED_OUTPUT=true
+SOFIA_CODING_CONTEXT_WINDOW=128000
+```
+
+The route prefixes are `SOFIA_FAST`, `SOFIA_CODING`, `SOFIA_REASONING`, and `SOFIA_VISION`. Boolean values accept `true/false`, `1/0`, or `yes/no`. Invalid values fail configuration loading rather than being silently ignored. Context window values must be positive safe integers. Unset fields remain unknown. These declarations guide routing; they are not live provider-verified guarantees.
