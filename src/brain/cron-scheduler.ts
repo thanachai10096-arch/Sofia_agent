@@ -223,8 +223,12 @@ export class CronScheduler {
     this.store = options.store ?? new FileCronStore();
     this.now = options.now ?? (() => new Date());
     this.authorize = options.authorize ?? ((actor, _action, schedule) => !!actor && (!schedule || actor === schedule.ownerKeyId));
-    this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
-    this.maxSchedulesPerOwner = Math.max(1, Math.min(10_000, Math.floor(options.maxSchedulesPerOwner ?? 100)));
+    const configuredConcurrency = options.maxConcurrent ?? 2;
+    this.maxConcurrent = Number.isFinite(configuredConcurrency)
+      ? Math.max(1, Math.min(100, Math.floor(configuredConcurrency))) : 2;
+    const configuredOwnerLimit = options.maxSchedulesPerOwner ?? 100;
+    this.maxSchedulesPerOwner = Number.isFinite(configuredOwnerLimit)
+      ? Math.max(1, Math.min(10_000, Math.floor(configuredOwnerLimit))) : 100;
     this.auditCallback = options.audit;
   }
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
@@ -250,8 +254,26 @@ export class CronScheduler {
   }
   async create(input: CronScheduleInput, actor: string): Promise<CronSchedule> {
     if (!await this.authorize(actor, "create")) throw new Error("Not authorized to create cron schedule");
+    if (!input || typeof input !== "object") throw new Error("Cron schedule input is required");
+    if (typeof actor !== "string" || !actor.trim()) throw new Error("Authenticated actor is required");
+    if (typeof input.name !== "string" || typeof input.task !== "string" ||
+        typeof input.ownerKeyId !== "string" || typeof input.timeZone !== "string" ||
+        !input.name.trim() || !input.task.trim() || !input.ownerKeyId.trim() || !input.timeZone.trim()) {
+      throw new Error("name, task, ownerKeyId and timeZone are required");
+    }
+    if (input.enabled !== undefined && typeof input.enabled !== "boolean") throw new Error("enabled must be a boolean");
+    if (input.misfirePolicy !== undefined && input.misfirePolicy !== "skip" && input.misfirePolicy !== "run-once") {
+      throw new Error("Invalid misfire policy");
+    }
+    if (input.maxRetries !== undefined && (!Number.isSafeInteger(input.maxRetries) || input.maxRetries < 0)) {
+      throw new Error("maxRetries must be a non-negative safe integer");
+    }
+    if (input.timeoutMs !== undefined && (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1)) {
+      throw new Error("timeoutMs must be a positive safe integer");
+    }
+    if (input.cron !== undefined && typeof input.cron !== "string") throw new Error("cron must be a string");
+    if (input.runAt !== undefined && typeof input.runAt !== "string") throw new Error("runAt must be a string");
     if (input.ownerKeyId !== actor) throw new Error("Schedule owner must match the authenticated API key");
-    if (!input.name.trim() || !input.task.trim() || !input.ownerKeyId.trim()) throw new Error("name, task and ownerKeyId are required");
     const hasCron = input.cron !== undefined;
     const hasRunAt = input.runAt !== undefined;
     if (hasCron === hasRunAt) throw new Error("Provide exactly one of cron or runAt");
