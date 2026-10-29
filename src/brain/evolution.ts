@@ -41,6 +41,19 @@ export interface SkillRanking {
   attempts: number;
 }
 
+/** A review-only suggestion derived from repeated execution evidence. */
+export interface SkillImprovementProposal {
+  skillId: string;
+  taskType: string;
+  reason: "low-success-rate" | "high-recovery-cost";
+  attempts: number;
+  successes: number;
+  failures: number;
+  successRate: number;
+  avgRecoveryRounds: number;
+  status: "review-required";
+}
+
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
@@ -190,6 +203,44 @@ export class EvolutionEngine {
     stats.attempts++;
     completed ? stats.successes++ : stats.failures++;
     void this.persist();
+  }
+
+  /**
+   * Suggests where an existing skill may need attention based on repeated,
+   * task-specific outcomes. This is advisory only: it never edits, enables,
+   * promotes, or executes a skill.
+   */
+  getImprovementProposals(minAttempts = 3): SkillImprovementProposal[] {
+    const threshold = Math.max(3, Math.floor(Number.isFinite(minAttempts) ? minAttempts : 3));
+    const proposals: SkillImprovementProposal[] = [];
+    for (const skill of Object.values(this.snapshot.skills)) {
+      for (const [taskType, outcome] of Object.entries(skill.taskTypes)) {
+        if (outcome.attempts < threshold) continue;
+        const successRate = outcome.successes / Math.max(1, outcome.attempts);
+        const reason = successRate < 0.6
+          ? "low-success-rate"
+          : skill.avgRecoveryRounds >= 1.5
+            ? "high-recovery-cost"
+            : undefined;
+        if (!reason) continue;
+        proposals.push({
+          skillId: skill.id,
+          taskType,
+          reason,
+          attempts: outcome.attempts,
+          successes: outcome.successes,
+          failures: outcome.failures,
+          successRate,
+          avgRecoveryRounds: skill.avgRecoveryRounds,
+          status: "review-required",
+        });
+      }
+    }
+    return proposals.sort((a, b) =>
+      (a.successRate - b.successRate) ||
+      (b.attempts - a.attempts) ||
+      a.skillId.localeCompare(b.skillId),
+    );
   }
 
   getDiagnostics(): LearningDiagnostics {
