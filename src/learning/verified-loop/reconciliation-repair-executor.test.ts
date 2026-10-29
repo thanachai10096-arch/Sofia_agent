@@ -35,6 +35,11 @@ class MemoryJournal implements LearningRepairJournal {
     if (claimToken !== undefined && prior.claimToken !== claimToken) throw new Error("Repair claim lost; stale executor cannot finalize this attempt");
     this.entries.set(key, { ...prior, state, result, updatedAt: new Date().toISOString(), claimToken: undefined });
   }
+  heartbeats: string[] = [];
+  async heartbeat(_key: string, _requested: LearningScope, _claimToken: string, at: string) {
+    this.heartbeats.push(at);
+    return true;
+  }
   async audit(event: LearningRepairAuditEvent) { this.events.push(event); }
 }
 function hostWith(current: () => LearningRepairSnapshot, register: () => Promise<void>): LearningRepairExecutorHost {
@@ -52,6 +57,19 @@ test("executes only after fresh checks and confirms the postcondition", async ()
   assert.equal(journal.entries.get(action.idempotencyKey)?.state, "succeeded");
   assert.ok(journal.events.some(e => e.event === "repair_started"));
   assert.ok(journal.events.some(e => e.event === "repair_succeeded"));
+});
+
+test("refreshes the repair lease with a valid ISO timestamp while registration is running", async () => {
+  const journal = new MemoryJournal();
+  let active = false;
+  const host = hostWith(() => snapshot({ exists: active, active }), async () => {
+    await new Promise(resolve => setTimeout(resolve, 1_200));
+    active = true;
+  });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "succeeded");
+  assert.ok(journal.heartbeats.length >= 1);
+  assert.ok(journal.heartbeats.every(value => Number.isFinite(Date.parse(value))));
 });
 
 test("refuses stale policy or missing trusted evidence before registration", async () => {
