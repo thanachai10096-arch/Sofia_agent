@@ -195,8 +195,11 @@ export class SqliteSessionStore {
   }
 
   search(query: string, options: { limit?: number; offset?: number } = {}): Session[] {
+    if (typeof query !== "string") throw new TypeError("Session search query must be a string.");
     const term = query.trim();
     if (!term) return [];
+    // Bound work on both FTS and LIKE fallback paths for untrusted callers.
+    if (term.length > 1000) throw new RangeError("Session search query must not exceed 1000 characters.");
     const limit = boundedInteger(options.limit, 20, 1, 100);
     const offset = boundedInteger(options.offset, 0, 0, Number.MAX_SAFE_INTEGER);
     let ids: string[];
