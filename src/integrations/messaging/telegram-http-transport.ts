@@ -128,6 +128,8 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           if (webhook.url) {
             try { options.onError?.("webhook_conflict"); } catch { /* diagnostics must not terminate cleanup */ }
             signal.removeEventListener("abort", stopFromParent);
+            stopped = true;
+            controller = undefined;
             return;
           }
         } catch (error) {
@@ -137,11 +139,15 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
             try { options.onError?.("poll_failed", status); } catch { /* diagnostics must not terminate cleanup */ }
           }
           signal.removeEventListener("abort", stopFromParent);
+          stopped = true;
+          controller = undefined;
           return;
         }
       }
       if (controller.signal.aborted) {
         signal.removeEventListener("abort", stopFromParent);
+        stopped = true;
+        controller = undefined;
         return;
       }
       loop = poll(controller.signal, onUpdate).finally(() => {
