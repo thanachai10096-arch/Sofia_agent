@@ -220,4 +220,6 @@ test("route-specific provider URLs reject embedded credentials and non-HTTP sche
   }
   process.env.SOFIA_ROUTE_FAST_BASE_URL = "https://user:password@fast.example.test/v1";
   assert.throws(loadModelConfigFromEnv, /must not contain credentials/);
+  process.env.SOFIA_ROUTE_FAST_BASE_URL = "ftp://fast.example.test/v1";
+  assert.throws(loadModelConfigFromEnv, /must use HTTP or HTTPS/);
 });
