@@ -18,6 +18,44 @@ export interface OpenAICompatibleVoiceConfig {
   maxResponseBytes?: number;
 }
 
+export type VoiceProviderEnvironment = Readonly<Record<string, string | undefined>>;
+
+/**
+ * Read provider credentials/config only inside the trusted server process.
+ * Returns undefined when the minimum provider configuration is absent.
+ * The caller must separately enable voice and select this provider in the registry.
+ */
+export function loadOpenAICompatibleVoiceConfigFromEnv(
+  env: VoiceProviderEnvironment = process.env,
+): OpenAICompatibleVoiceConfig | undefined {
+  const baseUrl = env.SOFIA_VOICE_BASE_URL?.trim();
+  const apiKey = env.SOFIA_VOICE_API_KEY;
+  const sttModel = env.SOFIA_VOICE_STT_MODEL?.trim();
+  if (!baseUrl && !apiKey && !sttModel) return undefined;
+  if (!baseUrl || !apiKey?.trim() || !sttModel) {
+    throw new Error("SOFIA_VOICE_BASE_URL, SOFIA_VOICE_API_KEY, and SOFIA_VOICE_STT_MODEL must be configured together.");
+  }
+  const ttsModel = env.SOFIA_VOICE_TTS_MODEL?.trim() || undefined;
+  const ttsVoice = env.SOFIA_VOICE_TTS_VOICE?.trim() || undefined;
+  const rawMaxResponseBytes = env.SOFIA_VOICE_MAX_RESPONSE_BYTES?.trim();
+  let maxResponseBytes: number | undefined;
+  if (rawMaxResponseBytes) {
+    if (!/^\\d+$/.test(rawMaxResponseBytes)) {
+      throw new Error("SOFIA_VOICE_MAX_RESPONSE_BYTES must be an integer.");
+    }
+    maxResponseBytes = Number(rawMaxResponseBytes);
+    assertResponseLimit(maxResponseBytes);
+  }
+  return {
+    baseUrl,
+    apiKey,
+    sttModel,
+    ...(ttsModel ? { ttsModel } : {}),
+    ...(ttsVoice ? { ttsVoice } : {}),
+    ...(maxResponseBytes === undefined ? {} : { maxResponseBytes }),
+  };
+}
+
 function validateModel(value: string, name: string): string {
   const model = value.trim();
   if (!model || model.length > 200 || /[\r\n\0]/.test(model)) {
