@@ -141,6 +141,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     routes.push({
       id,
       providerId: id,
+      model,
       capabilities: [...capabilities] as import("./types.js").ModelCapability[],
       costWeight: numberEnv("SOFIA_" + id.toUpperCase() + "_COST", cost),
       latencyWeight: numberEnv("SOFIA_" + id.toUpperCase() + "_LATENCY", latency),
