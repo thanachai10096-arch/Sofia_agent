@@ -5,6 +5,7 @@ import { createDiscordGatewayTransport, type DiscordGatewaySocket } from "./disc
 interface EventLike { data?: unknown; code?: number; reason?: string; }
 class FakeSocket implements DiscordGatewaySocket {
   readonly readyState = 1;
+  constructor(private readonly resumeGatewayUrl = "wss://gateway.discord.gg") {}
   private readonly listeners = new Map<string, Set<(event: EventLike) => void>>();
   readonly sent: string[] = [];
   send(data: string) {
@@ -12,7 +13,7 @@ class FakeSocket implements DiscordGatewaySocket {
     const payload = JSON.parse(data) as { op: number };
     if (payload.op === 2) {
       queueMicrotask(() => this.emit("message", { data: JSON.stringify({
-        op: 0, s: 1, t: "READY", d: { session_id: "session-1", resume_gateway_url: "wss://gateway.discord.gg" },
+        op: 0, s: 1, t: "READY", d: { session_id: "session-1", resume_gateway_url: this.resumeGatewayUrl },
       }) }));
     }
   }
@@ -131,5 +132,30 @@ test("Discord Gateway stops reconnecting when Discord rejects privileged intents
   await assert.rejects(started, /intents/);
   await new Promise<void>((resolve) => setTimeout(resolve, 150));
   assert.equal(reconnectAttempts, 1);
+  await transport.stop();
+});
+
+test("Discord Gateway ignores an untrusted resume URL outside Discord domains", async () => {
+  const urls: string[] = [];
+  let firstSocket: FakeSocket | undefined;
+  const transport = createDiscordGatewayTransport({
+    botToken: "BotToken_1234567890.abcdef-XYZ",
+    reconnectBaseMs: 100,
+    webSocketFactory: (url) => {
+      urls.push(url);
+      const socket = new FakeSocket("wss://attacker.example/internal");
+      if (!firstSocket) firstSocket = socket;
+      queueMicrotask(() => socket.emit("message", { data: JSON.stringify({ op: 10, d: { heartbeat_interval: 45_000 } }) }));
+      return socket;
+    },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  assert.ok(firstSocket);
+  firstSocket.close(1000, "test reconnect");
+  for (let attempt = 0; attempt < 30 && urls.length < 2; attempt++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(urls[0], "wss://gateway.discord.gg/?v=10&encoding=json");
+  assert.equal(urls[1], "wss://gateway.discord.gg/?v=10&encoding=json");
   await transport.stop();
 });
