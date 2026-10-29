@@ -153,11 +153,17 @@ test("a webhook conflict leaves transport stopped so it can be started again aft
   let webhookConfigured = true;
   const events: string[] = [];
   const requests: string[] = [];
-  const fetchImpl: typeof fetch = async (input) => {
+  const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     requests.push(url);
     if (url.endsWith("/getWebhookInfo")) return ok({ url: webhookConfigured ? "https://example.invalid/hook" : "" });
-    if (url.endsWith("/getUpdates")) return ok([]);
+    if (url.endsWith("/getUpdates")) {
+      return await new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) { reject(new Error("aborted")); return; }
+        signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    }
     throw new Error("Unexpected Telegram endpoint.");
   };
   const transport = createTelegramHttpTransport({ token, fetchImpl, onError(event) { events.push(event); } });
