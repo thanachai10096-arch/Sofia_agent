@@ -29,19 +29,23 @@ export async function handleLineWebhookHttpRequest(
   }
   const chunks: Buffer[] = [];
   let size = 0;
+  let oversized = false;
   try {
     for await (const chunk of req) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
       size += bytes.byteLength;
       if (size > maxBodyBytes) {
-        respond(413, { error: "request_too_large" }, { connection: "close" });
-        req.destroy();
-        return;
+        oversized = true;
+        continue;
       }
-      chunks.push(bytes);
+      if (!oversized) chunks.push(bytes);
     }
   } catch {
-    if (!res.headersSent) respond(400, { error: "invalid_request_body" });
+    respond(400, { error: "invalid_request_body" });
+    return;
+  }
+  if (oversized) {
+    respond(413, { error: "request_too_large" }, { connection: "close" });
     return;
   }
   const header = req.headers["x-line-signature"];
