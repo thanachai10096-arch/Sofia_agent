@@ -99,3 +99,15 @@ test("detects drift after a journaled success instead of silently claiming healt
   assert.match(result[0]?.reason ?? "", /state drifted/);
   assert.equal(registrations, 0);
 });
+
+
+test("does not trust a raced journal success when authoritative runtime is still missing", async () => {
+  const journal = new MemoryJournal();
+  journal.begin = async (entry) => ({ ...entry, state: "succeeded", attempts: 2, result: "another worker completed" });
+  let registrations = 0;
+  const host = hostWith(() => snapshot({ exists: false, active: false }), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /authoritative state is not active/);
+  assert.equal(registrations, 0);
+});
