@@ -149,6 +149,28 @@ test("an existing webhook is preserved and prevents long polling", async () => {
   await transport.stop();
 });
 
+test("a webhook conflict leaves transport stopped so it can be started again after operator remediation", async () => {
+  let webhookConfigured = true;
+  const events: string[] = [];
+  const requests: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/getWebhookInfo")) return ok({ url: webhookConfigured ? "https://example.invalid/hook" : "" });
+    if (url.endsWith("/getUpdates")) return ok([]);
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({ token, fetchImpl, onError(event) { events.push(event); } });
+  await transport.start(new AbortController().signal, async () => {});
+  await assert.rejects(() => transport.sendMessage("chat-1", "should be stopped"), /stopped/);
+  assert.deepEqual(events, ["webhook_conflict"]);
+  webhookConfigured = false;
+  await transport.start(new AbortController().signal, async () => {});
+  assert.equal(requests.filter((url) => url.endsWith("/getWebhookInfo")).length, 2);
+  assert.equal(requests.filter((url) => url.endsWith("/getUpdates")).length, 1);
+  await transport.stop();
+});
+
 test("Telegram transport rejects malformed tokens and poll timeouts", () => {
   assert.throws(() => createTelegramHttpTransport({ token: "not-a-token" }), /token/);
   assert.throws(() => createTelegramHttpTransport({ token, pollTimeoutSeconds: 51 }), /timeout/);
