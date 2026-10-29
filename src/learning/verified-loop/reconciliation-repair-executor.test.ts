@@ -111,6 +111,36 @@ test("fails closed when a journal claims work without a fencing token", async ()
   assert.equal(registrations, 0);
 });
 
+test("does not mutate when the required repair-start audit cannot be persisted", async () => {
+  const journal = new MemoryJournal();
+  const audit = journal.audit.bind(journal);
+  journal.audit = async (event) => {
+    if (event.event === "repair_started") throw new Error("audit unavailable");
+    return audit(event);
+  };
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
+
+test("still verifies and records successful repair if intermediate registration audit fails", async () => {
+  const journal = new MemoryJournal();
+  const audit = journal.audit.bind(journal);
+  journal.audit = async (event) => {
+    if (event.event === "repair_registered") throw new Error("audit unavailable");
+    return audit(event);
+  };
+  let active = false;
+  const host = hostWith(() => snapshot({ exists: active, active }), async () => { active = true; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "succeeded");
+  assert.match(result[0]?.reason ?? "", /registration audit append failed/);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "succeeded");
+});
+
 test("refuses ineligible plans and cross-scope actions", async () => {
   const journal = new MemoryJournal();
   const host = hostWith(() => snapshot(), async () => {});
