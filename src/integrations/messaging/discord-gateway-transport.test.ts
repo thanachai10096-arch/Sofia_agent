@@ -116,3 +116,20 @@ test("Discord Gateway startup aborts promptly before READY", async () => {
   controller.abort();
   await assert.rejects(started, /stopped before ready/);
 });
+
+test("Discord Gateway stops reconnecting when Discord rejects privileged intents", async () => {
+  const socket = new FakeSocket();
+  let reconnectAttempts = 0;
+  const transport = createDiscordGatewayTransport({
+    botToken: "BotToken_1234567890.abcdef-XYZ",
+    reconnectBaseMs: 100,
+    webSocketFactory: () => { reconnectAttempts++; return socket; },
+  });
+  const started = transport.start(new AbortController().signal, async () => {});
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  socket.emit("close", { code: 4014, reason: "disallowed intent" });
+  await assert.rejects(started, /intents/);
+  await new Promise<void>((resolve) => setTimeout(resolve, 150));
+  assert.equal(reconnectAttempts, 1);
+  await transport.stop();
+});
