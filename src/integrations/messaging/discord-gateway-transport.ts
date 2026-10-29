@@ -35,11 +35,11 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
 export function createDiscordGatewayTransport(options: DiscordGatewayTransportOptions): DiscordTransport {
   if (!/^[A-Za-z0-9._-]{20,256}$/.test(options.botToken)) throw new Error("Discord bot token has an invalid format.");
   const fetchImpl = options.fetchImpl ?? fetch;
-  const socketFactory = options.socketFactory ?? ((url: string) => {
-    const ctor = (globalThis as unknown as { WebSocket?: new (target: string) => DiscordGatewaySocket }).WebSocket;
-    if (!ctor) throw new Error("Discord Gateway requires a WebSocket implementation; inject socketFactory or use a runtime with global WebSocket.");
-    return new ctor(url);
-  });
+  const globalWebSocket = (globalThis as unknown as { WebSocket?: new (target: string) => DiscordGatewaySocket }).WebSocket;
+  if (!options.socketFactory && !globalWebSocket) {
+    throw new Error("Discord Gateway requires a WebSocket implementation; inject socketFactory or use a runtime with global WebSocket.");
+  }
+  const socketFactory = options.socketFactory ?? ((url: string) => new globalWebSocket!(url));
   const channelTypeCache = new Map<string, number>();
   let running = false;
   let controller: AbortController | undefined;
@@ -200,9 +200,19 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
     socket.addEventListener("error", () => {
       if (socket === currentSocket && myGeneration === generation) notify("gateway_connect_failed");
     });
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       if (socket !== currentSocket || myGeneration !== generation) return;
-      notify("gateway_disconnected");
+      clearHeartbeat();
+      const fatalCodes = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
+      if (typeof event.code === "number" && fatalCodes.has(event.code)) {
+        notify("gateway_connect_failed", event.code);
+        running = false;
+        callback = undefined;
+        controller?.abort();
+        currentSocket = undefined;
+        return;
+      }
+      notify("gateway_disconnected", typeof event.code === "number" ? event.code : undefined);
       scheduleReconnect(myGeneration);
     });
   }
