@@ -70,15 +70,8 @@ async function readLimited(response: Response, limit: number): Promise<Uint8Arra
 }
 
 async function providerError(response: Response): Promise<Error> {
-  let detail = "";
-  try {
-    const body = await response.text();
-    // Do not include arbitrary provider bodies in errors; they may contain secrets or personal data.
-    detail = body.slice(0, 160).replace(/[\r\n\t]+/g, " ");
-  } catch {
-    // Keep a generic error if the response body cannot be read.
-  }
-  return new Error("Voice provider request failed with HTTP " + response.status + (detail ? ": " + detail : ""));
+  // Do not include arbitrary provider response bodies: they may contain secrets or personal data.
+  return new Error("Voice provider request failed with HTTP " + response.status + ".");
 }
 
 /**
