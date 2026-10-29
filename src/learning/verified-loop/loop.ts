@@ -60,17 +60,16 @@ export class VerifiedLearningLoop {
         createdAt: new Date().toISOString(),
       };
 
-      return await this.host.transaction(scope, async tx => {
+      const prepared = await this.host.transaction(scope, async tx => {
         const inserted = await tx.insertExperienceIfAbsent(experience);
-        if (!inserted) return { recorded: false, experienceId: experience.id };
+        if (!inserted) return { inserted: false as const, experienceId: experience.id };
         const history = await tx.listExperiences(scope, this.options.historyLimit);
         const repeats = history.filter(item => item.taskFingerprint === taskFingerprint);
-        if (repeats.length < 2) return { recorded: true, experienceId: experience.id };
-
+        if (repeats.length < 2) return { inserted: true as const, experienceId: experience.id };
         const skillName = `learned-${taskFingerprint.slice(0, 12)}`;
         const activeSkills = await tx.listActiveSkills(scope);
         if (activeSkills.some(skill => skill.name === skillName && skill.policyRevision === currentPolicy)) {
-          return { recorded: true, experienceId: experience.id };
+          return { inserted: true as const, experienceId: experience.id };
         }
         const procedure = [
           "Inspect current task context and trusted evidence; do not rely on memory alone.",
@@ -85,46 +84,63 @@ export class VerifiedLearningLoop {
           name: skillName, trigger: safeSummary.slice(0, 240), procedure,
           confidence: Math.min(0.95, 0.65 + 0.05 * repeats.length),
         };
-        const assessment = await this.host.assessCandidate(scope, candidate);
-        // Treat policy/evaluator output as untrusted: NaN bypasses ordinary threshold
-        // comparisons, and out-of-range confidence must never be persisted as trusted.
-        if (!assessment || typeof assessment.allowed !== "boolean" ||
-            typeof assessment.confidence !== "number" || !Number.isFinite(assessment.confidence) ||
-            assessment.confidence < 0 || assessment.confidence > 1) {
-          return { recorded: true, experienceId: experience.id };
-        }
-        const confidence = Math.min(candidate.confidence, assessment.confidence);
-        const assessedCandidate = { ...candidate, confidence };
-        await tx.putCandidate(assessedCandidate);
-        if (!assessment.allowed || confidence < this.options.minimumConfidence) return { recorded: true, experienceId: experience.id };
-
-        const evaluation = await this.host.verification.runRegression(scope, assessedCandidate);
-        const regressionEvidence = evaluation.regressionEvidenceIds.length > 0
-          ? await this.host.verification.getEvidence(scope, evaluation.regressionEvidenceIds)
-          : [];
-        const verifiedRegressionIds = new Set(regressionEvidence.filter(item =>
-          item.trusted === true && item.success === true && item.kind === "regression" &&
-          item.runId === evaluation.regressionRunId && sameScope(item.scope, scope) &&
-          evaluation.regressionEvidenceIds.includes(item.id)
-        ).map(item => item.id));
-        const regressionPassed = Boolean(evaluation.regressionRunId) &&
-          evaluation.regressionEvidenceIds.length > 0 &&
-          evaluation.regressionEvidenceIds.every(id => verifiedRegressionIds.has(id));
-        await tx.recordEvaluation(scope, candidate.id, { ...evaluation, passed: evaluation.passed && regressionPassed });
-        if (!evaluation.passed || !regressionPassed || evaluation.checks.length === 0 ||
-            !evaluation.checks.every(check => check.passed)) {
-          return { recorded: true, experienceId: experience.id };
-        }
-        // Policy may change while regression checks run; re-check immediately before activation.
-        const latestPolicy = await this.host.currentPolicyRevision(scope);
-        if (latestPolicy !== currentPolicy) return { recorded: true, experienceId: experience.id };
-        const active: ActiveLearningSkill = {
-          ...assessedCandidate, status: "active", activatedAt: new Date().toISOString(),
-          policyRevision: latestPolicy,
-        };
-        await tx.activateSkill(active);
-        return { recorded: true, experienceId: experience.id, skillActivated: active.id };
+        return { inserted: true as const, experienceId: experience.id, candidate };
       });
+      if (!prepared.inserted) return { recorded: false, experienceId: prepared.experienceId };
+      if (!prepared.candidate) return { recorded: true, experienceId: prepared.experienceId };
+
+      // Never hold SQLite's BEGIN IMMEDIATE write lock while invoking policy or
+      // regression adapters; those may perform slow I/O or execute external checks.
+      const candidate = prepared.candidate;
+      const assessment = await this.host.assessCandidate(scope, candidate);
+      // Treat policy/evaluator output as untrusted: NaN bypasses ordinary threshold
+      // comparisons, and out-of-range confidence must never be persisted as trusted.
+      if (!assessment || typeof assessment.allowed !== "boolean" ||
+          typeof assessment.confidence !== "number" || !Number.isFinite(assessment.confidence) ||
+          assessment.confidence < 0 || assessment.confidence > 1) {
+        return { recorded: true, experienceId: experience.id };
+      }
+      const confidence = Math.min(candidate.confidence, assessment.confidence);
+      const assessedCandidate = { ...candidate, confidence };
+      await this.host.transaction(scope, tx => tx.putCandidate(assessedCandidate));
+      if (!assessment.allowed || confidence < this.options.minimumConfidence) {
+        return { recorded: true, experienceId: experience.id };
+      }
+
+      const evaluation = await this.host.verification.runRegression(scope, assessedCandidate);
+      const regressionEvidence = evaluation.regressionEvidenceIds.length > 0
+        ? await this.host.verification.getEvidence(scope, evaluation.regressionEvidenceIds)
+        : [];
+      const verifiedRegressionIds = new Set(regressionEvidence.filter(item =>
+        item.trusted === true && item.success === true && item.kind === "regression" &&
+        item.runId === evaluation.regressionRunId && sameScope(item.scope, scope) &&
+        evaluation.regressionEvidenceIds.includes(item.id)
+      ).map(item => item.id));
+      const regressionPassed = Boolean(evaluation.regressionRunId) &&
+        evaluation.regressionEvidenceIds.length > 0 &&
+        evaluation.regressionEvidenceIds.every(id => verifiedRegressionIds.has(id));
+      const recordedEvaluation = { ...evaluation, passed: evaluation.passed && regressionPassed };
+      await this.host.transaction(scope, tx => tx.recordEvaluation(scope, candidate.id, recordedEvaluation));
+      if (!evaluation.passed || !regressionPassed || evaluation.checks.length === 0 ||
+          !evaluation.checks.every(check => check.passed)) {
+        return { recorded: true, experienceId: experience.id };
+      }
+
+      // Policy may change while regression checks run; re-check after all external
+      // work and immediately before the short activation transaction.
+      const latestPolicy = await this.host.currentPolicyRevision(scope);
+      if (latestPolicy !== currentPolicy) return { recorded: true, experienceId: experience.id };
+      const active: ActiveLearningSkill = {
+        ...assessedCandidate, status: "active", activatedAt: new Date().toISOString(),
+        policyRevision: latestPolicy,
+      };
+      const activated = await this.host.transaction(scope, async tx => {
+        const activeSkills = await tx.listActiveSkills(scope);
+        if (activeSkills.some(skill => skill.name === active.name && skill.policyRevision === latestPolicy)) return false;
+        await tx.activateSkill(active);
+        return true;
+      });
+      return { recorded: true, experienceId: experience.id, ...(activated ? { skillActivated: active.id } : {}) };
     } catch (error) {
       throw safeError(this.host, error);
     }
