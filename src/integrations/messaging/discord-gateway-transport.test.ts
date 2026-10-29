@@ -185,12 +185,16 @@ test("Discord Gateway resumes the prior session after a transient disconnect", a
 
   await transport.start(new AbortController().signal, async () => {});
   assert.equal(sockets.length, 1);
-  sockets[0].close(1006, "temporary network disconnect");
+  const firstSocket = sockets[0];
+  assert.ok(firstSocket);
+  firstSocket.close(1006, "temporary network disconnect");
   for (let attempt = 0; attempt < 50 && sockets.length < 2; attempt++) {
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(sockets.length, 2);
-  const resume = sockets[1].sent.map((entry) => JSON.parse(entry) as { op: number; d?: { session_id?: string; seq?: number } })
+  const secondSocket = sockets[1];
+  assert.ok(secondSocket);
+  const resume = secondSocket.sent.map((entry) => JSON.parse(entry) as { op: number; d?: { session_id?: string; seq?: number } })
     .find((entry) => entry.op === 6);
   assert.ok(resume);
   assert.equal(resume.d?.session_id, "session-1");
