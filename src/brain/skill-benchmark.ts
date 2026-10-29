@@ -31,7 +31,7 @@ export interface IsolatedSkillBenchmarkRunner {
 export interface SkillBenchmarkEvaluatorOptions {
   fixtures: readonly SkillBenchmarkFixture[];
   runner: IsolatedSkillBenchmarkRunner;
-  getActiveBaseline?: (skillId: string) => Promise<SkillPackage | undefined> | SkillPackage | undefined;
+  getActiveBaseline?: (skillId: string, signal: AbortSignal) => Promise<SkillPackage | undefined> | SkillPackage | undefined;
   minimumPassRate?: number;
   maximumRegression?: number;
   timeoutMs?: number;
@@ -125,15 +125,16 @@ export function createIsolatedSkillBenchmarkEvaluator(
     const checks: SkillEvaluationResult["checks"] = [];
     let baseline: SkillPackage | undefined;
     let baselineLookupTimer: ReturnType<typeof setTimeout> | undefined;
+    const baselineLookupController = new AbortController();
     try {
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) throw new Error("Total benchmark time budget exhausted before baseline lookup");
-      const lookup = Promise.resolve().then(() => options.getActiveBaseline?.(candidate.skill.id));
+      const lookup = Promise.resolve().then(() => options.getActiveBaseline?.(candidate.skill.id, baselineLookupController.signal));
       const lookupTimeout = new Promise<never>((_, reject) => {
-        baselineLookupTimer = setTimeout(
-          () => reject(new Error("Active baseline lookup timed out")),
-          remainingMs,
-        );
+        baselineLookupTimer = setTimeout(() => {
+          baselineLookupController.abort(new Error("Active baseline lookup timed out"));
+          reject(new Error("Active baseline lookup timed out"));
+        }, remainingMs);
       });
       baseline = await Promise.race([lookup, lookupTimeout]);
     } catch (error) {
