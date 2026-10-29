@@ -113,3 +113,49 @@ test("Discord Gateway ignores an untrusted resume URL and reconnects only to the
   assert.equal(urls[1], "wss://gateway.discord.gg/?v=10&encoding=json");
   await transport.stop();
 });
+
+
+test("Discord Gateway resumes the trusted session with the latest sequence after reconnect", async () => {
+  const sockets: FakeSocket[] = [];
+  const urls: string[] = [];
+  const transport = createDiscordGatewayTransport({
+    botToken: "x".repeat(30),
+    socketFactory: (url) => {
+      urls.push(url);
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+    fetchImpl: async () => new Response(JSON.stringify({ id: "outgoing-message" }), { status: 200 }),
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  const first = sockets[0];
+  assert.ok(first);
+  first.gateway({ op: 10, d: { heartbeat_interval: 60_000 } });
+  first.gateway({ op: 0, t: "READY", s: 1, d: {
+    session_id: "session-resume",
+    resume_gateway_url: "wss://gateway.discord.gg",
+    user: { id: "999", username: "Sofia" },
+  } });
+  first.gateway({ op: 0, t: "MESSAGE_CREATE", s: 2, d: {
+    id: "101", channel_id: "202", guild_id: "303", content: "hello",
+    author: { id: "404", username: "user", bot: false }, mentions: [],
+  } });
+  first.gateway({ op: 7 });
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  const second = sockets[1];
+  assert.ok(second);
+  assert.equal(urls[1], "wss://gateway.discord.gg/?v=10&encoding=json");
+  second.gateway({ op: 10, d: { heartbeat_interval: 60_000 } });
+  const resume = second.sent.find((payload) => payload.op === 6);
+  assert.ok(resume, "expected a Gateway Resume payload");
+  assert.deepEqual(resume.d, { token: "x".repeat(30), session_id: "session-resume", seq: 2 });
+  await transport.stop();
+});
+
+test("Discord Gateway rejects malformed bot tokens before opening a socket", () => {
+  assert.throws(
+    () => createDiscordGatewayTransport({ botToken: "not a valid token", socketFactory: () => new FakeSocket() }),
+    /invalid format/i,
+  );
+});
