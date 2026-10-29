@@ -105,3 +105,31 @@ test("skill lifecycle accepts bounded unique evidence and still requires success
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("skill lifecycle rejects blank evaluator check names and oversized details", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-evaluator-fields-"));
+  try {
+    for (const [label, checks] of [
+      ["blank-name", [{ name: "   ", passed: true }]],
+      ["oversized-detail", [{ name: "check", passed: true, detail: "x".repeat(10_001) }]],
+    ] as const) {
+      const lifecycle = new VersionedSkillLifecycle(
+        new InMemorySkillsPlatform(),
+        async () => ({ passed: true, checks: [...checks] }),
+        { file: path.join(root, label + ".json") },
+      );
+      const candidate = lifecycle.propose(skillPackage, {
+        source: "verified-repair",
+        evidenceIds: ["test-run-" + label],
+        confidence: 0.9,
+      });
+      const evaluated = await lifecycle.evaluate(candidate.id);
+      assert.equal(evaluated.status, "rejected");
+      assert.equal(evaluated.evaluation?.passed, false);
+      assert.match(evaluated.evaluation?.checks[0]?.detail ?? "", /unbounded evidence/);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
