@@ -37,13 +37,29 @@ function harness(allowed = true) {
   return { starts, claims, policyInputs, accessPolicy: policy, deduplicator, client };
 }
 
-test("only explicit run commands start Sofia work", async () => {
+test("ordinary natural-language messages start Sofia without /run by default", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
+  assert.equal(await handle(inbound("hello Sofia, help me build the project")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.deepEqual(h.starts.map((entry) => entry.task), ["hello Sofia, help me build the project"]);
+  assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
+});
+
+test("command-only mode can be enabled for deployments that require it", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h, naturalLanguageEnabled: false });
   assert.equal(await handle(inbound("hello Sofia")), undefined);
   assert.equal(await handle(inbound("/run build the project")), "Sofia accepted the task (run run-123, status: queued).");
   assert.deepEqual(h.starts.map((entry) => entry.task), ["build the project"]);
-  assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
+});
+
+test("provider slash commands and attachment-only messages never start tasks", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({ ...h });
+  assert.equal(await handle(inbound("/start")), undefined);
+  assert.equal(await handle(inbound("/status")), undefined);
+  assert.equal(await handle(inbound("", { attachments: [{ id: "attachment-1" }] })), undefined);
+  assert.equal(h.starts.length, 0);
 });
 
 test("command prefix can be configured for a bot mention", async () => {
@@ -56,7 +72,7 @@ test("command prefix can be configured for a bot mention", async () => {
 test("denied user cannot start a run", async () => {
   const h = harness(false);
   const handle = createSofiaMessagingHandler({ ...h });
-  assert.equal(await handle(inbound("/run do work")), "Access denied.");
+  assert.equal(await handle(inbound("please do work")), "Access denied.");
   assert.equal(h.starts.length, 0);
 });
 
@@ -67,15 +83,15 @@ test("empty and overlong tasks are rejected by existing dispatcher", async () =>
 
   const long = harness();
   const handleLong = createSofiaMessagingHandler({ ...long, maxTaskCharacters: 3 });
-  assert.equal(await handleLong(inbound("/run four")), "Task is too long. Please shorten it.");
+  assert.equal(await handleLong(inbound("four")), "Task is too long. Please shorten it.");
   assert.equal(long.starts.length, 0);
 });
 
 test("duplicate provider message is not started twice", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
-  assert.equal(await handle(inbound("/run do work")), "Sofia accepted the task (run run-123, status: queued).");
-  assert.equal(await handle(inbound("/run do work")), undefined);
+  assert.equal(await handle(inbound("do work")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.equal(await handle(inbound("do work")), undefined);
   assert.equal(h.starts.length, 1);
 });
 
