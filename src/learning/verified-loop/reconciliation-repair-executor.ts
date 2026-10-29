@@ -15,6 +15,8 @@ export interface LearningRepairJournalEntry {
   attempts: number;
   updatedAt: string;
   result?: string;
+  /** True only when this call atomically acquired the right to execute the repair. */
+  claimed?: boolean;
 }
 export interface LearningRepairAuditEvent {
   key: string;
@@ -111,16 +113,18 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
         const existing = this.db.prepare("SELECT repair_key,tenant_id,principal_id,project_id,skill_id,policy_revision,state,attempts,updated_at,result FROM learning_repair_journal WHERE repair_key=?").get(entry.key) as Record<string, unknown> | undefined;
         if (existing) {
           if (existing.tenant_id !== entry.scope.tenantId || existing.principal_id !== entry.scope.principalId || existing.project_id !== entry.scope.projectId || existing.skill_id !== entry.skillId || existing.policy_revision !== entry.policyRevision) throw new Error("Repair idempotency key conflicts with a different scoped action");
-          if (existing.state === "succeeded") {
+          if (existing.state === "succeeded" || existing.state === "running") {
+            // A running entry may belong to another live process. Do not steal it:
+            // without a lease/heartbeat protocol, stale-running recovery must be manual.
             this.db.exec("COMMIT");
-            return { key: String(existing.repair_key), scope: { ...entry.scope }, skillId: String(existing.skill_id), policyRevision: String(existing.policy_revision), state: "succeeded", attempts: Number(existing.attempts), updatedAt: String(existing.updated_at), ...(typeof existing.result === "string" ? { result: existing.result } : {}) };
+            return { key: String(existing.repair_key), scope: { ...entry.scope }, skillId: String(existing.skill_id), policyRevision: String(existing.policy_revision), state: existing.state as LearningRepairState, attempts: Number(existing.attempts), updatedAt: String(existing.updated_at), ...(typeof existing.result === "string" ? { result: existing.result } : {}), claimed: false };
           }
           this.db.prepare("UPDATE learning_repair_journal SET state='running',attempts=attempts+1,updated_at=?,result=NULL WHERE repair_key=?").run(entry.updatedAt, entry.key);
         } else {
           this.db.prepare("INSERT INTO learning_repair_journal (repair_key,tenant_id,principal_id,project_id,skill_id,policy_revision,state,attempts,updated_at,result) VALUES (?,?,?,?,?,?,'running',1,?,NULL)").run(entry.key, entry.scope.tenantId, entry.scope.principalId, entry.scope.projectId, entry.skillId, entry.policyRevision, entry.updatedAt);
         }
         this.db.exec("COMMIT");
-        return { ...entry, state: "running", attempts: Number(existing?.attempts ?? 0) + 1 };
+        return { ...entry, state: "running", attempts: Number(existing?.attempts ?? 0) + 1, claimed: true };
       } catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
     });
   }
@@ -239,6 +243,12 @@ export async function executeLearningRepairPlan(
       } else {
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "journal says succeeded but authoritative state is not active; manual reconciliation required" });
       }
+      continue;
+    }
+    if (entry.claimed !== true) {
+      // Another process owns this running repair. Do not mutate its journal state or
+      // invoke lifecycle registration. Automatic stale-claim recovery needs leases.
+      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running in another executor; manual reconciliation required" });
       continue;
     }
     await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
