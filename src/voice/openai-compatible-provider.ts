@@ -124,7 +124,10 @@ export function createOpenAICompatibleVoiceProviders(config: OpenAICompatibleVoi
       const form = new FormData();
       form.set("model", sttModel);
       form.set("response_format", "json");
-      form.set("file", new Blob([input.bytes], { type: input.mimeType }), "audio-input");
+      // Copy into a fresh ArrayBuffer so TypeScript and Blob cannot observe SharedArrayBuffer-backed input.
+      const audioBytes = new Uint8Array(input.bytes.byteLength);
+      audioBytes.set(input.bytes);
+      form.set("file", new Blob([audioBytes.buffer], { type: input.mimeType }), "audio-input");
       const response = await fetcher(endpoint(base, "audio/transcriptions"), {
         method: "POST",
         headers: { authorization: "Bearer " + config.apiKey },
