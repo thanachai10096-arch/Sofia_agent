@@ -333,6 +333,7 @@ export async function executeLearningRepairPlan(
     try {
       // Require a durable start audit before any mutation.
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
+      if (heartbeatLost) throw new Error("Repair lease heartbeat lost before lifecycle mutation; authoritative reconciliation required");
       await host.registerThroughLifecycle(action);
       if (heartbeatLost) throw new Error("Repair lease heartbeat lost; authoritative reconciliation required");
       // Registration may already have succeeded; do not skip authoritative
