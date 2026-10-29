@@ -40,7 +40,7 @@ export function loadOpenAICompatibleVoiceConfigFromEnv(
   const rawMaxResponseBytes = env.SOFIA_VOICE_MAX_RESPONSE_BYTES?.trim();
   let maxResponseBytes: number | undefined;
   if (rawMaxResponseBytes) {
-    if (!/^\\d+$/.test(rawMaxResponseBytes)) {
+    if (!/^\d+$/.test(rawMaxResponseBytes)) {
       throw new Error("SOFIA_VOICE_MAX_RESPONSE_BYTES must be an integer.");
     }
     maxResponseBytes = Number(rawMaxResponseBytes);
