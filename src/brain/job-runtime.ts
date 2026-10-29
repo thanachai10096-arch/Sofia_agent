@@ -93,7 +93,10 @@ async function isExclusiveFileCollision(error: unknown, file: string): Promise<b
     await fs.stat(file);
     return true;
   } catch (statError) {
-    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return false;
+    // The lock may have been reclaimed between open(..., "wx") and stat().
+    // Treat that disappearing path as contention so the caller retries instead
+    // of surfacing a transient Windows EPERM as a fatal write failure.
+    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return true;
     throw statError;
   }
 }
