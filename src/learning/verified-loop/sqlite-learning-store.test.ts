@@ -60,7 +60,7 @@ test("SQLite learning stores enforce receipt uniqueness across independent conne
     await first.transaction(scope, async tx => {
       const rows = await tx.listExperiences(scope, 10);
       assert.equal(rows.length, 1);
-      assert.equal(rows[0].receiptId, "shared-receipt");
+      assert.equal(rows[0]?.receiptId, "shared-receipt");
     });
   } finally {
     first?.close();
