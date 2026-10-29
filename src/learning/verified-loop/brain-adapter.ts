@@ -30,7 +30,8 @@ export function createVerifiedCompletionHandler(options: {
         !input.verification.every(item => item.passed && item.evidenceIds.length > 0)) return;
 
     const scope = await options.resolveScope(input);
-    const key = [scope.tenantId, scope.principalId, scope.projectId].join(":");
+    if (!scope || ![scope.tenantId, scope.principalId, scope.projectId].every(value => typeof value === "string" && value.trim().length > 0)) throw new Error("Scope resolver returned an invalid authenticated scope");
+    const key = JSON.stringify([scope.tenantId, scope.principalId, scope.projectId]);
     let worker = workers.get(key);
     if (!worker) {
       worker = new ScopedSelfImprovement({
