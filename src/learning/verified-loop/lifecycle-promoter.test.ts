@@ -81,3 +81,23 @@ test("lifecycle promoter fails closed when approval or trusted evidence is unava
     assert.equal(f.platform.get(candidate.id), undefined);
   } finally { rmSync(f.directory, { recursive: true, force: true }); }
 });
+
+
+test("lifecycle promoter rejects cross-scope and malformed candidates before resolving evidence", async () => {
+  const f = fixture();
+  try {
+    let evidenceLookups = 0;
+    const promoter = createLearningLifecyclePromoter({
+      lifecycle: f.lifecycle,
+      approval: async () => { assert.fail("invalid candidate must never reach approval"); },
+      resolveEvidenceIds: async () => { evidenceLookups++; return ["trusted-evidence-1"]; },
+      resolveRunId: () => "run-invalid",
+    });
+    assert.equal(await promoter({ ...scope, tenantId: "other-tenant" }, candidate), false);
+    assert.equal(await promoter(scope, { ...candidate, confidence: Number.NaN }), false);
+    assert.equal(await promoter(scope, { ...candidate, procedure: [] }), false);
+    assert.equal(await promoter(scope, { ...candidate, trigger: " ".repeat(3) }), false);
+    assert.equal(evidenceLookups, 0);
+    assert.equal(f.platform.get(candidate.id), undefined);
+  } finally { rmSync(f.directory, { recursive: true, force: true }); }
+});
