@@ -43,20 +43,18 @@ The adapter is a building block for providers that implement the expected OpenAI
 ```ts
 import {
   createOpenAICompatibleVoiceProviders,
+  loadOpenAICompatibleVoiceConfigFromEnv,
   createVoiceProviderRegistry,
 } from "sofia-agent";
 
-const providers = createOpenAICompatibleVoiceProviders({
-  baseUrl: process.env.SOFIA_VOICE_BASE_URL!,
-  apiKey: process.env.SOFIA_VOICE_API_KEY!,
-  sttModel: process.env.SOFIA_VOICE_STT_MODEL!,
-  ttsModel: process.env.SOFIA_VOICE_TTS_MODEL, // optional
-  ttsVoice: process.env.SOFIA_VOICE_TTS_VOICE, // optional
-});
+const config = loadOpenAICompatibleVoiceConfigFromEnv();
+if (!config) throw new Error("Voice provider is not configured");
+
+const providers = createOpenAICompatibleVoiceProviders(config);
 
 const registry = createVoiceProviderRegistry();
 registry.registerStt("configured-stt", providers.stt);
 if (providers.tts) registry.registerTts("configured-tts", providers.tts);
 ```
 
-The example illustrates server-side composition only. Validate required environment values in the host's config layer and select provider IDs explicitly. Do not assume that a provider accepts the same audio formats, endpoint paths, or response semantics merely because it offers an OpenAI-compatible chat API. This adapter currently has automated mock tests, not a live-provider certification.
+The environment loader expects `SOFIA_VOICE_BASE_URL`, `SOFIA_VOICE_API_KEY`, and `SOFIA_VOICE_STT_MODEL` together. Optional settings are `SOFIA_VOICE_TTS_MODEL`, `SOFIA_VOICE_TTS_VOICE`, and `SOFIA_VOICE_MAX_RESPONSE_BYTES`. It returns `undefined` when no provider settings are present and throws on partial configuration. The example illustrates server-side composition only; voice must still be explicitly enabled and provider IDs selected in the registry. Do not assume that a provider accepts the same audio formats, endpoint paths, or response semantics merely because it offers an OpenAI-compatible chat API. This adapter currently has automated mock tests, not a live-provider certification.
