@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
@@ -17,6 +18,8 @@ export interface LearningRepairJournalEntry {
   result?: string;
   /** True only when this call atomically acquired the right to execute the repair. */
   claimed?: boolean;
+  /** Opaque per-attempt fencing token; only the owner receives it. */
+  claimToken?: string;
 }
 export interface LearningRepairAuditEvent {
   key: string;
@@ -30,7 +33,7 @@ export interface LearningRepairAuditEvent {
 export interface LearningRepairJournal {
   get(key: string, scope: LearningScope): Promise<LearningRepairJournalEntry | undefined>;
   begin(entry: LearningRepairJournalEntry): Promise<LearningRepairJournalEntry>;
-  finish(key: string, scope: LearningScope, state: LearningRepairState, result?: string): Promise<void>;
+  finish(key: string, scope: LearningScope, state: LearningRepairState, result?: string, claimToken?: string): Promise<void>;
   audit(event: LearningRepairAuditEvent): Promise<void>;
 }
 export interface LearningRepairSnapshot {
@@ -86,7 +89,9 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolute);
     try {
-      db.exec("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS learning_repair_journal (repair_key TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, skill_id TEXT NOT NULL, policy_revision TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('running','succeeded','failed')), attempts INTEGER NOT NULL, updated_at TEXT NOT NULL, result TEXT); CREATE TABLE IF NOT EXISTS learning_repair_audit (sequence INTEGER PRIMARY KEY AUTOINCREMENT, repair_key TEXT NOT NULL, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, actor_id TEXT NOT NULL, skill_id TEXT NOT NULL, event TEXT NOT NULL, at TEXT NOT NULL, detail TEXT); CREATE TRIGGER IF NOT EXISTS learning_repair_audit_no_update BEFORE UPDATE ON learning_repair_audit BEGIN SELECT RAISE(ABORT, 'learning repair audit is append-only'); END; CREATE TRIGGER IF NOT EXISTS learning_repair_audit_no_delete BEFORE DELETE ON learning_repair_audit BEGIN SELECT RAISE(ABORT, 'learning repair audit is append-only'); END;");
+      db.exec("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS learning_repair_journal (repair_key TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, skill_id TEXT NOT NULL, policy_revision TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('running','succeeded','failed')), attempts INTEGER NOT NULL, updated_at TEXT NOT NULL, result TEXT, claim_token TEXT); CREATE TABLE IF NOT EXISTS learning_repair_audit (sequence INTEGER PRIMARY KEY AUTOINCREMENT, repair_key TEXT NOT NULL, tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, actor_id TEXT NOT NULL, skill_id TEXT NOT NULL, event TEXT NOT NULL, at TEXT NOT NULL, detail TEXT); CREATE TRIGGER IF NOT EXISTS learning_repair_audit_no_update BEFORE UPDATE ON learning_repair_audit BEGIN SELECT RAISE(ABORT, 'learning repair audit is append-only'); END; CREATE TRIGGER IF NOT EXISTS learning_repair_audit_no_delete BEFORE DELETE ON learning_repair_audit BEGIN SELECT RAISE(ABORT, 'learning repair audit is append-only'); END;");
+      const columns = db.prepare("PRAGMA table_info(learning_repair_journal)").all() as Array<{ name?: unknown }>;
+      if (!columns.some(column => column.name === "claim_token")) db.exec("ALTER TABLE learning_repair_journal ADD COLUMN claim_token TEXT");
       privateFile(absolute);
       return new SqliteLearningRepairJournal(db, absolute);
     } catch (error) { db.close(); throw error; }
@@ -99,7 +104,7 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
   get(key: string, scope: LearningScope): Promise<LearningRepairJournalEntry | undefined> {
     assertScope(scope);
     return this.serial(() => {
-      const row = this.db.prepare("SELECT repair_key,tenant_id,principal_id,project_id,skill_id,policy_revision,state,attempts,updated_at,result FROM learning_repair_journal WHERE repair_key=?").get(key) as Record<string, unknown> | undefined;
+      const row = this.db.prepare("SELECT repair_key,tenant_id,principal_id,project_id,skill_id,policy_revision,state,attempts,updated_at,result,claim_token FROM learning_repair_journal WHERE repair_key=?").get(key) as Record<string, unknown> | undefined;
       if (!row) return undefined;
       if (row.tenant_id !== scope.tenantId || row.principal_id !== scope.principalId || row.project_id !== scope.projectId) throw new Error("Cross-scope repair journal access rejected");
       return { key: String(row.repair_key), scope: { tenantId: String(row.tenant_id), principalId: String(row.principal_id), projectId: String(row.project_id) }, skillId: String(row.skill_id), policyRevision: String(row.policy_revision), state: row.state as LearningRepairState, attempts: Number(row.attempts), updatedAt: String(row.updated_at), ...(typeof row.result === "string" ? { result: row.result } : {}) };
@@ -119,23 +124,34 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
             this.db.exec("COMMIT");
             return { key: String(existing.repair_key), scope: { ...entry.scope }, skillId: String(existing.skill_id), policyRevision: String(existing.policy_revision), state: existing.state as LearningRepairState, attempts: Number(existing.attempts), updatedAt: String(existing.updated_at), ...(typeof existing.result === "string" ? { result: existing.result } : {}), claimed: false };
           }
-          this.db.prepare("UPDATE learning_repair_journal SET state='running',attempts=attempts+1,updated_at=?,result=NULL WHERE repair_key=?").run(entry.updatedAt, entry.key);
+          const claimToken = randomUUID();
+          this.db.prepare("UPDATE learning_repair_journal SET state='running',attempts=attempts+1,updated_at=?,result=NULL,claim_token=? WHERE repair_key=? AND state='failed'").run(entry.updatedAt, claimToken, entry.key);
+          this.db.exec("COMMIT");
+          return { ...entry, state: "running", attempts: Number(existing.attempts) + 1, claimed: true, claimToken };
         } else {
-          this.db.prepare("INSERT INTO learning_repair_journal (repair_key,tenant_id,principal_id,project_id,skill_id,policy_revision,state,attempts,updated_at,result) VALUES (?,?,?,?,?,?,'running',1,?,NULL)").run(entry.key, entry.scope.tenantId, entry.scope.principalId, entry.scope.projectId, entry.skillId, entry.policyRevision, entry.updatedAt);
+          const claimToken = randomUUID();
+          this.db.prepare("INSERT INTO learning_repair_journal (repair_key,tenant_id,principal_id,project_id,skill_id,policy_revision,state,attempts,updated_at,result,claim_token) VALUES (?,?,?,?,?,?,'running',1,?,NULL,?)").run(entry.key, entry.scope.tenantId, entry.scope.principalId, entry.scope.projectId, entry.skillId, entry.policyRevision, entry.updatedAt, claimToken);
+          this.db.exec("COMMIT");
+          return { ...entry, state: "running", attempts: 1, claimed: true, claimToken };
         }
-        this.db.exec("COMMIT");
-        return { ...entry, state: "running", attempts: Number(existing?.attempts ?? 0) + 1, claimed: true };
       } catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
     });
   }
-  finish(key: string, scope: LearningScope, state: LearningRepairState, result?: string): Promise<void> {
+  finish(key: string, scope: LearningScope, state: LearningRepairState, result?: string, claimToken?: string): Promise<void> {
     assertScope(scope);
     return this.serial(() => {
       this.db.exec("BEGIN IMMEDIATE");
       try {
-        const row = this.db.prepare("SELECT tenant_id,principal_id,project_id FROM learning_repair_journal WHERE repair_key=?").get(key) as Record<string, unknown> | undefined;
+        const row = this.db.prepare("SELECT tenant_id,principal_id,project_id,claim_token FROM learning_repair_journal WHERE repair_key=?").get(key) as Record<string, unknown> | undefined;
         if (!row || row.tenant_id !== scope.tenantId || row.principal_id !== scope.principalId || row.project_id !== scope.projectId) throw new Error("Repair journal entry missing or scope mismatch");
-        this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=? WHERE repair_key=?").run(state, new Date().toISOString(), result?.slice(0, 1000) ?? null, key);
+        if (claimToken !== undefined) {
+          if (typeof claimToken !== "string" || !claimToken || row.claim_token !== claimToken) throw new Error("Repair claim lost; stale executor cannot finalize this attempt");
+          const updated = this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=?,claim_token=NULL WHERE repair_key=? AND claim_token=?").run(state, new Date().toISOString(), result?.slice(0, 1000) ?? null, key, claimToken);
+          if (Number(updated.changes) !== 1) throw new Error("Repair claim lost; stale executor cannot finalize this attempt");
+        } else {
+          // Backward-compatible path for legacy non-executor callers.
+          this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=?,claim_token=NULL WHERE repair_key=?").run(state, new Date().toISOString(), result?.slice(0, 1000) ?? null, key);
+        }
         this.db.exec("COMMIT");
       } catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
     });
@@ -211,24 +227,24 @@ export async function executeLearningRepairPlan(
       const reason = "scope/policy/approval/evidence revalidation failed";
       const entry = existing ?? { key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running" as const, attempts: 0, updatedAt: now() };
       const claim = await journal.begin(entry);
-      if (claim.claimed !== true) {
+      if (claim.claimed !== true || typeof claim.claimToken !== "string" || !claim.claimToken) {
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or completed by another executor; manual reconciliation required" });
         continue;
       }
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
-      await journal.finish(action.idempotencyKey, action.scope, "failed", reason);
+      await journal.finish(action.idempotencyKey, action.scope, "failed", reason, claim.claimToken);
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
       continue;
     }
     if (snapshot.exists && snapshot.active) {
       const entry = existing ?? { key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running" as const, attempts: 0, updatedAt: now() };
       const claim = await journal.begin(entry);
-      if (claim.claimed !== true) {
+      if (claim.claimed !== true || typeof claim.claimToken !== "string" || !claim.claimToken) {
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or completed by another executor; manual reconciliation required" });
         continue;
       }
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_already_satisfied", at: now() });
-      await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Runtime registration already satisfied");
+      await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Runtime registration already satisfied", claim.claimToken);
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", reason: "already satisfied" });
       continue;
     }
@@ -236,12 +252,12 @@ export async function executeLearningRepairPlan(
       const reason = "existing inactive runtime entry requires manual review";
       const entry = existing ?? { key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running" as const, attempts: 0, updatedAt: now() };
       const claim = await journal.begin(entry);
-      if (claim.claimed !== true) {
+      if (claim.claimed !== true || typeof claim.claimToken !== "string" || !claim.claimToken) {
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or completed by another executor; manual reconciliation required" });
         continue;
       }
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
-      await journal.finish(action.idempotencyKey, action.scope, "failed", reason);
+      await journal.finish(action.idempotencyKey, action.scope, "failed", reason, claim.claimToken);
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
       continue;
     }
@@ -257,10 +273,9 @@ export async function executeLearningRepairPlan(
       }
       continue;
     }
-    if (entry.claimed !== true) {
-      // Another process owns this running repair. Do not mutate its journal state or
-      // invoke lifecycle registration. Automatic stale-claim recovery needs leases.
-      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running in another executor; manual reconciliation required" });
+    if (entry.claimed !== true || typeof entry.claimToken !== "string" || !entry.claimToken) {
+      // Another process owns this running repair, or the journal cannot fence finalization.
+      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "repair already running or journal does not support safe claim fencing; manual reconciliation required" });
       continue;
     }
     await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
@@ -274,12 +289,12 @@ export async function executeLearningRepairPlan(
         throw new Error("Post-repair authoritative verification failed");
       }
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_succeeded", at: now() });
-      await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Postcondition verified");
+      await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Postcondition verified", entry.claimToken);
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded" });
     } catch (error) {
       const reason = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_failed", at: now(), detail: reason });
-      await journal.finish(action.idempotencyKey, action.scope, "failed", reason);
+      await journal.finish(action.idempotencyKey, action.scope, "failed", reason, entry.claimToken);
       results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
     }
   }
