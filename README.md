@@ -2,7 +2,7 @@
 <div align="center">
 
 <p align="center">
-  <img src="assets/sofia-agent-hero.svg" alt="Sofia Agent — scalable vector AI mascot team and neon-green title" width="100%" />
+  <img src="assets/sofia-agent-hero.svg" alt="Sofia Agent — green terminal-style agent platform identity" width="100%" />
 </p>
 
 **An agent runtime designed to plan, act, check results, and recover.**
@@ -81,13 +81,13 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 | --- | --- |
 | **Brain & planning** | State-machine execution, planning, verification, repair, traces, token budgets, repository intelligence, and edit workflows. |
 | **Tool Gateway** | A shared registry and centralized policy gate for terminal, Git, file, and verification capabilities. |
-| **Skills** | Built-in skills and persisted learned skills using a shared matching path. |
+| **Skills & learning** | Built-in skills, learned-skill candidates, and persisted workflow patterns recorded only after successful completion with verification evidence. These are reusable workflow records, not model-weight training. |
 | **Browser runtime** | Playwright-backed navigation, click, type, select, scroll, wait, keypress, history, reload, observation, screenshots, and close actions. |
 | **Durable jobs** | Background and long-running execution through one durable job runtime, with a compatibility facade for older callers. |
-| **Recovery** | Durable local checkpoints and run snapshots; resume is guarded against duplicate concurrent resumes. |
+| **Recovery & project memory** | Durable local checkpoints and run snapshots; guarded resume; searchable project conventions and repair/workflow patterns persisted locally. |
 | **Security boundaries** | Centralized tool permissions plus policy/process runners and an opt-in Docker-backed container sandbox. Process mode is **not** represented as a container. |
 | **Platform services** | Agent profiles and templates, skills platform, cloud execution backend contract, and evaluation runner. |
-| **SDK & API** | A stable, model-agnostic public surface for desktop, mobile, web, and third-party clients. |
+| **Messaging gateway** | Opt-in Telegram Bot API and Discord interaction adapters share the existing Sofia command/API path, access policy, rate limits, and deduplication controls. Ordinary text can be dispatched as a task without `/run`; provider slash commands are not treated as tasks. |\n| **SDK & API** | A stable, model-agnostic public surface for desktop, mobile, web, and third-party clients. |
 
 ## `> Quick start`
 
@@ -141,6 +141,17 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 
 **Keep the Sofia master API key on the server.** A browser should call your authenticated application backend, which then calls Sofia. Never ship a privileged Sofia API key in frontend JavaScript.
 
+## `> Messaging integrations (opt-in)`
+
+Sofia has a shared messaging gateway with Telegram and Discord adapters. These adapters connect to the existing Sofia API/SDK and command dispatcher; they do not create a second agent runtime or bypass the normal authorization and tool-policy checks.
+
+- **Telegram:** Bot API long polling, allowlisted user/chat IDs, bounded message delivery, run-completion reporting, and deduplication.
+- **Discord:** Signed interaction verification, deferred interaction responses, allowlisted users/channels, and durable job commands.
+- **Natural-language chat:** Ordinary text messages are treated as tasks by the shared Sofia messaging handler by default, so users do not need to prefix every request with `/run`. The explicit `/run <task>` command remains supported. Other slash commands are ignored by the task dispatcher, and attachment-only messages do not start runs.
+- **Safety:** Integrations are opt-in. Configure explicit user and conversation allowlists, keep tokens/API keys server-side, expose Discord interactions over HTTPS, and use shared Redis-backed rate limiting/deduplication before multi-replica operation.
+
+The adapter and transport foundations are implemented, but this does not mean a bot is already configured or live in a server. A real provider-side smoke test is still required for each deployment. Start with a test environment and follow [Messaging Gateway configuration and acceptance checks](docs/MESSAGING_GATEWAY.md).
+
 ## `> Discord integration (opt-in)`
 
 The Discord interaction adapter supports allowlisted slash commands for durable background work:
@@ -179,6 +190,10 @@ export SOFIA_SANDBOX_MODE=docker
 Replace the example placeholder with the actual digest printed by your local Docker engine. The placeholder is not a usable image reference. Preload the exact digest before running Sofia; the sandbox uses `--pull=never` and fails closed if that image is absent.
 
 More details: [Desktop Runtime Foundation](docs/desktop-runtime.md).
+
+## `> Current implementation notes`
+
+The repository is actively evolving. Recent merged work includes natural-language messaging dispatch (chat without requiring `/run`), persistence of verified workflow patterns as project memory, and a Windows job-lock release race fix. See the commit history and linked implementation guides for the exact scope of each change.
 
 ## `> Evidence & limitations`
 
@@ -255,6 +270,16 @@ try {
 
 Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Session transcript persistence does not automatically replay history into model context or add transcript retrieval endpoints. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
 
+## Project memory and learning
+
+Sofia keeps project-level workflow memory separate from user-scoped memory and conversation transcripts.
+
+- Project memory can persist conventions and repair/workflow patterns for a project.
+- Workflow learning is evidence-gated: a candidate is recorded only when the task completed, verification passed, and evidence IDs are present.
+- Persisted workflow patterns are searchable and can inform later work; they are not proof that the underlying model has been trained or that every future task will succeed.
+- Memory content is treated as untrusted reference data, checked for prompt-injection-like content, and redacted for common secrets before persistence.
+- The local file-backed stores are intended for a single active process. Multi-host deployments need a shared transactional storage design before relying on concurrent writes.
+
 ## User memory
 
-See [User Memory](docs/USER_MEMORY.md) for explicit, user-scoped memory API routes, scopes, retention limits, and privacy boundaries.
+See [User Memory](docs/USER_MEMORY.md) for explicit, authenticated-user-scoped memory API routes, retrieval behavior, scopes, retention limits, and privacy boundaries. User memory is distinct from project memory and persisted conversation transcripts.
