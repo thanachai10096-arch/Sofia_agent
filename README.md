@@ -87,7 +87,8 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 | **Recovery & project memory** | Durable local checkpoints and run snapshots; guarded resume; searchable project conventions and repair/workflow patterns persisted locally. |
 | **Security boundaries** | Centralized tool permissions plus policy/process runners and an opt-in Docker-backed container sandbox. Process mode is **not** represented as a container. |
 | **Platform services** | Agent profiles and templates, skills platform, cloud execution backend contract, and evaluation runner. |
-| **Messaging gateway** | Opt-in Telegram Bot API and Discord interaction adapters share the existing Sofia command/API path, access policy, rate limits, and deduplication controls. Ordinary text can be dispatched as a task without `/run`; provider slash commands are not treated as tasks. |\n| **SDK & API** | A stable, model-agnostic public surface for desktop, mobile, web, and third-party clients. |
+| **Messaging gateway** | Opt-in Telegram Bot API and Discord interaction adapters share the existing Sofia command/API path, access policy, rate limits, and deduplication controls. Ordinary text can be dispatched as a task without `/run`; provider slash commands are not treated as tasks. |
+| **SDK & API** | A stable, model-agnostic public surface for desktop, mobile, web, and third-party clients. |
 
 ## `> Quick start`
 
@@ -116,8 +117,7 @@ Browser access is disabled by default. To opt in:
 
 ```bash
 export SOFIA_ALLOW_BROWSER=true
-npm install
-npm ci\nnpx playwright install chromium
+npx playwright install chromium
 ```
 
 Only enable browser capability in environments where its permissions and policy are configured appropriately. Playwright traffic is routed through a local egress proxy that validates DNS answers and connects to the selected numeric IP, blocks private/internal destinations, and limits web traffic to HTTP port 80 and HTTPS port 443. Chromium QUIC and non-proxied WebRTC UDP are disabled to reduce direct-network bypasses. Sites that require non-standard ports may not work. Keep host/container egress controls enabled for defense in depth.
