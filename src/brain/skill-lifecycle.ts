@@ -25,7 +25,7 @@ interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[];
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
 function validatePackage(value: SkillPackage): SkillPackage {
-  if (!isRecord(value) || !isRecord(value.skill) || typeof value.skill.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value.skill.id)) {
+  if (!isRecord(value) || !isRecord(value.skill) || typeof value.skill.id !== "string" || (value.skill.id !== "__proto__" && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value.skill.id))) {
     throw new Error("Invalid skill package or skill id");
   }
   if (typeof value.version !== "string" || !value.version.trim() || value.version.length > 100) throw new Error("Invalid skill version");
@@ -153,7 +153,7 @@ export class VersionedSkillLifecycle {
     const current = this.requireRecord(candidateId);
     current.status = "active";
     current.updatedAt = now;
-    this.snapshot.activeBySkill[current.skillId] = current.id;
+    Object.defineProperty(this.snapshot.activeBySkill, current.skillId, { value: current.id, enumerable: true, configurable: true, writable: true });
     try {
       this.platform.register(clone(current.package));
       this.persist();
@@ -183,7 +183,7 @@ export class VersionedSkillLifecycle {
     active.updatedAt = now;
     previous.status = "active";
     previous.updatedAt = now;
-    this.snapshot.activeBySkill[skillId] = previous.id;
+    Object.defineProperty(this.snapshot.activeBySkill, skillId, { value: previous.id, enumerable: true, configurable: true, writable: true });
     try {
       this.platform.register(clone(previous.package));
       this.persist();
@@ -255,7 +255,7 @@ export class VersionedSkillLifecycle {
       const record = records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
       if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
       if (Object.prototype.hasOwnProperty.call(activeBySkill, skillId)) throw new Error("Duplicate skill lifecycle active pointer");
-      activeBySkill[skillId] = recordId;
+      Object.defineProperty(activeBySkill, skillId, { value: recordId, enumerable: true, configurable: true, writable: true });
     }
     for (const record of records) {
       if (record.status === "active" && activeBySkill[record.skillId] !== record.id) {

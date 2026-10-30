@@ -88,6 +88,8 @@ interface Dependencies {
   onEvent?: (event: BrainEvent) => void;
   skillLedger?: SkillLedger;
   onSkillCandidate?: (candidate: LearnedSkillCandidate, runId: string, principalId?: string) => Promise<boolean>;
+  /** Called only after trusted verification and code review pass. The host must persist an authoritative receipt before forwarding it to VerifiedLearningLoop. */
+  onVerifiedCompletion?: (input: { runId: string; principalId?: string; task: string; evidenceIds: string[]; verification: VerificationResult[] }) => Promise<void>;
   projectContext?: ProjectContext;
   projectContextLoader?: () => Promise<ProjectContext>;
   repositoryMap?: RepositoryMap;
@@ -1146,6 +1148,23 @@ export class SofiaBrain {
       }
 
       this.emit({ type: "brain.coding.loop.completed", count: codingIteration, passed: true });
+      // Additive integration seam: only emit finalized outcomes after verifier + code review pass.
+      // Receipt persistence and learning remain owned by the configured host adapter.
+      if (this.dependencies.onVerifiedCompletion) {
+        try {
+          await this.dependencies.onVerifiedCompletion({
+            runId: this.runId,
+            ...(input.principalId ? { principalId: input.principalId } : {}),
+            task: input.task,
+            evidenceIds: [...new Set(verification.flatMap((item) => item.evidenceIds))],
+            verification: verification.map((item) => ({ ...item, evidenceIds: [...item.evidenceIds] })),
+          });
+          this.emit({ type: "brain.verified_completion.dispatched", passed: true });
+        } catch {
+          // Learning persistence must not turn a verified task into a failed task.
+          this.emit({ type: "brain.verified_completion.dispatch_failed", passed: false });
+        }
+      }
       if (this.dependencies.evolution) {
         const taskType = understanding.requiredCapabilities[0] ?? "general";
         // This block is reachable only after trusted verification and code review pass.

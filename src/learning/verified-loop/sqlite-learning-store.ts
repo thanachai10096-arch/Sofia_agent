@@ -1,0 +1,153 @@
+import fs from "node:fs";
+import path from "node:path";
+import type { ActiveLearningSkill, LearningExperience, LearningScope, LearningTransaction, SkillCandidate, SkillEvaluation, VerifiedLearningHost } from "./ports.js";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
+type Db = DatabaseSyncType;
+type ScopeRow = { payload: string };
+function assertScope(scope: LearningScope): void {
+  if (!scope || ![scope.tenantId, scope.principalId, scope.projectId].every(value => typeof value === "string" && value.trim().length > 0)) throw new Error("Invalid authenticated learning scope");
+}
+function assertSameScope(a: LearningScope, b: LearningScope): void {
+  assertScope(a);
+  if (a.tenantId !== b.tenantId || a.principalId !== b.principalId || a.projectId !== b.projectId) throw new Error("Cross-scope learning access rejected");
+}
+function encode(value: unknown): string { return JSON.stringify(value); }
+function decode<T>(value: unknown, label: string): T {
+  if (typeof value !== "string") throw new Error("Corrupt persisted learning " + label);
+  try { return JSON.parse(value) as T; } catch { throw new Error("Corrupt persisted learning " + label); }
+}
+function hardenFile(file: string): void {
+  if (process.platform === "win32" || file === ":memory:") return;
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Learning database must be a regular file");
+  // Tighten permissions only; never grant owner permissions that were absent.
+  const currentMode = stat.mode & 0o777;
+  const privateMode = currentMode & 0o600;
+  if (privateMode !== currentMode) fs.chmodSync(file, privateMode);
+}
+function hardenSqliteFiles(file: string): void {
+  if (file === ":memory:" || process.platform === "win32") return;
+  for (const candidate of [file, file + "-wal", file + "-shm"]) {
+    try { hardenFile(candidate); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+}
+
+/** Serialize SQLite transactions across store instances sharing a file. Because DatabaseSync is synchronous,
+ * waiting inside BEGIN IMMEDIATE can block the event loop that must resume the current transaction and COMMIT.
+ * A per-file in-process queue prevents that same-process deadlock; SQLite busy_timeout remains the cross-process guard. */
+const transactionTails = new Map<string | object, Promise<void>>();
+
+/** Durable SQLite transaction adapter for the VerifiedLearningHost transaction port.
+ * Receipt/evidence lookup, policy decisions, and real regression execution remain owned by authoritative Sofia services. */
+export class SqliteLearningTransactionStore {
+  private tail: Promise<void> = Promise.resolve();
+  private readonly transactionKey: string | object;
+  private constructor(private readonly db: Db, private readonly file: string) {
+    this.transactionKey = file === ":memory:" ? this : file;
+  }
+
+  static async open(file: string): Promise<SqliteLearningTransactionStore> {
+    if (typeof file !== "string" || !file.trim()) throw new Error("Learning database path is required");
+    const absolute = file === ":memory:" ? file : path.resolve(file);
+    if (absolute !== ":memory:") {
+      fs.mkdirSync(path.dirname(absolute), { recursive: true, mode: 0o700 });
+      try { const fd = fs.openSync(absolute, "wx", 0o600); fs.closeSync(fd); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+      hardenFile(absolute);
+    }
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(absolute);
+    try {
+      db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
+      db.exec("CREATE TABLE IF NOT EXISTS learning_experiences (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, receipt_id TEXT NOT NULL, experience_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, receipt_id), UNIQUE (tenant_id, principal_id, project_id, experience_id)); CREATE TABLE IF NOT EXISTS learning_candidates (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, candidate_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, candidate_id)); CREATE TABLE IF NOT EXISTS learning_evaluations (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, candidate_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, candidate_id)); CREATE TABLE IF NOT EXISTS learning_active_skills (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, skill_id TEXT NOT NULL, skill_name TEXT NOT NULL, policy_revision TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, skill_id)); CREATE INDEX IF NOT EXISTS learning_active_skill_name ON learning_active_skills(tenant_id, principal_id, project_id, skill_name, policy_revision);");
+      hardenSqliteFiles(absolute);
+      return new SqliteLearningTransactionStore(db, absolute);
+    } catch (error) { db.close(); throw error; }
+  }
+
+  transaction<T>(scope: LearningScope, operation: (tx: LearningTransaction) => Promise<T>): Promise<T> {
+    assertScope(scope);
+    // Keep per-instance ordering and also queue sibling connections for the same file.
+    const local = this.tail;
+    const shared = transactionTails.get(this.transactionKey) ?? Promise.resolve();
+    const run = Promise.all([local, shared]).then(() => this.withTransaction(scope, operation));
+    const settled = run.then(() => undefined, () => undefined);
+    this.tail = settled;
+    transactionTails.set(this.transactionKey, settled);
+    void settled.then(() => {
+      if (transactionTails.get(this.transactionKey) === settled) transactionTails.delete(this.transactionKey);
+    });
+    return run;
+  }
+
+  private async withTransaction<T>(scope: LearningScope, operation: (tx: LearningTransaction) => Promise<T>): Promise<T> {
+    this.db.exec("BEGIN IMMEDIATE");
+    const values = [scope.tenantId, scope.principalId, scope.projectId] as const;
+    const db = this.db;
+    const tx: LearningTransaction = {
+      insertExperienceIfAbsent: async experience => {
+        assertSameScope(experience.scope, scope);
+        const result = db.prepare("INSERT INTO learning_experiences (tenant_id, principal_id, project_id, receipt_id, experience_id, payload) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING").run(...values, experience.receiptId, experience.id, encode(experience));
+        return Number(result.changes) === 1;
+      },
+      listExperiences: async (requestedScope, limit) => {
+        assertSameScope(requestedScope, scope);
+        if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Invalid learning history limit");
+        const rows = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? ORDER BY rowid DESC LIMIT ?").all(...values, limit) as ScopeRow[];
+        return rows.reverse().map(row => decode<LearningExperience>(row.payload, "experience"));
+      },
+      getExperience: async (requestedScope, id) => {
+        assertSameScope(requestedScope, scope);
+        const row = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND experience_id=?").get(...values, id) as ScopeRow | undefined;
+        return row ? decode<LearningExperience>(row.payload, "experience") : undefined;
+      },
+      getExperienceByReceipt: async (requestedScope, receiptId) => {
+        assertSameScope(requestedScope, scope);
+        const row = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND receipt_id=?").get(...values, receiptId) as ScopeRow | undefined;
+        return row ? decode<LearningExperience>(row.payload, "experience") : undefined;
+      },
+      putCandidate: async candidate => {
+        assertSameScope(candidate.scope, scope);
+        db.prepare("INSERT INTO learning_candidates VALUES (?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, candidate_id) DO UPDATE SET payload=excluded.payload").run(...values, candidate.id, encode(candidate));
+      },
+      getCandidate: async (requestedScope, id) => {
+        assertSameScope(requestedScope, scope);
+        const row = db.prepare("SELECT payload FROM learning_candidates WHERE tenant_id=? AND principal_id=? AND project_id=? AND candidate_id=?").get(...values, id) as ScopeRow | undefined;
+        return row ? decode<SkillCandidate>(row.payload, "candidate") : undefined;
+      },
+      recordEvaluation: async (requestedScope, candidateId, evaluation) => {
+        assertSameScope(requestedScope, scope);
+        db.prepare("INSERT INTO learning_evaluations VALUES (?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, candidate_id) DO UPDATE SET payload=excluded.payload").run(...values, candidateId, encode(evaluation));
+      },
+      activateSkill: async skill => {
+        assertSameScope(skill.scope, scope);
+        if (skill.status !== "active" || !skill.policyRevision) throw new Error("Invalid active learning skill");
+        db.prepare("INSERT INTO learning_active_skills VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, skill_id) DO UPDATE SET skill_name=excluded.skill_name, policy_revision=excluded.policy_revision, payload=excluded.payload").run(...values, skill.id, skill.name, skill.policyRevision, encode(skill));
+      },
+      listActiveSkills: async requestedScope => {
+        assertSameScope(requestedScope, scope);
+        const rows = db.prepare("SELECT payload FROM learning_active_skills WHERE tenant_id=? AND principal_id=? AND project_id=?").all(...values) as ScopeRow[];
+        return rows.map(row => decode<ActiveLearningSkill>(row.payload, "active skill"));
+      },
+    };
+    try {
+      const result = await operation(tx);
+      db.exec("COMMIT");
+      hardenSqliteFiles(this.file);
+      return result;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* preserve original error */ }
+      throw error;
+    }
+  }
+
+  close(): void { this.db.close(); }
+}
+
+/** Compose durable transactions into a host without replacing other Sofia services. */
+export function withSqliteLearningTransactions<T extends Omit<VerifiedLearningHost, "transaction">>(services: T, store: SqliteLearningTransactionStore): VerifiedLearningHost {
+  return { ...services, transaction: store.transaction.bind(store) };
+}

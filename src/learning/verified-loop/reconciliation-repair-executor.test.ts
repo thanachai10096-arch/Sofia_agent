@@ -1,0 +1,231 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { executeLearningRepairPlan } from "./reconciliation-repair-executor.js";
+import type { LearningRepairJournal, LearningRepairJournalEntry, LearningRepairAuditEvent, LearningRepairExecutorHost, LearningRepairSnapshot } from "./reconciliation-repair-executor.js";
+import type { LearningRepairAction, LearningRepairPlan } from "./reconciliation-repair.js";
+import type { LearningScope } from "./ports.js";
+
+const scope: LearningScope = { tenantId: "tenant-a", principalId: "user-a", projectId: "project-a" };
+const action: LearningRepairAction = { kind: "register-missing-runtime-skill", skillId: "skill-a", expectedPolicyRevision: "policy-4", scope, actorId: "operator-a", idempotencyKey: JSON.stringify(["repair-key-a", "skill-a"]) };
+const plan: LearningRepairPlan = { planId: "repair-key-a", scope, actions: [action], blocked: [], eligibleForExecutor: true };
+function snapshot(overrides: Partial<LearningRepairSnapshot> = {}): LearningRepairSnapshot {
+  return { scope, exists: false, active: false, policyRevision: "policy-4", explicitlyApproved: true, trustedEvidenceValid: true, ...overrides };
+}
+class MemoryJournal implements LearningRepairJournal {
+  entries = new Map<string, LearningRepairJournalEntry>();
+  events: LearningRepairAuditEvent[] = [];
+  async get(key: string, requested: LearningScope) {
+    const entry = this.entries.get(key);
+    if (entry && (entry.scope.tenantId !== requested.tenantId || entry.scope.principalId !== requested.principalId || entry.scope.projectId !== requested.projectId)) throw new Error("Cross-scope");
+    return entry;
+  }
+  async begin(entry: LearningRepairJournalEntry) {
+    const prior = this.entries.get(entry.key);
+    if (prior && (prior.scope.tenantId !== entry.scope.tenantId || prior.scope.principalId !== entry.scope.principalId || prior.scope.projectId !== entry.scope.projectId || prior.skillId !== entry.skillId || prior.policyRevision !== entry.policyRevision)) throw new Error("Key conflict");
+    if (prior?.state === "succeeded" || prior?.state === "running") {
+      return { ...prior, claimed: false };
+    }
+    const next = { ...entry, state: "running" as const, attempts: (prior?.attempts ?? 0) + 1, claimed: true, claimToken: `claim-${(prior?.attempts ?? 0) + 1}` };
+    this.entries.set(entry.key, next);
+    return next;
+  }
+  async finish(key: string, requested: LearningScope, state: "running" | "succeeded" | "failed", result?: string, claimToken?: string) {
+    const prior = this.entries.get(key);
+    if (!prior || prior.scope.tenantId !== requested.tenantId || prior.scope.principalId !== requested.principalId || prior.scope.projectId !== requested.projectId) throw new Error("Missing entry");
+    if (claimToken !== undefined && prior.claimToken !== claimToken) throw new Error("Repair claim lost; stale executor cannot finalize this attempt");
+    this.entries.set(key, { ...prior, state, result, updatedAt: new Date().toISOString(), claimToken: undefined });
+  }
+  heartbeats: string[] = [];
+  async heartbeat(_key: string, _requested: LearningScope, _claimToken: string, at: string) {
+    this.heartbeats.push(at);
+    return true;
+  }
+  async audit(event: LearningRepairAuditEvent) { this.events.push(event); }
+}
+function hostWith(current: () => LearningRepairSnapshot, register: () => Promise<void>): LearningRepairExecutorHost {
+  return { revalidate: async () => current(), registerThroughLifecycle: register, now: () => new Date("2026-10-29T05:00:00.000Z") };
+}
+
+test("executes only after fresh checks and confirms the postcondition", async () => {
+  const journal = new MemoryJournal();
+  let active = false;
+  let registrations = 0;
+  const host = hostWith(() => snapshot({ exists: active, active }), async () => { registrations++; active = true; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "succeeded");
+  assert.equal(registrations, 1);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "succeeded");
+  assert.ok(journal.events.some(e => e.event === "repair_started"));
+  assert.ok(journal.events.some(e => e.event === "repair_succeeded"));
+});
+
+test("refreshes the repair lease with a valid ISO timestamp while registration is running", async () => {
+  const journal = new MemoryJournal();
+  let active = false;
+  const host = hostWith(() => snapshot({ exists: active, active }), async () => {
+    await new Promise(resolve => setTimeout(resolve, 1_200));
+    active = true;
+  });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "succeeded");
+  assert.ok(journal.heartbeats.length >= 1);
+  assert.ok(journal.heartbeats.every(value => Number.isFinite(Date.parse(value))));
+});
+
+test("refuses stale policy or missing trusted evidence before registration", async () => {
+  const journal = new MemoryJournal();
+  let registrations = 0;
+  const host = hostWith(() => snapshot({ policyRevision: "policy-stale", trustedEvidenceValid: false }), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
+
+test("does not steal an existing running claim from another executor", async () => {
+  const journal = new MemoryJournal();
+  await journal.begin({ key: action.idempotencyKey, scope, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running", attempts: 0, updatedAt: new Date().toISOString() });
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /already running/);
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "running");
+});
+
+test("early reconciliation branches never finish another executor's running claim", async () => {
+  for (const current of [
+    snapshot({ policyRevision: "policy-stale", explicitlyApproved: false }),
+    snapshot({ exists: true, active: true }),
+    snapshot({ exists: true, active: false }),
+  ]) {
+    const journal = new MemoryJournal();
+    await journal.begin({
+      key: action.idempotencyKey, scope, skillId: action.skillId,
+      policyRevision: action.expectedPolicyRevision, state: "running",
+      attempts: 0, updatedAt: new Date().toISOString(),
+    });
+    const host = hostWith(() => current, async () => {
+      throw new Error("registration must not run for an unclaimed repair");
+    });
+    const result = await executeLearningRepairPlan(plan, journal, host);
+    assert.equal(result[0]?.state, "failed");
+    assert.match(result[0]?.reason ?? "", /another executor/);
+    assert.equal(journal.entries.get(action.idempotencyKey)?.state, "running");
+    assert.equal(journal.entries.get(action.idempotencyKey)?.attempts, 1);
+    assert.equal(journal.events.length, 0);
+  }
+});
+
+test("fails closed when a journal claims work without a fencing token", async () => {
+  const journal = new MemoryJournal();
+  journal.begin = async (entry) => ({ ...entry, state: "running", attempts: 1, claimed: true });
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /does not support safe claim fencing/);
+  assert.equal(registrations, 0);
+});
+
+test("does not start lifecycle mutation after the repair lease is lost during start audit", async () => {
+  const journal = new MemoryJournal();
+  journal.heartbeat = async () => false;
+  journal.audit = async (event) => {
+    if (event.event === "repair_started") await new Promise(resolve => setTimeout(resolve, 1_200));
+  };
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /heartbeat lost before lifecycle mutation/);
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
+
+test("does not mutate when the required repair-start audit cannot be persisted", async () => {
+  const journal = new MemoryJournal();
+  const audit = journal.audit.bind(journal);
+  journal.audit = async (event) => {
+    if (event.event === "repair_started") throw new Error("audit unavailable");
+    return audit(event);
+  };
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
+
+test("still verifies and records successful repair if intermediate registration audit fails", async () => {
+  const journal = new MemoryJournal();
+  const audit = journal.audit.bind(journal);
+  journal.audit = async (event) => {
+    if (event.event === "repair_registered") throw new Error("audit unavailable");
+    return audit(event);
+  };
+  let active = false;
+  const host = hostWith(() => snapshot({ exists: active, active }), async () => { active = true; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "succeeded");
+  assert.match(result[0]?.reason ?? "", /registration audit append failed/);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "succeeded");
+});
+
+test("audit failure cannot strand a preflight-rejected repair in running state", async () => {
+  const journal = new MemoryJournal();
+  journal.audit = async (event) => {
+    if (event.event === "repair_failed") throw new Error("audit unavailable");
+  };
+  const host = hostWith(() => snapshot({ policyRevision: "policy-stale" }), async () => {
+    throw new Error("registration must not run");
+  });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /failure audit append failed/);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
+
+test("refuses ineligible plans and cross-scope actions", async () => {
+  const journal = new MemoryJournal();
+  const host = hostWith(() => snapshot(), async () => {});
+  await assert.rejects(() => executeLearningRepairPlan({ ...plan, eligibleForExecutor: false }, journal, host), /not eligible/);
+  await assert.rejects(() => executeLearningRepairPlan({ ...plan, actions: [{ ...action, scope: { ...scope, tenantId: "tenant-b" } }] }, journal, host), /cross-scope/);
+});
+
+test("rejects an action whose idempotency key is not bound to the plan and skill", async () => {
+  const journal = new MemoryJournal();
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  await assert.rejects(
+    () => executeLearningRepairPlan({ ...plan, actions: [{ ...action, idempotencyKey: "unrelated-key" }] }, journal, host),
+    /unbound/,
+  );
+  assert.equal(registrations, 0);
+});
+
+test("detects drift after a journaled success instead of silently claiming healthy state", async () => {
+  const journal = new MemoryJournal();
+  await journal.begin({ key: action.idempotencyKey, scope, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running", attempts: 0, updatedAt: new Date().toISOString() });
+  await journal.finish(action.idempotencyKey, scope, "succeeded", "previously verified");
+  let registrations = 0;
+  const host = hostWith(() => snapshot({ exists: false, active: false }), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /state drifted/);
+  assert.equal(registrations, 0);
+});
+
+
+test("does not trust a raced journal success when authoritative runtime is still missing", async () => {
+  const journal = new MemoryJournal();
+  journal.begin = async (entry) => ({ ...entry, state: "succeeded", attempts: 2, result: "another worker completed", claimed: false });
+  let registrations = 0;
+  const host = hostWith(() => snapshot({ exists: false, active: false }), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /authoritative state is not active/);
+  assert.equal(registrations, 0);
+});
