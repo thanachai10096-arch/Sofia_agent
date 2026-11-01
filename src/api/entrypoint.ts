@@ -216,7 +216,7 @@ const server = createSofiaApi(deps, {
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   channelHealth: () => ({
     telegram: { status: telegramRuntime?.getStatus() ?? "disabled" },
-    discord: { status: discordTransport ? "running" : "disabled" },
+    discord: { status: discordTransport?.getStatus() ?? "disabled" },
   }),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
