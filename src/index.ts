@@ -155,3 +155,6 @@ export type { VoiceSession, VoiceSessionOptions, VoiceSessionSnapshot, VoiceSess
 
 export { iterateBoundedVoiceAudio } from "./voice/audio-stream.js";
 export type { VoiceAudioChunk, VoiceAudioStreamLimits } from "./voice/audio-stream.js";
+
+export { createVoiceActivityDetector } from "./voice/activity.js";
+export type { VoiceActivityOptions, VoiceActivityEvent, VoiceActivityEndReason } from "./voice/activity.js";
