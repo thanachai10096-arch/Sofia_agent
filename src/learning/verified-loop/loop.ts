@@ -184,6 +184,10 @@ export class VerifiedLearningLoop {
         policyRevision: latestPolicy,
       };
       const activated = await this.host.transaction(scope, async tx => {
+        // Close the gap between the post-promotion policy read and acquiring
+        // the activation transaction. The revision must still match at the
+        // final persistence boundary before an active row is written.
+        if (await this.host.currentPolicyRevision(scope) !== currentPolicy) return false;
         const activeSkills = await tx.listActiveSkills(scope);
         if (activeSkills.some(skill => skill.name === active.name && skill.policyRevision === latestPolicy)) return false;
         await tx.activateSkill(active);
