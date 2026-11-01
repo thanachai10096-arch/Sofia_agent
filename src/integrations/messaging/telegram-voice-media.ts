@@ -95,7 +95,7 @@ export function createTelegramVoiceMediaClient(config: TelegramVoiceMediaConfig)
 
   return {
     async downloadVoice(fileId: string, signal: AbortSignal): Promise<TelegramVoiceFile> {
-      if (typeof fileId !== "string" || !fileId.trim() || fileId.length > 512 || /[\r\n\0]/.test(fileId)) {
+      if (typeof fileId !== "string" || !/^[A-Za-z0-9_-]{1,512}$/.test(fileId)) {
         throw new Error("Telegram file ID is invalid.");
       }
       signal.throwIfAborted();
