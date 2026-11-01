@@ -48,14 +48,17 @@ function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if
 function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const ownerEvolutionEngines = new Map<string, EvolutionEngine>();
+  const ownerLearningStores = new Map<string, {
+    projectMemory: FileProjectMemoryStore;
+    skillLedger: PersistentSkillLedger;
+    onSkillCandidate: ReturnType<typeof createManagedSkillLearningHandler>;
+  }>();
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
   const settlementJournal = new FileSettlementJournal(workspace);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent,budgetSnapshot})=>{
     // Resolve all learning state only after the authenticated principal is known.
     // This prevents a shared workspace from becoming a cross-user memory boundary.
-    const projectMemory=new FileProjectMemoryStore(workspace, undefined, principalId);
-    const skillLedger=new PersistentSkillLedger(projectMemory);
     const ownerNamespace = principalId === undefined ? "local" : createHash("sha256").update(principalId).digest("hex");
     let runEvolution = evolution;
     if (principalId !== undefined) {
@@ -66,15 +69,29 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       }
       runEvolution = scopedEvolution;
     }
-    const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
-      const checks = [
-        { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
-        { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
-        { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
-      ];
-      return { passed: checks.every((check) => check.passed), checks };
-    }, { file: path.join(workspace, ".sofia", "skill-lifecycle", ownerNamespace + ".json") });
-    const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
+    let learningStores = ownerLearningStores.get(ownerNamespace);
+    if (!learningStores) {
+      const projectMemory = new FileProjectMemoryStore(workspace, undefined, principalId);
+      const skillLedger = new PersistentSkillLedger(projectMemory);
+      const lifecycleFile = principalId === undefined
+        ? path.join(workspace, ".sofia", "skill-lifecycle.json")
+        : path.join(workspace, ".sofia", "skill-lifecycle", ownerNamespace + ".json");
+      const skillLifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
+        const checks = [
+          { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
+          { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
+          { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
+        ];
+        return { passed: checks.every((check) => check.passed), checks };
+      }, { file: lifecycleFile });
+      learningStores = {
+        projectMemory,
+        skillLedger,
+        onSkillCandidate: createManagedSkillLearningHandler(skillLifecycle, dependencies.approval),
+      };
+      ownerLearningStores.set(ownerNamespace, learningStores);
+    }
+    const { projectMemory, skillLedger, onSkillCandidate } = learningStores;
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
     if (requestedRouteId && !requestedRoute) throw new Error("Unknown model route: " + requestedRouteId);
