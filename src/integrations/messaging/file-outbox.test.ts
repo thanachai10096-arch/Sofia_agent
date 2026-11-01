@@ -37,3 +37,52 @@ test("outbox rejects oversized or empty outbound content", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("platform-scoped flush leaves other platforms pending", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-platform-"));
+  try {
+    const outbox = new FileMessagingOutbox(root);
+    await outbox.enqueue("line", { conversationId: "line-chat", text: "line result" });
+    await outbox.enqueue("whatsapp", { conversationId: "wa-chat", text: "whatsapp result" });
+    const delivered: string[] = [];
+    const result = await flushMessagingOutbox(outbox, async (platform, message) => {
+      delivered.push(platform + ":" + message.text);
+      return true;
+    }, undefined, "line");
+    assert.deepEqual(result, { sent: 1, pending: 1 });
+    assert.deepEqual(delivered, ["line:line result"]);
+    assert.deepEqual((await outbox.pending()).map((record) => record.platform), ["whatsapp"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("overlapping flushes for one spool do not send the same record twice in-process", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-concurrent-"));
+  try {
+    const outbox = new FileMessagingOutbox(root);
+    await outbox.enqueue("line", { conversationId: "line-chat", text: "one result" });
+    let releaseSend!: (value: boolean) => void;
+    let started!: () => void;
+    const sendStarted = new Promise<void>((resolve) => { started = resolve; });
+    const sendGate = new Promise<boolean>((resolve) => { releaseSend = resolve; });
+    let sends = 0;
+    const first = flushMessagingOutbox(outbox, async () => {
+      sends++;
+      started();
+      return sendGate;
+    });
+    await sendStarted;
+    const second = await flushMessagingOutbox(outbox, async () => {
+      sends++;
+      return true;
+    });
+    assert.deepEqual(second, { sent: 0, pending: 1 });
+    releaseSend(true);
+    assert.deepEqual(await first, { sent: 1, pending: 0 });
+    assert.equal(sends, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
