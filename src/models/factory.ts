@@ -49,7 +49,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
   const settlementJournal = new FileSettlementJournal(workspace);
-  const projectMemory=new FileProjectMemoryStore(workspace);
+  const projectMemory=new FileProjectMemoryStore(workspace, undefined, principalId);
   const skillLedger=new PersistentSkillLedger(projectMemory);
   const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
     const checks = [
