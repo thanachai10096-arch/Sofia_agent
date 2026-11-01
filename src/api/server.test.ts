@@ -147,3 +147,50 @@ test("API rejects unknown model routes before starting a run", async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("public health reports safe channel lifecycle states without making the API depend on diagnostics", async () => {
+  let diagnosticsAvailable = true;
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: {},
+    channelHealth: () => {
+      if (!diagnosticsAvailable) throw new Error("diagnostics unavailable");
+      return {
+        telegram: { status: "poll_conflict" },
+        discord: { status: "running" },
+      };
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const url = "http://127.0.0.1:" + address.port + "/health";
+  try {
+    const healthy = await fetch(url);
+    assert.equal(healthy.status, 200);
+    assert.deepEqual(await healthy.json(), {
+      ok: true,
+      service: "sofia-agent-api",
+      version: "v1",
+      capabilities: { mobile: true, asyncRuns: true, stream: true },
+      channels: {
+        telegram: { status: "poll_conflict" },
+        discord: { status: "running" },
+      },
+    });
+
+    diagnosticsAvailable = false;
+    const degraded = await fetch(url);
+    assert.equal(degraded.status, 200);
+    const payload = await degraded.json() as Record<string, unknown>;
+    assert.equal(payload.ok, true);
+    assert.equal("channels" in payload, false);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
