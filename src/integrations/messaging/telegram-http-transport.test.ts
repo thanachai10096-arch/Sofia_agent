@@ -181,7 +181,7 @@ test("a failed webhook preflight fails closed and can be retried", async () => {
   let preflightFails = true;
   const events: Array<{ event: string; status?: number }> = [];
   const requests: string[] = [];
-  const fetchImpl: typeof fetch = async (input) => {
+  const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     requests.push(url);
     if (url.endsWith("/getWebhookInfo")) {
