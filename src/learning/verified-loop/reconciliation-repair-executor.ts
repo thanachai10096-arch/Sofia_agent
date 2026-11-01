@@ -237,6 +237,13 @@ export async function executeLearningRepairPlan(
       plan.eligibleForExecutor !== true || plan.blocked.length !== 0 || plan.actions.length === 0) {
     throw new Error("Repair plan is not eligible for execution");
   }
+  const plannedSkillIds = new Set<string>();
+  for (const action of plan.actions) {
+    if (!action || typeof action.skillId !== "string" || plannedSkillIds.has(action.skillId)) {
+      throw new Error("Repair plan contains duplicate or invalid skill actions");
+    }
+    plannedSkillIds.add(action.skillId);
+  }
   const results: LearningRepairExecutionResult[] = [];
   for (const action of plan.actions) {
     assertScope(action.scope);
