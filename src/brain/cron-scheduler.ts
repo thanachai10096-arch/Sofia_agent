@@ -397,7 +397,24 @@ export class CronScheduler {
         const found = state.schedules.find(item => item.id === execution.scheduleId);
         return found ? { ...found } : undefined;
       });
-      if (!schedule) continue;
+      if (!schedule) {
+        // A deleted/missing schedule must not leave a claimed execution consuming
+        // the global concurrency budget forever after a restart.
+        const orphaned = await this.store.transact(async state => {
+          const current = state.history.find(item => item.id === execution.id);
+          if (!current || (current.status !== "claimed" && current.status !== "running")) return false;
+          current.status = "failed";
+          current.finishedAt = this.now().toISOString();
+          current.error = "Schedule record is missing during recovery; execution cannot be safely resumed.";
+          await this.recordAudit(state, {
+            at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.orphaned",
+            scheduleId: execution.scheduleId, detail: execution.id,
+          });
+          return true;
+        });
+        if (orphaned) reconciled++;
+        continue;
+      }
 
       if (!execution.jobId) {
         await this.store.transact(async state => {
