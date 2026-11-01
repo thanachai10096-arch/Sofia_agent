@@ -8,6 +8,40 @@ import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
 
+test("DurableJobRuntime contains rejected background startup and persists a failed job", async () => {
+  const namespace = "job-runtime-background-start-failure-" + randomUUID();
+  const runtime = new DurableJobRuntime(() => ({
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  // Simulate a failure before the worker's own execution handler is entered
+  // (for example, a durable lease claim failing after submit() has persisted).
+  Object.defineProperty(runtime, "execute", {
+    configurable: true,
+    value: async () => { throw new Error("simulated worker startup failure"); },
+  });
+
+  const submitted = await runtime.submit({ task: "exercise background startup failure" });
+  assert.equal(submitted.status, "queued");
+
+  let persisted = await runtime.get(submitted.id);
+  const deadline = Date.now() + 5_000;
+  while (persisted?.status !== "failed" && Date.now() < deadline) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    persisted = await runtime.get(submitted.id);
+  }
+  assert.equal(persisted?.status, "failed");
+  assert.match(persisted?.error ?? "", /simulated worker startup failure/);
+
+  const stateFile = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  await rm(stateFile, { force: true });
+  await rm(stateFile + ".lock", { force: true });
+});
+
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
   const namespace = "job-runtime-restart-" + randomUUID();
   const hangingBrain = {
