@@ -135,7 +135,10 @@ export function createTelegramVoiceMediaClient(config: TelegramVoiceMediaConfig)
       signal.throwIfAborted();
       const form = new FormData();
       form.set("chat_id", chatId);
-      form.set("voice", new Blob([audio.bytes], { type: audio.mimeType }), "sofia-voice." + extension);
+      // Copy into an owned ArrayBuffer so BlobPart is valid across TS/Node DOM typings.
+      const audioBuffer = new ArrayBuffer(audio.bytes.byteLength);
+      new Uint8Array(audioBuffer).set(audio.bytes);
+      form.set("voice", new Blob([audioBuffer], { type: audio.mimeType }), "sofia-voice." + extension);
       const response = await fetcher(apiBase + "/sendVoice", {
         method: "POST",
         body: form,
