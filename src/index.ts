@@ -146,3 +146,6 @@ export type { VoiceChannel, VerifiedVoiceEvent, VoiceEventDeduplicator, VoiceCha
 
 export { createTelegramVoiceMediaClient } from "./integrations/messaging/telegram-voice-media.js";
 export type { TelegramVoiceMediaConfig, TelegramVoiceFile } from "./integrations/messaging/telegram-voice-media.js";
+
+export { createSandboxedTelegramAudioInspector } from "./integrations/messaging/telegram-audio-inspector.js";
+export type { SandboxedTelegramAudioInspectorOptions, TelegramAudioInspection } from "./integrations/messaging/telegram-audio-inspector.js";
