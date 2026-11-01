@@ -25,6 +25,8 @@ export { createBuiltinTools } from "./tools/builtin.js";
 export { buildRepositoryMap, compactRepositoryMap } from "./brain/repository-intelligence.js";
 export { createEditPatch, applyEditPatch, unifiedDiff } from "./brain/edit-engine.js";
 export { reviewCodeChange } from "./review/code-review.js";
+export { ScopedProjectMemoryStore } from "./brain/scoped-project-memory.js";
+export type { ProjectMemoryAccessScope, ScopedProjectMemoryStoreOptions } from "./brain/scoped-project-memory.js";
 export { FileProjectMemoryStore, PersistentSkillLedger, ProjectEpisodicMemoryStore, ProjectMemoryFeedbackStore, memoryEntryFromConvention, memoryEntryFromRepair, memoryEntryFromEpisode } from "./brain/project-memory.js";
 export { listProjectMemoryVersions, rollbackProjectMemory, saveVersionedProjectMemory } from "./brain/memory-versioning.js";
 export type { ProjectMemoryVersion, ProjectMemoryVersionMetadata, ProjectMemoryVersionResult } from "./brain/memory-versioning.js";
