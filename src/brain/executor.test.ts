@@ -324,6 +324,8 @@ test("Brain can resume from a saved run snapshot without repeating completed ste
     },
   });
 
+  assert.equal(resumed.runId, saved.runId);
+
   const report = await resumed.run({
     task: "Create hello.txt",
     resume: saved,
