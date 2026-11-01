@@ -72,7 +72,9 @@ export function sqliteFileBackupRestoreAdapter(
       if (process.platform !== "win32") await fs.chmod(temporaryDirectory, 0o700);
       const snapshotPath = path.join(temporaryDirectory, "snapshot.sqlite");
       lifecycle.getOpenStore().createConsistentSnapshot(snapshotPath);
-      return await fs.readFile(snapshotPath);
+      const bytes = await fs.readFile(snapshotPath);
+      await verifySqliteIntegrity(bytes);
+      return bytes;
     } finally {
       await fs.rm(temporaryDirectory, { recursive: true, force: true });
     }
@@ -149,6 +151,8 @@ export function sqliteFileBackupRestoreAdapter(
       if (!bytes || Buffer.from(bytes.subarray(0, 16)).toString("ascii") !== "SQLite format 3\0") {
         throw new Error("SQLite restore bundle is missing a valid database snapshot.");
       }
+      // Re-validate immediately before closing the live database in case bundle bytes changed after preflight.
+      await verifySqliteIntegrity(bytes);
       await closeDatabase();
       await replaceDatabase(bytes);
       await reopenDatabase();
@@ -158,6 +162,8 @@ export function sqliteFileBackupRestoreAdapter(
           !("bytes" in rawSnapshot) || !(rawSnapshot.bytes instanceof Uint8Array)) {
         throw new Error("SQLite restore rollback snapshot is invalid.");
       }
+      // Validate rollback material before closing or replacing the current database.
+      await verifySqliteIntegrity(rawSnapshot.bytes);
       await closeDatabase();
       await replaceDatabase(rawSnapshot.bytes);
       await reopenDatabase();
