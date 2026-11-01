@@ -77,6 +77,19 @@ test("settlement run claims serialize independent journal instances and release 
   }
 });
 
+test("concurrent settlement claim releases are idempotent", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-claim-release-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+    const claim = await journal.claimRun("concurrent-release-run");
+    await Promise.all([claim.release(), claim.release(), claim.release()]);
+    const next = await journal.claimRun("concurrent-release-run");
+    await next.release();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("settlement run claim remains fail-closed while an existing claim is present", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-claim-"));
   try {
