@@ -59,9 +59,10 @@ function decodeEvaluation(value: unknown): SkillEvaluation {
   const item = decode<unknown>(value, "evaluation");
   if (!isRecord(item) || typeof item.regressionRunId !== "string" || !item.regressionRunId ||
       typeof item.passed !== "boolean" || !Array.isArray(item.regressionEvidenceIds) ||
-      !item.regressionEvidenceIds.every(id => typeof id === "string") ||
+      !item.regressionEvidenceIds.every(id => typeof id === "string" && id.length > 0) ||
       !Array.isArray(item.checks) || !item.checks.every(check =>
-        isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean" &&
+        isRecord(check) && typeof check.name === "string" && check.name.trim().length > 0 &&
+        typeof check.passed === "boolean" &&
         (check.detail === undefined || typeof check.detail === "string"))) {
     throw new Error("Corrupt persisted learning evaluation");
   }
@@ -181,6 +182,11 @@ export class SqliteLearningTransactionStore {
       },
       recordEvaluation: async (requestedScope, candidateId, evaluation) => {
         assertSameScope(requestedScope, scope);
+        if (typeof candidateId !== "string" || !candidateId.trim()) throw new Error("Invalid learning evaluation candidate ID");
+        const candidateRow = db.prepare("SELECT candidate_id, payload FROM learning_candidates WHERE tenant_id=? AND principal_id=? AND project_id=? AND candidate_id=?").get(...values, candidateId) as CandidateRow | undefined;
+        if (!candidateRow) throw new Error("Learning evaluation requires a persisted candidate");
+        const candidate = decodeCandidate(candidateRow.payload, requestedScope);
+        assertPersistedIdentity(candidate.id, candidateRow.candidate_id, "candidate");
         const safeEvaluation = decodeEvaluation(encode(evaluation));
         db.prepare("INSERT INTO learning_evaluations VALUES (?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, candidate_id) DO UPDATE SET payload=excluded.payload").run(...values, candidateId, encode(safeEvaluation));
       },
