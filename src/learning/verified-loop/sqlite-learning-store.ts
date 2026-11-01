@@ -16,6 +16,62 @@ function decode<T>(value: unknown, label: string): T {
   if (typeof value !== "string") throw new Error("Corrupt persisted learning " + label);
   try { return JSON.parse(value) as T; } catch { throw new Error("Corrupt persisted learning " + label); }
 }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+function persistedScope(value: unknown, scope: LearningScope, label: string): void {
+  if (!isRecord(value) || !isRecord(value.scope)) throw new Error("Corrupt persisted learning " + label);
+  assertSameScope(value.scope as unknown as LearningScope, scope);
+}
+function decodeExperience(value: unknown, scope: LearningScope): LearningExperience {
+  const item = decode<unknown>(value, "experience");
+  persistedScope(item, scope, "experience");
+  if (!isRecord(item) || typeof item.id !== "string" || !item.id ||
+      typeof item.receiptId !== "string" || !item.receiptId ||
+      typeof item.runId !== "string" || !item.runId ||
+      !Array.isArray(item.evidenceIds) || !item.evidenceIds.every(id => typeof id === "string" && id.length > 0) ||
+      typeof item.summary !== "string" || typeof item.taskFingerprint !== "string" || !item.taskFingerprint ||
+      typeof item.createdAt !== "string" || !Number.isFinite(Date.parse(item.createdAt))) {
+    throw new Error("Corrupt persisted learning experience");
+  }
+  return item as unknown as LearningExperience;
+}
+function decodeCandidate(value: unknown, scope: LearningScope): SkillCandidate {
+  const item = decode<unknown>(value, "candidate");
+  persistedScope(item, scope, "candidate");
+  if (!isRecord(item) || typeof item.id !== "string" || !item.id ||
+      typeof item.experienceId !== "string" || !item.experienceId ||
+      typeof item.name !== "string" || !item.name ||
+      typeof item.trigger !== "string" ||
+      !Array.isArray(item.procedure) || !item.procedure.every(step => typeof step === "string") ||
+      typeof item.confidence !== "number" || !Number.isFinite(item.confidence) ||
+      item.confidence < 0 || item.confidence > 1) {
+    throw new Error("Corrupt persisted learning candidate");
+  }
+  return item as unknown as SkillCandidate;
+}
+function decodeEvaluation(value: unknown): SkillEvaluation {
+  const item = decode<unknown>(value, "evaluation");
+  if (!isRecord(item) || typeof item.regressionRunId !== "string" || !item.regressionRunId ||
+      typeof item.passed !== "boolean" || !Array.isArray(item.regressionEvidenceIds) ||
+      !item.regressionEvidenceIds.every(id => typeof id === "string") ||
+      !Array.isArray(item.checks) || !item.checks.every(check =>
+        isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean" &&
+        (check.detail === undefined || typeof check.detail === "string"))) {
+    throw new Error("Corrupt persisted learning evaluation");
+  }
+  return item as unknown as SkillEvaluation;
+}
+function decodeActiveSkill(value: unknown, scope: LearningScope): ActiveLearningSkill {
+  const item = decode<unknown>(value, "active skill");
+  const candidate = decodeCandidate(encode(item), scope);
+  if (!isRecord(item) || item.status !== "active" ||
+      typeof item.activatedAt !== "string" || !Number.isFinite(Date.parse(item.activatedAt)) ||
+      typeof item.policyRevision !== "string" || !item.policyRevision) {
+    throw new Error("Corrupt persisted active learning skill");
+  }
+  return { ...candidate, status: "active", activatedAt: item.activatedAt, policyRevision: item.policyRevision };
+}
 function hardenFile(file: string): void {
   if (process.platform === "win32" || file === ":memory:") return;
   const stat = fs.lstatSync(file);
@@ -81,17 +137,17 @@ export class SqliteLearningTransactionStore {
         assertSameScope(requestedScope, scope);
         if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Invalid learning history limit");
         const rows = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? ORDER BY rowid DESC LIMIT ?").all(...values, limit) as ScopeRow[];
-        return rows.reverse().map(row => decode<LearningExperience>(row.payload, "experience"));
+        return rows.reverse().map(row => decodeExperience(row.payload, requestedScope));
       },
       getExperience: async (requestedScope, id) => {
         assertSameScope(requestedScope, scope);
         const row = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND experience_id=?").get(...values, id) as ScopeRow | undefined;
-        return row ? decode<LearningExperience>(row.payload, "experience") : undefined;
+        return row ? decodeExperience(row.payload, requestedScope) : undefined;
       },
       getExperienceByReceipt: async (requestedScope, receiptId) => {
         assertSameScope(requestedScope, scope);
         const row = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND receipt_id=?").get(...values, receiptId) as ScopeRow | undefined;
-        return row ? decode<LearningExperience>(row.payload, "experience") : undefined;
+        return row ? decodeExperience(row.payload, requestedScope) : undefined;
       },
       putCandidate: async candidate => {
         assertSameScope(candidate.scope, scope);
@@ -100,7 +156,7 @@ export class SqliteLearningTransactionStore {
       getCandidate: async (requestedScope, id) => {
         assertSameScope(requestedScope, scope);
         const row = db.prepare("SELECT payload FROM learning_candidates WHERE tenant_id=? AND principal_id=? AND project_id=? AND candidate_id=?").get(...values, id) as ScopeRow | undefined;
-        return row ? decode<SkillCandidate>(row.payload, "candidate") : undefined;
+        return row ? decodeCandidate(row.payload, requestedScope) : undefined;
       },
       recordEvaluation: async (requestedScope, candidateId, evaluation) => {
         assertSameScope(requestedScope, scope);
@@ -114,7 +170,7 @@ export class SqliteLearningTransactionStore {
       listActiveSkills: async requestedScope => {
         assertSameScope(requestedScope, scope);
         const rows = db.prepare("SELECT payload FROM learning_active_skills WHERE tenant_id=? AND principal_id=? AND project_id=?").all(...values) as ScopeRow[];
-        return rows.map(row => decode<ActiveLearningSkill>(row.payload, "active skill"));
+        return rows.map(row => decodeActiveSkill(row.payload, requestedScope));
       },
     };
     let result: T;
