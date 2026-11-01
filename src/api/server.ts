@@ -152,6 +152,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   if (whatsappRoute && (!Number.isSafeInteger(whatsappMaxBodyBytes) || whatsappMaxBodyBytes < 1 || whatsappMaxBodyBytes > 1_000_000)) {
     throw new Error("WhatsApp webhook route maxBodyBytes must be between 1 and 1000000.");
   }
+  // Provider webhook routes bypass API-key auth and use different signature schemes.
+  // Reject collisions at startup so one integration cannot shadow another route.
+  const configuredWebhookPaths = [
+    ...(discordRoute ? [discordRoutePath] : []),
+    ...(lineRoute ? [lineRoutePath] : []),
+    ...(whatsappRoute ? [whatsappRoutePath] : []),
+  ];
+  if (new Set(configuredWebhookPaths).size !== configuredWebhookPaths.length) {
+    throw new Error("Messaging webhook route paths must be unique.");
+  }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStorePath);
