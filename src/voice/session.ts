@@ -53,7 +53,7 @@ export function createVoiceSession(
       signal?.throwIfAborted();
 
       const controller = new AbortController();
-      const currentTurn = ++turnId;
+      turnId++;
       activeController = controller;
       state = "processing";
 
@@ -70,7 +70,7 @@ export function createVoiceSession(
         if (signal && externalAbort) signal.removeEventListener("abort", externalAbort);
         externalAbort = undefined;
         if (activeController === controller) activeController = undefined;
-        if (state !== "closed") {
+        if (snapshot().state !== "closed") {
           state = "idle";
           publish();
         }
