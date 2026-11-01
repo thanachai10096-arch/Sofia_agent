@@ -425,6 +425,7 @@ export class DurableJobRuntime implements JobRuntime {
       signal?: AbortSignal;
       maxSteps?: number;
       onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
+      budgetSnapshot?: BrainRunSnapshot["budget"];
       modelRouteId?: string;
     }) => SofiaBrain,
     private readonly runStore?: RunStore,
@@ -620,7 +621,7 @@ export class DurableJobRuntime implements JobRuntime {
         return;
       }
 
-      const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot, ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}) });
+      const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot, ...(resume?.budget ? { budgetSnapshot: resume.budget } : {}), ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}) });
       const result = await brain.run({
         ...input,
         ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
