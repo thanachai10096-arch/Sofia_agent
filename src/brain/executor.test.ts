@@ -395,6 +395,8 @@ test("Brain emits a review gate after verification", async () => {
 test("Brain re-executes a completed step ID when a replan changes its action", async () => {
   let replannedActionCalls = 0;
   let failureCalls = 0;
+  let learnedTrigger = "";
+  const savedRepairMemories: ProjectMemoryEntry[] = [];
   const reasoner: BrainReasoner = {
     async prepare(request) {
       const parsed = JSON.parse(request) as { phase: string };
@@ -463,7 +465,7 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
           ok: false,
           data: null,
           evidenceId,
-          error: { category: "tool_error", message: "recoverable test failure" },
+          error: { category: "tool_error", message: "customer-email@example.com /home/alice/private.txt API_KEY=super-secret-value" },
         };
       }
       if (call.tool === "workspace.list_files" && call.input.path === "replanned-step") {
@@ -489,7 +491,15 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
   const skillLedger = new InMemorySkillLedger();
   const brain = createSofiaBrain({
     // No onSkillCandidate callback: learned-skill persistence must fail closed.
-    dependencies: { reasoner, tools, allowShell: false, allowNetwork: false, skillLedger },
+    dependencies: {
+      reasoner, tools, allowShell: false, allowNetwork: false, skillLedger,
+      async onSkillCandidate(candidate) { learnedTrigger = candidate.trigger; return false; },
+      projectMemory: {
+        async save(entry) { savedRepairMemories.push(entry); },
+        async list() { return []; },
+        async find() { return []; },
+      },
+    },
     limits: {
       maxSteps: 6,
       maxToolCalls: 20,
@@ -516,7 +526,14 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
   assert.equal(failureCalls, 1);
   assert.equal(replannedActionCalls, 1, "changed action must not be skipped due to a reused step ID");
   assert.equal(report.completed, true, report.summary);
-  assert.deepEqual(skillLedger.list(), [], "without an explicit approval callback, learned skills must not be recorded");
+  assert.deepEqual(skillLedger.list(), [], "without approval, learned skills must not be recorded");
+  assert.equal(learnedTrigger, "Detected tool_error during a verified repair.");
+  assert.doesNotMatch(learnedTrigger, /customer-email|private\\.txt|super-secret-value/);
+  const repairMemory = savedRepairMemories.find((entry) => entry.source === "brain-recovery");
+  assert.ok(repairMemory, "verified repair metadata should be saved");
+  assert.match(repairMemory.content, /Failure category: tool_error/);
+  assert.match(repairMemory.content, /verified repair completed/);
+  assert.doesNotMatch(repairMemory.content, /customer-email|private\\.txt|super-secret-value/);
 });
 
 test("Brain retrieves project memory using the current task and avoids listing unrelated entries", async () => {
