@@ -215,6 +215,9 @@ export class FileSettlementJournal {
     // the run. The same fail-closed claim serializes deletion with inference.
     const claim = await this.claimRun(runId);
     try {
+      if (await this.hasUnresolved(runId)) {
+        throw new Error("Cannot delete unresolved settlement evidence");
+      }
       try {
         await fs.unlink(this.file(runId));
       } catch (error) {
