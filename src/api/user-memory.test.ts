@@ -65,6 +65,34 @@ test("user memory API is owner-scoped, explicit, and redacts secrets", async () 
     assert.equal((await call("bob-token", "DELETE", "/v1/memory/" + encodeURIComponent(memory.id))).status, 404);
     assert.equal((await call("alice-token", "DELETE", "/v1/memory/" + encodeURIComponent(memory.id))).body.deleted, true);
     await call("alice-token", "POST", "/v1/memory", { kind: "goal", content: "Build an open source agent" });
+    const firstPreference = await call("alice-token", "POST", "/v1/memory", {
+      kind: "preference", content: "I prefer concise answers",
+    });
+    assert.equal(firstPreference.status, 201);
+    const conflict = await call("alice-token", "POST", "/v1/memory", {
+      kind: "preference", content: "I do not prefer concise answers",
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.body.error, "memory_conflict_review_required");
+    assert.deepEqual(conflict.body.decisions, ["keep-both", "keep-existing"]);
+
+    const keepExisting = await call("alice-token", "POST", "/v1/memory/review", {
+      kind: "preference", content: "I do not prefer concise answers", decision: "keep-existing",
+    });
+    assert.equal(keepExisting.status, 200);
+    assert.equal(keepExisting.body.saved, false);
+
+    const keepBoth = await call("alice-token", "POST", "/v1/memory/review", {
+      kind: "preference", content: "I do not prefer concise answers", decision: "keep-both",
+    });
+    assert.equal(keepBoth.status, 201);
+    assert.equal(keepBoth.body.saved, true);
+    assert.equal(keepBoth.body.retainedConflicts, 1);
+    assert.equal((await call("alice-token", "GET", "/v1/memory")).body.memories.length, 2);
+
+    assert.equal((await call("read-only-token", "POST", "/v1/memory/review", {
+      kind: "preference", content: "I do not prefer concise answers", decision: "keep-both",
+    })).status, 403);
     assert.equal((await call("alice-token", "DELETE", "/v1/memory")).body.cleared, true);
     assert.deepEqual((await call("alice-token", "GET", "/v1/memory")).body.memories, []);
   } finally {
