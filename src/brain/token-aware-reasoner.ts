@@ -76,6 +76,7 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
     options: {
       signal: AbortSignal;
       maxContextTokens: number;
+      runId: string;
     },
   ): Promise<PreparedInference> {
     if (options.signal.aborted) {
@@ -107,6 +108,7 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
         const result = await this.gateway.generateMetered(
           input,
           invokeOptions.signal,
+          invokeOptions.runId,
         );
 
         return {
