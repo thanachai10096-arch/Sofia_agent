@@ -17,6 +17,7 @@ import { compactProjectContext, type ProjectContext } from "./project-context.js
 import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 import type { BrainRunSnapshot } from "./run-state.js";
+import type { TokenBudgetSnapshot } from "./token-budget.js";
 import type { RepositoryMap } from "./repository-intelligence.js";
 import { compactRepositoryMap } from "./repository-intelligence.js";
 import { reviewCodeChange } from "../review/code-review.js";
@@ -876,6 +877,9 @@ export class SofiaBrain {
         checkpointId,
         baselineSnapshotId: baselineId,
         usage: { ...this.usage },
+        ...((this.dependencies.reasoner as BrainReasoner & { getBudgetSnapshot?: () => TokenBudgetSnapshot }).getBudgetSnapshot
+          ? { budget: (this.dependencies.reasoner as BrainReasoner & { getBudgetSnapshot: () => TokenBudgetSnapshot }).getBudgetSnapshot() }
+          : {}),
         observations: [...this.observations],
         diagnoses: [...this.diagnoses],
         decisions: [...this.decisions],
