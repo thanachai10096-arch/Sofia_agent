@@ -78,6 +78,24 @@ test("empty and overlong tasks are rejected by existing dispatcher", async () =>
   assert.equal(long.starts.length, 0);
 });
 
+test("ambiguous API failures retain the durable message claim to prevent duplicate runs", async () => {
+  const h = harness();
+  h.client.start = async () => { throw new Error("network timeout"); };
+  const handle = createSofiaMessagingHandler({ ...h });
+  await assert.rejects(() => handle(inbound("retry-safe task")), /network timeout/);
+  assert.equal(h.claims.size, 1);
+  assert.equal(await handle(inbound("retry-safe task")), undefined);
+  assert.equal(h.starts.length, 0);
+});
+
+test("definitive API rejection releases the message claim for a safe provider retry", async () => {
+  const h = harness();
+  h.client.start = async () => { throw Object.assign(new Error("rate limited"), { status: 429 }); };
+  const handle = createSofiaMessagingHandler({ ...h });
+  await assert.rejects(() => handle(inbound("retry-after-limit")), /rate limited/);
+  assert.equal(h.claims.size, 0);
+});
+
 test("duplicate provider message is not started twice", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
