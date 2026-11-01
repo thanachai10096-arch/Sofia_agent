@@ -31,6 +31,15 @@ function host(overrides: Partial<{
   };
 }
 
+test("coordinator returns a clean read-only inspection when stores agree", async () => {
+  const runtime: RuntimeLearningSkill = { id: "skill-1", scope, policyRevision: "policy-1", active: true };
+  const h = host({ runtime: [runtime] });
+  const result = await inspectLearningRecovery(scope, h.adapter);
+  assert.equal(result.readOnly, true);
+  assert.equal(result.report.safe, true);
+  assert.deepEqual(result.assessments, []);
+});
+
 test("coordinator marks only fully gated missing registration as eligible for reviewed repair", async () => {
   const h = host();
   const result = await inspectLearningRecovery(scope, h.adapter);
@@ -69,6 +78,12 @@ test("coordinator routes runtime-only and policy mismatch states to manual revie
   assert.deepEqual(result.assessments.map(item => item.disposition), ["manual-review", "manual-review"]);
   assert.ok(!h.state.calls.includes("approval"));
   assert.ok(!h.state.calls.includes("evidence"));
+});
+
+test("coordinator propagates authoritative host read failures without returning an assessment", async () => {
+  const h = host();
+  h.adapter.listRuntimeSkills = async () => { throw new Error("runtime registry unavailable"); };
+  await assert.rejects(() => inspectLearningRecovery(scope, h.adapter), /runtime registry unavailable/);
 });
 
 test("coordinator fails closed on invalid policy revision and cross-scope data", async () => {
