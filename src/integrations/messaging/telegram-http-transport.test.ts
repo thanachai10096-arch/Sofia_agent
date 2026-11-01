@@ -254,3 +254,28 @@ test("Telegram delivery errors are sanitized and surfaced to the caller", async 
   assert.ok(errorEvents.includes("delivery_failed"));
   await transport.stop();
 });
+
+
+test("Telegram transport reports safe lifecycle transitions for webhook conflicts and polling conflicts", async () => {
+  const webhookStates: string[] = [];
+  const webhookTransport = createTelegramHttpTransport({
+    token,
+    fetchImpl: async () => ok({ url: "https://example.invalid/hook" }),
+    onStatus(status) { webhookStates.push(status); },
+  });
+  await webhookTransport.start(new AbortController().signal, async () => {});
+  assert.deepEqual(webhookStates, ["starting", "webhook_conflict"]);
+
+  const pollStates: string[] = [];
+  const pollTransport = createTelegramHttpTransport({
+    token,
+    fetchImpl: async (input) => {
+      if (String(input).endsWith("/getWebhookInfo")) return ok({ url: "" });
+      return new Response(JSON.stringify({ ok: false }), { status: 409 });
+    },
+    onStatus(status) { pollStates.push(status); },
+  });
+  await pollTransport.start(new AbortController().signal, async () => {});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(pollStates, ["starting", "polling", "poll_conflict"]);
+});
