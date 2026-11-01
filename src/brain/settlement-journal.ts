@@ -106,6 +106,7 @@ export class FileSettlementJournal {
     }
 
     let released = false;
+    let releaseInFlight: Promise<void> | undefined;
     return {
       assertRun: (claimedRunId: string) => {
         if (released || claimedRunId !== runId) {
@@ -114,21 +115,35 @@ export class FileSettlementJournal {
       },
       release: async () => {
         if (released) return;
-        let current: { token?: unknown };
-        try {
-          current = JSON.parse(await fs.readFile(lockFile, "utf8")) as { token?: unknown };
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        // Concurrent callers share one unlink operation. Without this guard,
+        // two idempotent releases could both read the token and race to unlink,
+        // making the second caller fail with ENOENT after the first succeeds.
+        if (!releaseInFlight) {
+          releaseInFlight = (async () => {
+            let current: { token?: unknown };
+            try {
+              current = JSON.parse(await fs.readFile(lockFile, "utf8")) as { token?: unknown };
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+                released = true;
+                return;
+              }
+              throw error;
+            }
+            if (current.token !== token) {
+              throw new Error("Settlement run claim ownership changed; refusing to release another worker's claim");
+            }
+            await fs.unlink(lockFile);
             released = true;
-            return;
-          }
+          })();
+        }
+        try {
+          await releaseInFlight;
+        } catch (error) {
+          // Permit an explicit retry after a transient filesystem error.
+          releaseInFlight = undefined;
           throw error;
         }
-        if (current.token !== token) {
-          throw new Error("Settlement run claim ownership changed; refusing to release another worker's claim");
-        }
-        await fs.unlink(lockFile);
-        released = true;
       },
     };
   }
