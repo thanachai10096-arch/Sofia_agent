@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { FileSettlementJournal } from "./settlement-journal.js";
+import { SettlementRunClaimedError, type FileSettlementJournal, type SettlementRunClaim } from "./settlement-journal.js";
 
 import {
   BudgetError,
@@ -89,7 +89,8 @@ export class GatewayError extends Error {
       | "invalid_usage"
       | "provider_cap_exceeded"
       | "incomplete_output"
-      | "model_call_failed",
+      | "model_call_failed"
+      | "settlement_run_claimed",
     readonly reason?: string,
   ) {
     super(reason ? `${code}: ${reason}` : code);
@@ -289,7 +290,18 @@ export class TokenAwareGateway {
     }
     if (lockedRunId) this.activeJournalRuns.add(lockedRunId);
     let journalRunLockTransferred = false;
+    let durableRunClaim: SettlementRunClaim | undefined;
     try {
+      if (lockedRunId) {
+        try {
+          durableRunClaim = await this.settlementJournal!.claimRun(lockedRunId);
+        } catch (error) {
+          if (error instanceof SettlementRunClaimedError) {
+            throw new GatewayError("settlement_run_claimed");
+          }
+          throw error;
+        }
+      }
       if (lockedRunId && this.blockedJournalRuns.has(lockedRunId)) {
         throw new GatewayError("model_call_failed", "unresolved_provider_settlement");
       }
@@ -459,6 +471,7 @@ export class TokenAwareGateway {
         // Keep the run lock until the provider promise actually settles, even if
         // the caller stops waiting after an abort signal.
         if (lockedRunId) this.activeJournalRuns.delete(lockedRunId);
+        await durableRunClaim?.release();
       }
     })();
 
@@ -473,6 +486,7 @@ export class TokenAwareGateway {
     } finally {
       // Covers failures before the asynchronous provider work takes ownership.
       if (!journalRunLockTransferred && lockedRunId) this.activeJournalRuns.delete(lockedRunId);
+      if (!journalRunLockTransferred) await durableRunClaim?.release();
     }
   }
 }
