@@ -214,6 +214,10 @@ const server = createSofiaApi(deps, {
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(path.join(workspace, ".sofia", "api-runs")),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
+  channelHealth: () => ({
+    telegram: { status: telegramRuntime?.getStatus() ?? "disabled" },
+    discord: { status: discordTransport ? "running" : "disabled" },
+  }),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
 const port = Number(process.env.PORT ?? 3000);
