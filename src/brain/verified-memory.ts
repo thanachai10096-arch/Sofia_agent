@@ -36,7 +36,7 @@ export interface VerifiedMemoryPromotionOptions {
 
 export interface VerifiedMemoryPromotionResult {
   promoted: boolean;
-  reason: "promoted" | "invalid_candidate" | "invalid_receipt" | "checks_failed" | "insufficient_confidence" | "unsafe_content";
+  reason: "promoted" | "invalid_candidate" | "invalid_receipt" | "checks_failed" | "evidence_mismatch" | "insufficient_confidence" | "unsafe_content";
   entry?: ProjectMemoryEntry;
 }
 
@@ -56,20 +56,20 @@ export async function promoteVerifiedProjectMemory(
   if (!Number.isFinite(minimumConfidence) || minimumConfidence < 0 || minimumConfidence > 1) {
     throw new Error("minimumConfidence must be between 0 and 1");
   }
-  if (!candidate || typeof candidate.id !== "string" || !candidate.id.trim() ||
-      typeof candidate.project !== "string" || !candidate.project.trim() ||
+  if (!candidate || typeof candidate.id !== "string" || !candidate.id.trim() || candidate.id.length > 200 ||
+      typeof candidate.project !== "string" || !candidate.project.trim() || candidate.project.length > 300 ||
       !["convention", "repair", "decision"].includes(candidate.kind) ||
       typeof candidate.content !== "string" || !candidate.content.trim() ||
       typeof candidate.source !== "string" || !candidate.source.trim() ||
       !Number.isFinite(candidate.confidence) || candidate.confidence < 0 || candidate.confidence > 1 ||
-      !Array.isArray(candidate.evidenceIds) ||
-      !candidate.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0)) {
+      !Array.isArray(candidate.evidenceIds) || candidate.evidenceIds.length === 0 ||
+      !candidate.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 200)) {
     return { promoted: false, reason: "invalid_candidate" };
   }
-  if (!receipt || typeof receipt.runId !== "string" || !receipt.runId.trim() ||
+  if (!receipt || typeof receipt.runId !== "string" || !receipt.runId.trim() || receipt.runId.length > 200 ||
       typeof receipt.verifiedAt !== "string" || !Number.isFinite(Date.parse(receipt.verifiedAt)) ||
       !Array.isArray(receipt.checks) || !Array.isArray(receipt.evidenceIds) ||
-      !receipt.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0) ||
+      !receipt.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 200) ||
       receipt.evidenceIds.length === 0 ||
       !receipt.checks.every((check) => check && typeof check.name === "string" && typeof check.passed === "boolean")) {
     return { promoted: false, reason: "invalid_receipt" };
@@ -79,6 +79,14 @@ export async function promoteVerifiedProjectMemory(
     receipt.checks.some((check) => check.name === name && check.passed === true),
   ) && receipt.checks.every((check) => check.passed === true);
   if (!checksPassed) return { promoted: false, reason: "checks_failed" };
+  const candidateEvidence = new Set(candidate.evidenceIds);
+  const evidenceCheck = receipt.checks.find((check) => check.name === "evidence" && check.passed);
+  const verifiedEvidence = new Set(receipt.evidenceIds);
+  for (const evidenceId of evidenceCheck?.evidenceIds ?? []) verifiedEvidence.add(evidenceId);
+  if (!candidate.evidenceIds.some((id) => verifiedEvidence.has(id)) ||
+      (evidenceCheck?.evidenceIds && !evidenceCheck.evidenceIds.every((id) => typeof id === "string" && id.length <= 200))) {
+    return { promoted: false, reason: "evidence_mismatch" };
+  }
   if (candidate.confidence < minimumConfidence) {
     return { promoted: false, reason: "insufficient_confidence" };
   }
@@ -89,7 +97,7 @@ export async function promoteVerifiedProjectMemory(
   const now = options.now ?? new Date().toISOString();
   if (!Number.isFinite(Date.parse(now))) throw new Error("Invalid memory promotion timestamp");
   const safeContent = String(redactSecrets(candidate.content)).trim().slice(0, 4_000);
-  if (!safeContent) return { promoted: false, reason: "unsafe_content" };
+  if (!safeContent || containsPromptInjection(safeContent)) return { promoted: false, reason: "unsafe_content" };
   const evidenceIds = [...new Set([...candidate.evidenceIds, ...receipt.evidenceIds])].slice(0, 40);
   const id = createHash("sha256")
     .update(candidate.project + "\u0000verified-memory\u0000" + candidate.id + "\u0000" + receipt.runId)
@@ -104,15 +112,14 @@ export async function promoteVerifiedProjectMemory(
     createdAt: new Date(receipt.verifiedAt).toISOString(),
     updatedAt: now,
     uses: 0,
+    verification: {
+      candidateId: candidate.id,
+      runId: receipt.runId,
+      verifiedAt: new Date(receipt.verifiedAt).toISOString(),
+      evidenceIds,
+      checks: receipt.checks.map((check) => ({ name: check.name.slice(0, 100), passed: true as const })),
+    },
   };
-  // Keep provenance in the entry's source field; evidence IDs are included in
-  // the deterministic record identity's associated verification metadata only
-  // through the source suffix, avoiding an incompatible ProjectMemoryEntry schema.
-  entry.source = [
-    "verified-run:" + receipt.runId.slice(0, 80),
-    "source:" + String(redactSecrets(candidate.source)).slice(0, 50),
-    "evidence:" + evidenceIds.join(",").slice(0, 50),
-  ].join("|").slice(0, 200);
   await store.save(entry);
   return { promoted: true, reason: "promoted", entry };
 }
