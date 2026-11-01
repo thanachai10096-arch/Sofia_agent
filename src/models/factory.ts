@@ -119,9 +119,18 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       : dependencies.tools;
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const persistRunSnapshot = async (snapshot: import("../brain/run-state.js").BrainRunSnapshot) => {
-      await onRunSnapshot?.(snapshot);
-      // Acknowledgement follows the durable run/job snapshot write. A crash before
-      // this point leaves the attempt ambiguous and blocks automatic resume.
+      if (onRunSnapshot) {
+        // DurableJobRuntime persists the redacted snapshot in its job record before
+        // returning. That embedded copy is the fallback if FileRunStore is unavailable.
+        await onRunSnapshot(snapshot);
+      } else {
+        // Direct brainFactory callers have no job-record fallback. Reconfirm the
+        // dedicated snapshot write here because SofiaBrain intentionally treats its
+        // best-effort RunStore write as non-fatal for ordinary execution.
+        await runStore.save(snapshot);
+      }
+      // Acknowledgement is written only after one durable snapshot path succeeds.
+      // If persistence fails, leave the settlement unresolved to block unsafe resume.
       await settlementJournal.acknowledgeCheckpoint(snapshot.runId);
     };
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
