@@ -44,6 +44,16 @@ test("LINE webhook maps verified text events to trusted user and conversation ID
   await transport.stop();
 });
 
+test("LINE webhook safely ignores malformed event array entries", async () => {
+  const transport = createLineHttpTransport({ channelAccessToken: "test-token", channelSecret: secret });
+  const received: unknown[] = [];
+  await transport.start(new AbortController().signal, async (event) => { received.push(event); });
+  const body = JSON.stringify({ events: [null, "invalid", { type: "message" }] });
+  assert.deepEqual(await transport.handleWebhook(Buffer.from(body), signed(body)), { status: 200, acceptedEvents: 0 });
+  assert.deepEqual(received, []);
+  await transport.stop();
+});
+
 test("LINE adapter sends replies through the shared adapter contract", async () => {
   const sent: Array<{ conversationId: string; text: string }> = [];
   const transport = {
