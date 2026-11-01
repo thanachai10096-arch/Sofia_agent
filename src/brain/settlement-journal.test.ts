@@ -35,9 +35,14 @@ test("unresolved or corrupt settlement records fail closed", async () => {
   try {
     const journal = new FileSettlementJournal("workspace", root);
     const claim = await journal.claimRun("run-1");
-    await journal.begin("run-1", { inputTokens: 1, outputTokens: 2 }, claim);
+    const attempt = await journal.begin("run-1", { inputTokens: 1, outputTokens: 2 }, claim);
+    assert.equal(await journal.hasUnresolved("run-1"), true);
+    await journal.settle("run-1", attempt, { inputTokens: 1, outputTokens: 1 }, claim);
     await claim.release();
     assert.equal(await journal.hasUnresolved("run-1"), true);
+    await assert.rejects(journal.deleteRun("run-1"), /Cannot delete unresolved settlement evidence/);
+    await journal.acknowledgeCheckpoint("run-1");
+    assert.equal(await journal.hasUnresolved("run-1"), false);
     await journal.deleteRun("run-1");
     assert.equal(await journal.hasUnresolved("run-1"), false);
   } finally {
@@ -148,6 +153,28 @@ test("journal writes reject missing, released, or mismatched run claims", async 
       journal.settle("run-a", attempt, { inputTokens: 1, outputTokens: 1 }, claim),
       /claim is missing, released, or belongs to another run/,
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("journal cleanup refuses to erase corrupt settlement evidence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-corrupt-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+    const claim = await journal.claimRun("corrupt-run");
+    const attempt = await journal.begin("corrupt-run", { inputTokens: 1, outputTokens: 1 }, claim);
+    await claim.release();
+    const { readdir, writeFile } = await import("node:fs/promises");
+    const { createHash } = await import("node:crypto");
+    const directory = path.join(root, createHash("sha256").update("workspace").digest("hex"));
+    const file = path.join(directory, createHash("sha256").update("corrupt-run").digest("hex") + ".jsonl");
+    await writeFile(file, "{corrupt journal record}\\n", "utf8");
+    assert.equal(await journal.hasUnresolved("corrupt-run"), true);
+    await assert.rejects(journal.deleteRun("corrupt-run"), /Cannot delete unresolved settlement evidence/);
+    assert.equal((await readdir(directory)).some((name) => name.endsWith(".jsonl")), true);
+    void attempt;
   } finally {
     await rm(root, { recursive: true, force: true });
   }
