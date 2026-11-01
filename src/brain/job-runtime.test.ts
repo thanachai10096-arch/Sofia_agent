@@ -92,8 +92,10 @@ test("DurableJobRuntime fences stale worker writes after an expired lease is rec
     }),
   } as unknown as SofiaBrain), undefined, namespace);
 
+  let jobId: string | undefined;
   try {
     const submitted = await runtime.submit({ task: "prove stale lease fencing" });
+    jobId = submitted.id;
     let records: Array<{ id: string; status: string; leaseOwnerToken?: string; leaseExpiresAt?: string }> = [];
     const startDeadline = Date.now() + 5_000;
     let active = false;
@@ -138,7 +140,29 @@ test("DurableJobRuntime fences stale worker writes after an expired lease is rec
     assert.equal(persisted?.leaseOwnerToken, undefined, "lease capabilities must remain private in public reads");
     assert.equal(persisted?.result, undefined, "stale worker results must not appear in durable state");
   } finally {
-    await runtime.cancel((await runtime.list()).find((job) => job.task === "prove stale lease fencing")?.id ?? "");
+    if (jobId) await runtime.cancel(jobId);
+    // Cancellation is durable before the local brain has necessarily observed
+    // its abort signal. Wait for execute() to release its controller and file lock
+    // before deleting the isolated state directory (especially on macOS).
+    const internals = runtime as unknown as {
+      controllers: Map<string, AbortController>;
+      starting: Set<string>;
+    };
+    const cleanupDeadline = Date.now() + 5_000;
+    while (jobId && (internals.controllers.has(jobId) || internals.starting.has(jobId)) && Date.now() < cleanupDeadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(!jobId || (!internals.controllers.has(jobId) && !internals.starting.has(jobId)),
+      "worker must finish its cancellation cleanup before temporary state is removed");
+    const lockFile = stateFile + ".lock";
+    while (Date.now() < cleanupDeadline) {
+      try { await stat(lockFile); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") break;
+        throw error;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
     if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
     else process.env.SOFIA_STATE_DIR = previousRoot;
     await rm(root, { recursive: true, force: true });
