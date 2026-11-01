@@ -213,3 +213,10 @@ The feature branch adds `src/voice/session.ts` as a small coordinator around the
 - no audio persistence, provider credentials, transport, or second agent runtime.
 
 This is a lifecycle foundation for barge-in behavior, **not a realtime streaming engine**. The current `VoiceWorkflow` still processes complete audio turns. Streaming media transport, incremental STT/TTS, voice activity detection, playback cancellation at the client, and live latency tests remain unimplemented. Channel adapters must connect their transport-level stop/interruption events to `VoiceSession.interrupt()` and must not claim realtime support until those integrations are tested.
+
+
+## Bounded audio stream contract (feature branch)
+
+The feature branch adds `src/voice/audio-stream.ts` with `iterateBoundedVoiceAudio()`. It validates monotonically increasing zero-based chunk sequence numbers, non-empty byte payloads, per-chunk size, total stream size, chunk count, final-chunk ordering, and cancellation between received chunks. Each yielded chunk is copied so later mutation by the transport cannot alter bytes already handed to the consumer.
+
+The iterator does not concatenate or persist the stream. Its memory bound is per-chunk at this layer; adapters must separately bound their own network/socket buffers and ensure their source iterator responds to cancellation while waiting for data. This contract is not itself streaming STT, streaming TTS, WebSocket/WebRTC transport, or a live microphone implementation. The existing complete-audio `VoiceWorkflow` remains unchanged and is still the only connected STT → Sofia callback → optional TTS path at this stage.
