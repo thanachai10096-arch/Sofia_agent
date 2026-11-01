@@ -87,3 +87,26 @@ test("project memory ranks entries matching more query terms ahead of weaker mat
   assert.equal(results[0]?.id, "strong");
   assert.equal(results.some((entry) => entry.id === "weak"), true);
 });
+
+
+test("project memory and learned-skill storage are isolated by authenticated owner", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-owner-isolation-"));
+  const ownerA = new FileProjectMemoryStore("shared-workspace", root, "owner-a");
+  const ownerB = new FileProjectMemoryStore("shared-workspace", root, "owner-b");
+
+  await ownerA.save(memoryEntryFromConvention("shared-workspace", "Private convention for owner A"));
+  assert.equal((await ownerA.find("Private convention")).length, 1);
+  assert.deepEqual(await ownerB.list(), []);
+
+  const ownerAReopened = new FileProjectMemoryStore("shared-workspace", root, "owner-a");
+  assert.equal((await ownerAReopened.find("Private convention"))[0]?.content, "Private convention for owner A");
+  assert.notEqual(
+    path.basename((ownerA as unknown as { file: string }).file),
+    path.basename((ownerB as unknown as { file: string }).file),
+  );
+});
+
+test("project memory rejects an explicitly empty owner scope", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-empty-owner-"));
+  assert.throws(() => new FileProjectMemoryStore("shared-workspace", root, "  "), /owner scope/i);
+});
