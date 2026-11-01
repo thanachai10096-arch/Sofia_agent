@@ -213,7 +213,7 @@ test("SofiaAgent treats user-memory retrieval as best-effort when the memory sto
   assert.deepEqual(lookup, {
     principalId: "principal-a",
     query: "Continue Sofia Agent",
-    limit: 6,
+    limit: 4,
   });
 });
 
@@ -237,4 +237,45 @@ test("SofiaAgent never queries user memory without an authenticated principal", 
 
   await agent.run({ task: "A task without a principal" });
   assert.equal(lookups, 0);
+});
+
+
+test("SofiaAgent caps retrieved memory context before adding it to the prompt", async () => {
+  let captured = "";
+  let requestedLimit = 0;
+  const memories = Array.from({ length: 4 }, (_, index) => ({
+    id: "memory-" + index,
+    kind: "fact" as const,
+    content: "x".repeat(1_190) + (index === 3 ? "LAST_MEMORY_SENTINEL" : ""),
+    source: "explicit-user-request" as const,
+    confidence: 1,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    uses: 0,
+  }));
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async (request) => {
+        captured = (request.messages ?? []).map((message) => message.content).join("\\n");
+        return { text: "Completed with bounded memory." };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: {
+      save: async () => undefined,
+      list: async () => [],
+      find: async (_principalId, _query, limit) => {
+        requestedLimit = limit ?? 0;
+        return memories;
+      },
+      delete: async () => false,
+      clear: async () => undefined,
+    },
+  });
+
+  await agent.run({ task: "Continue this project", principalId: "principal-a" });
+  assert.equal(requestedLimit, 4);
+  assert.match(captured, /Retrieved user memory/);
+  assert.ok(!captured.includes("LAST_MEMORY_SENTINEL"));
 });
