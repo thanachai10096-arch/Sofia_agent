@@ -64,6 +64,19 @@ test("coordinator requires explicit approval before resolving trusted evidence",
   assert.ok(!h.state.calls.includes("evidence"));
 });
 
+test("coordinator detects policy drift that occurs during evidence revalidation", async () => {
+  const h = host();
+  let reads = 0;
+  h.adapter.currentPolicyRevision = async () => {
+    reads += 1;
+    h.state.calls.push("policy");
+    return reads === 1 ? "policy-1" : "policy-2";
+  };
+  const result = await inspectLearningRecovery(scope, h.adapter);
+  assert.equal(result.assessments[0]?.disposition, "blocked-policy-drift");
+  assert.equal(result.assessments[0]?.currentPolicyRevision, "policy-2");
+});
+
 test("coordinator blocks missing or untrusted evidence", async () => {
   const h = host({ evidence: false });
   const result = await inspectLearningRecovery(scope, h.adapter);
