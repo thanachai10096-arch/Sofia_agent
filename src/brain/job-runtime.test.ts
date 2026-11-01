@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
+import { FileSettlementJournal } from "./settlement-journal.js";
 import type { BrainRunInput, SofiaBrain } from "./executor.js";
 
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
@@ -1130,4 +1131,85 @@ test("DurableJobRuntime enforces owner scope for get, list, resume, and cancel",
   assert.equal(await runtime.cancel(submitted.id, "owner-b"), false);
   assert.equal((await runtime.get(submitted.id, "owner-a"))?.status, "running");
   assert.equal(await runtime.cancel(submitted.id, "owner-a"), true);
+});
+
+test("DurableJobRuntime does not acknowledge a settlement when the Job checkpoint loses its lease", async () => {
+  const namespace = "job-runtime-checkpoint-lease-loss-" + randomUUID();
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-settlement-"));
+  const runId = "lease-loss-run-" + randomUUID();
+  const journal = new FileSettlementJournal("workspace", root);
+  const claim = await journal.claimRun(runId);
+  const attempt = await journal.begin(runId, { inputTokens: 2, outputTokens: 3 }, claim);
+  await journal.settle(runId, attempt, { inputTokens: 1, outputTokens: 1 }, claim);
+  await claim.release();
+
+  const snapshot = {
+    version: 1,
+    runId,
+    task: "checkpoint lease loss",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "lease-loss-checkpoint",
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  let signalStoreStarted!: () => void;
+  const storeStarted = new Promise<void>((resolve) => { signalStoreStarted = resolve; });
+  let releaseStore!: () => void;
+  const storeGate = new Promise<void>((resolve) => { releaseStore = resolve; });
+  let acknowledgementAttempted = false;
+  let callbackError: unknown;
+  const unavailableRunStore = {
+    async save() {
+      signalStoreStarted();
+      await storeGate;
+      throw new Error("dedicated snapshot store unavailable");
+    },
+    async load() { return undefined; },
+    async delete() {},
+  };
+
+  try {
+    const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+      run: async () => {
+        try {
+          // Mirrors the factory's durability boundary: only ack after the Job
+          // callback has returned successfully.
+          await onRunSnapshot?.(snapshot);
+          acknowledgementAttempted = true;
+          await journal.acknowledgeCheckpoint(runId);
+        } catch (error) {
+          // SofiaBrain treats snapshot persistence as non-fatal, but the
+          // journal must remain unresolved when no durable fallback succeeded.
+          callbackError = error;
+        }
+        return { completed: false, state: "failed" };
+      },
+    } as unknown as SofiaBrain), unavailableRunStore, namespace);
+
+    const submitted = await runtime.submit({ task: "checkpoint lease loss" });
+    await storeStarted;
+    assert.equal(await runtime.cancel(submitted.id), true);
+    releaseStore();
+
+    let current = await runtime.get(submitted.id);
+    for (let attemptIndex = 0; attemptIndex < 100 && current?.status !== "cancelled"; attemptIndex += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      current = await runtime.get(submitted.id);
+    }
+    assert.equal(current?.status, "cancelled");
+    assert.ok(callbackError instanceof Error, "failed Job checkpoint persistence must reject the callback");
+    assert.equal(acknowledgementAttempted, false, "failed Job persistence must stop settlement acknowledgement");
+    assert.equal(await journal.hasUnresolved(runId), true, "ambiguous settlement evidence must remain unresolved");
+  } finally {
+    releaseStore();
+    await rm(root, { recursive: true, force: true });
+  }
 });
