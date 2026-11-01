@@ -179,3 +179,28 @@ test("journal cleanup refuses to erase corrupt settlement evidence", async () =>
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("checkpoint cannot clear an unsettled or unknown-usage provider attempt", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-ambiguous-checkpoint-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+
+    const unknownClaim = await journal.claimRun("unknown-usage-run");
+    const unknownAttempt = await journal.begin("unknown-usage-run", { inputTokens: 10, outputTokens: 10 }, unknownClaim);
+    await journal.settle("unknown-usage-run", unknownAttempt, undefined, unknownClaim);
+    await unknownClaim.release();
+    assert.equal(await journal.hasUnresolved("unknown-usage-run"), true);
+    await journal.acknowledgeCheckpoint("unknown-usage-run");
+    assert.equal(await journal.hasUnresolved("unknown-usage-run"), true,
+      "a durable brain snapshot cannot resolve unknown provider usage");
+
+    const pendingClaim = await journal.claimRun("pending-run");
+    await journal.begin("pending-run", { inputTokens: 10, outputTokens: 10 }, pendingClaim);
+    await pendingClaim.release();
+    await journal.acknowledgeCheckpoint("pending-run");
+    assert.equal(await journal.hasUnresolved("pending-run"), true,
+      "a checkpoint cannot resolve a provider attempt without a settlement record");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
