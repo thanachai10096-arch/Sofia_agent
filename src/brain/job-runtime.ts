@@ -404,7 +404,7 @@ class FileJobStateStore {
     return operation;
   }
 
-  async pruneTerminalBefore(cutoff: number, protectedIds: ReadonlySet<string> = new Set()): Promise<JobRecord[]> {
+  async pruneTerminalBefore(cutoff: number, protectedIds: ReadonlySet<string> = new Set(), onExpire?: (record: JobRecord) => Promise<void>): Promise<JobRecord[]> {
     if (!Number.isFinite(cutoff)) throw new Error("Invalid job retention cutoff");
     return this.withFileLock(async () => {
       const records = await this.read();
@@ -418,6 +418,9 @@ class FileJobStateStore {
         }
         return true;
       });
+      // Delete linked private artifacts before removing the job index. If cleanup
+      // fails, keep the index so the next retention pass can retry idempotently.
+      for (const record of expired) await onExpire?.(record);
       if (expired.length) await this.write(retained);
       return expired;
     });
@@ -517,20 +520,18 @@ export class DurableJobRuntime implements JobRuntime {
       throw new Error("Job retention must be at least one minute");
     }
     const protectedIds = new Set([...this.controllers.keys(), ...this.starting, ...this.resuming]);
-    const expired = await this.state.pruneTerminalBefore(Date.now() - retentionMs, protectedIds);
-    for (const record of expired) {
-      if (this.controllers.has(record.id) || this.starting.has(record.id) || this.resuming.has(record.id)) {
-        // A concurrent in-memory worker is never eligible for retention deletion.
-        // The state store only prunes terminal records; keep this defensive guard.
-        continue;
-      }
-      const runId = record.snapshot?.runId;
-      if (runId) {
-        await this.runStore?.delete(runId);
-        await this.deleteSettlementRun?.(runId);
-      }
-      this.jobs.delete(record.id);
-    }
+    const expired = await this.state.pruneTerminalBefore(
+      Date.now() - retentionMs,
+      protectedIds,
+      async (record) => {
+        const runId = record.snapshot?.runId;
+        if (runId) {
+          await this.runStore?.delete(runId);
+          await this.deleteSettlementRun?.(runId);
+        }
+      },
+    );
+    for (const record of expired) this.jobs.delete(record.id);
     return expired.length;
   }
 
