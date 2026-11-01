@@ -1,4 +1,5 @@
 import test from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -153,12 +154,12 @@ test("SofiaAgent isolates identical session IDs across authenticated principals"
   await agent.run({ task: "private turn A", sessionId: "shared-id", principalId: "principal-A" });
   await agent.run({ task: "private turn B", sessionId: "shared-id", principalId: "principal-B" });
 
-  const stored = sessions.listSessions();
-  assert.equal(stored.length, 2);
-  assert.notEqual(stored[0]?.id, stored[1]?.id);
-  assert.equal(stored.some((session) => session.messages.some((message) => message.includes("private turn A")) &&
-    session.messages.some((message) => message.includes("private turn B"))), false);
-  assert.equal(stored.some((session) => session.id === "shared-id"), false);
+  const keyA = "principal:" + createHash("sha256").update(JSON.stringify(["principal-A", "shared-id"])).digest("hex");
+  const keyB = "principal:" + createHash("sha256").update(JSON.stringify(["principal-B", "shared-id"])).digest("hex");
+  assert.notEqual(keyA, keyB);
+  assert.deepEqual(sessions.get(keyA)?.messages, ["user: private turn A", "assistant: Completed: private turn A"]);
+  assert.deepEqual(sessions.get(keyB)?.messages, ["user: private turn B", "assistant: Completed: private turn B"]);
+  assert.equal(sessions.get("shared-id"), undefined);
 });
 
 test("SofiaAgent keeps authenticated sessions stable for the same principal", async () => {
@@ -173,9 +174,8 @@ test("SofiaAgent keeps authenticated sessions stable for the same principal", as
   await agent.run({ task: "first private turn", sessionId: "stable-id", principalId: "principal-A" });
   await agent.run({ task: "second private turn", sessionId: "stable-id", principalId: "principal-A" });
 
-  const stored = sessions.listSessions();
-  assert.equal(stored.length, 1);
-  assert.deepEqual(stored[0]?.messages, [
+  const stableKey = "principal:" + createHash("sha256").update(JSON.stringify(["principal-A", "stable-id"])).digest("hex");
+  assert.deepEqual(sessions.get(stableKey)?.messages, [
     "user: first private turn",
     "assistant: Completed: first private turn",
     "user: second private turn",
