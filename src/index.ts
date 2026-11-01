@@ -134,3 +134,6 @@ export type { MemoryMaintenanceRecord, MemoryMaintenanceReport, MemoryConsolidat
 
 export { rankMemoryDocuments } from "./brain/memory-retrieval.js";
 export type { MemorySearchDocument, RankedMemory } from "./brain/memory-retrieval.js";
+
+export { promoteVerifiedProjectMemory } from "./brain/verified-memory.js";
+export type { VerifiedMemoryKind, MemoryPromotionCandidate, MemoryVerificationCheck, MemoryVerificationReceipt, VerifiedMemoryPromotionOptions, VerifiedMemoryPromotionResult } from "./brain/verified-memory.js";
