@@ -92,7 +92,7 @@ export async function promoteVerifiedProjectMemory(
   if (!safeContent) return { promoted: false, reason: "unsafe_content" };
   const evidenceIds = [...new Set([...candidate.evidenceIds, ...receipt.evidenceIds])].slice(0, 40);
   const id = createHash("sha256")
-    .update(candidate.project + "\\u0000verified-memory\\u0000" + candidate.id + "\\u0000" + receipt.runId)
+    .update(candidate.project + "\u0000verified-memory\u0000" + candidate.id + "\u0000" + receipt.runId)
     .digest("hex");
   const entry: ProjectMemoryEntry = {
     id,
