@@ -22,6 +22,7 @@ export class SettlementRunClaimedError extends Error {
 }
 
 export interface SettlementRunClaim {
+  assertRun(runId: string): void;
   release(): Promise<void>;
 }
 
@@ -98,6 +99,11 @@ export class FileSettlementJournal {
 
     let released = false;
     return {
+      assertRun: (claimedRunId: string) => {
+        if (released || claimedRunId !== runId) {
+          throw new Error("Settlement run claim is missing, released, or belongs to another run");
+        }
+      },
       release: async () => {
         if (released) return;
         let current: { token?: unknown };
@@ -133,11 +139,10 @@ export class FileSettlementJournal {
     await fs.chmod(file, 0o600);
   }
 
-  async begin(runId: string, maximum: TokenUsage): Promise<SettlementAttempt> {
-    // Callers performing inference must hold claimRun(runId) from preflight
-    // through provider settlement. This keeps the journal API append-only while
-    // making the gateway's check-and-start sequence mutually exclusive.
-    if (!runId || !Number.isSafeInteger(maximum.inputTokens) || maximum.inputTokens < 0 ||
+  async begin(runId: string, maximum: TokenUsage, claim: SettlementRunClaim): Promise<SettlementAttempt> {
+    if (!runId) throw new Error("Invalid settlement journal attempt");
+    claim.assertRun(runId);
+    if (!Number.isSafeInteger(maximum.inputTokens) || maximum.inputTokens < 0 ||
         !Number.isSafeInteger(maximum.outputTokens) || maximum.outputTokens < 0) {
       throw new Error("Invalid settlement journal attempt");
     }
@@ -153,8 +158,9 @@ export class FileSettlementJournal {
     return { id };
   }
 
-  async settle(runId: string, attempt: SettlementAttempt, usage?: TokenUsage): Promise<void> {
+  async settle(runId: string, attempt: SettlementAttempt, usage: TokenUsage | undefined, claim: SettlementRunClaim): Promise<void> {
     if (!runId || !attempt.id) throw new Error("Invalid settlement journal settlement");
+    claim.assertRun(runId);
     const usageKnown = usage !== undefined &&
       Number.isSafeInteger(usage.inputTokens) && usage.inputTokens >= 0 &&
       Number.isSafeInteger(usage.outputTokens) && usage.outputTokens >= 0;
