@@ -180,4 +180,10 @@ export class MarkdownProjectMemoryStore implements ProjectMemoryStore {
   async find(query: string): Promise<ProjectMemoryEntry[]> {
     return this.store.find(query);
   }
+
+  /** Preserve the synchronous bootstrap hook used by PersistentSkillLedger. */
+  readSync(): ProjectMemoryEntry[] {
+    const syncStore = this.store as ProjectMemoryStore & { readSync?: () => ProjectMemoryEntry[] };
+    return typeof syncStore.readSync === "function" ? syncStore.readSync() : [];
+  }
 }
