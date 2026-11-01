@@ -595,3 +595,37 @@ test("backup bundle owns snapshot bytes so later source mutation cannot invalida
   assert.equal(verifyBackupBundle(bundle).valid, true);
   assert.equal(Buffer.from(bundle.files.get("state.txt")!).toString("utf8"), "original snapshot");
 });
+
+
+test("restore transaction rejects malformed runtime adapters before any side effects", async () => {
+  const bundle = await createBackupBundle([
+    { name: "state", async snapshot() {
+      return [{ path: "a.json", content: Buffer.from("A") }];
+    } },
+  ], createdAt);
+  const valid = {
+    name: "target",
+    paths: ["a.json"],
+    async preflight() {},
+    async captureRollback() { return "old"; },
+    async apply() {},
+    async rollback() {},
+  };
+  const invalidAdapters: unknown[] = [
+    null,
+    [],
+    { ...valid, name: " " },
+    { ...valid, paths: "a.json" },
+    { ...valid, preflight: undefined },
+    { ...valid, captureRollback: undefined },
+    { ...valid, apply: undefined },
+    { ...valid, rollback: undefined },
+  ];
+
+  for (const invalid of invalidAdapters) {
+    await assert.rejects(
+      executeBackupRestoreTransaction(bundle, [invalid] as never),
+      /restore adapter|restore adapters/i,
+    );
+  }
+});
