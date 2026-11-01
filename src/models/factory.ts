@@ -32,6 +32,7 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
 import { EncryptedFileAudit } from "../security/persistent-audit.js";
@@ -49,18 +50,21 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
   const settlementJournal = new FileSettlementJournal(workspace);
-  const projectMemory=new FileProjectMemoryStore(workspace, undefined, principalId);
-  const skillLedger=new PersistentSkillLedger(projectMemory);
-  const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
-    const checks = [
-      { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
-      { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
-      { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
-    ];
-    return { passed: checks.every((check) => check.passed), checks };
-  }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
-  const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent,budgetSnapshot})=>{
+    // Resolve all learning state only after the authenticated principal is known.
+    // This prevents a shared workspace from becoming a cross-user memory boundary.
+    const projectMemory=new FileProjectMemoryStore(workspace, undefined, principalId);
+    const skillLedger=new PersistentSkillLedger(projectMemory);
+    const ownerNamespace = principalId === undefined ? "local" : createHash("sha256").update(principalId).digest("hex");
+    const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
+      const checks = [
+        { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
+        { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
+        { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
+      ];
+      return { passed: checks.every((check) => check.passed), checks };
+    }, { file: path.join(workspace, ".sofia", "skill-lifecycle", ownerNamespace + ".json") });
+    const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
     if (requestedRouteId && !requestedRoute) throw new Error("Unknown model route: " + requestedRouteId);
