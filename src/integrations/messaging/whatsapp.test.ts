@@ -56,6 +56,22 @@ test("WhatsApp webhook dispatches only signed text messages for configured busin
   await transport.stop();
 });
 
+test("WhatsApp webhook safely ignores malformed nested event entries", async () => {
+  const transport = createWhatsAppHttpTransport(options);
+  const received: unknown[] = [];
+  await transport.start(new AbortController().signal, async (event) => { received.push(event); });
+  const body = JSON.stringify({
+    object: "whatsapp_business_account",
+    entry: [null, "invalid", { id: "business-1", changes: [null, "invalid", {
+      field: "messages",
+      value: { metadata: { phone_number_id: options.phoneNumberId }, messages: [null, "invalid"] },
+    }] }],
+  });
+  assert.deepEqual(await transport.handleWebhook(Buffer.from(body), signed(body)), { status: 200, acceptedEvents: 0 });
+  assert.deepEqual(received, []);
+  await transport.stop();
+});
+
 test("WhatsApp adapter maps identities and sends chunked replies via the shared contract", async () => {
   const sent: Array<{ recipient: string; text: string }> = [];
   const transport = {
