@@ -498,7 +498,19 @@ test("DurableJobRuntime preserves concurrent submissions from independent runtim
   const reader = new DurableJobRuntime(() => ({
     run: async () => new Promise(() => undefined),
   } as unknown as SofiaBrain), undefined, namespace);
-  const persisted = await reader.list();
+
+  // submit() persists the queued record before starting its worker. Wait until
+  // every worker has durably claimed its lease before removing the test files;
+  // otherwise a late claim can race with cleanup on slower CI platforms.
+  let persisted = await reader.list();
+  const deadline = Date.now() + 5_000;
+  while (persisted.length !== submitted.length || persisted.some((record) => record.status !== "running")) {
+    if (Date.now() >= deadline) {
+      assert.fail("all concurrent workers should claim their jobs before cleanup");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    persisted = await reader.list();
+  }
   const persistedIds = new Set(persisted.map((record) => record.id));
 
   assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
