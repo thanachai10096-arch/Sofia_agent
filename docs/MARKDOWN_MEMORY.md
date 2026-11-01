@@ -74,3 +74,16 @@ The existing user-memory API derives the owner from the authenticated API key. I
 - A caller must retain the original scope/provenance and obtain an explicit decision before merging, archiving, or deleting anything.
 
 This is deliberately a review layer, not an autonomous consolidation job. It can be used by a future maintenance UI or scheduled diagnostic without risking silent memory loss.
+
+
+## Hybrid retrieval
+
+User and project memory keep their existing store interfaces and now share `rankMemoryDocuments` from `src/brain/memory-retrieval.ts`.
+
+- Combines word-term coverage, character n-gram coverage, and exact phrase matching.
+- Character n-grams support Thai and CJK queries without adding a tokenizer dependency.
+- Results are relevance-ranked; recency breaks ties but cannot make an irrelevant item eligible.
+- Candidate scanning and result counts are bounded; empty and low-relevance queries return no records.
+- Retrieval is deterministic and local. This is lexical hybrid retrieval, not vector/embedding search; an embedding index can be added later behind the same retrieval boundary if evaluation justifies its cost.
+
+The existing `UserMemoryStore.find` and `ProjectMemoryStore.find` contracts remain unchanged, so agent context injection and callers continue to use the same APIs.
