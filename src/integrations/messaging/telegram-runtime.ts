@@ -108,10 +108,18 @@ export interface TelegramMessagingEnvironment {
  * dispatcher. Missing/invalid optional configuration disables Telegram without
  * taking the core API offline. Only /run commands can start agent work.
  */
+export interface TelegramMessagingRuntimeOptions {
+  /** Optional host-composed voice ingress. Disabled when omitted. */
+  voice?: {
+    handle(message: import("./telegram.js").TelegramVoiceMessage, signal: AbortSignal): Promise<unknown>;
+  };
+}
+
 export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
   workspace = process.cwd(),
   onWarning: (message: string) => void = (message) => console.error(message),
+  options: TelegramMessagingRuntimeOptions = {},
 ): TelegramMessagingRuntime | undefined {
   const requested = env.SOFIA_MESSAGING_ENABLED === "true";
   if (!requested) return undefined;
@@ -162,7 +170,16 @@ export function createTelegramMessagingRuntime(
       onError: (event, status) => onWarning(
         "Telegram transport " + event + (status ? " (HTTP " + status + ")" : "") + ".",
       ),
-    }));
+    }), {
+      ...(options.voice ? { onVoiceMessage: async (message, signal) => {
+        try {
+          await options.voice!.handle(message, signal);
+        } catch {
+          // Never log transcripts, provider bodies, or media data.
+          onWarning("Telegram voice processing failed.");
+        }
+      } } : {}),
+    });
     gateway = createMessagingGateway({
       enabled: true,
       adapters: [adapter],
