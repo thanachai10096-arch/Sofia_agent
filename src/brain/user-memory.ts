@@ -43,9 +43,17 @@ function normalizeMemorySearchText(value: string): string {
 }
 
 function memorySearchTerms(value: string): string[] {
-  // Preserve Thai and other scripts as chunks between whitespace; substring matching
-  // keeps Thai queries useful without adding a language-specific tokenizer dependency.
-  return value.split(/\s+/u).map((term) => term.trim()).filter((term) => term.length > 1);
+  const chunks = value.split(/\s+/u).map((term) => term.trim()).filter((term) => term.length > 1);
+  if (chunks.length !== 1 || !/[\u0E00-\u0E7F]/u.test(chunks[0]!)) return chunks;
+
+  // Thai text is commonly written without spaces between words. Use overlapping
+  // Unicode-code-point bigrams so a short task can retrieve related Thai memories
+  // without introducing a language-specific tokenizer dependency.
+  const characters = Array.from(chunks[0]!);
+  if (characters.length < 2) return [];
+  return Array.from(new Set(
+    characters.slice(0, -1).map((character, index) => character + characters[index + 1]),
+  )).slice(0, 32);
 }
 
 function defaultUserMemoryDirectory(): string {
@@ -153,6 +161,9 @@ export class FileUserMemoryStore implements UserMemoryStore {
 
     const entries = await this.read(userId);
     const now = Date.now();
+    const safeLimit = Number.isFinite(limit) ? Math.max(0, Math.min(20, Math.floor(limit))) : 8;
+    if (safeLimit === 0) return [];
+
     return entries.map((entry) => {
       const content = normalizeMemorySearchText(entry.content);
       const searchable = normalizeMemorySearchText(entry.kind + " " + entry.content);
@@ -170,7 +181,7 @@ export class FileUserMemoryStore implements UserMemoryStore {
       return { entry, score };
     }).filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score || b.entry.updatedAt.localeCompare(a.entry.updatedAt))
-      .slice(0, Math.max(1, Math.min(20, Math.floor(limit))))
+      .slice(0, safeLimit)
       .map(({ entry }) => entry);
   }
   async delete(userId: string, id: string): Promise<boolean> {
