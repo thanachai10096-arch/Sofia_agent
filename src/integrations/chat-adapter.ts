@@ -100,10 +100,15 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
       }, undefined, { idempotencyKey });
       return { status: "accepted", runId: run.id, runStatus: run.status };
     } catch (error) {
-      // The stable API idempotency key makes a retry safe if the server accepted
-      // the request but the response was lost. Durable dedupe is still required
-      // across adapter restarts because the API idempotency cache is process-local.
-      await options.deduplicator.release(dedupeKey);
+      // Only release when the API explicitly rejected the request before creating
+      // a run. Network errors, timeouts and 5xx responses are ambiguous: the API
+      // may already have accepted the idempotent request. Keep the durable claim
+      // in those cases so a provider retry cannot start the same task twice.
+      const status = error && typeof error === "object" && "status" in error &&
+        typeof error.status === "number" ? error.status : undefined;
+      const definitivelyRejected = status !== undefined &&
+        [400, 401, 403, 404, 409, 413, 422, 429].includes(status);
+      if (definitivelyRejected) await options.deduplicator.release(dedupeKey);
       throw error;
     }
   };
