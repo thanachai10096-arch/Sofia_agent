@@ -50,12 +50,13 @@ const MEMORY_NEGATION_MARKERS = new Set([
 ]);
 
 function memoryPolarityText(value: string): { terms: Set<string>; negated: boolean } {
-  const normalized = normalizeMemorySearchText(value)
-    .replace(/\\b(don't|doesn't|isn't|can't|won't)\\b/gu, (match) => match.replace("'", ""));
-  const tokens = normalized.split(/\\s+/u).filter(Boolean);
-  const negated = tokens.some((token) => MEMORY_NEGATION_MARKERS.has(token));
+  const normalized = normalizeMemorySearchText(value);
+  const negated = [...MEMORY_NEGATION_MARKERS].some((marker) => normalized.includes(marker));
+  const withoutNegation = normalized
+    .replace(/\\b(?:not|no|never|dont|doesnt|isnt|cant|wont)\\b/gu, " ")
+    .replace(/ไม่ใช่|ไม่|เลิก/gu, " ");
   return {
-    terms: new Set(tokens.filter((token) => !MEMORY_NEGATION_MARKERS.has(token))),
+    terms: new Set(withoutNegation.split(/\\s+/u).filter(Boolean)),
     negated,
   };
 }
