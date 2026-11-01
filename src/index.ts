@@ -90,6 +90,8 @@ export { RedisMessagingRateLimiter, REDIS_MESSAGING_RATE_LIMIT_SCRIPT } from "./
 export type { RedisEvalClient, RedisMessagingRateLimiterOptions } from "./integrations/messaging/redis-rate-limiter.js";
 export { createTelegramAdapter } from "./integrations/messaging/telegram.js";
 export { createTelegramVoiceMessageHandler } from "./integrations/messaging/telegram-voice-handler.js";
+export { createTelegramMessagingRuntime, reportTelegramRunCompletion, parseTelegramUserAllowlist, parseTelegramChatAllowlist } from "./integrations/messaging/telegram-runtime.js";
+export type { TelegramMessagingRuntime, TelegramMessagingRuntimeOptions, TelegramMessagingEnvironment } from "./integrations/messaging/telegram-runtime.js";
 export type { TelegramVoiceHandlerOptions, TelegramAudioInspector, TelegramVoiceMediaClient, TelegramVoiceDeduplicator } from "./integrations/messaging/telegram-voice-handler.js";
 export type { TelegramAdapterOptions, TelegramVoiceMessage, TelegramTransport, TelegramUpdate } from "./integrations/messaging/telegram.js";
 export { createTelegramHttpTransport } from "./integrations/messaging/telegram-http-transport.js";
