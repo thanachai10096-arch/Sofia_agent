@@ -18,6 +18,22 @@ test("project memory survives a new store instance", async () => {
   assert.ok((await second.find("type_error")).length > 0);
 });
 
+test("project memory rejects entries that cross project boundaries", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-boundary-"));
+  const store = new FileProjectMemoryStore("project-a", root);
+  const foreignEntry = memoryEntryFromConvention("project-b", "foreign project memory");
+  await assert.rejects(() => store.save(foreignEntry), /does not belong to this store's project/);
+
+  await store.save(memoryEntryFromConvention("project-a", "trusted project memory"));
+  const files = await readdir(root);
+  const file = path.join(root, files[0]!);
+  const entries = JSON.parse(await readFile(file, "utf8")) as Array<Record<string, unknown>>;
+  entries.push({ ...foreignEntry });
+  await writeFile(file, JSON.stringify(entries), "utf8");
+  await assert.rejects(() => store.list(), /outside its project boundary/);
+  await assert.rejects(() => store.find("foreign"), /outside its project boundary/);
+});
+
 test("project memory treats a missing file as empty but surfaces corrupt JSON", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-corrupt-"));
   const store = new FileProjectMemoryStore("corrupt-project", root);
