@@ -85,6 +85,44 @@ test("memory deduplication is scoped by user and kind", async () => {
   }
 });
 
+test("memory conflict detection is advisory and preserves both versions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-conflicts-"));
+  try {
+    const store = new FileUserMemoryStore(root);
+    const prior = createUserMemoryEntry("preference", "I prefer concise answers");
+    await store.save("user-a", prior);
+
+    const changed = createUserMemoryEntry("preference", "I do not prefer concise answers");
+    const conflicts = await store.findPotentialConflicts("user-a", changed);
+    assert.deepEqual(conflicts.map((entry) => entry.id), [prior.id]);
+
+    await store.save("user-a", changed);
+    const saved = await store.list("user-a");
+    assert.equal(saved.length, 2);
+    assert.ok(saved.some((entry) => entry.id === prior.id));
+    assert.ok(saved.some((entry) => entry.id === changed.id));
+    assert.deepEqual(await store.findPotentialConflicts("user-b", changed), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("memory conflict detection handles Thai negation and keeps kinds separate", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-conflicts-thai-"));
+  try {
+    const store = new FileUserMemoryStore(root);
+    const prior = createUserMemoryEntry("preference", "ฉันชอบคำตอบสั้น");
+    await store.save("user", prior);
+    const changed = createUserMemoryEntry("preference", "ฉันไม่ชอบคำตอบสั้น");
+    assert.deepEqual((await store.findPotentialConflicts("user", changed)).map((entry) => entry.id), [prior.id]);
+
+    const differentKind = createUserMemoryEntry("fact", "ฉันไม่ชอบคำตอบสั้น");
+    assert.deepEqual(await store.findPotentialConflicts("user", differentKind), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("user memory supports deletion and full forget", async () => {
   const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-delete-"));
   try {
