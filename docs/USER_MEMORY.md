@@ -36,3 +36,7 @@ This is local-first, file-backed storage. Writes are serialized within one proce
 Memory entries are untrusted context, not instructions. For an authenticated agent request, Sofia performs best-effort retrieval of up to four relevant entries and caps injected memory context at 2,400 characters. Retrieved content is fenced as untrusted reference data and cannot grant tools or permissions. A memory-store failure does not block the task. Current authorization is re-checked for every action.
 
 Search relevance uses a minimum 50% query-term coverage for ordinary multi-term matches. Exact phrase and memory-kind queries remain eligible. This prevents a single incidental shared word from injecting an otherwise unrelated memory; it is a lexical filter, not semantic relevance ranking.
+
+### Identity boundary
+
+For API requests, the authenticated API key is the memory owner identity (stored as a one-way SHA-256-derived key, not the raw token). Two different API keys have separate memory namespaces even when their scopes are identical. Deleting one entry or clearing all memories under one key cannot delete another key's entries. Rotating an API key therefore creates a new memory identity; this implementation does not automatically migrate memories between keys. If account-level continuity across key rotation is required, add an explicit authenticated principal mapping and an audited migration flow rather than reusing client-supplied owner IDs.
