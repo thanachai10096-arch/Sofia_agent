@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
@@ -44,6 +44,15 @@ export class FileSettlementJournal {
     return path.join(this.directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
   }
 
+  private async ensureDirectory(): Promise<void> {
+    await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
+    const info = await fs.lstat(this.directory);
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new Error("Settlement journal directory must be a real directory, not a symbolic link");
+    }
+    await fs.chmod(this.directory, 0o700);
+  }
+
   /**
    * Atomically claims one run on a cooperating local filesystem.
    *
@@ -56,8 +65,7 @@ export class FileSettlementJournal {
    */
   async claimRun(runId: string): Promise<SettlementRunClaim> {
     if (!runId) throw new Error("Invalid settlement journal run claim");
-    await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
-    await fs.chmod(this.directory, 0o700);
+    await this.ensureDirectory();
 
     const lockFile = this.file(runId) + ".lock";
     const token = randomUUID();
@@ -126,17 +134,26 @@ export class FileSettlementJournal {
   }
 
   private async append(runId: string, event: JournalEvent): Promise<void> {
-    await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
-    await fs.chmod(this.directory, 0o700);
+    await this.ensureDirectory();
     const file = this.file(runId);
-    const handle = await fs.open(file, "a", 0o600);
+    const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+    const handle = await fs.open(
+      file,
+      fsConstants.O_CREAT | fsConstants.O_APPEND | fsConstants.O_WRONLY | noFollow,
+      0o600,
+    );
     try {
+      const info = await handle.stat();
+      if (!info.isFile()) {
+        throw new Error("Settlement journal record must be a regular file");
+      }
+      // chmod the opened inode rather than resolving the path a second time.
+      await handle.chmod(0o600);
       await handle.writeFile(JSON.stringify(event) + "\n", "utf8");
       await handle.sync();
     } finally {
       await handle.close();
     }
-    await fs.chmod(file, 0o600);
   }
 
   async begin(runId: string, maximum: TokenUsage, claim: SettlementRunClaim): Promise<SettlementAttempt> {
