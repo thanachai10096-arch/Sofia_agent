@@ -62,11 +62,16 @@ test("API sessions are persisted and scoped to the authenticated API key", async
     await startAndWait("key-two", "second user's task");
 
     const idFor = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 32);
-    assert.deepEqual(sessions.get(`${idFor("key-one")}:shared-client-session`)?.messages, [
+    const sessionKeyFor = (key: string) => {
+      const principalId = idFor(key);
+      const apiSessionId = principalId + ":shared-client-session";
+      return "principal:" + createHash("sha256").update(JSON.stringify([principalId, apiSessionId])).digest("hex");
+    };
+    assert.deepEqual(sessions.get(sessionKeyFor("key-one"))?.messages, [
       "user: first user's task",
       "assistant: Task completed.",
     ]);
-    assert.deepEqual(sessions.get(`${idFor("key-two")}:shared-client-session`)?.messages, [
+    assert.deepEqual(sessions.get(sessionKeyFor("key-two"))?.messages, [
       "user: second user's task",
       "assistant: Task completed.",
     ]);
