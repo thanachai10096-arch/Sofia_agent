@@ -139,3 +139,46 @@ test("user-memory retrieval failure does not prevent a normal agent run", async 
   assert.match(contexts[0] ?? "", /Keep the existing task context/);
   assert.doesNotMatch(contexts[0] ?? "", /Relevant user memory/);
 });
+
+
+test("SofiaAgent isolates identical session IDs across authenticated principals", async () => {
+  const sessions = new MemorySessionStore();
+  const agent = new SofiaAgent({
+    provider: { generate: async ({ task }) => ({ text: `Completed: ${task}` }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await agent.run({ task: "private turn A", sessionId: "shared-id", principalId: "principal-A" });
+  await agent.run({ task: "private turn B", sessionId: "shared-id", principalId: "principal-B" });
+
+  const stored = sessions.listSessions();
+  assert.equal(stored.length, 2);
+  assert.notEqual(stored[0]?.id, stored[1]?.id);
+  assert.equal(stored.some((session) => session.messages.some((message) => message.includes("private turn A")) &&
+    session.messages.some((message) => message.includes("private turn B"))), false);
+  assert.equal(stored.some((session) => session.id === "shared-id"), false);
+});
+
+test("SofiaAgent keeps authenticated sessions stable for the same principal", async () => {
+  const sessions = new MemorySessionStore();
+  const agent = new SofiaAgent({
+    provider: { generate: async ({ task }) => ({ text: `Completed: ${task}` }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await agent.run({ task: "first private turn", sessionId: "stable-id", principalId: "principal-A" });
+  await agent.run({ task: "second private turn", sessionId: "stable-id", principalId: "principal-A" });
+
+  const stored = sessions.listSessions();
+  assert.equal(stored.length, 1);
+  assert.deepEqual(stored[0]?.messages, [
+    "user: first private turn",
+    "assistant: Completed: first private turn",
+    "user: second private turn",
+    "assistant: Completed: second private turn",
+  ]);
+});
