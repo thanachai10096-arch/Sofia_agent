@@ -116,6 +116,28 @@ test("async run terminal callback receives the final result and original notific
 });
 
 
+test("messaging webhook routes reject duplicate paths during API construction", () => {
+  const deps = {
+    provider: { generate: async () => ({ text: "Unused by route validation test." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Unused by route validation test." }) },
+  };
+  assert.throws(() => createSofiaApi(deps, {
+    apiKeys: {},
+    lineWebhookRoute: {
+      path: "/hooks/shared",
+      transport: { handleWebhook: async () => ({ status: 200 as const, acceptedEvents: 0 }) },
+    },
+    whatsappWebhookRoute: {
+      path: "/hooks/shared",
+      transport: {
+        verifyChallenge: () => undefined,
+        handleWebhook: async () => ({ status: 200 as const, acceptedEvents: 0 }),
+      },
+    },
+  }), /Messaging webhook route paths must be unique/);
+});
+
 test("configured LINE webhook route preserves raw body and forwards the signature before API authentication", async () => {
   let receivedBody = "";
   let receivedSignature: string | undefined;
