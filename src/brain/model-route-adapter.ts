@@ -90,7 +90,7 @@ export function createInternalRoute(
 
   return {
     id: route.id,
-    budgetKey: route.providerId ?? route.id,
+    budgetKey: route.id,
     qualityTier: Math.max(1, Math.round(route.qualityWeight)),
     capabilities: [...capabilities],
     contextWindow: positiveSafeIntegerEnv(
