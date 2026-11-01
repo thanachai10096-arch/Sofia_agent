@@ -603,13 +603,14 @@ test("restore transaction rejects malformed runtime adapters before any side eff
       return [{ path: "a.json", content: Buffer.from("A") }];
     } },
   ], createdAt);
+  const events: string[] = [];
   const valid = {
     name: "target",
     paths: ["a.json"],
-    async preflight() {},
-    async captureRollback() { return "old"; },
-    async apply() {},
-    async rollback() {},
+    async preflight() { events.push("preflight"); },
+    async captureRollback() { events.push("snapshot"); return "old"; },
+    async apply() { events.push("apply"); },
+    async rollback() { events.push("rollback"); },
   };
   const invalidAdapters: unknown[] = [
     null,
@@ -628,4 +629,5 @@ test("restore transaction rejects malformed runtime adapters before any side eff
       /restore adapter|restore adapters/i,
     );
   }
+  assert.deepEqual(events, [], "invalid adapter input must be rejected before callbacks run");
 });
