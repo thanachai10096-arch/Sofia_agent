@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -13,14 +14,16 @@ test("Markdown user memory mirrors explicit entries into private per-user files"
     const store = new MarkdownUserMemoryStore(new FileUserMemoryStore(join(root, "canonical")), { root: join(root, "markdown") });
     const entry = createUserMemoryEntry("preference", "Prefers concise answers");
     await store.save("principal-a", entry);
-    const a = await readFile(join(root, "markdown", "users", (await import("node:crypto")).createHash("sha256").update("principal-a").digest("hex"), "USER.md"), "utf8");
+    const a = await readFile(join(root, "markdown", "users", createHash("sha256").update("principal-a").digest("hex"), "USER.md"), "utf8");
     assert.match(a, /USER\.md/);
     assert.match(a, /Prefers concise answers/);
     await store.save("principal-b", createUserMemoryEntry("fact", "Uses TypeScript"));
     assert.doesNotMatch(a, /Uses TypeScript/);
     assert.equal(await store.delete("principal-a", entry.id), true);
     assert.match(await readFile(join(root, "markdown", "users", (await import("node:crypto")).createHash("sha256").update("principal-a").digest("hex"), "USER.md"), "utf8"), /No saved memories/);
+    const bFile = join(root, "markdown", "users", createHash("sha256").update("principal-b").digest("hex"), "USER.md");
     await store.clear("principal-b");
+    await assert.rejects(readFile(bFile, "utf8"), { code: "ENOENT" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
