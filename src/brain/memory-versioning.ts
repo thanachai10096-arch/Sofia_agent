@@ -24,6 +24,7 @@ export async function rollbackProjectMemory(store: ProjectMemoryStore, project: 
   const current = entries.find((item) => item.project === project && item.id === parsed.memoryId && item.kind !== "version");
   if (!current) return { saved: false, reason: "not-found" };
   const currentVersion = createVersion(current, metadata);
+  if (toVersionEntry(currentVersion).content.length > 12_000) return { saved: false, reason: "snapshot-too-large" };
   await store.save(toVersionEntry(currentVersion));
   const restored: ProjectMemoryEntry = { ...parsed.snapshot, id: current.id, project: current.project, createdAt: current.createdAt, updatedAt: metadata.occurredAt ?? new Date().toISOString(), uses: current.uses };
   await store.save(restored);
