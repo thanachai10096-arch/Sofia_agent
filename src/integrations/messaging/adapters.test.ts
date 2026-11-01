@@ -106,3 +106,28 @@ test("Telegram voice adapter ignores invalid duration and never invokes an absen
     },
   });
 });
+
+test("Telegram voice callback receives the existing poller's AbortSignal", async () => {
+  let onUpdate: ((update: TelegramUpdate) => Promise<void>) | undefined;
+  let callbackSignal: AbortSignal | undefined;
+  const controller = new AbortController();
+  const adapter = createTelegramAdapter({
+    async start(_signal, callback) { onUpdate = callback; },
+    async sendMessage() { return { messageId: "sent" }; },
+    async stop() {},
+  }, {
+    async onVoiceMessage(_message, signal) { callbackSignal = signal; },
+  });
+  await adapter.start(controller.signal, async () => {});
+  assert.ok(onUpdate);
+  await onUpdate!({
+    update_id: 20,
+    message: {
+      message_id: 21, date: 100, chat: { id: 3, type: "private" }, from: { id: 4 },
+      voice: { file_id: "file", duration: 2 },
+    },
+  });
+  assert.equal(callbackSignal, controller.signal);
+  controller.abort();
+  assert.equal(callbackSignal?.aborted, true);
+});
