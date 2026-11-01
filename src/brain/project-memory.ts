@@ -7,9 +7,19 @@ import { containsPromptInjection, redactSecrets } from "../security/guard.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { rankMemoryDocuments } from "./memory-retrieval.js";
 
+export interface ProjectMemoryVerificationProvenance {
+  candidateId: string;
+  runId: string;
+  verifiedAt: string;
+  evidenceIds: string[];
+  checks: Array<{ name: string; passed: true }>;
+}
+
 export interface ProjectMemoryEntry {
   id: string; project: string; kind: "convention" | "repair" | "decision" | "episode" | "feedback"; content: string;
   source?: string; confidence: number; createdAt: string; updatedAt: string; uses: number;
+  /** Present only when the record passed an explicit verification gate. */
+  verification?: ProjectMemoryVerificationProvenance;
 }
 export interface ProjectMemoryStore {
   save(entry: ProjectMemoryEntry): Promise<void>;
