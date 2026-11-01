@@ -46,13 +46,13 @@ function normalizeMemorySearchText(value: string): string {
 
 function memoryPolarityText(value: string): { terms: Set<string>; negated: boolean } {
   const normalized = normalizeMemorySearchText(value);
-  const negated = /\\b(?:not|no|never|dont|doesnt|isnt|cant|wont)\\b/u.test(normalized) ||
+  const negated = /\b(?:not|no|never|dont|doesnt|isnt|cant|wont)\b/u.test(normalized) ||
     /ไม่ใช่|ไม่|เลิก/u.test(normalized);
   const withoutNegation = normalized
-    .replace(/\\b(?:not|no|never|dont|doesnt|isnt|cant|wont)\\b/gu, " ")
+    .replace(/\b(?:not|no|never|dont|doesnt|isnt|cant|wont)\b/gu, " ")
     .replace(/ไม่ใช่|ไม่|เลิก/gu, " ");
   return {
-    terms: new Set(withoutNegation.split(/\\s+/u).filter(Boolean)),
+    terms: new Set(withoutNegation.split(/\s+/u).filter(Boolean)),
     negated,
   };
 }
