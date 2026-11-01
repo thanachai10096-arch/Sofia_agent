@@ -10,7 +10,7 @@ const report = (issues: LearningReconciliationReport["issues"]): LearningReconci
   scope, checkedLearningSkills: 1, checkedRuntimeSkills: 0, issues, safe: issues.length === 0,
 });
 const auth = (overrides: Partial<LearningRepairAuthorization> = {}): LearningRepairAuthorization => ({
-  scope, actorId: "operator-a", approvalId: "approval-123", idempotencyKey: "repair-2026-10-29-001",
+  scope, actorId: "operator-a", idempotencyKey: "repair-2026-10-29-001",
   approvedSkillIds: ["skill-1"], approvalIds: { "skill-1": "approval-123" }, learningPolicyRevisions: { "skill-1": "policy-7" },
   currentPolicyRevisions: { "skill-1": "policy-7" }, trustedEvidenceSkillIds: ["skill-1"], ...overrides,
 });
@@ -21,7 +21,7 @@ test("plans only explicitly approved missing runtime registration with current p
   assert.equal(result.actions.length, 1);
   assert.deepEqual(result.actions[0], {
     kind: "register-missing-runtime-skill", skillId: "skill-1", expectedPolicyRevision: "policy-7",
-    scope, actorId: "operator-a", idempotencyKey: JSON.stringify(["repair-2026-10-29-001", "skill-1"]),
+    scope, actorId: "operator-a", approvalId: "approval-123", idempotencyKey: JSON.stringify(["repair-2026-10-29-001", "skill-1"]),
   });
 });
 
