@@ -26,6 +26,8 @@ export { buildRepositoryMap, compactRepositoryMap } from "./brain/repository-int
 export { createEditPatch, applyEditPatch, unifiedDiff } from "./brain/edit-engine.js";
 export { reviewCodeChange } from "./review/code-review.js";
 export { FileProjectMemoryStore, PersistentSkillLedger, ProjectEpisodicMemoryStore, ProjectMemoryFeedbackStore, memoryEntryFromConvention, memoryEntryFromRepair, memoryEntryFromEpisode } from "./brain/project-memory.js";
+export { listProjectMemoryVersions, rollbackProjectMemory, saveVersionedProjectMemory } from "./brain/memory-versioning.js";
+export type { ProjectMemoryVersion, ProjectMemoryVersionMetadata, ProjectMemoryVersionResult } from "./brain/memory-versioning.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { BoundedSubagentCoordinator } from "./brain/subagent-coordinator.js";
 export type { SubagentTask, SubagentBatchItem, SubagentCoordinatorOptions, SubagentRuntimeFactory } from "./brain/subagent-coordinator.js";
