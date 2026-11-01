@@ -8,9 +8,14 @@ import { createTelegramHttpTransport } from "./telegram-http-transport.js";
 import type { OutboundMessage } from "./types.js";
 import { redactSecrets } from "../../security/guard.js";
 
+export type TelegramMessagingRuntimeStatus = "starting" | "polling" | "stopped" | "webhook_conflict" | "poll_conflict" | "preflight_failed";
+
 export interface TelegramMessagingRuntime {
   start(): Promise<void>;
   stop(): Promise<void>;
+  /** Explicit recovery only after an operator has resolved the competing poller/webhook. */
+  restart(): Promise<void>;
+  getStatus(): TelegramMessagingRuntimeStatus;
 }
 
 interface TelegramRunResult {
@@ -143,6 +148,7 @@ export function createTelegramMessagingRuntime(
     };
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
     let gateway: MessagingGateway | undefined;
+    let runtimeStatus: TelegramMessagingRuntimeStatus = "stopped";
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
       onAccepted: ({ runId, message }) => {
@@ -160,6 +166,7 @@ export function createTelegramMessagingRuntime(
     });
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
       token,
+      onStatus: (status) => { runtimeStatus = status; },
       onError: (event, status) => onWarning(
         "Telegram transport " + event + (status ? " (HTTP " + status + ")" : "") + ".",
       ),
@@ -178,8 +185,10 @@ export function createTelegramMessagingRuntime(
       },
     });
     return {
-      start: () => gateway.start(),
-      stop: () => gateway.stop(),
+      start: async () => { runtimeStatus = "starting"; await gateway!.start(); },
+      stop: async () => { await gateway!.stop(); runtimeStatus = "stopped"; },
+      restart: async () => { runtimeStatus = "starting"; await gateway!.restart(); },
+      getStatus: () => runtimeStatus,
     };
   } catch (error) {
     // Report only the static validation message from our own constructors. Never log
