@@ -422,3 +422,31 @@ test("cancelled recovered execution does not overwrite schedule completion metad
   assert.equal(state.schedules[0].lastRunAt, "2026-10-16T23:00:00.000Z");
   assert.equal(state.schedules[0].lastJobId, "previous-job");
 });
+
+
+test("recovery terminalizes orphaned executions whose schedule record is missing", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  const runtime = {
+    async submit() { submitted++; throw new Error("orphan recovery must not submit"); },
+    async get() { return undefined; },
+    async cancel() { return false; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store });
+  state.history.push({
+    id: "orphaned-execution", scheduleId: "deleted-schedule",
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "orphaned-job", attempt: 1,
+  });
+
+  const result = await scheduler.recover();
+
+  assert.deepEqual(result, { reconciled: 1, monitoring: 0, indeterminate: 0 });
+  assert.equal(submitted, 0);
+  assert.equal(state.history[0].status, "failed");
+  assert.match(state.history[0].error, /schedule record is missing/i);
+  assert.ok(state.audit.some(event => event.action === "schedule.recovery.orphaned"));
+});
