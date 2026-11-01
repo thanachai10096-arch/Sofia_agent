@@ -42,6 +42,42 @@ test("SQLite learning transactions persist experiences and skills across reopen"
   }
 });
 
+test("SQLite learning store serializes overlapping async transactions on one connection", async () => {
+  const store = await SqliteLearningTransactionStore.open(":memory:");
+  try {
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>(resolve => { markFirstStarted = resolve; });
+    const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
+    let secondStarted = false;
+
+    const first = store.transaction(scope, async tx => {
+      markFirstStarted();
+      await firstGate;
+      await tx.insertExperienceIfAbsent(experience("concurrent-first"));
+    });
+    await firstStarted;
+
+    const second = store.transaction(scope, async tx => {
+      secondStarted = true;
+      await tx.insertExperienceIfAbsent(experience("concurrent-second"));
+    });
+    await Promise.resolve();
+    assert.equal(secondStarted, false, "second transaction must wait for the first transaction to finish");
+
+    releaseFirst();
+    await Promise.all([first, second]);
+    await store.transaction(scope, async tx => {
+      assert.deepEqual(
+        (await tx.listExperiences(scope, 10)).map(item => item.receiptId),
+        ["concurrent-first", "concurrent-second"],
+      );
+    });
+  } finally {
+    store.close();
+  }
+});
+
 test("SQLite learning transaction rolls back all writes when the operation fails", async () => {
   const store = await SqliteLearningTransactionStore.open(":memory:");
   try {
