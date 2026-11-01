@@ -108,7 +108,11 @@ export async function promoteVerifiedProjectMemory(
   // Keep provenance in the entry's source field; evidence IDs are included in
   // the deterministic record identity's associated verification metadata only
   // through the source suffix, avoiding an incompatible ProjectMemoryEntry schema.
-  entry.source = [entry.source, "verified-run:" + receipt.runId.slice(0, 160), "evidence:" + evidenceIds.join(",").slice(0, 500)].join("|").slice(0, 200);
+  entry.source = [
+    "verified-run:" + receipt.runId.slice(0, 80),
+    "source:" + String(redactSecrets(candidate.source)).slice(0, 50),
+    "evidence:" + evidenceIds.join(",").slice(0, 50),
+  ].join("|").slice(0, 200);
   await store.save(entry);
   return { promoted: true, reason: "promoted", entry };
 }
