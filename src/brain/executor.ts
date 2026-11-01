@@ -304,11 +304,21 @@ export class SofiaBrain {
   private async saveRunSnapshot(snapshot: BrainRunSnapshot): Promise<void> {
     this.latestRunSnapshot = snapshot;
     this.emit({ type: "brain.run.checkpointed" });
+
+    // These are independent durability paths. A failed dedicated RunStore write
+    // must not prevent the host callback from persisting its own durable snapshot
+    // (for example, the embedded snapshot in a Job record). The callback itself
+    // may also retry the RunStore when no Job-level fallback exists.
     try {
       await this.dependencies.runStore?.save(snapshot);
+    } catch {
+      // Keep execution semantics unchanged; the independent callback still runs.
+    }
+    try {
       await this.dependencies.onRunSnapshot?.(snapshot);
     } catch {
-      // Persistence must never alter execution semantics.
+      // Persistence failures remain non-fatal here. A settlement acknowledgement
+      // must be issued only by a callback after its required durable path succeeds.
     }
   }
 
