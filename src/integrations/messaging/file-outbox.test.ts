@@ -86,3 +86,40 @@ test("overlapping flushes for one spool do not send the same record twice in-pro
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("outbox lease is exclusive across independent instances and stale owners cannot acknowledge", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-lease-"));
+  try {
+    const first = new FileMessagingOutbox(root);
+    const second = new FileMessagingOutbox(root);
+    const id = await first.enqueue("line", { conversationId: "line-chat", text: "leased result" });
+    const oldLease = await first.claim(id, 5_000, 1_000);
+    assert.ok(oldLease);
+    assert.equal(await second.claim(id, 5_000, 1_000), undefined);
+    const newLease = await second.claim(id, 5_000, 7_000);
+    assert.ok(newLease);
+    assert.notEqual(newLease, oldLease);
+    assert.equal(await first.markSent(id, oldLease!), false);
+    assert.equal((await second.pending()).length, 1);
+    assert.equal(await second.markSent(id, newLease!), true);
+    assert.equal((await first.pending()).length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("outbox flush releases lease when provider send fails so another worker can retry", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-lease-retry-"));
+  try {
+    const first = new FileMessagingOutbox(root);
+    const second = new FileMessagingOutbox(root);
+    await first.enqueue("whatsapp", { conversationId: "wa-chat", text: "retry me" });
+    const failed = await flushMessagingOutbox(first, async () => false);
+    assert.deepEqual(failed, { sent: 0, pending: 1 });
+    const succeeded = await flushMessagingOutbox(second, async () => true);
+    assert.deepEqual(succeeded, { sent: 1, pending: 0 });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
