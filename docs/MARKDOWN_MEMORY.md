@@ -153,7 +153,7 @@ first, then restores the selected snapshot while preserving the current record I
 original creation time, and current usage count; the rollback receives a new update
 timestamp and an audit snapshot of the value it replaced.
 
-Version snapshots reuse the existing `ProjectMemoryStore` as records of kind
+Version snapshots are bounded before persistence: if JSON escaping or metadata overhead would exceed the backing store's 12,000-character version-record limit, the update/rollback returns `snapshot-too-large` without changing the current memory. Version IDs also include a hash of the snapshot content so distinct snapshots do not collide merely because their timestamps and metadata match.\n\nVersion snapshots reuse the existing `ProjectMemoryStore` as records of kind
 `version`; they are excluded from normal memory retrieval and are not promoted
 knowledge. These helpers are explicit APIs, not an automatic interception layer:
 callers must authorize the actor and decide when an update or rollback is allowed.
