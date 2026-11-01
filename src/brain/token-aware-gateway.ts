@@ -390,10 +390,11 @@ export class TokenAwareGateway {
         let journalAttempt: { id: string } | undefined;
         try {
           if (this.settlementJournal) {
+            if (!durableRunClaim) throw new GatewayError("model_call_failed", "missing_settlement_run_claim");
             journalAttempt = await this.settlementJournal.begin(runId!, {
               inputTokens: candidate.prepared.inputTokensUpperBound,
               outputTokens: candidate.maxOutputTokens,
-            });
+            }, durableRunClaim);
           }
           const reply = await candidate.prepared.invoke({
             signal,
@@ -405,7 +406,7 @@ export class TokenAwareGateway {
           const settled = lease.settle(reply.usage);
           activeReservation = undefined;
           if (settled.usageKnown && journalAttempt && this.settlementJournal) {
-            await this.settlementJournal.settle(runId!, journalAttempt, reply.usage);
+            await this.settlementJournal.settle(runId!, journalAttempt, reply.usage, durableRunClaim!);
             journalAttempt = undefined;
           }
           if (!settled.usageKnown) throw new GatewayError("invalid_usage");
@@ -419,7 +420,7 @@ export class TokenAwareGateway {
             activeReservation = undefined;
             if (settled.usageKnown && journalAttempt && this.settlementJournal) {
               try {
-                await this.settlementJournal.settle(runId!, journalAttempt, error.usage);
+                await this.settlementJournal.settle(runId!, journalAttempt, error.usage, durableRunClaim!);
                 journalAttempt = undefined;
               } catch (journalError) {
                 // The provider outcome is known but its durable settlement was not
