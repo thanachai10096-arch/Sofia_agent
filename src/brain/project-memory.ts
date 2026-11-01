@@ -152,7 +152,7 @@ export function memoryEntryFromEpisode(project: string, event: EpisodicMemoryEve
     tags: (event.tags ?? []).filter((tag) => typeof tag === "string").slice(0, 12).map((tag) => tag.slice(0, 64)),
   };
   if (!safeEvent.taskSummary || !safeEvent.resultSummary) throw new Error("Episodic memory summaries cannot be empty.");
-  const id = createHash("sha256").update(project + "\\u0000episode\\u0000" + safeEvent.runId).digest("hex");
+  const id = createHash("sha256").update(project + "\u0000episode\u0000" + safeEvent.runId).digest("hex");
   return {
     id,
     project,
@@ -229,7 +229,7 @@ export class ProjectMemoryFeedbackStore implements MemoryFeedbackStore {
       occurredAt,
     };
     const id = createHash("sha256")
-      .update(project + "\\u0000feedback\\u0000" + safeEvent.memoryId + "\\u0000" + safeEvent.sourceRunId)
+      .update(project + "\u0000feedback\u0000" + safeEvent.memoryId + "\u0000" + safeEvent.sourceRunId)
       .digest("hex");
     await this.store.save({
       id,
