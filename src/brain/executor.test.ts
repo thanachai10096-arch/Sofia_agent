@@ -490,7 +490,7 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
 
   const skillLedger = new InMemorySkillLedger();
   const brain = createSofiaBrain({
-    // No onSkillCandidate callback: learned-skill persistence must fail closed.
+    // Explicitly decline approval: learned-skill persistence must fail closed.
     dependencies: {
       reasoner, tools, allowShell: false, allowNetwork: false, skillLedger,
       async onSkillCandidate(candidate) { learnedTrigger = candidate.trigger; return false; },
