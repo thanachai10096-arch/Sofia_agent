@@ -110,7 +110,7 @@ test("SQLite restore adapter rejects a symlinked database parent before lifecycl
       async snapshot() { return [{ path: "sessions/snapshot.sqlite", content: sqliteBytes("restored") }]; },
     }], createdAt);
     const adapter = sqliteFileBackupRestoreAdapter("sessions", path.join(aliasDirectory, "sessions.sqlite"), "sessions/snapshot.sqlite", lifecycle);
-    await assert.rejects(adapter.preflight(bundle, ["sessions/snapshot.sqlite"]), /symlinked path components/);
+    await assert.rejects(adapter.preflight(bundle, ["sessions/snapshot.sqlite"]), /real directory/);
     assert.equal(lifecycleCalls, 0);
     assert.deepEqual(await readFile(database), sqliteBytes("original"));
   } finally {
