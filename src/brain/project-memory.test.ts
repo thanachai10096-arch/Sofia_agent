@@ -410,3 +410,23 @@ test("persistent skill ledger does not expose candidates before durable persiste
   assert.equal(ledger.list().length, 1);
   assert.equal(ledger.getPersistenceStatus().pending, false);
 });
+
+
+test("synchronous project memory reads enforce the project boundary", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-sync-boundary-"));
+  try {
+    const store = new FileProjectMemoryStore("sync-project-a", root);
+    await store.save({
+      id: "owned", project: "sync-project-a", kind: "decision", content: "owned memory",
+      confidence: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), uses: 0,
+    });
+    const file = (await readdir(root)).map(name => path.join(root, name))[0]!;
+    const entries = JSON.parse(await readFile(file, "utf8"));
+    entries.push({
+      id: "foreign", project: "sync-project-b", kind: "decision", content: "foreign memory",
+      confidence: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), uses: 0,
+    });
+    await writeFile(file, JSON.stringify(entries), "utf8");
+    assert.throws(() => store.readSync(), /outside its project boundary/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
