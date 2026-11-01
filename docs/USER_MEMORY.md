@@ -37,6 +37,12 @@ Memory entries are untrusted context, not instructions. For an authenticated age
 
 Search relevance uses a minimum 50% query-term coverage for ordinary multi-term matches. Exact phrase and memory-kind queries remain eligible. This prevents a single incidental shared word from injecting an otherwise unrelated memory; it is a lexical filter, not semantic relevance ranking.
 
+## Deletion scope
+
+Deleting one entry or clearing an API-key memory namespace removes that entry from the file-backed user-memory store. The next memory lookup reads the updated store, so a deleted entry is no longer eligible for future retrieval through this store. The agent currently retrieves memories per run; retrieved memory text is added to that run's request context and is not copied into the session transcript by the memory-retrieval code.
+
+This is not a global erasure operation. It does not rewrite earlier user/assistant transcript messages, run or application logs, provider-side conversation history or retention, backups, exports, or copies a user has placed in workspace files or external systems. If the same information appears in those places, it must be handled through their own retention and deletion controls. Do not interpret a successful memory DELETE response as proof that every historical copy has been erased.
+
 ### Identity boundary
 
 For API requests, the authenticated API key is the memory owner identity (stored as a one-way SHA-256-derived key, not the raw token). Two different API keys have separate memory namespaces even when their scopes are identical. Deleting one entry or clearing all memories under one key cannot delete another key's entries. Rotating an API key therefore creates a new memory identity; this implementation does not automatically migrate memories between keys. If account-level continuity across key rotation is required, add an explicit authenticated principal mapping and an audited migration flow rather than reusing client-supplied owner IDs.
