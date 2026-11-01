@@ -56,6 +56,8 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Safe, unauthenticated channel lifecycle snapshot for the public health endpoint. Never include credentials or user data. */
+  channelHealth?: () => Readonly<Record<string, { status: string }>>;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
