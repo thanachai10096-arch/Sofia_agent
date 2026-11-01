@@ -705,7 +705,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const jobId = jobMatch[1];
         const action = jobMatch[2];
         if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
-        const job = await deps.jobRuntime.get(jobId);
+        const job = await deps.jobRuntime.get(jobId, auth.keyId);
         if (!job || job.ownerKeyId !== auth.keyId) {
           return json(res, 404, { error: "job_not_found" }, origin, config);
         }
@@ -713,18 +713,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 200, job, origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
+          try { return json(res, 202, await deps.jobRuntime.resume(jobId, undefined, auth.keyId), origin, config); }
           catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
-          const cancelled = await deps.jobRuntime.cancel(jobId);
+          const cancelled = await deps.jobRuntime.cancel(jobId, auth.keyId);
           return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
         }
       }
 
       if (req.method === "GET" && req.url === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
-        const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
+        const jobs = await deps.jobRuntime.list(auth.keyId);
         return json(res, 200, { jobs }, origin, config);
       }
 
