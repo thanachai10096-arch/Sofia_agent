@@ -130,6 +130,7 @@ test("HTTP 409 stops polling instead of retrying a competing getUpdates consumer
   // Let the poll loop's finalizer mark the transport stopped, then verify
   // that an operator can restart it after resolving the external conflict.
   await new Promise((resolve) => setTimeout(resolve, 0));
+  await assert.rejects(() => transport.sendMessage("chat-1", "must not send after polling stops"), /stopped/);
   const secondConflict = new Promise<void>((resolve) => {
     const check = () => {
       if (conflictCount >= 2) resolve();
