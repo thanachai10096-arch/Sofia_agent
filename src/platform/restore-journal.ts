@@ -125,7 +125,7 @@ export function validateRestoreJournalRecord(value: unknown): RestoreJournalReco
     }
     for (const item of target.paths) {
       assertSafeToken(item, "target path");
-      if (item.startsWith("/") || item.includes("\\") || item.split("/").some((part) => !part || part === "." || part === "..")) {
+      if (item.startsWith("/") || item.includes("\\") || item.includes(":") || item.split("/").some((part) => !part || part === "." || part === "..")) {
         throw new Error("Restore journal contains an unsafe target path.");
       }
       if (paths.has(item)) throw new Error("Restore journal target paths overlap.");
