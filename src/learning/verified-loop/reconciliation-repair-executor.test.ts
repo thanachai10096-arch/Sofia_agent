@@ -283,3 +283,52 @@ test("recovers a lifecycle mutation completed before a crashed journal finalizat
   }
 });
 
+
+
+test("rejects an approval receipt bound to a different actor before any mutation", async () => {
+  const journal = new MemoryJournal();
+  let registrations = 0;
+  const host = hostWith(() => snapshot({
+    approvalBinding: {
+      id: action.approvalId,
+      actorId: "different-operator",
+      skillId: action.skillId,
+      scope,
+      policyRevision: action.expectedPolicyRevision,
+      status: "approved",
+    },
+  }), async () => { registrations++; });
+  await assert.rejects(
+    () => executeLearningRepairPlan(plan, journal, host),
+    /Authoritative repair revalidation returned invalid state/,
+  );
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.size, 0);
+});
+
+test("fails postcondition if the approval receipt is revoked during lifecycle mutation", async () => {
+  const journal = new MemoryJournal();
+  let active = false;
+  let revoked = false;
+  const host = hostWith(() => snapshot({
+    exists: active,
+    active,
+    explicitlyApproved: !revoked,
+    approvalBinding: {
+      id: action.approvalId,
+      actorId: action.actorId,
+      skillId: action.skillId,
+      scope,
+      policyRevision: action.expectedPolicyRevision,
+      status: revoked ? "revoked" as const : "approved" as const,
+    },
+  }), async () => {
+    active = true;
+    revoked = true;
+  });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /Post-repair authoritative verification failed/);
+  assert.equal(active, true);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
