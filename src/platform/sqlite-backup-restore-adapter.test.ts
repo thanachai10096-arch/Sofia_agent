@@ -57,7 +57,7 @@ test("SQLite restore adapter snapshots before mutation and uses close-replace-re
     assert.deepEqual(events, ["snapshot"]);
     await adapter.apply(bundle, ["sessions/snapshot.sqlite"]);
     assert.deepEqual(events, ["snapshot", "close", "reopen"]);
-    assert.deepEqual(await readFile(database), sqliteBytes("restored"));
+    assert.deepEqual(await readFile(database), restoredBytes);
     await adapter.rollback(snapshot);
     assert.deepEqual(await readFile(database), sqliteBytes("original"));
     assert.deepEqual(events, ["snapshot", "close", "reopen", "close", "reopen"]);
