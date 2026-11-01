@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 import type { TokenUsage } from "./token-budget.js";
 
@@ -11,6 +12,17 @@ type JournalEvent =
 
 export interface SettlementAttempt {
   id: string;
+}
+
+export class SettlementRunClaimedError extends Error {
+  constructor() {
+    super("Settlement run is already claimed by another worker");
+    this.name = "SettlementRunClaimedError";
+  }
+}
+
+export interface SettlementRunClaim {
+  release(): Promise<void>;
 }
 
 /**
@@ -29,6 +41,82 @@ export class FileSettlementJournal {
 
   private file(runId: string): string {
     return path.join(this.directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+  }
+
+  /**
+   * Atomically claims one run on a cooperating local filesystem.
+   *
+   * The exclusive-create operation is the cross-process boundary: only one
+   * worker can own the run while it checks the journal and performs inference.
+   * Claims are deliberately never reclaimed based on age. A crashed worker
+   * leaves a fail-closed claim for operator reconciliation rather than risking
+   * a second billable provider request. Multi-host workers need a transactional
+   * shared store; this file claim is not a distributed lease.
+   */
+  async claimRun(runId: string): Promise<SettlementRunClaim> {
+    if (!runId) throw new Error("Invalid settlement journal run claim");
+    await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
+    await fs.chmod(this.directory, 0o700);
+
+    const lockFile = this.file(runId) + ".lock";
+    const token = randomUUID();
+    const owner = {
+      version: 1,
+      token,
+      pid: process.pid,
+      hostname: os.hostname(),
+      createdAt: new Date().toISOString(),
+    };
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+    try {
+      handle = await fs.open(lockFile, "wx", 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new SettlementRunClaimedError();
+      }
+      throw error;
+    }
+
+    try {
+      await handle.writeFile(JSON.stringify(owner) + "\\n", "utf8");
+      await handle.sync();
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      handle = undefined;
+      // We created the path exclusively. Remove it only if its token still
+      // identifies this acquisition; never unlink a replacement owner's claim.
+      try {
+        const current = JSON.parse(await fs.readFile(lockFile, "utf8")) as { token?: unknown };
+        if (current.token === token) await fs.unlink(lockFile);
+      } catch {
+        // Preserve the original write error; an uncertain claim remains fail-closed.
+      }
+      throw error;
+    } finally {
+      await handle?.close();
+    }
+
+    let released = false;
+    return {
+      release: async () => {
+        if (released) return;
+        let current: { token?: unknown };
+        try {
+          current = JSON.parse(await fs.readFile(lockFile, "utf8")) as { token?: unknown };
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            released = true;
+            return;
+          }
+          throw error;
+        }
+        if (current.token !== token) {
+          throw new Error("Settlement run claim ownership changed; refusing to release another worker's claim");
+        }
+        await fs.unlink(lockFile);
+        released = true;
+      },
+    };
   }
 
   private async append(runId: string, event: JournalEvent): Promise<void> {
