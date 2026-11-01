@@ -220,6 +220,31 @@ function revisionName(revision: number): string {
   return revision.toString().padStart(10, "0") + ".json";
 }
 
+async function writeExclusiveRecord(directory: string, file: string, record: RestoreJournalRecord): Promise<void> {
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    handle = await fs.open(file, "wx", 0o600);
+    await handle.writeFile(JSON.stringify(record), "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    // Persist the directory entry where supported. Windows does not expose
+    // portable directory fsync semantics, so file data is still synced there.
+    if (process.platform !== "win32") {
+      const directoryHandle = await fs.open(directory, "r");
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
+    }
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await fs.rm(file, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
 /**
  * Append-only local journal. Each revision is a new exclusive-create file;
  * no prior record is overwritten. Concurrent writers race on the same next
@@ -269,7 +294,7 @@ export class FileRestoreJournalStore implements RestoreJournalStore {
     const directory = transactionDirectory(this.root, record.transactionId);
     await fs.mkdir(directory, { mode: 0o700 });
     try {
-      await fs.writeFile(path.join(directory, revisionName(0)), JSON.stringify(record), { flag: "wx", mode: 0o600 });
+      await writeExclusiveRecord(directory, path.join(directory, revisionName(0)), record);
     } catch (error) {
       await fs.rm(directory, { recursive: true, force: true });
       throw error;
@@ -290,10 +315,7 @@ export class FileRestoreJournalStore implements RestoreJournalStore {
     }
     // Exclusive create prevents overwriting an existing revision. If another
     // process won the same revision after our read, this write fails closed.
-    await fs.writeFile(path.join(directory, revisionName(record.revision)), JSON.stringify(record), {
-      flag: "wx",
-      mode: 0o600,
-    });
+    await writeExclusiveRecord(directory, path.join(directory, revisionName(record.revision)), record);
   }
 
   async read(transactionId: string): Promise<RestoreJournalRecord | undefined> {
