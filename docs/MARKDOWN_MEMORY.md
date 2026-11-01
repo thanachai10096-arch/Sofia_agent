@@ -61,3 +61,16 @@ The existing user-memory API derives the owner from the authenticated API key. I
 
 - [Project MEMORY.md](../templates/memory/MEMORY.md)
 - [User USER.md](../templates/memory/USER.md)
+
+
+## Non-destructive maintenance
+
+`src/brain/memory-maintenance.ts` provides deterministic, offline analysis for memory hygiene:
+
+- Exact duplicate groups are detected after Unicode, case, punctuation, and whitespace normalization.
+- Similar entries of the same kind can be surfaced as review candidates.
+- Analysis is bounded by record and candidate limits.
+- The helper does not mutate stores, infer that two statements conflict, or decide which entry is authoritative.
+- A caller must retain the original scope/provenance and obtain an explicit decision before merging, archiving, or deleting anything.
+
+This is deliberately a review layer, not an autonomous consolidation job. It can be used by a future maintenance UI or scheduled diagnostic without risking silent memory loss.
