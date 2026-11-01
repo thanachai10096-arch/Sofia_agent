@@ -441,7 +441,22 @@ export class DurableJobRuntime implements JobRuntime {
     };
     this.jobs.set(id, record);
     await this.state.save(record);
-    void this.execute(record, input);
+    // submit() is intentionally non-blocking, so observe startup/dispatch failures
+    // rather than allowing a rejected background promise to become unhandled.
+    void this.execute(record, input).catch(async (error: unknown) => {
+      if (record.status !== "cancelled") {
+        record.status = "failed";
+        record.error = error instanceof Error ? error.message : String(error);
+        record.updatedAt = new Date().toISOString();
+      }
+      // The store may be the source of the failure (for example, a lock timeout).
+      // Keep the original failure contained and make a best-effort terminal write.
+      try {
+        await this.state.save(record);
+      } catch {
+        // If persistence is unavailable, the in-memory record still reflects the failure.
+      }
+    });
     return publicJobRecord(record);
   }
 
