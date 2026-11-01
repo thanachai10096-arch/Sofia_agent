@@ -278,6 +278,7 @@ test("Brain route adapter enforces explicitly declared feature support", () => {
 
   const legacy = createInternalRoute({ modelProvider, route });
   assert.deepEqual(legacy.capabilities, route.capabilities);
+  assert.equal(legacy.budgetKey, route.id, "pricing and budget accounting must use the same route key");
 });
 
 test("Brain route adapter rejects invalid token limit environment overrides", () => {
