@@ -111,6 +111,78 @@ test("SQLite learning store rejects active-skill payload identity drift from ind
   }
 });
 
+test("SQLite learning store rejects experience payload identity drift from indexed columns", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-learning-experience-identity-"));
+  const file = path.join(directory, "learning.sqlite");
+  try {
+    const store = await SqliteLearningTransactionStore.open(file);
+    await store.transaction(scope, tx => tx.insertExperienceIfAbsent(experience("identity-receipt")));
+    store.close();
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(file);
+    try {
+      const tampered = { ...experience("identity-receipt"), id: "different-experience", receiptId: "different-receipt" };
+      db.prepare("UPDATE learning_experiences SET payload=? WHERE tenant_id=? AND principal_id=? AND project_id=? AND receipt_id=?")
+        .run(JSON.stringify(tampered), scope.tenantId, scope.principalId, scope.projectId, "identity-receipt");
+    } finally {
+      db.close();
+    }
+
+    const reopened = await SqliteLearningTransactionStore.open(file);
+    try {
+      await assert.rejects(
+        reopened.transaction(scope, tx => tx.listExperiences(scope, 10)),
+        /Corrupt persisted learning experience receipt identity/,
+      );
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("SQLite learning store rejects candidate payload identity drift from indexed columns", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-learning-candidate-identity-"));
+  const file = path.join(directory, "learning.sqlite");
+  try {
+    const store = await SqliteLearningTransactionStore.open(file);
+    await store.transaction(scope, async tx => {
+      await tx.putCandidate({
+        id: "candidate-original", scope, experienceId: "experience-r1",
+        name: "candidate", trigger: "task", procedure: ["inspect"], confidence: 0.8,
+      });
+    });
+    store.close();
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(file);
+    try {
+      const tampered = {
+        id: "candidate-forged", scope, experienceId: "experience-r1",
+        name: "candidate", trigger: "task", procedure: ["inspect"], confidence: 0.8,
+      };
+      db.prepare("UPDATE learning_candidates SET payload=? WHERE tenant_id=? AND principal_id=? AND project_id=? AND candidate_id=?")
+        .run(JSON.stringify(tampered), scope.tenantId, scope.principalId, scope.projectId, "candidate-original");
+    } finally {
+      db.close();
+    }
+
+    const reopened = await SqliteLearningTransactionStore.open(file);
+    try {
+      await assert.rejects(
+        reopened.transaction(scope, tx => tx.getCandidate(scope, "candidate-original")),
+        /Corrupt persisted learning candidate identity/,
+      );
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("SQLite learning store serializes overlapping async transactions on one connection", async () => {
   const store = await SqliteLearningTransactionStore.open(":memory:");
   try {
