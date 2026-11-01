@@ -76,3 +76,30 @@ test("gateway refuses to replay a run with an unresolved provider attempt", asyn
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("gateway blocks a second same-run provider call after an unknown-usage settlement", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-gateway-journal-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+    let providerCalls = 0;
+    const gateway = new TokenAwareGateway(createBudget(), [createRoute(async () => {
+      providerCalls += 1;
+      throw new Error("provider connection closed before usage was reported");
+    })], 45_000, journal);
+
+    await assert.rejects(
+      gateway.generateMetered(request, undefined, "ambiguous-run"),
+      (error: unknown) => error instanceof GatewayError && error.code === "model_call_failed",
+    );
+    assert.equal(await journal.hasUnresolved("ambiguous-run"), true);
+
+    await assert.rejects(
+      gateway.generateMetered(request, undefined, "ambiguous-run"),
+      (error: unknown) => error instanceof GatewayError && error.message.includes("unresolved_provider_settlement"),
+    );
+    assert.equal(providerCalls, 1, "an ambiguous settlement must prevent a repeated provider charge");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
