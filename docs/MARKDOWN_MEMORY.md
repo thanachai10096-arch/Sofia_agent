@@ -141,3 +141,21 @@ verification timestamps, or age only produce review candidates. This API never
 changes confidence, demotes, deletes, rewrites, or automatically re-verifies a
 record. A caller must obtain fresh evidence and invoke an explicit, separately
 authorized workflow before changing stored knowledge.
+
+
+## Memory version history and rollback
+
+Use `saveVersionedProjectMemory` for an explicit update when a prior record exists.
+It writes an immutable, project-scoped snapshot with actor, reason, and timestamp
+before saving the new current record. `listProjectMemoryVersions` returns history
+for one project and memory ID. `rollbackProjectMemory` journals the current value
+first, then restores the selected snapshot while preserving the current record ID,
+original creation time, and current usage count; the rollback receives a new update
+timestamp and an audit snapshot of the value it replaced.
+
+Version snapshots reuse the existing `ProjectMemoryStore` as records of kind
+`version`; they are excluded from normal memory retrieval and are not promoted
+knowledge. These helpers are explicit APIs, not an automatic interception layer:
+callers must authorize the actor and decide when an update or rollback is allowed.
+A failed update may leave an extra safe snapshot, but the previous record is never
+deleted as part of the operation.
