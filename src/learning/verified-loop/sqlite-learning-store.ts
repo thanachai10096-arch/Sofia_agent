@@ -4,6 +4,12 @@ import type { ActiveLearningSkill, LearningExperience, LearningScope, LearningTr
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 type Db = DatabaseSyncType;
 type ScopeRow = { payload: string };
+type ExperienceRow = { receipt_id: string; experience_id: string; payload: string };
+type CandidateRow = { candidate_id: string; payload: string };
+type ActiveSkillRow = { skill_id: string; skill_name: string; policy_revision: string; payload: string };
+function assertPersistedIdentity(actual: unknown, expected: string, label: string): void {
+  if (actual !== expected) throw new Error("Corrupt persisted learning " + label + " identity");
+}
 function assertScope(scope: LearningScope): void {
   if (!scope || ![scope.tenantId, scope.principalId, scope.projectId].every(value => typeof value === "string" && value.trim().length > 0)) throw new Error("Invalid authenticated learning scope");
 }
@@ -136,18 +142,31 @@ export class SqliteLearningTransactionStore {
       listExperiences: async (requestedScope, limit) => {
         assertSameScope(requestedScope, scope);
         if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Invalid learning history limit");
-        const rows = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? ORDER BY rowid DESC LIMIT ?").all(...values, limit) as ScopeRow[];
-        return rows.reverse().map(row => decodeExperience(row.payload, requestedScope));
+        const rows = db.prepare("SELECT receipt_id, experience_id, payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? ORDER BY rowid DESC LIMIT ?").all(...values, limit) as ExperienceRow[];
+        return rows.reverse().map(row => {
+          const item = decodeExperience(row.payload, requestedScope);
+          assertPersistedIdentity(item.receiptId, row.receipt_id, "experience receipt");
+          assertPersistedIdentity(item.id, row.experience_id, "experience");
+          return item;
+        });
       },
       getExperience: async (requestedScope, id) => {
         assertSameScope(requestedScope, scope);
-        const row = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND experience_id=?").get(...values, id) as ScopeRow | undefined;
-        return row ? decodeExperience(row.payload, requestedScope) : undefined;
+        const row = db.prepare("SELECT receipt_id, experience_id, payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND experience_id=?").get(...values, id) as ExperienceRow | undefined;
+        if (!row) return undefined;
+        const item = decodeExperience(row.payload, requestedScope);
+        assertPersistedIdentity(item.receiptId, row.receipt_id, "experience receipt");
+        assertPersistedIdentity(item.id, row.experience_id, "experience");
+        return item;
       },
       getExperienceByReceipt: async (requestedScope, receiptId) => {
         assertSameScope(requestedScope, scope);
-        const row = db.prepare("SELECT payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND receipt_id=?").get(...values, receiptId) as ScopeRow | undefined;
-        return row ? decodeExperience(row.payload, requestedScope) : undefined;
+        const row = db.prepare("SELECT receipt_id, experience_id, payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND receipt_id=?").get(...values, receiptId) as ExperienceRow | undefined;
+        if (!row) return undefined;
+        const item = decodeExperience(row.payload, requestedScope);
+        assertPersistedIdentity(item.receiptId, row.receipt_id, "experience receipt");
+        assertPersistedIdentity(item.id, row.experience_id, "experience");
+        return item;
       },
       putCandidate: async candidate => {
         const safeCandidate = decodeCandidate(encode(candidate), scope);
@@ -155,8 +174,11 @@ export class SqliteLearningTransactionStore {
       },
       getCandidate: async (requestedScope, id) => {
         assertSameScope(requestedScope, scope);
-        const row = db.prepare("SELECT payload FROM learning_candidates WHERE tenant_id=? AND principal_id=? AND project_id=? AND candidate_id=?").get(...values, id) as ScopeRow | undefined;
-        return row ? decodeCandidate(row.payload, requestedScope) : undefined;
+        const row = db.prepare("SELECT candidate_id, payload FROM learning_candidates WHERE tenant_id=? AND principal_id=? AND project_id=? AND candidate_id=?").get(...values, id) as CandidateRow | undefined;
+        if (!row) return undefined;
+        const item = decodeCandidate(row.payload, requestedScope);
+        assertPersistedIdentity(item.id, row.candidate_id, "candidate");
+        return item;
       },
       recordEvaluation: async (requestedScope, candidateId, evaluation) => {
         assertSameScope(requestedScope, scope);
@@ -169,8 +191,14 @@ export class SqliteLearningTransactionStore {
       },
       listActiveSkills: async requestedScope => {
         assertSameScope(requestedScope, scope);
-        const rows = db.prepare("SELECT payload FROM learning_active_skills WHERE tenant_id=? AND principal_id=? AND project_id=?").all(...values) as ScopeRow[];
-        return rows.map(row => decodeActiveSkill(row.payload, requestedScope));
+        const rows = db.prepare("SELECT skill_id, skill_name, policy_revision, payload FROM learning_active_skills WHERE tenant_id=? AND principal_id=? AND project_id=?").all(...values) as ActiveSkillRow[];
+        return rows.map(row => {
+          const item = decodeActiveSkill(row.payload, requestedScope);
+          assertPersistedIdentity(item.id, row.skill_id, "active skill");
+          assertPersistedIdentity(item.name, row.skill_name, "active skill name");
+          assertPersistedIdentity(item.policyRevision, row.policy_revision, "active skill policy");
+          return item;
+        });
       },
     };
     let result: T;
