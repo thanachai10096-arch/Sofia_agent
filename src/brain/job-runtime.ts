@@ -656,7 +656,13 @@ export class DurableJobRuntime implements JobRuntime {
         // the dedicated snapshot store is temporarily unavailable.
       }
       const saved = await this.state.save(record);
-      if (!saved) controller.abort(new Error("Job execution lease was lost or cancelled"));
+      if (!saved) {
+        const error = new Error("Job execution lease was lost or cancelled before its checkpoint became durable");
+        controller.abort(error);
+        // The caller may acknowledge this checkpoint in a downstream journal.
+        // A false save result is not a durable fallback and must stop that ack.
+        throw error;
+      }
     };
 
     try {
