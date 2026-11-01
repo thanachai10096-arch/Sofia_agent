@@ -18,6 +18,7 @@ export interface ProjectMemoryStore {
 
 export class FileProjectMemoryStore implements ProjectMemoryStore {
   private readonly file: string;
+  private writeChain: Promise<void> = Promise.resolve();
   constructor(project: string, root = sofiaStateDirectory("memory"), ownerScope?: string) {
     if (ownerScope !== undefined && (!ownerScope.trim() || ownerScope.length > 512)) {
       throw new Error("A valid authenticated owner scope is required for project memory.");
@@ -36,17 +37,21 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
   async save(entry: ProjectMemoryEntry): Promise<void> {
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
     const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, 4000) };
-    const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
-    const directory = path.dirname(this.file);
-    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-    await fs.chmod(directory, 0o700);
-    const temporary = this.file + "." + randomUUID() + ".tmp";
-    try {
-      await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
-      await fs.rename(temporary, this.file);
-    } finally {
-      await fs.rm(temporary, { force: true });
-    }
+    const operation = this.writeChain.then(async () => {
+      const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
+      const directory = path.dirname(this.file);
+      await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      await fs.chmod(directory, 0o700);
+      const temporary = this.file + "." + randomUUID() + ".tmp";
+      try {
+        await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
+        await fs.rename(temporary, this.file);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+    });
+    this.writeChain = operation.catch(() => undefined);
+    await operation;
   }
   async list(){return (await this.read()).filter(entry=>!containsPromptInjection(entry.content));}
   async find(query: string) {
