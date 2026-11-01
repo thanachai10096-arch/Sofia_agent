@@ -68,3 +68,8 @@ Lease expiry is a failure detector, not proof that the old process has stopped. 
 
 Independent journal instances opened against the same resolved file path share an in-process transaction queue. This prevents a synchronous `DatabaseSync` connection from blocking the event loop in `BEGIN IMMEDIATE` while another connection's asynchronous caller still needs that event loop to commit. In-memory journals remain isolated per instance. SQLite's busy timeout remains responsible for contention from other processes; this queue is not a distributed lock. Concurrent-claim tests assert that exactly one connection acquires the fencing token and the attempt counter increments only once.
 
+
+### Policy changes during lifecycle promotion
+
+The verified loop checks the current policy revision after candidate evaluation and again after the existing lifecycle promotion gate returns. This second check matters because evaluation or human approval may take time; a policy revision change during that interval prevents the learning-store activation record from being written. The lifecycle gate remains authoritative for runtime promotion, and this check does not roll back a runtime-side action that an adapter may already have performed. Hosts should keep promotion idempotent and use activation reconciliation for any cross-store disagreement. A regression test changes the policy revision from inside the promotion adapter and verifies that no active learning record is persisted.
+
