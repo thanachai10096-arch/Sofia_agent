@@ -1,4 +1,5 @@
 import { FileUserMemoryStore } from "../brain/user-memory.js";
+import { MarkdownProjectMemoryStore, MarkdownUserMemoryStore } from "../brain/markdown-memory.js";
 import { SqliteSessionStore } from "../session/sqlite-store.js";
 import { TokenBudget, type BudgetLimit } from "../brain/token-budget.js";
 import { TokenAwareGateway } from "../brain/token-aware-gateway.js";
@@ -47,7 +48,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
-  const projectMemory=new FileProjectMemoryStore(workspace);
+  const projectMemory=new MarkdownProjectMemoryStore(new FileProjectMemoryStore(workspace));
   const skillLedger=new PersistentSkillLedger(projectMemory);
   const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
     const checks = [
@@ -105,7 +106,7 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
-  const userMemoryStore = new FileUserMemoryStore();
+  const userMemoryStore = new MarkdownUserMemoryStore(new FileUserMemoryStore());
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
 }
 
