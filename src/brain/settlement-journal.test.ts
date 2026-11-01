@@ -3,6 +3,7 @@ import test from "node:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { FileSettlementJournal } from "./settlement-journal.js";
 
 test("settlement journal records only bounded accounting metadata", async () => {
@@ -77,6 +78,45 @@ test("settlement run claim remains fail-closed while an existing claim is presen
     const next = await journal.claimRun("run-1");
     await next.release();
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("settlement run claim excludes a separate Node.js worker process", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-process-"));
+  const journal = new FileSettlementJournal("shared-process-workspace", root);
+  const moduleUrl = new URL("./settlement-journal.ts", import.meta.url).href;
+  const parentClaim = await journal.claimRun("same-process-run");
+
+  const runChild = (expectBlocked: boolean) => {
+    const script = `
+      import { FileSettlementJournal, SettlementRunClaimedError } from ${JSON.stringify(moduleUrl)};
+      const journal = new FileSettlementJournal("shared-process-workspace", ${JSON.stringify(root)});
+      try {
+        const claim = await journal.claimRun("same-process-run");
+        await claim.release();
+        if (${expectBlocked}) process.exitCode = 2;
+      } catch (error) {
+        if (${expectBlocked} && error instanceof SettlementRunClaimedError) process.exitCode = 0;
+        else { console.error(error); process.exitCode = 3; }
+      }
+    `;
+    return spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+  };
+
+  try {
+    const blocked = runChild(true);
+    assert.equal(blocked.status, 0, blocked.stderr || blocked.stdout);
+    await parentClaim.release();
+    const allowed = runChild(false);
+    assert.equal(allowed.status, 0, allowed.stderr || allowed.stdout);
+  } finally {
+    await parentClaim.release();
     await rm(root, { recursive: true, force: true });
   }
 });
