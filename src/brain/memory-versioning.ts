@@ -2,14 +2,14 @@ import { createHash } from "node:crypto";
 import type { ProjectMemoryEntry, ProjectMemoryStore } from "./project-memory.js";
 export interface ProjectMemoryVersionMetadata { actor: string; reason: string; occurredAt?: string; }
 export interface ProjectMemoryVersion { versionId: string; memoryId: string; project: string; actor: string; reason: string; occurredAt: string; snapshot: ProjectMemoryEntry; }
-export interface ProjectMemoryVersionResult { saved: boolean; reason: "saved" | "invalid-entry" | "invalid-metadata" | "not-found" | "invalid-version"; entry?: ProjectMemoryEntry; version?: ProjectMemoryVersion; }
+export interface ProjectMemoryVersionResult { saved: boolean; reason: "saved" | "invalid-entry" | "invalid-metadata" | "not-found" | "invalid-version" | "snapshot-too-large"; entry?: ProjectMemoryEntry; version?: ProjectMemoryVersion; }
 
 export async function saveVersionedProjectMemory(store: ProjectMemoryStore, entry: ProjectMemoryEntry, metadata: ProjectMemoryVersionMetadata): Promise<ProjectMemoryVersionResult> {
   if (!isEntry(entry)) return { saved: false, reason: "invalid-entry" };
   if (!isMetadata(metadata)) return { saved: false, reason: "invalid-metadata" };
   const current = (await store.list()).find((item) => item.id === entry.id && item.project === entry.project && item.kind !== "version");
   let version: ProjectMemoryVersion | undefined;
-  if (current) { version = createVersion(current, metadata); await store.save(toVersionEntry(version)); }
+  if (current) {\n    version = createVersion(current, metadata);\n    if (toVersionEntry(version).content.length > 12_000) return { saved: false, reason: "snapshot-too-large" };\n    await store.save(toVersionEntry(version));\n  }
   await store.save(entry);
   return { saved: true, reason: "saved", entry, ...(version ? { version } : {}) };
 }
@@ -37,7 +37,7 @@ export async function listProjectMemoryVersions(store: ProjectMemoryStore, proje
 }
 function createVersion(snapshot: ProjectMemoryEntry, metadata: ProjectMemoryVersionMetadata): ProjectMemoryVersion {
   const occurredAt = metadata.occurredAt ?? new Date().toISOString();
-  const versionId = createHash("sha256").update(snapshot.project + "\u0000" + snapshot.id + "\u0000" + snapshot.updatedAt + "\u0000" + occurredAt + "\u0000" + metadata.actor + "\u0000" + metadata.reason).digest("hex");
+  const snapshotHash = createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");\n  const versionId = createHash("sha256").update(snapshot.project + "\u0000" + snapshot.id + "\u0000" + snapshot.updatedAt + "\u0000" + occurredAt + "\u0000" + metadata.actor + "\u0000" + metadata.reason + "\u0000" + snapshotHash).digest("hex");
   return { versionId, memoryId: snapshot.id, project: snapshot.project, actor: metadata.actor.trim(), reason: metadata.reason.trim(), occurredAt, snapshot: { ...snapshot } };
 }
 function toVersionEntry(version: ProjectMemoryVersion): ProjectMemoryEntry {
