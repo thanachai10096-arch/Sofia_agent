@@ -384,3 +384,41 @@ test("execution timeout cancels the runtime job and records failure", async () =
   assert.equal(state.history[0].status, "failed");
   assert.match(state.history[0].error, /timed out/i);
 });
+
+
+test("cancelled recovered execution does not overwrite schedule completion metadata", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      return { id, status: "queued", task: "already running" } as JobRecord;
+    },
+    async cancel() { return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const schedule = await scheduler.create({
+    name: "cancelled-recovery", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.schedules[0].lastRunAt = "2026-10-16T23:00:00.000Z";
+  state.schedules[0].lastJobId = "previous-job";
+  state.history.push({
+    id: "recovered-cancel", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "active-job", attempt: 1,
+  });
+  const result = await scheduler.recover();
+  assert.equal(result.monitoring, 1);
+  await scheduler.cancel(schedule.id, "alice");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  for (let i = 0; i < 50 && scheduler["active"].size > 0; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(state.history[0].status, "cancelled");
+  assert.equal(state.schedules[0].lastRunAt, "2026-10-16T23:00:00.000Z");
+  assert.equal(state.schedules[0].lastJobId, "previous-job");
+});
