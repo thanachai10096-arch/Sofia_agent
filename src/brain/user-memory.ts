@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { containsPromptInjection, redactSecrets } from "../security/guard.js";
+import { rankMemoryDocuments } from "./memory-retrieval.js";
 
 export type UserMemoryKind = "preference" | "fact" | "goal" | "instruction";
 
@@ -145,35 +146,11 @@ export class FileUserMemoryStore implements UserMemoryStore {
 
   async find(userId: string, query: string, limit = 8): Promise<UserMemoryEntry[]> {
     userKey(userId);
-    const normalized = query.toLocaleLowerCase().trim();
-    const rawTerms = normalized.split(/\s+/).flatMap((part) => part.match(/[\p{L}\p{N}_-]+/gu) ?? []);
-    const termSet = new Set<string>();
-    for (const term of rawTerms) {
-      if (term.length <= 1) continue;
-      const characters = Array.from(term);
-      // Thai, CJK, and other unspaced scripts often arrive as one token.
-      // Add bounded character trigrams so a short task can retrieve a related
-      // memory without requiring whitespace-based word segmentation.
-      if (characters.length >= 4 && /[^\u0000-\u024F]/u.test(term)) {
-        for (let index = 0; index <= characters.length - 3 && termSet.size < 32; index += 1) {
-          termSet.add(characters.slice(index, index + 3).join(""));
-        }
-      } else {
-        termSet.add(term);
-      }
-      if (termSet.size >= 32) break;
-    }
-    const terms = [...termSet].slice(0, 32);
-    if (terms.length === 0) return [];
-    const matches = (await this.read(userId)).map((entry) => {
-      const text = (entry.kind + " " + entry.content).toLowerCase();
-      const score = terms.reduce((total, term) => total + (text.includes(term) ? 1 : 0), 0);
-      return { entry, score };
-    }).filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score || b.entry.updatedAt.localeCompare(a.entry.updatedAt))
-      .slice(0, Math.max(1, Math.min(20, Math.floor(limit))))
-      .map(({ entry }) => entry);
-    return matches;
+    return rankMemoryDocuments(await this.read(userId), query, {
+      limit: Math.max(1, Math.min(20, Math.floor(limit))),
+      maxDocuments: MAX_ENTRIES,
+      minScore: 0.12,
+    }).map((result) => result.entry);
   }
 
   async delete(userId: string, id: string): Promise<boolean> {
