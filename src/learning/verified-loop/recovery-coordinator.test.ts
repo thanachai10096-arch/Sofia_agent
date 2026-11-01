@@ -49,6 +49,16 @@ test("coordinator marks only fully gated missing registration as eligible for re
   assert.deepEqual(h.state.calls, ["learning", "runtime", "policy", "approval", "evidence", "policy"]);
 });
 
+test("coordinator sends an existing inactive runtime entry to manual review", async () => {
+  const inactive: RuntimeLearningSkill = { id: "skill-1", scope, policyRevision: "policy-1", active: false };
+  const h = host({ runtime: [inactive] });
+  const result = await inspectLearningRecovery(scope, h.adapter);
+  assert.equal(result.assessments[0]?.disposition, "manual-review");
+  assert.match(result.assessments[0]?.reason ?? "", /inactive/);
+  assert.ok(!h.state.calls.includes("approval"));
+  assert.ok(!h.state.calls.includes("evidence"));
+});
+
 test("coordinator blocks missing registration when policy has drifted", async () => {
   const h = host({ policy: "policy-2" });
   const result = await inspectLearningRecovery(scope, h.adapter);
