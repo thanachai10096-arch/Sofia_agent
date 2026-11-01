@@ -78,6 +78,32 @@ export function sqliteFileBackupRestoreAdapter(
     }
   }
 
+
+  async function verifySqliteIntegrity(bytes: Uint8Array): Promise<void> {
+    const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "sofia-sqlite-preflight-"));
+    try {
+      if (process.platform !== "win32") await fs.chmod(temporaryDirectory, 0o700);
+      const candidatePath = path.join(temporaryDirectory, "candidate.sqlite");
+      await fs.writeFile(candidatePath, bytes, { flag: "wx", mode: 0o600 });
+      const { DatabaseSync } = await import("node:sqlite");
+      const database = new DatabaseSync(candidatePath, { readOnly: true });
+      try {
+        database.exec("PRAGMA trusted_schema = OFF");
+        const rows = database.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
+        if (rows.length !== 1 || rows[0]?.integrity_check !== "ok") {
+          throw new Error("SQLite restore backup failed PRAGMA integrity_check.");
+        }
+      } finally {
+        database.close();
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "unknown SQLite validation error";
+      throw new Error(`SQLite restore backup failed integrity validation: ${detail}`, { cause: error });
+    } finally {
+      await fs.rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  }
+
   async function replaceDatabase(bytes: Uint8Array): Promise<void> {
     const temporary = path.join(path.dirname(database), ".sofia-sqlite-restore-" + randomUUID() + ".tmp");
     try {
@@ -109,6 +135,7 @@ export function sqliteFileBackupRestoreAdapter(
       if (header !== "SQLite format 3\0") {
         throw new Error("SQLite restore backup does not have a valid SQLite database header.");
       }
+      await verifySqliteIntegrity(bytes);
     },
     async captureRollback(): Promise<SqliteRollbackSnapshot> {
       await ensureDatabasePath();
