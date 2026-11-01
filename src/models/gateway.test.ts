@@ -3,6 +3,15 @@ import test from "node:test";
 import { SofiaModelGateway } from "./gateway.js";
 import { createInternalRoute } from "../brain/model-route-adapter.js";
 import type { ModelRequest, ModelRoute } from "./types.js";
+import { TokenBudget } from "../brain/token-budget.js";
+import {
+  MeteredProviderError,
+  TokenAwareGateway,
+  type InternalRoute,
+  type InferenceRequest,
+  type ProviderReply,
+} from "../brain/token-aware-gateway.js";
+
 
 const route: ModelRoute = {
   id: "coding",
@@ -14,6 +23,107 @@ const route: ModelRoute = {
   qualityWeight: 8,
   healthy: true,
 };
+
+
+function brainGatewayRequest(): InferenceRequest {
+  return {
+    phase: "plan",
+    minimumQualityTier: 1,
+    requiredCapabilities: ["structured-output"],
+    core: {
+      instructions: "Return JSON.",
+      task: "Plan a task.",
+      acceptanceCriteria: [],
+      state: {},
+      toolSchemas: [],
+    },
+    evidence: [],
+  };
+}
+
+function brainRoute(
+  id: string,
+  budgetKey: string,
+  invoke: () => Promise<ProviderReply>,
+): InternalRoute {
+  return {
+    id,
+    budgetKey,
+    qualityTier: 1,
+    capabilities: ["structured-output"],
+    contextWindow: 2_000,
+    maxOutputTokens: 50,
+    hardOutputCap: true,
+    prepare() {
+      return { inputTokensUpperBound: 10, invoke };
+    },
+  };
+}
+
+function brainBudget() {
+  const limit = {
+    maxTokens: 1_000,
+    maxCostNanoUsd: 1_000_000n,
+    maxCalls: 10,
+    maxInFlight: 1,
+  };
+  return new TokenBudget(limit, ["provider-a", "provider-b"].map((key) => ({
+    key,
+    limit,
+    price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 1n },
+  })));
+}
+
+test("Brain gateway falls back only after a provider failure with known usage", async () => {
+  const budget = brainBudget();
+  let firstCalls = 0;
+  let secondCalls = 0;
+  const gateway = new TokenAwareGateway(budget, [
+    brainRoute("first", "provider-a", async () => {
+      firstCalls += 1;
+      throw new MeteredProviderError({ inputTokens: 3, outputTokens: 2 });
+    }),
+    brainRoute("second", "provider-b", async () => {
+      secondCalls += 1;
+      return {
+        value: { plan: "completed" },
+        usage: { inputTokens: 4, outputTokens: 3 },
+        finishReason: "complete",
+      };
+    }),
+  ]);
+
+  assert.deepEqual(await gateway.generate(brainGatewayRequest()), { plan: "completed" });
+  assert.equal(firstCalls, 1);
+  assert.equal(secondCalls, 1);
+  assert.equal(budget.snapshot().chargedTokens, 12);
+  assert.equal(budget.snapshot().reservedTokens, 0);
+  assert.equal(budget.snapshot().inFlight, 0);
+});
+
+test("Brain gateway does not fail over when provider usage is unknown", async () => {
+  const budget = brainBudget();
+  let fallbackCalls = 0;
+  const gateway = new TokenAwareGateway(budget, [
+    brainRoute("first", "provider-a", async () => {
+      throw new Error("network failure with unknown provider usage");
+    }),
+    brainRoute("second", "provider-b", async () => {
+      fallbackCalls += 1;
+      return {
+        value: { shouldNotRun: true },
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "complete",
+      };
+    }),
+  ]);
+
+  await assert.rejects(gateway.generate(brainGatewayRequest()), /model_call_failed/);
+  assert.equal(fallbackCalls, 0);
+  assert.equal(budget.snapshot().stopped, true);
+  assert.equal(budget.snapshot().reservedTokens, 0);
+  assert.equal(budget.snapshot().inFlight, 0);
+});
 
 test("Anthropic Messages adapter sends native tool schema and normalizes tool-use responses", async () => {
   const originalFetch = globalThis.fetch;
