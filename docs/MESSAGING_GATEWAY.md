@@ -18,6 +18,14 @@ Status: opt-in gateway, natural-chat command bridge, Telegram Bot API long polli
 - The default gateway rate limiter is in-memory and per process. For shared deployments, `RedisMessagingRateLimiter` provides an atomic fixed-window implementation using a node-redis v4-compatible `eval(script, { keys, arguments })` client; inject it as `rateLimiter: new RedisMessagingRateLimiter({ client })`. The Lua counter operation is atomic across workers, raw scope identifiers are SHA-256 hashed before being used as Redis keys, and Redis errors fail closed (the message is rate-limited). For cross-worker message deduplication, `RedisChatMessageDeduplicator` provides atomic `SET NX PX` claims and ownership-checked release; inject it into the command handler, not twice in both layers.
 
 
+## Durable outbound completion delivery (LINE and WhatsApp)
+
+LINE and WhatsApp runtimes persist redacted completion messages to `.sofia/messaging-outbox` before attempting delivery. Pending records are retried when the runtime starts and when a new completion message is queued. A confirmed provider send removes the record; a failed or unavailable send leaves it pending. This retry path sends the saved response and **never re-runs the Sofia task**.
+
+The outbox is bounded to 500 records and 128 KB per message. Its directory is created with owner-only permissions where supported. Because message text is stored on disk, deployments must protect the Sofia workspace and its backups as user data. Do not enqueue credentials or raw provider payloads; the LINE/WhatsApp runtime redacts secrets before persistence.
+
+Delivery is at-least-once, not exactly-once: if the provider accepts a message but the process crashes before the local acknowledgement is removed, a retry may send the same response again. Pending records are not automatically discarded when malformed, so operators should inspect the private outbox directory and resolve corrupt/full queues deliberately. The current implementation retries on runtime startup and on subsequent completion activity; it is not a continuously running retry scheduler, and live provider smoke tests are still required.
+
 ## Standalone Slack Events API receiver
 
 The optional serverless route is `POST /api/slack/events`. It disables automatic body parsing so `X-Slack-Signature` is checked against the exact raw bytes, and handles Slack's signed `url_verification` challenge before accepting events. Only ordinary human `message` events are considered; bot/subtype events and unapproved users/channels are ignored. Attachments are not downloaded.
