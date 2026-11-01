@@ -42,6 +42,41 @@ test("SQLite learning transactions persist experiences and skills across reopen"
   }
 });
 
+test("SQLite learning store rejects an active-skill payload whose persisted scope was tampered", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-learning-tamper-"));
+  const file = path.join(directory, "learning.sqlite");
+  try {
+    const store = await SqliteLearningTransactionStore.open(file);
+    await store.transaction(scope, async tx => {
+      await tx.activateSkill(activeSkill("tampered-skill"));
+    });
+    store.close();
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(file);
+    try {
+      const tampered = activeSkill("tampered-skill");
+      tampered.scope = { ...scope, tenantId: "another-tenant" };
+      db.prepare("UPDATE learning_active_skills SET payload=? WHERE tenant_id=? AND principal_id=? AND project_id=? AND skill_id=?")
+        .run(JSON.stringify(tampered), scope.tenantId, scope.principalId, scope.projectId, tampered.id);
+    } finally {
+      db.close();
+    }
+
+    const reopened = await SqliteLearningTransactionStore.open(file);
+    try {
+      await assert.rejects(
+        reopened.transaction(scope, tx => tx.listActiveSkills(scope)),
+        /Cross-scope learning access rejected/,
+      );
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("SQLite learning store serializes overlapping async transactions on one connection", async () => {
   const store = await SqliteLearningTransactionStore.open(":memory:");
   try {
