@@ -136,6 +136,16 @@ export class FileSettlementJournal {
   private async append(runId: string, event: JournalEvent): Promise<void> {
     await this.ensureDirectory();
     const file = this.file(runId);
+    try {
+      const existing = await fs.lstat(file);
+      if (existing.isSymbolicLink() || !existing.isFile()) {
+        throw new Error("Settlement journal record must be a regular file, not a symbolic link");
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    // O_NOFOLLOW closes the lstat/open race on platforms that expose it.
+    // The lstat check above still rejects pre-existing symlinks elsewhere.
     const noFollow = fsConstants.O_NOFOLLOW ?? 0;
     const handle = await fs.open(
       file,
