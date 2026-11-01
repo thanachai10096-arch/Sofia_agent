@@ -117,15 +117,25 @@ export class SqliteLearningTransactionStore {
         return rows.map(row => decode<ActiveLearningSkill>(row.payload, "active skill"));
       },
     };
+    let result: T;
     try {
-      const result = await operation(tx);
+      result = await operation(tx);
       db.exec("COMMIT");
-      hardenSqliteFiles(this.file);
-      return result;
     } catch (error) {
       try { db.exec("ROLLBACK"); } catch { /* preserve original error */ }
       throw error;
     }
+
+    // COMMIT is irreversible. A later permission-hardening failure must not
+    // enter the rollback path or imply that the transaction was undone.
+    try {
+      hardenSqliteFiles(this.file);
+    } catch (cause) {
+      const error = new Error("Learning transaction committed, but SQLite file hardening failed");
+      Object.assign(error, { committed: true, cause });
+      throw error;
+    }
+    return result;
   }
 
   close(): void { this.db.close(); }
