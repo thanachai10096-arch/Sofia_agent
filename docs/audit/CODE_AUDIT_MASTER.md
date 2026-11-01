@@ -97,3 +97,19 @@ These merge records establish that code entered main; they do not independently 
 - Unit tests do not prove live provider/channel integration.
 - A successful build does not prove runtime correctness.
 - No destructive cleanup is permitted based only on this audit.
+
+## Additional merge blockers found in PRs #328, #340, and #342
+
+### PR #340 — model capability / gateway settlement
+- The branch is based on an older merge base (`59785c78aae8d57fc00a7f7be9251076e5a388fc`); comparison reports 89 commits ahead / 2 behind current main, with 30 changed files. It is not mergeable and no workflow runs were observed for its inspected head.
+- Blocking correctness issue in the added `TokenAwareGateway`: `checkedJournalRuns` caches a run ID after the initial `hasUnresolved()` check. If a provider call later fails with unknown usage, the journal attempt intentionally remains unresolved, but a subsequent call for the same `runId` skips `hasUnresolved()` because the ID is cached. That can permit a second provider call despite ambiguous billing. Fix the guard and add a regression test that invokes the gateway twice with the same run ID after an unknown-usage failure and proves the second provider call is blocked.
+- Other changes touch core execution, billing settlement, token budgets, and run identity restoration; require focused review and fresh CI.
+
+### PR #328 — independent providers per route
+- The five-file patch is narrow and adds useful tests for complete/partial route configuration, URL validation, `/v1/models` authentication and credential non-disclosure, and refusing unhealthy explicitly selected routes.
+- Passing CI evidence is for older commit `d9a072a24a1ce9dc0a1c3f5425fe162ce549dbd5`, not current head `6d5e58eeeb81bd48b5bfaf709a266aeef65f4c0c`. Latest API security assertions and unhealthy-route test are not covered by those runs.
+- Branch comparison: 8 ahead / 3 behind current main; not mergeable. Current main has newer native Anthropic protocol support and provider configuration changes. Reconcile route-specific OpenAI-compatible overrides with the current adapter abstraction; preserve native Anthropic support.
+
+### PR #342 — verified-learning policy recheck
+- This is stacked on `feat/verified-learning-loop` / PR #308, not a standalone feature branch. Direct comparison to main shows 156 ahead / 9 behind; review the parent stack and merge base, not only the six-file patch.
+- Added checks after promotion and before activation are directionally important. Verify `currentPolicyRevision()` reads from the same transactional consistency boundary as `tx.activateSkill`; otherwise policy can still race between the revision read and activation. Add a deterministic final-persistence-boundary test and run fresh CI on the actual merge snapshot. No current-head workflow run was observed.
