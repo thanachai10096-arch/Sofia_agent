@@ -60,7 +60,9 @@ test("gateway refuses to replay a run with an unresolved provider attempt", asyn
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-gateway-journal-"));
   try {
     const journal = new FileSettlementJournal("workspace", root);
-    await journal.begin("run-1", { inputTokens: 10, outputTokens: 100 });
+    const unresolvedClaim = await journal.claimRun("run-1");
+    await journal.begin("run-1", { inputTokens: 10, outputTokens: 100 }, unresolvedClaim);
+    await unresolvedClaim.release();
     let providerCalls = 0;
     const gateway = new TokenAwareGateway(createBudget(), [createRoute(async () => {
       providerCalls += 1;
