@@ -24,4 +24,4 @@ Memory writes reject prompt-injection-like content, redact common API/token secr
 
 This is local-first, file-backed storage. Writes are serialized within one process but do not provide a distributed transaction across multiple hosts sharing a volume. For multi-host deployment, use a shared transactional store before relying on concurrent writes across replicas.
 
-Memory entries are untrusted context, not instructions. The store does not automatically replay memories into the model prompt or alter execution permissions. Retrieval integration must keep memory clearly separated from policy and must re-check current authorization on every action.
+Memory entries are untrusted context, not instructions. For an authenticated agent request, Sofia performs best-effort retrieval of up to four relevant entries and caps injected memory context at 2,400 characters. Retrieved content is fenced as untrusted reference data and cannot grant tools or permissions. A memory-store failure does not block the task. Current authorization is re-checked for every action.
