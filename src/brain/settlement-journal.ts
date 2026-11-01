@@ -78,7 +78,7 @@ export class FileSettlementJournal {
     }
 
     try {
-      await handle.writeFile(JSON.stringify(owner) + "\\n", "utf8");
+      await handle.writeFile(JSON.stringify(owner) + "\n", "utf8");
       await handle.sync();
     } catch (error) {
       await handle.close().catch(() => undefined);
