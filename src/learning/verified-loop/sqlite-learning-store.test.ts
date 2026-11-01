@@ -143,6 +143,38 @@ test("SQLite learning store rejects experience payload identity drift from index
   }
 });
 
+test("SQLite learning store rejects experience ID drift from its indexed column", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-learning-experience-id-"));
+  const file = path.join(directory, "learning.sqlite");
+  try {
+    const store = await SqliteLearningTransactionStore.open(file);
+    await store.transaction(scope, tx => tx.insertExperienceIfAbsent(experience("stable-receipt")));
+    store.close();
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(file);
+    try {
+      const tampered = { ...experience("stable-receipt"), id: "forged-experience" };
+      db.prepare("UPDATE learning_experiences SET payload=? WHERE tenant_id=? AND principal_id=? AND project_id=? AND receipt_id=?")
+        .run(JSON.stringify(tampered), scope.tenantId, scope.principalId, scope.projectId, "stable-receipt");
+    } finally {
+      db.close();
+    }
+
+    const reopened = await SqliteLearningTransactionStore.open(file);
+    try {
+      await assert.rejects(
+        reopened.transaction(scope, tx => tx.getExperience(scope, "experience-stable-receipt")),
+        /Corrupt persisted learning experience identity/,
+      );
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("SQLite learning store rejects candidate payload identity drift from indexed columns", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-learning-candidate-identity-"));
   const file = path.join(directory, "learning.sqlite");
