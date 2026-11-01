@@ -125,3 +125,19 @@ This is a feedback ledger, not autonomous self-training. It does not infer that 
 `promoteVerifiedProjectMemory` is an explicit, additive gate for turning a proposed project memory into a durable record. The caller must provide a receipt containing passing `evidence`, `regression`, and `policy` checks, a verification run ID, a timestamp, and evidence IDs. All supplied checks must pass; confidence must meet the configured threshold (0.8 by default). Feedback records alone do not satisfy the gate.
 
 The helper rejects malformed candidates, low-confidence candidates, and content flagged by the prompt-injection guard. It requires the verification receipt to cite at least one evidence ID already attached to the candidate, preventing unrelated passing receipts from promoting a memory. Structured verification provenance (candidate ID, run ID, timestamp, evidence IDs, and passed checks) is stored on the optional `ProjectMemoryEntry.verification` field rather than being truncated into the source label. It redacts secrets, bounds the stored content and provenance, derives an idempotent record ID from project/candidate/verification-run identity, and writes through the existing `ProjectMemoryStore`. It does not execute candidate text, change source-memory confidence, activate skills, or bypass approval/policy systems. The caller remains responsible for obtaining trustworthy verification receipts; the helper validates their shape and declared outcomes, not the honesty of an external verifier.
+
+
+## Verified-memory revalidation
+
+`analyzeVerifiedMemoryRevalidation` provides a bounded, read-only audit of durable
+`convention`, `repair`, and `decision` records. It distinguishes records without
+complete verification provenance from records that passed the evidence, regression,
+and policy checks. By default, verified records at least 180 days old are returned
+as revalidation candidates; the threshold and scan bound are configurable.
+
+Episodes and feedback are excluded because they describe activity and feedback,
+not promoted knowledge. Missing provenance, incomplete checks, invalid/future
+verification timestamps, or age only produce review candidates. This API never
+changes confidence, demotes, deletes, rewrites, or automatically re-verifies a
+record. A caller must obtain fresh evidence and invoke an explicit, separately
+authorized workflow before changing stored knowledge.
