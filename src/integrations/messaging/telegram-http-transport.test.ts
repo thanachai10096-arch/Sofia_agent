@@ -177,6 +177,42 @@ test("a webhook conflict leaves transport stopped so it can be started again aft
   await transport.stop();
 });
 
+test("a failed webhook preflight fails closed and can be retried", async () => {
+  let preflightFails = true;
+  const events: Array<{ event: string; status?: number }> = [];
+  const requests: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/getWebhookInfo")) {
+      if (preflightFails) return new Response(JSON.stringify({ ok: false }), { status: 503 });
+      return ok({ url: "" });
+    }
+    if (url.endsWith("/getUpdates")) {
+      return await new Promise<Response>((_resolve, reject) => {
+        // Keep the successful retry alive until stop() aborts it.
+        const signal = init?.signal;
+        if (signal?.aborted) { reject(new Error("aborted")); return; }
+        signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event, status) { events.push({ event, ...(status === undefined ? {} : { status }) }); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  assert.deepEqual(events, [{ event: "poll_failed", status: 503 }]);
+  assert.equal(requests.some((url) => url.endsWith("/getUpdates")), false);
+  preflightFails = false;
+  await transport.start(new AbortController().signal, async () => {});
+  assert.equal(requests.filter((url) => url.endsWith("/getWebhookInfo")).length, 2);
+  assert.equal(requests.filter((url) => url.endsWith("/getUpdates")).length, 1);
+  await transport.stop();
+});
+
 test("Telegram transport rejects malformed tokens and poll timeouts", () => {
   assert.throws(() => createTelegramHttpTransport({ token: "not-a-token" }), /token/);
   assert.throws(() => createTelegramHttpTransport({ token, pollTimeoutSeconds: 51 }), /timeout/);
