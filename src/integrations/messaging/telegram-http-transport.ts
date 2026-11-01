@@ -6,11 +6,15 @@ interface TelegramApiResponse<T> {
   description?: string;
 }
 
+export type TelegramTransportStatus = "starting" | "polling" | "stopped" | "webhook_conflict" | "poll_conflict" | "preflight_failed";
+
 export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
   onError?: (event: "poll_failed" | "poll_conflict" | "webhook_conflict" | "update_failed" | "delivery_failed", status?: number) => void;
+  /** Safe lifecycle signal; contains no provider payloads or credentials. */
+  onStatus?: (status: TelegramTransportStatus) => void;
 }
 
 /**
@@ -32,6 +36,11 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
   let controller: AbortController | undefined;
   let loop: Promise<void> | undefined;
   let stopped = true;
+  let status: TelegramTransportStatus = "stopped";
+  function setStatus(next: TelegramTransportStatus) {
+    status = next;
+    try { options.onStatus?.(next); } catch { /* diagnostics must not affect transport safety */ }
+  }
 
   async function request<T>(method: string, body: Record<string, unknown> | undefined, signal: AbortSignal): Promise<T> {
     const response = await fetchImpl(`${endpoint}/${method}`, {
@@ -102,6 +111,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           // Telegram rejects concurrent getUpdates consumers with HTTP 409.
           // Retrying cannot resolve the conflict and can create a noisy restart loop;
           // stop polling and require the operator to identify the other consumer.
+          setStatus("poll_conflict");
           try { options.onError?.("poll_conflict", status); } catch { /* diagnostics must not terminate cleanup */ }
           break;
         }
@@ -116,6 +126,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
     async start(signal, onUpdate) {
       if (!stopped) return;
       stopped = false;
+      setStatus("starting");
       const activeController = new AbortController();
       controller = activeController;
       const stopFromParent = () => activeController.abort(signal.reason);
@@ -127,6 +138,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         try {
           const webhook = await request<{ url: string }>("getWebhookInfo", undefined, activeController.signal);
           if (webhook.url) {
+            setStatus("webhook_conflict");
             try { options.onError?.("webhook_conflict"); } catch { /* diagnostics must not terminate cleanup */ }
             signal.removeEventListener("abort", stopFromParent);
             stopped = true;
@@ -135,6 +147,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           }
         } catch (error) {
           if (!activeController.signal.aborted) {
+            setStatus("preflight_failed");
             const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
               ? error.status : undefined;
             try { options.onError?.("poll_failed", status); } catch { /* diagnostics must not terminate cleanup */ }
@@ -148,15 +161,18 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       if (activeController.signal.aborted) {
         signal.removeEventListener("abort", stopFromParent);
         stopped = true;
+        setStatus("stopped");
         controller = undefined;
         return;
       }
+      setStatus("polling");
       loop = poll(activeController.signal, onUpdate).finally(() => {
         signal.removeEventListener("abort", stopFromParent);
         // A terminal polling conflict ends this transport instance. Mark it
         // stopped so callers can safely start it again after fixing the cause.
         if (controller === activeController) {
           stopped = true;
+          if (status !== "poll_conflict") setStatus("stopped");
           controller = undefined;
         }
       });
@@ -184,6 +200,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
     async stop() {
       if (stopped) return;
       stopped = true;
+      if (status !== "poll_conflict" && status !== "webhook_conflict" && status !== "preflight_failed") setStatus("stopped");
       controller?.abort();
       await loop?.catch(() => undefined);
       controller = undefined;
