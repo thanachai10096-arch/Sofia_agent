@@ -1102,3 +1102,32 @@ test("DurableJobRuntime retention removes expired terminal jobs and linked priva
   assert.equal(deletedRun, runId);
   assert.equal(await runtime.get(submitted.id), undefined);
 });
+
+
+test("DurableJobRuntime enforces owner scope for get, list, resume, and cancel", async () => {
+  const namespace = "job-runtime-owner-isolation-" + randomUUID();
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => { started = resolve; });
+  const brain = {
+    run: async ({ signal }: { signal?: AbortSignal }) => {
+      started();
+      if (!signal) throw new Error("Runtime did not pass an abort signal");
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return { completed: false, state: "cancelled" };
+    },
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({ task: "private owner job", ownerKeyId: "owner-a" });
+  await running;
+
+  assert.equal(await runtime.get(submitted.id, "owner-b"), undefined);
+  assert.deepEqual(await runtime.list("owner-b"), []);
+  assert.equal((await runtime.list("owner-a")).some((job) => job.id === submitted.id), true);
+  await assert.rejects(() => runtime.resume(submitted.id, undefined, "owner-b"), /unknown job/i);
+  assert.equal(await runtime.cancel(submitted.id, "owner-b"), false);
+  assert.equal((await runtime.get(submitted.id, "owner-a"))?.status, "running");
+  assert.equal(await runtime.cancel(submitted.id, "owner-a"), true);
+});
