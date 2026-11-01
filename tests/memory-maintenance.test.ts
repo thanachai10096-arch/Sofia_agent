@@ -74,3 +74,35 @@ test("conflict review is bounded and ignores unrelated text", () => {
   assert.equal(result.length, 1);
   assert.deepEqual([result[0]?.firstId, result[0]?.secondId], ["a", "c"]);
 });
+
+
+test("consolidation report combines review signals and flags old records without mutating them", async () => {
+  const { analyzeMemoryConsolidation } = await import("../src/brain/memory-maintenance.js");
+  const records = [
+    { id: "old", kind: "preference", content: "User prefers concise technical answers", updatedAt: "2025-01-01T00:00:00.000Z" },
+    { id: "changed", kind: "preference", content: "User does not prefer concise technical answers", updatedAt: "2026-10-31T00:00:00.000Z" },
+    { id: "future", kind: "preference", content: "A future record should not be marked stale", updatedAt: "2027-01-01T00:00:00.000Z" },
+    { id: "invalid-date", kind: "preference", content: "A record with invalid date", updatedAt: "not-a-date" },
+  ];
+  const before = structuredClone(records);
+  const report = analyzeMemoryConsolidation(records, {
+    now: "2026-11-01T00:00:00.000Z",
+    staleAfterDays: 180,
+  });
+  assert.equal(report.maintenance.scanned, 4);
+  assert.equal(report.conflicts.length, 1);
+  assert.deepEqual(report.staleCandidates.map((item) => item.id), ["old"]);
+  assert.deepEqual(records, before);
+});
+
+test("consolidation rejects invalid analysis time and respects scan bounds", async () => {
+  const { analyzeMemoryConsolidation } = await import("../src/brain/memory-maintenance.js");
+  assert.throws(() => analyzeMemoryConsolidation([], { now: "invalid" }));
+  const report = analyzeMemoryConsolidation([
+    { id: "a", kind: "fact", content: "one two three", updatedAt: "2020-01-01T00:00:00Z" },
+    { id: "b", kind: "fact", content: "one two three", updatedAt: "2020-01-01T00:00:00Z" },
+  ], { maxRecords: 1, now: "2026-11-01T00:00:00Z" });
+  assert.equal(report.maintenance.scanned, 1);
+  assert.deepEqual(report.maintenance.duplicates, []);
+  assert.equal(report.staleCandidates.length, 1);
+});
