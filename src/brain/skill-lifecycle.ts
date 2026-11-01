@@ -82,6 +82,9 @@ export class VersionedSkillLifecycle {
     const registered: string[] = [];
     try {
       for (const { record } of activeRecords) {
+        // An identical pre-existing registration is already restored; leave it
+        // untouched so rollback never removes state owned before this attempt.
+        if (this.platform.get(record.skillId)) continue;
         this.platform.register(clone(record.package));
         registered.push(record.skillId);
       }
