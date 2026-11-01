@@ -1070,9 +1070,6 @@ test("DurableJobRuntime retention removes expired terminal jobs and linked priva
     recoveryRounds: 0,
     trace: [],
   } as unknown as import("./run-state.js").BrainRunSnapshot;
-  const brain = {
-    run: async () => ({ completed: true, state: "completed" }),
-  } as unknown as SofiaBrain;
   const runtime = new DurableJobRuntime(
     ({ onRunSnapshot }) => ({
       run: async () => {
