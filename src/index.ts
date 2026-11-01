@@ -131,3 +131,6 @@ export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/u
 
 export { analyzeMemoryEntries, normalizeMemoryForComparison } from "./brain/memory-maintenance.js";
 export type { MemoryMaintenanceRecord, MemoryMaintenanceReport, DuplicateMemoryGroup, MemoryReviewPair } from "./brain/memory-maintenance.js";
+
+export { rankMemoryDocuments } from "./brain/memory-retrieval.js";
+export type { MemorySearchDocument, RankedMemory } from "./brain/memory-retrieval.js";
