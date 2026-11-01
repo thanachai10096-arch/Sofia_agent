@@ -212,6 +212,8 @@ test("SQLite restore adapter restores a real database and rollback reopens the p
     live.save({ id: "session-1", messages: ["before"], updatedAt: 0 });
     backup = await SqliteSessionStore.open(backupPath);
     backup.save({ id: "session-1", messages: ["restored"], updatedAt: 0 });
+    // Keep the backup connection open so this committed transaction is still in WAL.
+    await readFile(backupPath + "-wal");
     const bundle = await createBackupBundle([{
       name: "sessions",
       async snapshot() {
@@ -224,8 +226,17 @@ test("SQLite restore adapter restores a real database and rollback reopens the p
     }], createdAt);
     const adapter = sqliteFileBackupRestoreAdapter("sessions", livePath, "sessions/snapshot.sqlite", {
       getOpenStore() { return live; },
-      async close() { live.close(); },
-      async reopen() { live = await SqliteSessionStore.open(livePath); },
+      async close() {
+        live.close();
+        // Simulate stale sidecars left behind by an interrupted prior process.
+        writeFileSync(livePath + "-wal", "stale-wal");
+        writeFileSync(livePath + "-shm", "stale-shm");
+      },
+      async reopen() {
+        await assert.rejects(readFile(livePath + "-wal"), { code: "ENOENT" });
+        await assert.rejects(readFile(livePath + "-shm"), { code: "ENOENT" });
+        live = await SqliteSessionStore.open(livePath);
+      },
     });
     await adapter.preflight(bundle, ["sessions/snapshot.sqlite"]);
     const rollback = await adapter.captureRollback();
