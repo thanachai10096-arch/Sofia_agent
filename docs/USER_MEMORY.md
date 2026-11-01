@@ -17,6 +17,9 @@ The API derives the memory owner from the authenticated API key. A client cannot
 - `POST /v1/memory` accepts `{ "kind": "preference", "content": "Prefers concise answers" }`. Kinds: `preference`, `fact`, `goal`, `instruction`.
 - `DELETE /v1/memory/:id` deletes one entry.
 - `DELETE /v1/memory` clears all memories for the authenticated identity.
+- When a new entry conflicts with an existing same-kind memory, `POST /v1/memory` returns `409 memory_conflict_review_required` with advisory candidates and the available decisions.
+- `POST /v1/memory/review` accepts the candidate `kind`, `content`, and an explicit `decision`: `keep-existing` leaves the current memory untouched; `keep-both` saves the new entry while retaining all older entries. Both require `memory:write` and a conflict is rechecked at review time.
+
 
 Memory writes reject prompt-injection-like content, redact common API/token secrets, cap content at 1,200 characters and retain at most 200 entries per identity. The file store hashes the owner identity before using it in a filename and uses private local filesystem permissions. A memory's source is recorded as an explicit user request; callers should not store inferred profile facts without user intent.
 
