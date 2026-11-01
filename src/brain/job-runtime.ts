@@ -404,7 +404,7 @@ class FileJobStateStore {
     return operation;
   }
 
-  async pruneTerminalBefore(cutoff: number): Promise<JobRecord[]> {
+  async pruneTerminalBefore(cutoff: number, protectedIds: ReadonlySet<string> = new Set()): Promise<JobRecord[]> {
     if (!Number.isFinite(cutoff)) throw new Error("Invalid job retention cutoff");
     return this.withFileLock(async () => {
       const records = await this.read();
@@ -412,7 +412,7 @@ class FileJobStateStore {
       const retained = records.filter((record) => {
         const terminal = record.status === "completed" || record.status === "failed" || record.status === "cancelled";
         const updatedAt = Date.parse(record.updatedAt);
-        if (terminal && Number.isFinite(updatedAt) && updatedAt < cutoff) {
+        if (terminal && !protectedIds.has(record.id) && Number.isFinite(updatedAt) && updatedAt < cutoff) {
           expired.push(record);
           return false;
         }
@@ -516,7 +516,8 @@ export class DurableJobRuntime implements JobRuntime {
     if (!Number.isSafeInteger(retentionMs) || retentionMs < 60_000) {
       throw new Error("Job retention must be at least one minute");
     }
-    const expired = await this.state.pruneTerminalBefore(Date.now() - retentionMs);
+    const protectedIds = new Set([...this.controllers.keys(), ...this.starting, ...this.resuming]);
+    const expired = await this.state.pruneTerminalBefore(Date.now() - retentionMs, protectedIds);
     for (const record of expired) {
       if (this.controllers.has(record.id) || this.starting.has(record.id) || this.resuming.has(record.id)) {
         // A concurrent in-memory worker is never eligible for retention deletion.
