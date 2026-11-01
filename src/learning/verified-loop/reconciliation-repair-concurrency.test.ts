@@ -15,6 +15,7 @@ const action: LearningRepairAction = {
   expectedPolicyRevision: "policy-concurrent",
   scope,
   actorId: "operator-concurrent",
+  approvalId: "approval-concurrent",
   idempotencyKey: JSON.stringify(["plan-concurrent", "skill-concurrent"]),
 };
 const plan: LearningRepairPlan = {
@@ -26,7 +27,9 @@ const plan: LearningRepairPlan = {
 };
 const snapshot = (exists: boolean, active: boolean): LearningRepairSnapshot => ({
   scope, exists, active, policyRevision: "policy-concurrent",
-  explicitlyApproved: true, trustedEvidenceValid: true,
+  explicitlyApproved: true,
+  approvalBinding: { id: action.approvalId, actorId: action.actorId, skillId: action.skillId, scope, policyRevision: action.expectedPolicyRevision, status: "approved" },
+  trustedEvidenceValid: true,
 });
 
 test("two concurrent executors cannot register the same skill twice", async () => {
