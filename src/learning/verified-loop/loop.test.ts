@@ -271,6 +271,39 @@ test("does not activate a skill if policy changes during lifecycle promotion", a
   assert.equal(state.active.length, 0);
 });
 
+test("rechecks policy inside the final activation transaction", async () => {
+  const state = makeHost();
+  const originalTransaction = state.host.transaction.bind(state.host);
+  let promotionFinished = false;
+  let policyRevision = "policy-1";
+  state.host.currentPolicyRevision = async () => policyRevision;
+  state.host.promoteCandidate = async () => {
+    promotionFinished = true;
+    return true;
+  };
+  state.host.transaction = async (requestedScope, operation) => {
+    if (promotionFinished) {
+      // Simulate a policy update after the outside-the-transaction check but
+      // before the activation transaction begins.
+      policyRevision = "policy-2";
+      promotionFinished = false;
+    }
+    return originalTransaction(requestedScope, operation);
+  };
+
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "activation-race-1", "run1");
+  addReceipt(state, "activation-race-2", "run2");
+  addReceipt(state, "activation-race-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "activation-race-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "activation-race-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "activation-race-3", "Fix TypeScript build");
+
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
 test("duplicate receipt cannot be reinterpreted with a different task summary", async () => {
   const state = makeHost();
   const loop = new VerifiedLearningLoop(state.host);
