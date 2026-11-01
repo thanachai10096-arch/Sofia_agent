@@ -407,7 +407,10 @@ export class TokenAwareGateway {
                 throw journalError;
               }
             }
-            if (!settled.usageKnown) throw new GatewayError("invalid_usage");
+            if (!settled.usageKnown) {
+              if (journalAttempt && this.settlementJournal) this.blockedJournalRuns.add(runId!);
+              throw new GatewayError("invalid_usage");
+            }
             if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
 
             if (!signal.aborted) {
