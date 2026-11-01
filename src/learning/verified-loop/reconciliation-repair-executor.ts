@@ -75,10 +75,16 @@ function privateFile(file: string): void {
   if (mode !== restrictive) fs.chmodSync(file, restrictive);
 }
 
+/** Serialize synchronous SQLite transactions across independent journal connections in this process. */
+const repairJournalTails = new Map<string | object, Promise<void>>();
+
 /** SQLite-backed idempotency journal and append-only audit events. */
 export class SqliteLearningRepairJournal implements LearningRepairJournal {
   private tail: Promise<void> = Promise.resolve();
-  private constructor(private readonly db: Db, private readonly file: string, private readonly leaseMs: number, private readonly clock: () => Date) {}
+  private readonly transactionKey: string | object;
+  private constructor(private readonly db: Db, private readonly file: string, private readonly leaseMs: number, private readonly clock: () => Date) {
+    this.transactionKey = file === ":memory:" ? this : file;
+  }
   static async open(file: string, options: { leaseMs?: number; now?: () => Date } = {}): Promise<SqliteLearningRepairJournal> {
     const leaseMs = options.leaseMs ?? 60_000;
     if (!Number.isSafeInteger(leaseMs) || leaseMs < 5_000 || leaseMs > 3_600_000) throw new Error("Repair lease must be between 5 seconds and 1 hour");
@@ -101,8 +107,15 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
     } catch (error) { db.close(); throw error; }
   }
   private serial<T>(operation: () => T): Promise<T> {
-    const run = this.tail.then(operation);
-    this.tail = run.then(() => undefined, () => undefined);
+    const local = this.tail;
+    const shared = repairJournalTails.get(this.transactionKey) ?? Promise.resolve();
+    const run = Promise.all([local, shared]).then(operation);
+    const settled = run.then(() => undefined, () => undefined);
+    this.tail = settled;
+    repairJournalTails.set(this.transactionKey, settled);
+    void settled.then(() => {
+      if (repairJournalTails.get(this.transactionKey) === settled) repairJournalTails.delete(this.transactionKey);
+    });
     return run;
   }
   get(key: string, scope: LearningScope): Promise<LearningRepairJournalEntry | undefined> {
@@ -160,7 +173,7 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
         if (!row || row.tenant_id !== scope.tenantId || row.principal_id !== scope.principalId || row.project_id !== scope.projectId) throw new Error("Repair journal entry missing or scope mismatch");
         if (claimToken !== undefined) {
           if (typeof claimToken !== "string" || !claimToken || row.claim_token !== claimToken) throw new Error("Repair claim lost; stale executor cannot finalize this attempt");
-          const updated = this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=?,claim_token=NULL WHERE repair_key=? AND claim_token=?").run(state, new Date().toISOString(), result?.slice(0, 1000) ?? null, key, claimToken);
+          const updated = this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=?,claim_token=NULL WHERE repair_key=? AND claim_token=?").run(state, this.clock().toISOString(), result?.slice(0, 1000) ?? null, key, claimToken);
           if (Number(updated.changes) !== 1) throw new Error("Repair claim lost; stale executor cannot finalize this attempt");
         } else {
           // Legacy callers may finalize only rows that are not currently owned by a
@@ -168,7 +181,7 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
           if (row.claim_token !== null && row.claim_token !== undefined) {
             throw new Error("Repair claim token required; refusing unfenced finalization");
           }
-          this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=? WHERE repair_key=? AND claim_token IS NULL").run(state, new Date().toISOString(), result?.slice(0, 1000) ?? null, key);
+          this.db.prepare("UPDATE learning_repair_journal SET state=?,updated_at=?,result=? WHERE repair_key=? AND claim_token IS NULL").run(state, this.clock().toISOString(), result?.slice(0, 1000) ?? null, key);
         }
         this.db.exec("COMMIT");
       } catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
