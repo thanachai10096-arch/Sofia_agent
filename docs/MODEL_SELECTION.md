@@ -64,4 +64,13 @@ SOFIA_CODING_MAX_OUTPUT=4096
 ```
 
 The `_CONTEXT` override takes precedence over the declared `_CONTEXT_WINDOW` metadata for that route. Both runtime overrides must be positive safe integers; malformed, fractional, zero, or negative values fail route initialization with the variable name in the error. If unset, Sofia uses the declared context window when available (otherwise 32000) and a default maximum output of 4096 tokens. The gateway still applies its own phase-specific input/output caps and budget controls.
+### Per-route token pricing and budget isolation
 
+Brain token accounting uses each configured route ID as its model-budget key. This keeps route-specific pricing independent even when multiple routes share one provider. Configure prices in nano-USD per token:
+
+```dotenv
+SOFIA_CODING_INPUT_NANO_USD=...
+SOFIA_CODING_OUTPUT_NANO_USD=...
+```
+
+The same `SOFIA_<ROUTE_ID>_INPUT_NANO_USD` and `SOFIA_<ROUTE_ID>_OUTPUT_NANO_USD` pattern applies to other route IDs. The run-wide limits (for example `SOFIA_BRAIN_MAX_TOKENS` and `SOFIA_BRAIN_MAX_MODEL_CALLS`) remain shared across all routes in that run; `SOFIA_BRAIN_MODEL_MAX_TOKENS` is applied independently to each route's model budget.
