@@ -20,6 +20,12 @@ The API derives the memory owner from the authenticated API key. A client cannot
 
 Memory writes reject prompt-injection-like content, redact common API/token secrets, cap content at 1,200 characters and retain at most 200 entries per identity. The file store hashes the owner identity before using it in a filename and uses private local filesystem permissions. A memory's source is recorded as an explicit user request; callers should not store inferred profile facts without user intent.
 
+## Lifecycle and conflict review
+
+Repeated saves with equivalent normalized content in the same user scope and memory kind update the existing entry rather than creating duplicates. The existing ID, creation timestamp, and usage count are retained; the update timestamp is refreshed and confidence does not decrease.
+
+The file store also exposes an optional `findPotentialConflicts` capability. It conservatively flags same-kind entries with substantial shared wording but opposite English or Thai negation. This is an advisory heuristic, not semantic understanding: callers should present candidates for review rather than treating them as proven contradictions. Saving a changed statement does not delete or silently overwrite the older entry. Conflict review is scoped to the authenticated user's memory.
+
 ## Limits
 
 This is local-first, file-backed storage. Writes are serialized within one process but do not provide a distributed transaction across multiple hosts sharing a volume. For multi-host deployment, use a shared transactional store before relying on concurrent writes across replicas.
