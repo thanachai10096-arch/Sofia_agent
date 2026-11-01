@@ -149,3 +149,6 @@ export type { TelegramVoiceMediaConfig, TelegramVoiceFile } from "./integrations
 
 export { createSandboxedTelegramAudioInspector } from "./integrations/messaging/telegram-audio-inspector.js";
 export type { SandboxedTelegramAudioInspectorOptions, TelegramAudioInspection } from "./integrations/messaging/telegram-audio-inspector.js";
+
+export { createVoiceSession } from "./voice/session.js";
+export type { VoiceSession, VoiceSessionOptions, VoiceSessionSnapshot, VoiceSessionState } from "./voice/session.js";
