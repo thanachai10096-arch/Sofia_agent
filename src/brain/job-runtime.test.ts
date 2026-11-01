@@ -488,41 +488,71 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
-  const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
-  } as unknown as SofiaBrain), undefined, namespace));
-
+  const workerCount = 12;
+  let startedWorkers = 0;
+  let resolveAllWorkersStarted!: () => void;
+  let releaseWorkers!: () => void;
+  const allWorkersStarted = new Promise<void>((resolve) => { resolveAllWorkersStarted = resolve; });
+  const workerGate = new Promise<void>((resolve) => { releaseWorkers = resolve; });
+  const brainFactory = () => ({
+    run: async () => {
+      startedWorkers += 1;
+      if (startedWorkers === workerCount) resolveAllWorkersStarted();
+      await workerGate;
+      return { completed: true, state: "completed", output: "concurrency-test" };
+    },
+  } as unknown as SofiaBrain);
+  const runtimes = Array.from({ length: workerCount }, () => new DurableJobRuntime(brainFactory, undefined, namespace));
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
     runtime.submit({ task: "concurrent worker submission " + index }),
   ));
-  const reader = new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
-  } as unknown as SofiaBrain), undefined, namespace);
+  const reader = new DurableJobRuntime(brainFactory, undefined, namespace);
 
-  // submit() persists the queued record before starting its worker. Wait until
-  // every worker has durably claimed its lease before removing the test files;
-  // otherwise a late claim can race with cleanup on slower CI platforms.
-  let persisted = await reader.list();
-  const deadline = Date.now() + 5_000;
-  while (persisted.length !== submitted.length || persisted.some((record) => record.status !== "running")) {
-    if (Date.now() >= deadline) {
-      assert.fail("all concurrent workers should claim their jobs before cleanup");
+  try {
+    // Wait until every worker has claimed its lease and entered brain.run().
+    // The gate keeps all workers active together so this exercises real overlap.
+    let startupTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        allWorkersStarted,
+        new Promise<never>((_, reject) => {
+          startupTimer = setTimeout(() => reject(new Error("all concurrent workers should start within 5 seconds")), 5_000);
+        }),
+      ]);
+    } finally {
+      if (startupTimer) clearTimeout(startupTimer);
     }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    persisted = await reader.list();
+
+    const running = await reader.list();
+    assert.equal(running.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
+    assert.equal(running.filter((record) => record.status === "running").length, workerCount,
+      "all independent workers should hold running leases concurrently");
+    const runningIds = new Set(running.map((record) => record.id));
+    for (const job of submitted) assert.ok(runningIds.has(job.id), "missing persisted job " + job.id);
+
+    // Let every brain.run() resolve, then wait for durable terminal writes before cleanup.
+    releaseWorkers();
+    let persisted = await reader.list();
+    const completionDeadline = Date.now() + 5_000;
+    while (persisted.length !== submitted.length || persisted.some((record) => record.status !== "completed")) {
+      if (Date.now() >= completionDeadline) {
+        assert.fail("all concurrent workers should finish and persist before cleanup");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      persisted = await reader.list();
+    }
+
+    const file = path.join(
+      os.tmpdir(),
+      "sofia-agents-jobs",
+      createHash("sha256").update(namespace).digest("hex") + ".json",
+    );
+    await rm(file, { force: true });
+    await rm(file + ".lock", { force: true });
+  } finally {
+    // Never leave the test's workers blocked if an assertion or startup wait fails.
+    releaseWorkers();
   }
-  const persistedIds = new Set(persisted.map((record) => record.id));
-
-  assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
-  for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
-
-  const file = path.join(
-    os.tmpdir(),
-    "sofia-agents-jobs",
-    createHash("sha256").update(namespace).digest("hex") + ".json",
-  );
-  await rm(file, { force: true });
-  await rm(file + ".lock", { force: true });
 });
 
 
