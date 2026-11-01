@@ -212,7 +212,7 @@ export class ProjectMemoryFeedbackStore implements MemoryFeedbackStore {
   constructor(private readonly store: ProjectMemoryStore) {}
 
   async record(project: string, event: MemoryFeedbackEvent): Promise<void> {
-    if (!project.trim() || !isMemoryFeedbackEvent(event)) {
+    if (!project.trim() || !isMemoryFeedbackEvent(event) || !event.memoryId.trim() || !event.sourceRunId.trim()) {
       throw new Error("Project, memory identity, source run, and feedback signal are required.");
     }
     const now = new Date().toISOString();
