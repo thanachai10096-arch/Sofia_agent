@@ -24,6 +24,7 @@ const memoryWriteQueues = new Map<string, Promise<void>>();
 export class FileProjectMemoryStore implements ProjectMemoryStore {
   private readonly file: string;
   private readonly project: string;
+  get projectId(): string { return this.project; }
   constructor(project: string, root = sofiaStateDirectory("memory")) {
     if (typeof project !== "string" || !project.trim()) throw new Error("Project memory requires a non-empty project identifier");
     this.project = project;
@@ -182,6 +183,7 @@ function validateLearnedCandidate(candidate: LearnedSkillCandidate): LearnedSkil
 
 export class PersistentSkillLedger implements SkillLedger {
   private cache: LearnedSkillCandidate[];
+  private readonly project: string;
   private readonly pendingCandidates = new Set<LearnedSkillCandidate>();
   private pending: Promise<void> = Promise.resolve();
   private persistenceError: string | null = null;
@@ -190,9 +192,12 @@ export class PersistentSkillLedger implements SkillLedger {
 
   constructor(private readonly store: ProjectMemoryStore) {
     const syncStore = store as FileProjectMemoryStore;
+    // Keep ledger entries inside the same project namespace as the injected store.
+    // Generic test/custom stores retain the historical isolated "skill" namespace.
+    this.project = typeof syncStore.projectId === "string" ? syncStore.projectId : "skill";
     this.cache = typeof syncStore.readSync === "function"
       ? syncStore.readSync()
-          .filter(entry => entry.kind === "repair" && entry.project === "skill")
+          .filter(entry => entry.kind === "repair" && entry.project === this.project)
           .map(entry => {
             try { return validateLearnedCandidate(JSON.parse(entry.content) as LearnedSkillCandidate); }
             catch { return undefined; }
@@ -215,7 +220,7 @@ export class PersistentSkillLedger implements SkillLedger {
       category: safe.category, strategy: safe.strategy, trigger: safe.trigger, procedure: safe.procedure,
     })).digest("hex");
     const entry: ProjectMemoryEntry = {
-      id, project: "skill", kind: "repair", content: JSON.stringify(safe),
+      id, project: this.project, kind: "repair", content: JSON.stringify(safe),
       source: safe.evidenceIds.join(","), confidence: 0.8, createdAt: now, updatedAt: now, uses: 0,
     };
 
