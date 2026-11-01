@@ -102,6 +102,10 @@ test("memory conflict detection is advisory and preserves both versions", async 
     assert.ok(saved.some((entry) => entry.id === prior.id));
     assert.ok(saved.some((entry) => entry.id === changed.id));
     assert.deepEqual(await store.findPotentialConflicts("user-b", changed), []);
+    const nodeFact = createUserMemoryEntry("preference", "I use Node.js for tooling");
+    await store.save("user-a", nodeFact);
+    const nodeUpdate = createUserMemoryEntry("preference", "I use Node.js for tooling every day");
+    assert.deepEqual(await store.findPotentialConflicts("user-a", nodeUpdate), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
