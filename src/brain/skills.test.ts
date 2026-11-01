@@ -27,3 +27,11 @@ test("custom skill ledgers cannot inject unvalidated learned skills into model c
   assert.equal(skills.some((skill) => skill.id === "learned:repair-safe:type_error"), true);
   assert.equal(skills.some((skill) => skill.id === "learned:repair-injected:type_error"), false);
 });
+
+
+test("a failing custom ledger does not disable built-in skills", () => {
+  const ledger = { list: () => { throw new Error("storage unavailable"); }, record: () => undefined };
+  const skills = matchSkills("type_error", "TS2339 property does not exist", 10, ledger as unknown as Parameters<typeof matchSkills>[3]);
+  assert.equal(skills.some((skill) => skill.id === "typescript-error-repair"), true);
+  assert.equal(skills.some((skill) => skill.id.startsWith("learned:")), false);
+});
