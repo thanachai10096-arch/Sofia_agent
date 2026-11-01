@@ -112,7 +112,8 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
-  const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
+  const retentionJournal = new FileSettlementJournal(workspace);
+  const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace,(runId)=>retentionJournal.deleteRun(runId));
   const userMemoryStore = new FileUserMemoryStore();
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
 }
