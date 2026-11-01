@@ -81,3 +81,8 @@ The same `SOFIA_<ROUTE_ID>_INPUT_NANO_USD` and `SOFIA_<ROUTE_ID>_OUTPUT_NANO_USD
 Brain run snapshots now optionally include a versioned token-budget ledger. The ledger stores settled aggregate and per-route token counts, call counts, committed nano-USD cost, the unmetered-call count, and the stopped state. Resume restores those values before the next model call; restored values are checked against the currently configured run/model limits and the exact configured route-key set. Older snapshots without a ledger continue to resume with a fresh ledger for backward compatibility.
 
 The ledger is captured at Brain checkpoint boundaries. It is not an exactly-once billing journal: a process crash after a provider settles usage but before the next Brain checkpoint can still leave the most recent call absent from the saved snapshot. In-flight reservations are intentionally not serialized as committed usage. A future durable settlement journal is required to close that crash window.
+
+
+### Budget checkpoint privacy
+
+The persisted budget ledger contains aggregate token counts, call counts, committed cost, safety-stop state, and one-way SHA-256 fingerprints of configured route keys. It does not store prompts, task text, provider responses, API keys, authorization headers, or raw provider/model route names. Legacy version-one snapshots with plain route keys remain readable for backward compatibility; newly written snapshots use version two fingerprints. These fingerprints are pseudonymous metadata, not encryption or a guarantee of anonymity.
