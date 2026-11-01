@@ -16,6 +16,11 @@ export interface ProjectMemoryStore {
   find(query: string): Promise<ProjectMemoryEntry[]>;
 }
 
+// Serialize read-modify-write cycles per memory file within this process. Atomic
+// rename prevents partial files; this queue also prevents concurrent writers from
+// overwriting one another's newly appended entries.
+const memoryWriteQueues = new Map<string, Promise<void>>();
+
 export class FileProjectMemoryStore implements ProjectMemoryStore {
   private readonly file: string;
   constructor(project: string, root = sofiaStateDirectory("memory")) {
@@ -28,16 +33,29 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
   async save(entry: ProjectMemoryEntry): Promise<void> {
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
     const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, 4000) };
-    const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
-    const directory = path.dirname(this.file);
-    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-    await fs.chmod(directory, 0o700);
-    const temporary = this.file + "." + randomUUID() + ".tmp";
+    const previous = memoryWriteQueues.get(this.file) ?? Promise.resolve();
+    const write = previous.catch(() => undefined).then(async () => {
+      const entries = await this.read();
+      const index = entries.findIndex(item => item.id === safeEntry.id);
+      if (index >= 0) entries[index] = safeEntry;
+      else entries.push(safeEntry);
+
+      const directory = path.dirname(this.file);
+      await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      await fs.chmod(directory, 0o700);
+      const temporary = this.file + "." + randomUUID() + ".tmp";
+      try {
+        await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
+        await fs.rename(temporary, this.file);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+    });
+    memoryWriteQueues.set(this.file, write);
     try {
-      await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
-      await fs.rename(temporary, this.file);
+      await write;
     } finally {
-      await fs.rm(temporary, { force: true });
+      if (memoryWriteQueues.get(this.file) === write) memoryWriteQueues.delete(this.file);
     }
   }
   async list(){return (await this.read()).filter(entry=>!containsPromptInjection(entry.content));}
