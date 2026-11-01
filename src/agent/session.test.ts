@@ -182,3 +182,59 @@ test("explicit useBrain=true keeps the full Brain path", async () => {
   );
   assert.equal(legacyCalls, 0);
 });
+
+test("SofiaAgent treats user-memory retrieval as best-effort when the memory store is unavailable", async () => {
+  let modelCalls = 0;
+  let lookup: { principalId: string; query: string; limit: number } | undefined;
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async () => {
+        modelCalls += 1;
+        return { text: "Task completed without memory." };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: {
+      save: async () => undefined,
+      list: async () => [],
+      find: async (principalId, query, limit) => {
+        lookup = { principalId, query, limit };
+        throw new Error("Memory database unavailable");
+      },
+      delete: async () => false,
+      clear: async () => undefined,
+    },
+  });
+
+  const result = await agent.run({ task: "Continue Sofia Agent", principalId: "principal-a" });
+  assert.equal(result.output, "Task completed without memory.");
+  assert.equal(modelCalls, 1);
+  assert.deepEqual(lookup, {
+    principalId: "principal-a",
+    query: "Continue Sofia Agent",
+    limit: 6,
+  });
+});
+
+test("SofiaAgent never queries user memory without an authenticated principal", async () => {
+  let lookups = 0;
+  const agent = new SofiaAgent({
+    provider: { generate: async () => ({ text: "Anonymous task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: {
+      save: async () => undefined,
+      list: async () => [],
+      find: async () => {
+        lookups += 1;
+        return [];
+      },
+      delete: async () => false,
+      clear: async () => undefined,
+    },
+  });
+
+  await agent.run({ task: "A task without a principal" });
+  assert.equal(lookups, 0);
+});
