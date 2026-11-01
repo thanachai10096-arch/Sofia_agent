@@ -6,6 +6,7 @@ import type {
   AcceptanceCriterion,
 } from "./types.js";
 import type { ExecutionTraceEntry } from "./execution-trace.js";
+import type { TokenBudgetSnapshot } from "./token-budget.js";
 
 export interface BrainRunUsageSnapshot {
   steps: number;
@@ -26,6 +27,7 @@ export interface BrainRunSnapshot {
   checkpointId: string;
   baselineSnapshotId?: string;
   usage: BrainRunUsageSnapshot;
+  budget?: TokenBudgetSnapshot;
   observations: Observation[];
   diagnoses: Diagnosis[];
   decisions: Array<{ strategy: ExecutionPlan["strategy"]; reason: string }>;
