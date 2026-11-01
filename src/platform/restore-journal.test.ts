@@ -7,6 +7,7 @@ import {
   advanceRestoreJournal,
   createRestoreJournalRecord,
   FileRestoreJournalStore,
+  inspectRestoreJournalRecovery,
   validateRestoreJournalRecord,
 } from "./restore-journal.js";
 
@@ -134,6 +135,34 @@ test("restore journal list returns the latest revision for every transaction", a
       [first.transactionId, 1],
       [second.transactionId, 0],
     ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("restore recovery inspection flags interrupted work without mutating it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-restore-journal-recovery-"));
+  try {
+    const store = new FileRestoreJournalStore(root);
+    const prepared = rootRecord("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    await store.create(prepared);
+    const applying = advanceRestoreJournal(prepared, {
+      phase: "applying",
+      updatedAt: "2026-11-01T08:00:01.000Z",
+      targets: prepared.targets.map((target, index) => ({
+        ...target,
+        phase: index === 0 ? "applied" : "applying",
+      })),
+    });
+    await store.append(applying, 0);
+    const before = await store.read(prepared.transactionId);
+    const inspections = await inspectRestoreJournalRecovery(store);
+    const interrupted = inspections.find((item) => item.transactionId === prepared.transactionId);
+    assert.equal(interrupted?.status, "interrupted");
+    assert.equal(interrupted?.requiresOperator, true);
+    assert.deepEqual(interrupted?.targets.map((target) => target.phase), ["applied", "applying"]);
+    assert.deepEqual(await store.read(prepared.transactionId), before);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
