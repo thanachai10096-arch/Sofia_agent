@@ -132,11 +132,14 @@ export function createWhatsAppHttpTransport(options: WhatsAppHttpTransportOption
       let acceptedEvents = 0;
       let failed = false;
       for (const entry of envelope.entry) {
-        for (const change of entry.changes ?? []) {
-          if (change.field !== "messages" || !change.value || !Array.isArray(change.value.messages)) continue;
+        if (!entry || typeof entry !== "object" || !Array.isArray(entry.changes)) continue;
+        for (const change of entry.changes) {
+          if (!change || typeof change !== "object" ||
+              change.field !== "messages" || !change.value || !Array.isArray(change.value.messages)) continue;
           const businessPhoneId = change.value.metadata?.phone_number_id;
           if (businessPhoneId !== phoneNumberId) continue;
           for (const message of change.value.messages) {
+            if (!message || typeof message !== "object") continue;
             if (stopped || activeSignal?.aborted) return { status: 503, acceptedEvents };
             if (message.type !== "text" || !message.id || !message.from || !message.timestamp ||
                 !message.text || typeof message.text.body !== "string" || message.text.body.length > 100_000 ||
