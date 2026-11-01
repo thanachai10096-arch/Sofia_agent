@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { executeLearningRepairPlan } from "./reconciliation-repair-executor.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { executeLearningRepairPlan, SqliteLearningRepairJournal } from "./reconciliation-repair-executor.js";
 import type { LearningRepairJournal, LearningRepairJournalEntry, LearningRepairAuditEvent, LearningRepairExecutorHost, LearningRepairSnapshot } from "./reconciliation-repair-executor.js";
 import type { LearningRepairAction, LearningRepairPlan } from "./reconciliation-repair.js";
 import type { LearningScope } from "./ports.js";
@@ -229,3 +232,42 @@ test("does not trust a raced journal success when authoritative runtime is still
   assert.match(result[0]?.reason ?? "", /authoritative state is not active/);
   assert.equal(registrations, 0);
 });
+
+test("recovers a lifecycle mutation completed before a crashed journal finalization", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-crash-window-"));
+  const file = path.join(dir, "repair.sqlite");
+  let clock = new Date("2026-10-29T05:00:00.000Z");
+  const journal = await SqliteLearningRepairJournal.open(file, { leaseMs: 5_000, now: () => clock });
+  let active = false;
+  let registrations = 0;
+  const host = hostWith(() => snapshot({ exists: active, active }), async () => {
+    registrations++;
+    active = true;
+    throw new Error("simulated interruption after lifecycle mutation");
+  });
+  try {
+    const originalFinish = journal.finish.bind(journal);
+    journal.finish = async () => { throw new Error("simulated process loss before journal finalization"); };
+    const interrupted = await executeLearningRepairPlan(plan, journal, host);
+    assert.equal(interrupted[0]?.state, "failed");
+    assert.equal(active, true);
+    assert.equal((await journal.get(action.idempotencyKey, scope))?.state, "running");
+
+    journal.finish = originalFinish;
+    clock = new Date("2026-10-29T05:00:06.000Z");
+    const replayHost = hostWith(() => snapshot({ exists: active, active }), async () => {
+      registrations++;
+      active = true;
+    });
+    replayHost.now = () => clock;
+    const recovered = await executeLearningRepairPlan(plan, journal, replayHost);
+    assert.equal(recovered[0]?.state, "succeeded");
+    assert.match(recovered[0]?.reason ?? "", /already satisfied/);
+    assert.equal(registrations, 1);
+    assert.equal((await journal.get(action.idempotencyKey, scope))?.state, "succeeded");
+  } finally {
+    journal.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
