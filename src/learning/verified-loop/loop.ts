@@ -42,12 +42,18 @@ export class VerifiedLearningLoop {
     if (!validScope(scope)) throw new Error("Invalid authenticated learning scope");
     try {
       const receipt = await this.host.verification.getReceipt(scope, receiptId);
-      if (!receipt || !validReceipt(receipt, scope, Date.now(), this.options.maxEvidenceAgeMs)) {
+      if (!receipt || receipt.id !== receiptId || !validReceipt(receipt, scope, Date.now(), this.options.maxEvidenceAgeMs)) {
         return { recorded: false };
       }
       const currentPolicy = await this.host.currentPolicyRevision(scope);
       if (receipt.policyRevision !== currentPolicy) return { recorded: false };
       const evidence = await this.host.verification.getEvidence(scope, receipt.evidenceIds);
+      // Persisted verification adapters are an untrusted boundary. A malformed
+      // collection or row must reject the receipt instead of throwing or learning.
+      if (!Array.isArray(evidence) || receipt.evidenceIds.some(id =>
+        !evidence.some(item => validEvidence(item, receipt) && item.id === id))) {
+        return { recorded: false };
+      }
       const trustedIds = new Set(evidence.filter(item => validEvidence(item, receipt)).map(item => item.id));
       if (receipt.evidenceIds.some(id => !trustedIds.has(id))) return { recorded: false };
 
@@ -119,9 +125,28 @@ export class VerifiedLearningLoop {
       }
 
       const evaluation = await this.host.verification.runRegression(scope, assessedCandidate);
+      // Treat the regression adapter as an untrusted boundary at runtime too:
+      // TypeScript types cannot prevent malformed values from plugins or external stores.
+      if (!evaluation || typeof evaluation.regressionRunId !== "string" ||
+          typeof evaluation.passed !== "boolean" ||
+          !Array.isArray(evaluation.regressionEvidenceIds) ||
+          !evaluation.regressionEvidenceIds.every(id => typeof id === "string") ||
+          !Array.isArray(evaluation.checks) ||
+          !evaluation.checks.every(check => check && typeof check.name === "string" && typeof check.passed === "boolean")) {
+        return { recorded: true, experienceId: prepared.experienceId };
+      }
       const regressionEvidence = evaluation.regressionEvidenceIds.length > 0
         ? await this.host.verification.getEvidence(scope, evaluation.regressionEvidenceIds)
         : [];
+      // Verification adapters are external boundaries: malformed persisted evidence
+      // must fail closed rather than throwing while fields are inspected.
+      if (!Array.isArray(regressionEvidence) || regressionEvidence.some(item =>
+        !item || typeof item !== "object" || typeof item.id !== "string" ||
+        typeof item.runId !== "string" || !item.scope || typeof item.scope !== "object" ||
+        typeof item.trusted !== "boolean" || typeof item.success !== "boolean" ||
+        typeof item.kind !== "string")) {
+        return { recorded: true, experienceId: prepared.experienceId };
+      }
       const verifiedRegressionIds = new Set(regressionEvidence.filter(item =>
         item.trusted === true && item.success === true && item.kind === "regression" &&
         item.runId === evaluation.regressionRunId && sameScope(item.scope, scope) &&
