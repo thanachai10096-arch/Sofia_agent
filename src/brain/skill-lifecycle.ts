@@ -77,8 +77,20 @@ export class VersionedSkillLifecycle {
       }
       activeRecords.push({ skillId, record });
     }
-    // Validate the entire restore set before mutating the supplied platform.
-    for (const { record } of activeRecords) this.platform.register(clone(record.package));
+    // Restore transactionally: if a platform adapter fails midway, remove only
+    // entries registered by this restore attempt and preserve pre-existing skills.
+    const registered: string[] = [];
+    try {
+      for (const { record } of activeRecords) {
+        this.platform.register(clone(record.package));
+        registered.push(record.skillId);
+      }
+    } catch (error) {
+      for (const skillId of registered.reverse()) {
+        try { this.platform.remove(skillId); } catch { /* Preserve the original restore failure. */ }
+      }
+      throw error;
+    }
   }
 
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
@@ -242,7 +254,11 @@ export class VersionedSkillLifecycle {
       if (item.evaluation !== undefined) {
         if (!isRecord(item.evaluation) || typeof item.evaluation.passed !== "boolean" || !Array.isArray(item.evaluation.checks) ||
             item.evaluation.checks.length === 0 || !item.evaluation.checks.every((check) =>
-              isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
+              isRecord(check) && typeof check.name === "string" && check.name.length <= 200 &&
+              typeof check.passed === "boolean" &&
+              (check.detail === undefined || typeof check.detail === "string" && check.detail.length <= 1000) &&
+              !containsPromptInjection(check)) ||
+            (item.evaluation.evaluatedAt !== undefined && typeof item.evaluation.evaluatedAt !== "string")) {
           throw new Error("Invalid skill lifecycle evaluation");
         }
       }
