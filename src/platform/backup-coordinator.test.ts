@@ -631,3 +631,19 @@ test("restore transaction rejects malformed runtime adapters before any side eff
   }
   assert.deepEqual(events, [], "invalid adapter input must be rejected before callbacks run");
 });
+
+
+test("backup bundle owns snapshot bytes after source buffers are mutated", async () => {
+  const sourceBytes = Buffer.from("original snapshot");
+  const bundle = await createBackupBundle([
+    { name: "mutable-source", async snapshot() {
+      return [{ path: "state/snapshot.json", content: sourceBytes }];
+    } },
+  ], createdAt);
+
+  sourceBytes.fill(0x78);
+  const bundledBytes = bundle.files.get("state/snapshot.json");
+  assert.ok(bundledBytes);
+  assert.equal(Buffer.from(bundledBytes).toString("utf8"), "original snapshot");
+  assert.equal(verifyBackupBundle(bundle).valid, true);
+});
