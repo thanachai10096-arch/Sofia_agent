@@ -566,9 +566,15 @@ test("restore transaction rejects malformed adapters before invoking any adapter
     executeBackupRestoreTransaction(bundle, [null] as never),
     /adapter must be an object/i,
   );
+  for (const method of ["preflight", "captureRollback", "apply", "rollback"] as const) {
+    await assert.rejects(
+      executeBackupRestoreTransaction(bundle, [{ ...valid, [method]: undefined }] as never),
+      new RegExp(`missing required method: ${method}`, "i"),
+    );
+  }
   await assert.rejects(
-    executeBackupRestoreTransaction(bundle, [{ ...valid, apply: undefined }] as never),
-    /missing required method: apply/i,
+    executeBackupRestoreTransaction(bundle, [{ ...valid, name: "  " }] as never),
+    /non-empty name/i,
   );
   await assert.rejects(
     executeBackupRestoreTransaction(bundle, [{ ...valid, paths: "a.json" }] as never),
