@@ -111,7 +111,8 @@ test("DurableJobRuntime fences stale worker writes after an expired lease is rec
     const original = records.find((item) => item.id === submitted.id)!;
     const staleToken = original.leaseOwnerToken!;
 
-    // Simulate lease expiry, then let a replacement worker atomically claim it.
+    // Simulate lease expiry. The original worker must be fenced immediately,
+    // even in the interval before another worker reclaims the job.
     original.leaseExpiresAt = new Date(0).toISOString();
     await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
     await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
@@ -122,6 +123,15 @@ test("DurableJobRuntime fences stale worker writes after an expired lease is rec
         save(record: { id: string; status: string; leaseOwnerToken?: string; result?: unknown; updatedAt: string }): Promise<boolean>;
       };
     }).state;
+    const expiredOwnerWriteAccepted = await internalState.save({
+      id: submitted.id,
+      status: "running",
+      leaseOwnerToken: staleToken,
+      updatedAt: new Date().toISOString(),
+    });
+    assert.equal(expiredOwnerWriteAccepted, false,
+      "an expired owner must not renew or persist while waiting for lease reclamation");
+
     const replacement = await internalState.claim(submitted.id, "replacement-worker-token", 15_000);
     assert.equal(replacement?.leaseOwnerToken, "replacement-worker-token");
     assert.equal(replacement?.status, "running");
