@@ -39,8 +39,9 @@ These are counts of the returned 100-record sample, not the repository's lifetim
 
 ### Current-head CI failures
 
-- PR #344, head `87cf1d5b3e973e4a3b28045678e388aff857cefa`: CodeQL succeeded; Sofia CI failed. Job inspection shows Typecheck failed in Ubuntu, macOS, and Windows validation jobs, and Build failed in Docker sandbox and Playwright browser-egress integration jobs. The exact compiler/build diagnostics were not available from the inspected job summary; do not guess the error.
-- Action runs: [Sofia CI #3304](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/41288474621), [CodeQL #1763](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/41288474573).
+- PR #344 originally failed on head `87cf1d5b3e973e4a3b28045678e388aff857cefa`. The exact job logs identify the root cause: `src/brain/memory-versioning.ts` contained five literal backslash-`n` sequences between TypeScript statements. TypeScript reported `TS1127 Invalid character` and `TS1434 Unexpected keyword or identifier` at lines 12 and 41. This single source syntax defect caused Typecheck failures on Ubuntu, macOS and Windows and downstream Build failures in Docker and Playwright jobs.
+- A minimal correction replaced only those five literal `\\n` separators with actual newline characters on the PR branch. Fix commit: `cb5819e7e0a32b11eb57b304a20654175902438a`. The file was re-read from GitHub and verified to contain zero remaining literal backslash-`n` separators. Fresh CI for the fix commit had not appeared at the time of this audit update; the fix is therefore pending validation, not passed.
+- Original failing run: [Sofia CI #3304](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/41288474621); CodeQL had passed on the pre-fix head: [CodeQL #1763](https://github.com/thanachai10096-arch/Sofia_agent/actions/runs/41288474573).
 
 ### Current-head passes observed
 
