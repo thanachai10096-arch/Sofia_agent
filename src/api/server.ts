@@ -282,11 +282,19 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       if (req.method === "GET" && req.url === "/health") {
+        let channels: Readonly<Record<string, { status: string }>> | undefined;
+        try {
+          channels = config.channelHealth?.();
+        } catch {
+          // Optional channel diagnostics must never make the core API unhealthy.
+          channels = undefined;
+        }
         return json(res, 200, {
           ok: true,
           service: "sofia-agent-api",
           version: "v1",
           capabilities: { mobile: true, asyncRuns: true, stream: true },
+          ...(channels ? { channels } : {}),
         }, origin, config);
       }
 
