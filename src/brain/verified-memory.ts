@@ -59,19 +59,19 @@ export async function promoteVerifiedProjectMemory(
   if (!candidate || typeof candidate.id !== "string" || !candidate.id.trim() || candidate.id.length > 200 ||
       typeof candidate.project !== "string" || !candidate.project.trim() || candidate.project.length > 300 ||
       !["convention", "repair", "decision"].includes(candidate.kind) ||
-      typeof candidate.content !== "string" || !candidate.content.trim() ||
-      typeof candidate.source !== "string" || !candidate.source.trim() ||
+      typeof candidate.content !== "string" || !candidate.content.trim() || candidate.content.length > 4_000 ||
+      typeof candidate.source !== "string" || !candidate.source.trim() || candidate.source.length > 500 ||
       !Number.isFinite(candidate.confidence) || candidate.confidence < 0 || candidate.confidence > 1 ||
-      !Array.isArray(candidate.evidenceIds) || candidate.evidenceIds.length === 0 ||
+      !Array.isArray(candidate.evidenceIds) || candidate.evidenceIds.length === 0 || candidate.evidenceIds.length > 40 ||
       !candidate.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 200)) {
     return { promoted: false, reason: "invalid_candidate" };
   }
   if (!receipt || typeof receipt.runId !== "string" || !receipt.runId.trim() || receipt.runId.length > 200 ||
       typeof receipt.verifiedAt !== "string" || !Number.isFinite(Date.parse(receipt.verifiedAt)) ||
-      !Array.isArray(receipt.checks) || !Array.isArray(receipt.evidenceIds) ||
+      !Array.isArray(receipt.checks) || receipt.checks.length === 0 || receipt.checks.length > 20 || !Array.isArray(receipt.evidenceIds) || receipt.evidenceIds.length > 40 ||
       !receipt.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 200) ||
       receipt.evidenceIds.length === 0 ||
-      !receipt.checks.every((check) => check && typeof check.name === "string" && typeof check.passed === "boolean" &&
+      !receipt.checks.every((check) => check && typeof check.name === "string" && check.name.length > 0 && check.name.length <= 100 && typeof check.passed === "boolean" &&
         (check.evidenceIds === undefined || (Array.isArray(check.evidenceIds) && check.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 200))))) {
     return { promoted: false, reason: "invalid_receipt" };
   }
@@ -96,7 +96,8 @@ export async function promoteVerifiedProjectMemory(
   if (!Number.isFinite(Date.parse(now))) throw new Error("Invalid memory promotion timestamp");
   const safeContent = String(redactSecrets(candidate.content)).trim().slice(0, 4_000);
   if (!safeContent || containsPromptInjection(safeContent)) return { promoted: false, reason: "unsafe_content" };
-  const evidenceIds = [...new Set([...candidate.evidenceIds, ...receipt.evidenceIds])].slice(0, 40);
+  const evidenceIds = [...new Set([...candidate.evidenceIds, ...receipt.evidenceIds])]
+    .map((value) => String(redactSecrets(value)).slice(0, 200)).filter(Boolean).slice(0, 40);
   const id = createHash("sha256")
     .update(candidate.project + "\u0000verified-memory\u0000" + candidate.id + "\u0000" + receipt.runId)
     .digest("hex");
@@ -111,11 +112,11 @@ export async function promoteVerifiedProjectMemory(
     updatedAt: now,
     uses: 0,
     verification: {
-      candidateId: candidate.id,
-      runId: receipt.runId,
+      candidateId: String(redactSecrets(candidate.id)).slice(0, 200),
+      runId: String(redactSecrets(receipt.runId)).slice(0, 200),
       verifiedAt: new Date(receipt.verifiedAt).toISOString(),
       evidenceIds,
-      checks: receipt.checks.map((check) => ({ name: check.name.slice(0, 100), passed: true as const })),
+      checks: receipt.checks.map((check) => ({ name: String(redactSecrets(check.name)).slice(0, 100), passed: true as const })),
     },
   };
   await store.save(entry);
