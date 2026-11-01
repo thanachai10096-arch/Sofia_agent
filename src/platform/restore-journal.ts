@@ -134,13 +134,23 @@ export function validateRestoreJournalRecord(value: unknown): RestoreJournalReco
     if (typeof target.phase !== "string" || !TARGET_PHASES.has(target.phase)) {
       throw new Error("Restore journal target phase is invalid.");
     }
-    if (target.rollbackSnapshotRef !== undefined) {\n      assertSafeToken(target.rollbackSnapshotRef, "snapshot reference");\n      if (!/^[a-z0-9._:/-]+$/iu.test(target.rollbackSnapshotRef)) throw new Error("Restore journal snapshot reference contains unsupported characters.");\n    }
+    if (target.rollbackSnapshotRef !== undefined) {
+      assertSafeToken(target.rollbackSnapshotRef, "snapshot reference");
+      if (!/^[a-z0-9._:/-]+$/iu.test(target.rollbackSnapshotRef)) {
+        throw new Error("Restore journal snapshot reference contains unsupported characters.");
+      }
+    }
     if (target.rollbackSnapshotSha256 !== undefined &&
         (typeof target.rollbackSnapshotSha256 !== "string" || !SHA256.test(target.rollbackSnapshotSha256))) {
       throw new Error("Restore journal snapshot digest is invalid.");
     }
   }
-  if (record.failureCode !== undefined) {\n    assertSafeToken(record.failureCode, "failure code");\n    if (!/^[a-z0-9_:-]{1,64}$/iu.test(record.failureCode)) throw new Error("Restore journal failure code is invalid.");\n  }
+  if (record.failureCode !== undefined) {
+    assertSafeToken(record.failureCode, "failure code");
+    if (!/^[a-z0-9_:-]{1,64}$/iu.test(record.failureCode)) {
+      throw new Error("Restore journal failure code is invalid.");
+    }
+  }
   return structuredClone(record as RestoreJournalRecord);
 }
 
