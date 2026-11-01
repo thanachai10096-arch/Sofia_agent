@@ -20,6 +20,18 @@ export interface ModelBudgetConfig {
   price: TokenPrice;
   limit: BudgetLimit;
 }
+export interface TokenBudgetAccountSnapshot {
+  chargedTokens: number;
+  calls: number;
+  committedCostNanoUsd: string;
+}
+export interface TokenBudgetSnapshot {
+  version: 1;
+  total: TokenBudgetAccountSnapshot;
+  models: Record<string, TokenBudgetAccountSnapshot>;
+  unmeteredCalls: number;
+  stopped: boolean;
+}
 
 export class BudgetError extends Error {
   constructor(
@@ -105,7 +117,7 @@ export class TokenBudget {
   private stopped = false;
   private unmeteredCalls = 0;
 
-  constructor(runLimit: BudgetLimit, models: readonly ModelBudgetConfig[]) {
+  constructor(runLimit: BudgetLimit, models: readonly ModelBudgetConfig[], restored?: TokenBudgetSnapshot) {
     this.total = createAccount(runLimit);
 
     for (const model of models) {
@@ -128,6 +140,40 @@ export class TokenBudget {
         price,
       });
     }
+    if (restored) this.restore(restored);
+  }
+
+  private restore(snapshot: TokenBudgetSnapshot): void {
+    if (snapshot.version !== 1 || !nonNegativeInteger(snapshot.unmeteredCalls) ||
+        typeof snapshot.stopped !== "boolean" || !snapshot.total ||
+        !snapshot.models || typeof snapshot.models !== "object" || Array.isArray(snapshot.models)) {
+      throw new Error("Invalid token budget snapshot");
+    }
+    const restoreAccount = (account: Account, saved: TokenBudgetAccountSnapshot) => {
+      if (!saved || !nonNegativeInteger(saved.chargedTokens) || !nonNegativeInteger(saved.calls) ||
+          typeof saved.committedCostNanoUsd !== "string" || !/^(0|[1-9][0-9]*)$/.test(saved.committedCostNanoUsd)) {
+        throw new Error("Invalid token budget account snapshot");
+      }
+      const cost = BigInt(saved.committedCostNanoUsd);
+      if (saved.chargedTokens > account.limit.maxTokens || saved.calls > account.limit.maxCalls ||
+          cost > account.limit.maxCostNanoUsd) throw new Error("Restored token budget exceeds configured limits");
+      account.chargedTokens = saved.chargedTokens;
+      account.calls = saved.calls;
+      account.chargedCost = cost;
+    };
+    const savedKeys = Object.keys(snapshot.models).sort();
+    const configuredKeys = [...this.models.keys()].sort();
+    if (savedKeys.length !== configuredKeys.length || savedKeys.some((key, i) => key !== configuredKeys[i])) {
+      throw new Error("Restored token budget model set does not match configuration");
+    }
+    restoreAccount(this.total, snapshot.total);
+    for (const [key, saved] of Object.entries(snapshot.models)) {
+      const model = this.models.get(key);
+      if (!model) throw new Error("Unknown model in token budget snapshot");
+      restoreAccount(model.account, saved);
+    }
+    this.unmeteredCalls = snapshot.unmeteredCalls;
+    this.stopped = snapshot.stopped;
   }
 
   private model(key: string) {
@@ -205,16 +251,18 @@ export class TokenBudget {
     };
   }
 
-  snapshot() {
-    const account = this.total;
-    return {
+  snapshot(): TokenBudgetSnapshot {
+    const save = (account: Account): TokenBudgetAccountSnapshot => ({
       chargedTokens: account.chargedTokens,
-      reservedTokens: account.heldTokens,
       calls: account.calls,
-      inFlight: account.inFlight,
+      committedCostNanoUsd: account.chargedCost.toString(),
+    });
+    return {
+      version: 1,
+      total: save(this.total),
+      models: Object.fromEntries([...this.models].map(([key, model]) => [key, save(model.account)])),
       unmeteredCalls: this.unmeteredCalls,
       stopped: this.stopped,
-      committedCostNanoUsd: (account.chargedCost + account.heldCost).toString(),
     };
   }
 }
