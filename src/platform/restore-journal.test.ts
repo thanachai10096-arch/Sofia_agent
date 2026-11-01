@@ -94,6 +94,10 @@ test("restore journal rejects unsafe paths, malformed digests, and unknown field
     ...initial,
     targets: [{ ...initial.targets[0]!, paths: ["../../secrets.env"] }, initial.targets[1]],
   }), /unsafe target path/i);
+  assert.throws(() => validateRestoreJournalRecord({
+    ...initial,
+    targets: [{ ...initial.targets[0]!, paths: ["C:/private/secret.json"] }, initial.targets[1]],
+  }), /unsafe target path/i);
 });
 
 test("restore journal files and directories use private permissions on POSIX", async (t) => {
