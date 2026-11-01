@@ -147,6 +147,10 @@ function verifyMessagingContext(input: AgentRunInput, config: SofiaApiConfig): i
   return { platform: context.platform, userId: context.userId, conversationId: context.conversationId };
 }
 
+function normalizeMemoryContent(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replace(/[^\\p{L}\\p{N}\\s]+/gu, " ").replace(/\\s+/g, " ").trim();
+}
+
 function pathId(url: string): string | null {
   const match = url.match(/^\/v1\/agent\/runs\/([^/?]+)$/);
   return match?.[1] ?? null;
@@ -461,7 +465,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               }, origin, config);
             }
             await deps.userMemoryStore.save(auth.keyId, entry);
-            const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
+            const savedEntries = await deps.userMemoryStore.list(auth.keyId);
+            const normalizedContent = normalizeMemoryContent(entry.content);
+            const saved = savedEntries.find((item) => item.id === entry.id) ??
+              savedEntries.find((item) => item.kind === entry.kind && normalizeMemoryContent(item.content) === normalizedContent);
             if (!saved) return json(res, 500, { error: "memory_write_failed" }, origin, config);
             return json(res, 201, { memory: saved }, origin, config);
           } catch {
@@ -489,7 +496,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               return json(res, 200, { saved: false, decision: "keep-existing", retainedConflicts: conflicts.length }, origin, config);
             }
             await deps.userMemoryStore.save(auth.keyId, entry);
-            const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
+            const savedEntries = await deps.userMemoryStore.list(auth.keyId);
+            const normalizedContent = normalizeMemoryContent(entry.content);
+            const saved = savedEntries.find((item) => item.id === entry.id) ??
+              savedEntries.find((item) => item.kind === entry.kind && normalizeMemoryContent(item.content) === normalizedContent);
             if (!saved) return json(res, 500, { error: "memory_write_failed" }, origin, config);
             return json(res, 201, { saved: true, decision: "keep-both", memory: saved, retainedConflicts: conflicts.length }, origin, config);
           } catch {
