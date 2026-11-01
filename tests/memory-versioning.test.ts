@@ -29,3 +29,13 @@ test("version history cannot cross project boundaries and rejects invalid metada
  assert.equal((await rollbackProjectMemory(store,"project-b",r.version!.versionId,{actor:"owner",reason:"Cross project"})).reason,"not-found");
  assert.equal((await saveVersionedProjectMemory(store,original,{actor:"",reason:"Bad"})).reason,"invalid-metadata");
 });
+test("oversized serialized snapshots fail closed without changing the current memory",async()=>{
+ const store=new Store();
+ const oversized:ProjectMemoryEntry={...original,content:"\\u0001".repeat(2_500)};
+ await store.save(oversized);
+ const result=await saveVersionedProjectMemory(store,{...oversized,content:"replacement"},{actor:"owner",reason:"Update",occurredAt:"2026-04-01T00:00:00Z"});
+ assert.equal(result.saved,false);
+ assert.equal(result.reason,"snapshot-too-large");
+ assert.equal(store.entries.length,1);
+ assert.equal(store.entries[0]?.content,oversized.content);
+});
