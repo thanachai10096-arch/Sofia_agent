@@ -16,7 +16,7 @@ export interface ProjectMemoryVerificationProvenance {
 }
 
 export interface ProjectMemoryEntry {
-  id: string; project: string; kind: "convention" | "repair" | "decision" | "episode" | "feedback"; content: string;
+  id: string; project: string; kind: "convention" | "repair" | "decision" | "episode" | "feedback" | "version"; content: string;
   source?: string; confidence: number; createdAt: string; updatedAt: string; uses: number;
   /** Present only when the record passed an explicit verification gate. */
   verification?: ProjectMemoryVerificationProvenance;
@@ -38,7 +38,7 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
   }
   async save(entry: ProjectMemoryEntry): Promise<void> {
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
-    const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, 4000) };
+    const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, entry.kind === "version" ? 12_000 : 4_000) };
     const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
     const directory = path.dirname(this.file);
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
@@ -53,7 +53,7 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
   }
   async list(){return (await this.read()).filter(entry=>!containsPromptInjection(entry.content));}
   async find(query: string) {
-    return rankMemoryDocuments(await this.list(), query, {
+    return rankMemoryDocuments((await this.list()).filter((entry) => entry.kind !== "version"), query, {
       limit: 12,
       maxDocuments: 500,
       minScore: 0.12,
