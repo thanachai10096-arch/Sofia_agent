@@ -266,3 +266,29 @@ test("SQLite repair lease configuration rejects unsafe values", async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("independent SQLite repair journal connections serialize concurrent claims", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-journal-concurrent-"));
+  const file = path.join(dir, "repair.sqlite");
+  const first = await SqliteLearningRepairJournal.open(file);
+  const second = await SqliteLearningRepairJournal.open(file);
+  try {
+    const entry = {
+      key: "concurrent-repair", scope, skillId: "skill-concurrent",
+      policyRevision: "policy-1", state: "running" as const, attempts: 0,
+      updatedAt: "2026-10-29T00:00:00.000Z",
+    };
+    const claims = await Promise.all([first.begin(entry), second.begin(entry)]);
+    assert.equal(claims.filter(claim => claim.claimed === true).length, 1);
+    assert.equal(claims.filter(claim => claim.claimed === false).length, 1);
+    assert.equal(new Set(claims.map(claim => claim.claimToken).filter(Boolean)).size, 1);
+    const stored = await first.get(entry.key, scope);
+    assert.equal(stored?.attempts, 1);
+    assert.equal(stored?.state, "running");
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
