@@ -404,6 +404,25 @@ class FileJobStateStore {
     return operation;
   }
 
+  async pruneTerminalBefore(cutoff: number): Promise<JobRecord[]> {
+    if (!Number.isFinite(cutoff)) throw new Error("Invalid job retention cutoff");
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const expired: JobRecord[] = [];
+      const retained = records.filter((record) => {
+        const terminal = record.status === "completed" || record.status === "failed" || record.status === "cancelled";
+        const updatedAt = Date.parse(record.updatedAt);
+        if (terminal && Number.isFinite(updatedAt) && updatedAt < cutoff) {
+          expired.push(record);
+          return false;
+        }
+        return true;
+      });
+      if (expired.length) await this.write(retained);
+      return expired;
+    });
+  }
+
   async list(): Promise<JobRecord[]> {
     return this.read();
   }
@@ -430,6 +449,7 @@ export class DurableJobRuntime implements JobRuntime {
     }) => SofiaBrain,
     private readonly runStore?: RunStore,
     namespace = process.cwd(),
+    private readonly deleteSettlementRun?: (runId: string) => Promise<void>,
   ) {
     this.state = new FileJobStateStore(namespace);
   }
@@ -492,7 +512,32 @@ export class DurableJobRuntime implements JobRuntime {
     await this.state.save(canonical);
   }
 
+  async pruneExpired(retentionMs = 30 * 24 * 60 * 60 * 1000): Promise<number> {
+    if (!Number.isSafeInteger(retentionMs) || retentionMs < 60_000) {
+      throw new Error("Job retention must be at least one minute");
+    }
+    const expired = await this.state.pruneTerminalBefore(Date.now() - retentionMs);
+    for (const record of expired) {
+      if (this.controllers.has(record.id) || this.starting.has(record.id) || this.resuming.has(record.id)) {
+        // A concurrent in-memory worker is never eligible for retention deletion.
+        // The state store only prunes terminal records; keep this defensive guard.
+        continue;
+      }
+      const runId = record.snapshot?.runId;
+      if (runId) {
+        await this.runStore?.delete(runId);
+        await this.deleteSettlementRun?.(runId);
+      }
+      this.jobs.delete(record.id);
+    }
+    return expired.length;
+  }
+
   async list(): Promise<JobRecord[]> {
+    const retentionDays = Number(process.env.SOFIA_JOB_RETENTION_DAYS ?? "30");
+    if (Number.isSafeInteger(retentionDays) && retentionDays >= 1 && retentionDays <= 3650) {
+      await this.pruneExpired(retentionDays * 24 * 60 * 60 * 1000);
+    }
     const stored = await this.state.list();
     for (const persisted of stored) {
       if (this.controllers.has(persisted.id) || this.starting.has(persisted.id)) continue;
