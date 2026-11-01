@@ -77,6 +77,40 @@ test("SQLite learning store rejects an active-skill payload whose persisted scop
   }
 });
 
+test("SQLite learning store rejects active-skill payload identity drift from indexed columns", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-learning-identity-"));
+  const file = path.join(directory, "learning.sqlite");
+  try {
+    const store = await SqliteLearningTransactionStore.open(file);
+    await store.transaction(scope, async tx => {
+      await tx.activateSkill(activeSkill("identity-skill"));
+    });
+    store.close();
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(file);
+    try {
+      const tampered = { ...activeSkill("identity-skill"), id: "different-skill", name: "different-name", policyRevision: "policy-2" };
+      db.prepare("UPDATE learning_active_skills SET payload=? WHERE tenant_id=? AND principal_id=? AND project_id=? AND skill_id=?")
+        .run(JSON.stringify(tampered), scope.tenantId, scope.principalId, scope.projectId, "identity-skill");
+    } finally {
+      db.close();
+    }
+
+    const reopened = await SqliteLearningTransactionStore.open(file);
+    try {
+      await assert.rejects(
+        reopened.transaction(scope, tx => tx.listActiveSkills(scope)),
+        /Corrupt persisted learning active skill identity/,
+      );
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("SQLite learning store serializes overlapping async transactions on one connection", async () => {
   const store = await SqliteLearningTransactionStore.open(":memory:");
   try {
