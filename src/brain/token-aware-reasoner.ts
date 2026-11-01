@@ -67,6 +67,10 @@ function asInferenceRequest(request: string): InferenceRequest {
 export class TokenAwareBrainReasoner implements BrainReasoner {
   constructor(private readonly gateway: TokenAwareGateway) {}
 
+  getBudgetSnapshot() {
+    return this.gateway.getBudgetSnapshot();
+  }
+
   async prepare(
     request: string,
     options: {
