@@ -106,3 +106,72 @@ test("consolidation rejects invalid analysis time and respects scan bounds", asy
   assert.deepEqual(report.maintenance.duplicates, []);
   assert.equal(report.staleCandidates.length, 1);
 });
+
+
+test("verified memory revalidation separates unverified knowledge from verified knowledge", async () => {
+  const { analyzeVerifiedMemoryRevalidation } = await import("../src/brain/memory-maintenance.js");
+  const records = [
+    { id: "legacy", kind: "decision", updatedAt: "2026-10-01T00:00:00Z" },
+    {
+      id: "verified-old",
+      kind: "repair",
+      verification: {
+        candidateId: "candidate-1",
+        runId: "run-1",
+        verifiedAt: "2026-01-01T00:00:00Z",
+        evidenceIds: ["test-evidence"],
+        checks: [{ name: "evidence", passed: true }, { name: "regression", passed: true }, { name: "policy", passed: true }],
+      },
+    },
+    {
+      id: "verified-new",
+      kind: "convention",
+      verification: {
+        candidateId: "candidate-2",
+        runId: "run-2",
+        verifiedAt: "2026-10-31T00:00:00Z",
+        evidenceIds: ["test-evidence-2"],
+        checks: [{ name: "evidence", passed: true }, { name: "regression", passed: true }, { name: "policy", passed: true }],
+      },
+    },
+    { id: "episode", kind: "episode" },
+  ];
+  const before = structuredClone(records);
+  const report = analyzeVerifiedMemoryRevalidation(records, {
+    now: "2026-11-01T00:00:00Z",
+    revalidateAfterDays: 180,
+  });
+  assert.equal(report.scanned, 3);
+  assert.equal(report.verified, 2);
+  assert.equal(report.unverified, 1);
+  assert.deepEqual(report.revalidationCandidates.map((item) => [item.id, item.reason]), [
+    ["legacy", "missing-provenance"],
+    ["verified-old", "verification-expired"],
+  ]);
+  assert.deepEqual(records, before);
+});
+
+test("verified memory revalidation flags incomplete or invalid provenance and respects bounds", async () => {
+  const { analyzeVerifiedMemoryRevalidation } = await import("../src/brain/memory-maintenance.js");
+  const report = analyzeVerifiedMemoryRevalidation([
+    { id: "incomplete", kind: "decision", verification: { candidateId: "candidate" } },
+    {
+      id: "future",
+      kind: "repair",
+      verification: {
+        candidateId: "candidate", runId: "run", verifiedAt: "2027-01-01T00:00:00Z",
+        evidenceIds: ["evidence"],
+        checks: [{ name: "evidence", passed: true }, { name: "regression", passed: true }, { name: "policy", passed: true }],
+      },
+    },
+    { id: "ignored", kind: "decision" },
+  ], { now: "2026-11-01T00:00:00Z", maxRecords: 2 });
+  assert.equal(report.scanned, 2);
+  assert.equal(report.unverified, 1);
+  assert.equal(report.verified, 1);
+  assert.deepEqual(report.revalidationCandidates.map((item) => item.reason), [
+    "incomplete-provenance",
+    "invalid-verification-time",
+  ]);
+  assert.throws(() => analyzeVerifiedMemoryRevalidation([], { now: "not-a-date" }));
+});
