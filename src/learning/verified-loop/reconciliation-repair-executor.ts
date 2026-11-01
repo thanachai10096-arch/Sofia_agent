@@ -44,7 +44,7 @@ export interface LearningRepairApprovalBinding {
   skillId: string;
   scope: LearningScope;
   policyRevision: string;
-  status: "approved";
+  status: "approved" | "revoked";
 }
 export interface LearningRepairSnapshot {
   scope: LearningScope;
