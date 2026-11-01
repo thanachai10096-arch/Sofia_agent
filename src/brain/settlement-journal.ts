@@ -5,6 +5,7 @@ import { sofiaStateDirectory } from "../platform/state-directory.js";
 import type { TokenUsage } from "./token-budget.js";
 
 type JournalEvent =
+  | { version: 1; type: "checkpoint"; at: string }
   | { version: 1; type: "started"; attemptId: string; at: string; maxInputTokens: number; maxOutputTokens: number }
   | { version: 1; type: "settled"; attemptId: string; at: string; usageKnown: boolean; usage?: TokenUsage };
 
@@ -84,23 +85,23 @@ export class FileSettlementJournal {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
     }
-    const started = new Set<string>();
-    const settled = new Set<string>();
+    let hasUncheckpointedAttempt = false;
     for (const line of source.split("\n")) {
       if (!line) continue;
       let event: JournalEvent;
-      try {
-        event = JSON.parse(line) as JournalEvent;
-      } catch {
-        // Corrupt accounting data is ambiguous and must fail closed.
-        return true;
-      }
-      if (event.version !== 1 || typeof event.attemptId !== "string") return true;
-      if (event.type === "started") started.add(event.attemptId);
-      else if (event.type === "settled") settled.add(event.attemptId);
-      else return true;
+      try { event = JSON.parse(line) as JournalEvent; }
+      catch { return true; }
+      if (event.version !== 1) return true;
+      if (event.type === "checkpoint") hasUncheckpointedAttempt = false;
+      else if (event.type === "started") hasUncheckpointedAttempt = true;
+      else if (event.type !== "settled" || typeof event.attemptId !== "string") return true;
     }
-    return [...started].some((id) => !settled.has(id));
+    return hasUncheckpointedAttempt;
+  }
+
+  async acknowledgeCheckpoint(runId: string): Promise<void> {
+    if (!runId) throw new Error("Invalid settlement journal checkpoint");
+    await this.append(runId, { version: 1, type: "checkpoint", at: new Date().toISOString() });
   }
 
   async deleteRun(runId: string): Promise<void> {
