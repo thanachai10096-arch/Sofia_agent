@@ -235,7 +235,7 @@ function priorReferenceContext(context?: string): { trust: "untrusted_reference_
 }
 
 export class SofiaBrain {
-  readonly runId = randomUUID();
+  runId = randomUUID();
 
   private state: BrainState = "idle";
   private started = false;
@@ -894,6 +894,10 @@ export class SofiaBrain {
 
       if (resumed) {
         if (resumed.version !== 1) throw new Stop("Unsupported run snapshot version");
+        if (typeof resumed.runId !== "string" || !resumed.runId.trim()) throw new Stop("Invalid run snapshot identity");
+        // Keep the durable run identity stable so settlement recovery and ownership
+        // remain attached to the original job after a worker restart.
+        this.runId = resumed.runId;
         if (resumed.task !== input.task) throw new Stop("Run snapshot task mismatch");
         understanding = resumed.understanding;
         currentPlan = this.validatePlan(resumed.plan);
