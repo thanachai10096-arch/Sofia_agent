@@ -103,6 +103,22 @@ test("rejects a receipt whose stored ID differs from the requested receipt ID", 
   assert.equal(state.experiences.length, 0);
 });
 
+test("fails closed when the receipt evidence adapter returns malformed rows", async () => {
+  const state = makeHost();
+  const getEvidence = state.host.verification.getEvidence;
+  state.host.verification.getEvidence = async (_requestedScope, ids) => {
+    if (ids.some(id => id.startsWith("evidence-"))) return [null as unknown as RunEvidence];
+    return getEvidence(scope, ids);
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "malformed-receipt-evidence", "run1");
+
+  const result = await loop.recordVerifiedCompletion(scope, "malformed-receipt-evidence", "Fix TypeScript build");
+  assert.equal(result.recorded, false);
+  assert.equal(state.experiences.length, 0);
+  assert.equal(state.active.length, 0);
+});
+
 test("rejects stale policy receipts and untrusted evidence", async () => {
   const state = makeHost();
   const loop = new VerifiedLearningLoop(state.host);
