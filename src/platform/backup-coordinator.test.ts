@@ -516,7 +516,9 @@ test("restore staging rejects a tampered bundle before creating a private tempor
         return [{ path: "state.json", content: Buffer.from("verified payload") }];
       } },
     ], createdAt);
-    bundle.files.get("state.json")![0] ^= 0xff;
+    const stagedBytes = bundle.files.get("state.json");
+    assert.ok(stagedBytes);
+    stagedBytes[0] = stagedBytes[0]! ^ 0xff;
     await assert.rejects(stageBackupBundleForRestore(bundle, root), /integrity|checksum|hash/i);
     const remaining = await (await import("node:fs/promises")).readdir(root);
     assert.deepEqual(remaining, []);
