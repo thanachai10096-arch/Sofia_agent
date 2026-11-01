@@ -288,7 +288,7 @@ export async function executeLearningRepairPlan(
       }
       continue;
     }
-    if (snapshot.policyRevision !== action.expectedPolicyRevision || !snapshot.explicitlyApproved || !snapshot.trustedEvidenceValid || snapshot.approvalBinding?.id !== action.approvalId) {
+    if (snapshot.policyRevision !== action.expectedPolicyRevision || !snapshot.explicitlyApproved || !snapshot.trustedEvidenceValid || snapshot.approvalBinding.id !== action.approvalId) {
       const reason = "scope/policy/approval/evidence revalidation failed";
       const entry = existing ?? { key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running" as const, attempts: 0, updatedAt: now() };
       const claim = await journal.begin(entry);
@@ -384,6 +384,7 @@ export async function executeLearningRepairPlan(
       const after = await host.revalidate(action);
       if (!after || !validScope(after.scope) || !sameScope(after.scope, action.scope) ||
           !after.exists || !after.active || after.policyRevision !== action.expectedPolicyRevision ||
+          !after.approvalBinding || !validScope(after.approvalBinding.scope) ||
           !after.explicitlyApproved || !after.trustedEvidenceValid ||
           after.approvalBinding.id !== action.approvalId || after.approvalBinding.actorId !== action.actorId ||
           after.approvalBinding.skillId !== action.skillId || !sameScope(after.approvalBinding.scope, action.scope) ||
