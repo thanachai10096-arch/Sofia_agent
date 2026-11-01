@@ -28,6 +28,8 @@ Use modelRouteId set to "auto" or omit the field to let Sofia choose a route bas
 
 An explicitly selected route is not silently replaced by another route. If the route is unknown, unhealthy, or cannot satisfy the task's declared capabilities, Sofia returns a visible error. Use automatic selection when the task may require different capabilities.
 
+For Brain inference in automatic mode, Sofia may try another eligible route after a provider failure only when the failed provider reports validated token usage. That usage is charged before the next route is attempted. If usage is unknown, the run budget is stopped and no fallback request is sent; cancellation, timeout, invalid output, and output-cap violations are also not retried. Each provider attempt is limited to one request.
+
 ## Provider configuration
 
 - SOFIA_MODEL_PROVIDER=openrouter selects OpenRouter.
