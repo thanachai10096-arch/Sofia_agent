@@ -139,9 +139,29 @@ export class FileUserMemoryStore implements UserMemoryStore {
     };
     await this.withUserWriteLock(userId, async () => {
       const entries = await this.read(userId);
-      const index = entries.findIndex((item) => item.id === safeEntry.id);
-      if (index >= 0) entries[index] = safeEntry;
-      else entries.push(safeEntry);
+      const now = new Date().toISOString();
+      const normalizedContent = normalizeMemorySearchText(safeEntry.content);
+      // A repeated save with a fresh UUID should update the existing memory,
+      // not create a second copy. Keep the original identity and creation time.
+      const duplicateIndex = entries.findIndex((item) =>
+        item.kind === safeEntry.kind &&
+        normalizeMemorySearchText(item.content) === normalizedContent
+      );
+      const idIndex = entries.findIndex((item) => item.id === safeEntry.id);
+      const index = idIndex >= 0 ? idIndex : duplicateIndex;
+      if (index >= 0) {
+        const existing = entries[index]!;
+        entries[index] = {
+          ...safeEntry,
+          id: existing.id,
+          createdAt: existing.createdAt,
+          updatedAt: now,
+          uses: existing.uses,
+          confidence: Math.max(existing.confidence, safeEntry.confidence),
+        };
+      } else {
+        entries.push({ ...safeEntry, updatedAt: now });
+      }
       await this.writeEntries(userId, entries.slice(-MAX_ENTRIES));
     });
   }
