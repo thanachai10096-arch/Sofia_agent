@@ -383,6 +383,13 @@ class FileJobStateStore {
       if (index >= 0) {
         const current = records[index]!;
         if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
+        // A matching token is not sufficient once its lease has expired: a paused
+        // worker may resume after its deadline but before another worker reclaims
+        // the job. Reject its snapshot/result writes during that gap as well.
+        if (current.status === "running" && record.status === "running") {
+          const leaseExpiresAt = current.leaseExpiresAt ? Date.parse(current.leaseExpiresAt) : 0;
+          if (!Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= Date.now()) return false;
+        }
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
         records[index] = {
           ...record,
