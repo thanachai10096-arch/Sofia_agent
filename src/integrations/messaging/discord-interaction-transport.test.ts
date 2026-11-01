@@ -94,3 +94,23 @@ test("Discord transport accepts additional allowlisted slash command names and f
   await transport.stop();
 });
 
+
+
+test("Discord transport reports stopped, running, and stopped lifecycle states", async () => {
+  const transport = createDiscordInteractionTransport({ publicKeyHex, botToken });
+  assert.equal(transport.getStatus(), "stopped");
+
+  const parent = new AbortController();
+  await transport.start(parent.signal, async () => {});
+  assert.equal(transport.getStatus(), "running");
+
+  parent.abort();
+  assert.equal(transport.getStatus(), "stopped");
+
+  await transport.stop();
+  await transport.start(new AbortController().signal, async () => {});
+  assert.equal(transport.getStatus(), "running");
+
+  await transport.stop();
+  assert.equal(transport.getStatus(), "stopped");
+});
