@@ -89,3 +89,9 @@ The code outline above is not a claim that the repository's API server is alread
 - It is not wired into `createTelegramMessagingRuntime`; text messaging behavior is unchanged. A single Telegram update dispatcher must route voice and text events without running two competing `getUpdates` loops.
 
 Automated tests cover fixed-origin downloads, path traversal rejection, extension allowlisting, streamed size limits, multipart upload, and cancellation. These are mocked HTTP tests, not a live Telegram bot test.
+
+### Telegram voice update handoff
+
+The Telegram adapter can optionally expose voice messages through `TelegramAdapterOptions.onVoiceMessage`. This callback runs from the existing Telegram update poller; it does not create a second `getUpdates` loop and voice messages are not misrouted as text commands. The callback receives the sender/chat identifiers, Telegram file ID, MIME hint, byte-size hint, and Telegram-reported duration.
+
+This is an integration seam, not an enabled voice runtime. A host must still apply the existing user/chat access policy and durable deduplication before downloading media, use `createTelegramVoiceMediaClient` for bounded fixed-origin downloads, independently inspect/decode the audio to verify its actual format and duration (Telegram metadata is untrusted), then pass verified bytes to `VoiceWorkflow`. Only deliver a generated audio reply after the normal Sofia policy/runtime path succeeds. No codec, STT/TTS provider, audio storage, or live Telegram voice processing is enabled by this callback alone.
