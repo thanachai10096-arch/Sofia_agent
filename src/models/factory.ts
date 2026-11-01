@@ -47,6 +47,7 @@ function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if
 
 function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
+  const ownerEvolutionEngines = new Map<string, EvolutionEngine>();
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
   const settlementJournal = new FileSettlementJournal(workspace);
@@ -56,6 +57,15 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const projectMemory=new FileProjectMemoryStore(workspace, undefined, principalId);
     const skillLedger=new PersistentSkillLedger(projectMemory);
     const ownerNamespace = principalId === undefined ? "local" : createHash("sha256").update(principalId).digest("hex");
+    let runEvolution = evolution;
+    if (principalId !== undefined) {
+      let scopedEvolution = ownerEvolutionEngines.get(ownerNamespace);
+      if (!scopedEvolution) {
+        scopedEvolution = new EvolutionEngine(path.join(workspace, ".sofia", "evolution", ownerNamespace + ".json"));
+        ownerEvolutionEngines.set(ownerNamespace, scopedEvolution);
+      }
+      runEvolution = scopedEvolution;
+    }
     const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
       const checks = [
         { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
@@ -105,7 +115,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       maxContextBytes:intEnv("SOFIA_SUBAGENT_MAX_CONTEXT_BYTES",32768,256),
     });
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
-    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot:persistRunSnapshot,onEvent},limits});
+    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution:runEvolution,onRunSnapshot:persistRunSnapshot,onEvent},limits});
   };
 }
 
