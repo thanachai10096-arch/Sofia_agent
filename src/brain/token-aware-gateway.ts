@@ -321,6 +321,7 @@ export class TokenAwareGateway {
 
     if (candidates.length === 0) throw new GatewayError("no_eligible_route");
 
+    let activeReservation: Reservation | undefined;
     const work = (async (): Promise<{ value: unknown; usage: TokenUsage }> => {
       let reservedAny = false;
       let lastMeteredFailure: string | undefined;
@@ -334,6 +335,7 @@ export class TokenAwareGateway {
             inputTokens: candidate.prepared.inputTokensUpperBound,
             outputTokens: candidate.maxOutputTokens,
           });
+          activeReservation = lease;
           reservedAny = true;
         } catch (error: unknown) {
           if (!(error instanceof BudgetError)) throw error;
@@ -350,6 +352,7 @@ export class TokenAwareGateway {
           });
 
           const settled = lease.settle(reply.usage);
+          activeReservation = undefined;
           if (!settled.usageKnown) throw new GatewayError("invalid_usage");
           if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
           if (reply.finishReason !== "complete") throw new GatewayError("incomplete_output");
@@ -358,6 +361,7 @@ export class TokenAwareGateway {
         } catch (error: unknown) {
           if (error instanceof MeteredProviderError) {
             const settled = lease.settle(error.usage);
+            activeReservation = undefined;
             if (!settled.usageKnown) throw new GatewayError("invalid_usage");
             if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
 
@@ -375,6 +379,7 @@ export class TokenAwareGateway {
           // retried. Settling without usage charges the full reservation and stops
           // the run budget, preventing unmetered fallback calls.
           lease.settle();
+          activeReservation = undefined;
           if (!signal.aborted && !(error instanceof GatewayError)) {
             const id = candidate.route.id;
             this.routeFailures.set(id, (this.routeFailures.get(id) ?? 0) + 1);
@@ -392,8 +397,10 @@ export class TokenAwareGateway {
     })();
 
     return observeWithAbort(work, signal, () => {
-      // The in-flight reservation is settled by the active attempt's catch path.
-      // Stop the run immediately on cancellation; no further route may be attempted.
+      // Release the active reservation immediately even if the provider promise
+      // ignores cancellation; settlement is idempotent when its rejection arrives.
+      activeReservation?.settle();
+      activeReservation = undefined;
       this.budget.stop();
     });
   }
