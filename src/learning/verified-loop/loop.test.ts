@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { VerifiedLearningLoop } from "./loop.js";
+import { reconcileLearningActivationState } from "./reconciliation.js";
 import type {
   LearningExperience, LearningScope, LearningTransaction, RunEvidence, SkillCandidate,
   SkillEvaluation, ActiveLearningSkill, VerificationReceipt, VerifiedLearningHost,
@@ -283,4 +284,44 @@ test("recovers runtime promotion when learning-store activation commit fails", a
   assert.ok(recovered.skillActivated);
   assert.equal(runtimeRegistrations, 1, "runtime registration must not be duplicated");
   assert.equal(state.active.length, 1);
+});
+
+
+test("surfaces runtime-only promotion when policy changes before learning-store activation", async () => {
+  const state = makeHost();
+  let runtimeSkill: { id: string; scope: LearningScope; policyRevision: string; active: boolean } | undefined;
+  let registrations = 0;
+  state.host.promoteCandidate = async (requestedScope, candidate) => {
+    if (!runtimeSkill) {
+      registrations++;
+      runtimeSkill = { id: candidate.id, scope: requestedScope, policyRevision: "policy-1", active: true };
+    }
+    // Simulate policy changing after the external lifecycle side effect.
+    state.host.currentPolicyRevision = async () => "policy-2";
+    return true;
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "policy-cross-store-1", "run1");
+  addReceipt(state, "policy-cross-store-2", "run2");
+  addReceipt(state, "policy-cross-store-3", "run3");
+  await loop.recordVerifiedCompletion(scope, "policy-cross-store-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "policy-cross-store-2", "Fix TypeScript build");
+  const promoted = await loop.recordVerifiedCompletion(scope, "policy-cross-store-3", "Fix TypeScript build");
+
+  assert.equal(promoted.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+  assert.equal(registrations, 1);
+
+  // A stale receipt cannot silently finish the learning-store half on retry.
+  const retry = await loop.recordVerifiedCompletion(scope, "policy-cross-store-3", "Fix TypeScript build");
+  assert.equal(retry.recorded, false);
+  assert.equal(state.active.length, 0);
+
+  const report = reconcileLearningActivationState(scope, state.active, runtimeSkill ? [runtimeSkill] : []);
+  assert.equal(report.safe, false);
+  assert.deepEqual(report.issues, [{
+    kind: "runtime-active-without-learning-record",
+    skillId: runtimeSkill!.id,
+  }]);
+  assert.equal(registrations, 1, "policy drift must not cause duplicate runtime promotion");
 });
