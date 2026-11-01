@@ -139,3 +139,6 @@ export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/u
 
 export { createVoiceChannelHandler } from "./voice/channel-handler.js";
 export type { VoiceChannel, VerifiedVoiceEvent, VoiceEventDeduplicator, VoiceChannelAccessPolicy, VoiceChannelDelivery, VoiceChannelResult, VoiceChannelHandlerOptions } from "./voice/channel-handler.js";
+
+export { createTelegramVoiceMediaClient } from "./integrations/messaging/telegram-voice-media.js";
+export type { TelegramVoiceMediaConfig, TelegramVoiceFile } from "./integrations/messaging/telegram-voice-media.js";
