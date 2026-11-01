@@ -10,9 +10,11 @@ test("settlement journal records only bounded accounting metadata", async () => 
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-"));
   try {
     const journal = new FileSettlementJournal("workspace-secret", root);
-    const attempt = await journal.begin("run-private", { inputTokens: 12, outputTokens: 34 });
+    const claim = await journal.claimRun("run-private");
+    const attempt = await journal.begin("run-private", { inputTokens: 12, outputTokens: 34 }, claim);
     assert.equal(await journal.hasUnresolved("run-private"), true);
-    await journal.settle("run-private", attempt, { inputTokens: 8, outputTokens: 5 });
+    await journal.settle("run-private", attempt, { inputTokens: 8, outputTokens: 5 }, claim);
+    await claim.release();
     assert.equal(await journal.hasUnresolved("run-private"), true);
     await journal.acknowledgeCheckpoint("run-private");
     assert.equal(await journal.hasUnresolved("run-private"), false);
@@ -32,7 +34,9 @@ test("unresolved or corrupt settlement records fail closed", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-"));
   try {
     const journal = new FileSettlementJournal("workspace", root);
-    await journal.begin("run-1", { inputTokens: 1, outputTokens: 2 });
+    const claim = await journal.claimRun("run-1");
+    await journal.begin("run-1", { inputTokens: 1, outputTokens: 2 }, claim);
+    await claim.release();
     assert.equal(await journal.hasUnresolved("run-1"), true);
     await journal.deleteRun("run-1");
     assert.equal(await journal.hasUnresolved("run-1"), false);
@@ -117,6 +121,34 @@ test("settlement run claim excludes a separate Node.js worker process", async ()
     assert.equal(allowed.status, 0, allowed.stderr || allowed.stdout);
   } finally {
     await parentClaim.release();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("journal writes reject missing, released, or mismatched run claims", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-claim-validation-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+    const claim = await journal.claimRun("run-a");
+    await assert.rejects(
+      journal.begin("run-a", { inputTokens: 1, outputTokens: 1 }, {
+        assertRun() { throw new Error("invalid claim"); },
+        async release() {},
+      }),
+      /invalid claim/,
+    );
+    const attempt = await journal.begin("run-a", { inputTokens: 1, outputTokens: 1 }, claim);
+    await assert.rejects(
+      journal.settle("run-b", attempt, { inputTokens: 1, outputTokens: 1 }, claim),
+      /Invalid settlement journal settlement/,
+    );
+    await claim.release();
+    await assert.rejects(
+      journal.settle("run-a", attempt, { inputTokens: 1, outputTokens: 1 }, claim),
+      /claim is missing, released, or belongs to another run/,
+    );
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
