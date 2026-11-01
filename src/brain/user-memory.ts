@@ -51,7 +51,8 @@ const MEMORY_NEGATION_MARKERS = new Set([
 
 function memoryPolarityText(value: string): { terms: Set<string>; negated: boolean } {
   const normalized = normalizeMemorySearchText(value);
-  const negated = [...MEMORY_NEGATION_MARKERS].some((marker) => normalized.includes(marker));
+  const negated = /\\b(?:not|no|never|dont|doesnt|isnt|cant|wont)\\b/u.test(normalized) ||
+    /ไม่ใช่|ไม่|เลิก/u.test(normalized);
   const withoutNegation = normalized
     .replace(/\\b(?:not|no|never|dont|doesnt|isnt|cant|wont)\\b/gu, " ")
     .replace(/ไม่ใช่|ไม่|เลิก/gu, " ");
