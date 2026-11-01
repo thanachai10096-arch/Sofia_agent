@@ -12,6 +12,8 @@ test("settlement journal records only bounded accounting metadata", async () => 
     const attempt = await journal.begin("run-private", { inputTokens: 12, outputTokens: 34 });
     assert.equal(await journal.hasUnresolved("run-private"), true);
     await journal.settle("run-private", attempt, { inputTokens: 8, outputTokens: 5 });
+    assert.equal(await journal.hasUnresolved("run-private"), true);
+    await journal.acknowledgeCheckpoint("run-private");
     assert.equal(await journal.hasUnresolved("run-private"), false);
 
     const { readdir } = await import("node:fs/promises");
