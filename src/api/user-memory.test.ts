@@ -54,6 +54,11 @@ test("user memory API is owner-scoped, explicit, and redacts secrets", async () 
     assert.ok(memory.id);
     assert.ok(memory.content.includes("[REDACTED]"));
     assert.ok(!memory.content.includes("sk-abcdefghijklmnopqrstuvwxyz"));
+    const duplicate = await call("alice-token", "POST", "/v1/memory", {
+      kind: "preference", content: "My API key is sk-abcdefghijklmnopqrstuvwxyz and I prefer concise answers",
+    });
+    assert.equal(duplicate.status, 201);
+    assert.equal(duplicate.body.memory.id, memory.id);
 
     assert.equal((await call("bob-token", "GET", "/v1/memory")).body.memories && (await call("bob-token", "GET", "/v1/memory")).body.memories.length, 0);
     const aliceList = await call("alice-token", "GET", "/v1/memory?q=concise");
