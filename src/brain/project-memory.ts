@@ -23,14 +23,29 @@ const memoryWriteQueues = new Map<string, Promise<void>>();
 
 export class FileProjectMemoryStore implements ProjectMemoryStore {
   private readonly file: string;
+  private readonly project: string;
   constructor(project: string, root = sofiaStateDirectory("memory")) {
+    if (typeof project !== "string" || !project.trim()) throw new Error("Project memory requires a non-empty project identifier");
+    this.project = project;
     const key = createHash("sha256").update(project).digest("hex"); this.file = path.join(root, key + ".json");
   }
   private async read(): Promise<ProjectMemoryEntry[]> {
-    try { return JSON.parse(await fs.readFile(this.file, "utf8")) as ProjectMemoryEntry[]; }
+    let raw: string;
+    try { raw = await fs.readFile(this.file, "utf8"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error("Project memory file must contain a JSON array.");
+    if (parsed.some(entry => !entry || typeof entry !== "object" ||
+        (entry as ProjectMemoryEntry).project !== this.project)) {
+      throw new Error("Project memory file contains an entry outside its project boundary.");
+    }
+    return parsed as ProjectMemoryEntry[];
   }
   async save(entry: ProjectMemoryEntry): Promise<void> {
+    if (!entry || typeof entry !== "object" || entry.project !== this.project) {
+      throw new Error("Project memory entry does not belong to this store's project.");
+    }
+    if (typeof entry.content !== "string") throw new Error("Project memory content must be a string.");
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
     const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, 4000) };
     const previous = memoryWriteQueues.get(this.file) ?? Promise.resolve();
