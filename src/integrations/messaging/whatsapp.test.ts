@@ -66,11 +66,11 @@ test("WhatsApp adapter maps identities and sends chunked replies via the shared 
     async stop() {},
   };
   const adapter = createWhatsAppAdapter(transport);
-  const received: Array<{ platform: string; userId: string; conversationId: string }> = [];
+  const received: Array<{ platform: string; userId: string; channelId: string; conversationId: string }> = [];
   await adapter.start(new AbortController().signal, async (message) => {
-    received.push({ platform: message.platform, userId: message.identity.userId, conversationId: message.identity.conversationId });
+    received.push({ platform: message.platform, userId: message.identity.userId, channelId: message.identity.channelId, conversationId: message.identity.conversationId });
   });
-  assert.deepEqual(received, [{ platform: "whatsapp", userId: "66812345678", conversationId: "66812345678" }]);
+  assert.deepEqual(received, [{ platform: "whatsapp", userId: "66812345678", channelId: "66812345678", conversationId: "66812345678" }]);
   assert.deepEqual(await adapter.send({ conversationId: "66812345678", text: "reply" }), { state: "sent", providerMessageId: "wamid.out" });
   assert.deepEqual(sent, [{ recipient: "66812345678", text: "reply" }]);
   await adapter.stop();
