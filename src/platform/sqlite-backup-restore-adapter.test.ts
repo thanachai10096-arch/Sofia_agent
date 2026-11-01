@@ -28,14 +28,15 @@ async function validSqliteBytes(directory: string, filename: string): Promise<Ui
 test("SQLite restore adapter snapshots before mutation and uses close-replace-reopen lifecycle", async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-sqlite-restore-"));
   const database = path.join(parent, "sessions.sqlite");
-  await writeFile(database, sqliteBytes("original"));
+  const originalBytes = await validSqliteBytes(parent, "original-fixture.sqlite");
+  await writeFile(database, originalBytes);
   const events: string[] = [];
   const lifecycle = {
     getOpenStore() {
       return {
         createConsistentSnapshot(destination: string) {
           events.push("snapshot");
-          const bytes = sqliteBytes("original");
+          const bytes = originalBytes;
           // The real SqliteSessionStore uses VACUUM INTO; this fixture models its contract.
           requireFsWrite(destination, bytes);
           return destination;
@@ -59,7 +60,7 @@ test("SQLite restore adapter snapshots before mutation and uses close-replace-re
     assert.deepEqual(events, ["snapshot", "close", "reopen"]);
     assert.deepEqual(await readFile(database), restoredBytes);
     await adapter.rollback(snapshot);
-    assert.deepEqual(await readFile(database), sqliteBytes("original"));
+    assert.deepEqual(await readFile(database), originalBytes);
     assert.deepEqual(events, ["snapshot", "close", "reopen", "close", "reopen"]);
   } finally {
     await rm(parent, { recursive: true, force: true });
