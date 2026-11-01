@@ -43,6 +43,48 @@ test("user memory rejects prompt injection and redacts secrets", async () => {
   }
 });
 
+test("repeated equivalent saves update one memory and preserve its identity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-dedupe-"));
+  try {
+    const store = new FileUserMemoryStore(root);
+    const original = createUserMemoryEntry("preference", "Prefers TypeScript for core agent logic");
+    original.createdAt = "2026-01-01T00:00:00.000Z";
+    original.updatedAt = "2026-01-02T00:00:00.000Z";
+    original.uses = 7;
+    original.confidence = 0.8;
+    await store.save("user-a", original);
+
+    const repeated = createUserMemoryEntry("preference", "prefers TypeScript, for core agent logic.");
+    repeated.confidence = 0.6;
+    await store.save("user-a", repeated);
+
+    const saved = await store.list("user-a");
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0]?.id, original.id);
+    assert.equal(saved[0]?.createdAt, original.createdAt);
+    assert.equal(saved[0]?.uses, 7);
+    assert.equal(saved[0]?.confidence, 0.8);
+    assert.equal(saved[0]?.updatedAt, repeated.updatedAt);
+    assert.equal((await store.list("user-b")).length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("memory deduplication is scoped by user and kind", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-dedupe-scope-"));
+  try {
+    const store = new FileUserMemoryStore(root);
+    await store.save("user-a", createUserMemoryEntry("fact", "Uses Node.js"));
+    await store.save("user-a", createUserMemoryEntry("goal", "Uses Node.js"));
+    await store.save("user-b", createUserMemoryEntry("fact", "Uses Node.js"));
+    assert.equal((await store.list("user-a")).length, 2);
+    assert.equal((await store.list("user-b")).length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("user memory supports deletion and full forget", async () => {
   const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-delete-"));
   try {
