@@ -151,13 +151,19 @@ export function createTelegramMessagingRuntime(
         const id = await outbox.enqueue("telegram", message);
         const lease = await outbox.claim(id);
         if (!lease) return false;
-        const delivered = gateway ? await gateway.send("telegram", message) : false;
-        if (delivered) await outbox.markSent(id, lease);
-        else {
+        try {
+          const delivered = gateway ? await gateway.send("telegram", message) : false;
+          if (delivered) {
+            await outbox.markSent(id, lease);
+          } else {
+            await outbox.releaseClaim(id, lease);
+            onWarning("Telegram outbound delivery remains pending.");
+          }
+          return delivered;
+        } catch (error) {
           await outbox.releaseClaim(id, lease);
-          onWarning("Telegram outbound delivery remains pending.");
+          throw error;
         }
-        return delivered;
       } catch {
         onWarning("Telegram outbound message could not be persisted; operator review is required.");
         return false;
