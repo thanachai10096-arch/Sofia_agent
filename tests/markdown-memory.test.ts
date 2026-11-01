@@ -20,7 +20,7 @@ test("Markdown user memory mirrors explicit entries into private per-user files"
     await store.save("principal-b", createUserMemoryEntry("fact", "Uses TypeScript"));
     assert.doesNotMatch(a, /Uses TypeScript/);
     assert.equal(await store.delete("principal-a", entry.id), true);
-    assert.match(await readFile(join(root, "markdown", "users", (await import("node:crypto")).createHash("sha256").update("principal-a").digest("hex"), "USER.md"), "utf8"), /No saved memories/);
+    assert.match(await readFile(join(root, "markdown", "users", createHash("sha256").update("principal-a").digest("hex"), "USER.md"), "utf8"), /No saved memories/);
     const bFile = join(root, "markdown", "users", createHash("sha256").update("principal-b").digest("hex"), "USER.md");
     await store.clear("principal-b");
     await assert.rejects(readFile(bFile, "utf8"), { code: "ENOENT" });
@@ -42,8 +42,8 @@ test("Markdown project memory writes project-scoped MEMORY.md snapshots", async 
     const now = new Date().toISOString();
     await store.save({ id: "decision-1", project: "/workspace/a", kind: "decision", content: "Use a stable adapter", confidence: 1, createdAt: now, updatedAt: now, uses: 0 });
     await store.save({ id: "decision-2", project: "/workspace/b", kind: "decision", content: "Keep tenant data separate", confidence: 1, createdAt: now, updatedAt: now, uses: 0 });
-    const aKey = (await import("node:crypto")).createHash("sha256").update("/workspace/a").digest("hex");
-    const bKey = (await import("node:crypto")).createHash("sha256").update("/workspace/b").digest("hex");
+    const aKey = createHash("sha256").update("/workspace/a").digest("hex");
+    const bKey = createHash("sha256").update("/workspace/b").digest("hex");
     const a = await readFile(join(root, "projects", aKey, "MEMORY.md"), "utf8");
     const b = await readFile(join(root, "projects", bKey, "MEMORY.md"), "utf8");
     assert.match(a, /Use a stable adapter/);
