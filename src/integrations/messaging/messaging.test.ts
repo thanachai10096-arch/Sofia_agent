@@ -192,3 +192,37 @@ test("gateway does not pretend a failed startup can be restarted with an aborted
   await assert.rejects(() => gateway.start(), /transport failed/);
   assert.equal((await gateway.dispatch(message())).status, "disabled");
 });
+
+
+test("gateway restart fences stale adapter callbacks and resumes with a fresh generation", async () => {
+  const callbacks: Array<(message: InboundMessage) => Promise<void>> = [];
+  let starts = 0;
+  const sent: string[] = [];
+  const restartable: MessagingAdapter = {
+    platform: "telegram",
+    async start(_signal, onMessage) { starts++; callbacks.push(onMessage); },
+    async stop() {},
+    async send(input) { sent.push(input.text); return { state: "sent" }; },
+  };
+  let handled = 0;
+  const gateway = createMessagingGateway({
+    enabled: true,
+    adapters: [restartable],
+    allowUser: () => true,
+    onMessage: async () => { handled++; return "ok"; },
+  });
+  assert.equal(gateway.getStatus(), "idle");
+  await gateway.start();
+  assert.equal(gateway.getStatus(), "running");
+  const oldCallback = callbacks[0]!;
+  await gateway.restart();
+  assert.equal(starts, 2);
+  assert.equal(gateway.getStatus(), "running");
+  await oldCallback(message({ messageId: "stale" }));
+  assert.equal(handled, 0);
+  await callbacks[1]!(message({ messageId: "fresh" }));
+  assert.equal(handled, 1);
+  assert.deepEqual(sent, ["ok"]);
+  await gateway.stop();
+  assert.equal(gateway.getStatus(), "stopped");
+});
