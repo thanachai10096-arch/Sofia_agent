@@ -38,12 +38,22 @@ export interface LearningRepairJournal {
   heartbeat?(key: string, scope: LearningScope, claimToken: string, at: string): Promise<boolean>;
   audit(event: LearningRepairAuditEvent): Promise<void>;
 }
+export interface LearningRepairApprovalBinding {
+  id: string;
+  actorId: string;
+  skillId: string;
+  scope: LearningScope;
+  policyRevision: string;
+  status: "approved";
+}
 export interface LearningRepairSnapshot {
   scope: LearningScope;
   exists: boolean;
   active: boolean;
   policyRevision: string;
   explicitlyApproved: boolean;
+  /** Returned only after resolving the persisted approval receipt authoritatively. */
+  approvalBinding?: LearningRepairApprovalBinding;
   trustedEvidenceValid: boolean;
 }
 export interface LearningRepairExecutorHost {
@@ -251,6 +261,7 @@ export async function executeLearningRepairPlan(
         typeof action.skillId !== "string" || !action.skillId.trim() || action.skillId.length > 200 ||
         typeof action.expectedPolicyRevision !== "string" || !action.expectedPolicyRevision.trim() || action.expectedPolicyRevision.length > 200 ||
         typeof action.actorId !== "string" || !action.actorId.trim() || action.actorId.length > 200 ||
+        typeof action.approvalId !== "string" || !action.approvalId.trim() || action.approvalId.length > 200 ||
         typeof action.idempotencyKey !== "string" || !action.idempotencyKey.trim() || action.idempotencyKey.length > 500 ||
         typeof plan.planId !== "string" || !plan.planId.trim() ||
         action.idempotencyKey !== JSON.stringify([plan.planId, action.skillId])) {
@@ -262,18 +273,22 @@ export async function executeLearningRepairPlan(
     if (!snapshot || !validScope(snapshot.scope) || !sameScope(snapshot.scope, action.scope) ||
         typeof snapshot.exists !== "boolean" || typeof snapshot.active !== "boolean" ||
         typeof snapshot.explicitlyApproved !== "boolean" || typeof snapshot.trustedEvidenceValid !== "boolean" ||
-        typeof snapshot.policyRevision !== "string" || !snapshot.policyRevision.trim()) {
+        typeof snapshot.policyRevision !== "string" || !snapshot.policyRevision.trim() ||
+        !snapshot.approvalBinding || snapshot.approvalBinding.id !== action.approvalId ||
+        snapshot.approvalBinding.actorId !== action.actorId || snapshot.approvalBinding.skillId !== action.skillId ||
+        !validScope(snapshot.approvalBinding.scope) || !sameScope(snapshot.approvalBinding.scope, action.scope) ||
+        snapshot.approvalBinding.policyRevision !== action.expectedPolicyRevision || snapshot.approvalBinding.status !== "approved") {
       throw new Error("Authoritative repair revalidation returned invalid state");
     }
     if (existing?.state === "succeeded") {
-      if (snapshot.exists && snapshot.active && snapshot.policyRevision === action.expectedPolicyRevision && snapshot.explicitlyApproved && snapshot.trustedEvidenceValid) {
+      if (snapshot.exists && snapshot.active && snapshot.policyRevision === action.expectedPolicyRevision && snapshot.explicitlyApproved && snapshot.trustedEvidenceValid && snapshot.approvalBinding?.id === action.approvalId) {
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", reason: "journal and authoritative state agree" });
       } else {
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "journal says succeeded but authoritative state drifted; manual reconciliation required" });
       }
       continue;
     }
-    if (snapshot.policyRevision !== action.expectedPolicyRevision || !snapshot.explicitlyApproved || !snapshot.trustedEvidenceValid) {
+    if (snapshot.policyRevision !== action.expectedPolicyRevision || !snapshot.explicitlyApproved || !snapshot.trustedEvidenceValid || snapshot.approvalBinding?.id !== action.approvalId) {
       const reason = "scope/policy/approval/evidence revalidation failed";
       const entry = existing ?? { key: action.idempotencyKey, scope: { ...action.scope }, skillId: action.skillId, policyRevision: action.expectedPolicyRevision, state: "running" as const, attempts: 0, updatedAt: now() };
       const claim = await journal.begin(entry);
@@ -367,7 +382,10 @@ export async function executeLearningRepairPlan(
       const after = await host.revalidate(action);
       if (!after || !validScope(after.scope) || !sameScope(after.scope, action.scope) ||
           !after.exists || !after.active || after.policyRevision !== action.expectedPolicyRevision ||
-          !after.explicitlyApproved || !after.trustedEvidenceValid) {
+          !after.explicitlyApproved || !after.trustedEvidenceValid ||
+          after.approvalBinding?.id !== action.approvalId || after.approvalBinding.actorId !== action.actorId ||
+          after.approvalBinding.skillId !== action.skillId || !sameScope(after.approvalBinding.scope, action.scope) ||
+          after.approvalBinding.policyRevision !== action.expectedPolicyRevision || after.approvalBinding.status !== "approved") {
         throw new Error("Post-repair authoritative verification failed");
       }
       await journal.finish(action.idempotencyKey, action.scope, "succeeded", "Postcondition verified", entry.claimToken);
