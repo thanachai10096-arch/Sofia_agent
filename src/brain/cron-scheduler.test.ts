@@ -415,7 +415,7 @@ test("cancelled recovered execution does not overwrite schedule completion metad
   assert.equal(result.monitoring, 1);
   await scheduler.cancel(schedule.id, "alice");
   now = new Date("2026-10-17T00:01:00.000Z");
-  for (let i = 0; i < 50 && scheduler["active"].size > 0; i++) {
+  for (let i = 0; i < 50 && !state.audit.some((event: any) => event.action === "schedule.recovery.finished"); i++) {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   assert.equal(state.history[0].status, "cancelled");
