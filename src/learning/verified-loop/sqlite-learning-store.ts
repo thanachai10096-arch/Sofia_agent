@@ -3,7 +3,6 @@ import path from "node:path";
 import type { ActiveLearningSkill, LearningExperience, LearningScope, LearningTransaction, SkillCandidate, SkillEvaluation, VerifiedLearningHost } from "./ports.js";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 type Db = DatabaseSyncType;
-type ScopeRow = { payload: string };
 type ExperienceRow = { receipt_id: string; experience_id: string; payload: string };
 type CandidateRow = { candidate_id: string; payload: string };
 type ActiveSkillRow = { skill_id: string; skill_name: string; policy_revision: string; payload: string };
