@@ -198,6 +198,18 @@ test("refuses ineligible plans and cross-scope actions", async () => {
   await assert.rejects(() => executeLearningRepairPlan({ ...plan, actions: [{ ...action, scope: { ...scope, tenantId: "tenant-b" } }] }, journal, host), /cross-scope/);
 });
 
+test("rejects duplicate skill actions before any journal or lifecycle side effect", async () => {
+  const journal = new MemoryJournal();
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  await assert.rejects(
+    () => executeLearningRepairPlan({ ...plan, actions: [action, { ...action }] }, journal, host),
+    /duplicate or invalid skill actions/,
+  );
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.size, 0);
+});
+
 test("rejects an action whose idempotency key is not bound to the plan and skill", async () => {
   const journal = new MemoryJournal();
   let registrations = 0;
