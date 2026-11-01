@@ -98,8 +98,19 @@ test("user memory API is owner-scoped, explicit, and redacts secrets", async () 
     assert.equal((await call("read-only-token", "POST", "/v1/memory/review", {
       kind: "preference", content: "I do not prefer concise answers", decision: "keep-both",
     })).status, 403);
+
+    // A clear operation must affect only the authenticated API-key identity.
+    const bobMemory = await call("bob-token", "POST", "/v1/memory", {
+      kind: "fact", content: "Bob's private project is called Blue Lantern",
+    });
+    assert.equal(bobMemory.status, 201);
+    const bobMemoryId = bobMemory.body.memory.id as string;
+    assert.equal((await call("alice-token", "DELETE", "/v1/memory/" + encodeURIComponent(bobMemoryId))).status, 404);
     assert.equal((await call("alice-token", "DELETE", "/v1/memory")).body.cleared, true);
     assert.deepEqual((await call("alice-token", "GET", "/v1/memory")).body.memories, []);
+    const bobAfterAliceClear = await call("bob-token", "GET", "/v1/memory");
+    assert.equal(bobAfterAliceClear.body.memories.length, 1);
+    assert.equal(bobAfterAliceClear.body.memories[0].id, bobMemoryId);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
