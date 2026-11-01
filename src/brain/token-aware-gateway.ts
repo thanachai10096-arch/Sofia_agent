@@ -242,6 +242,10 @@ function observeWithAbort<T>(
 export class TokenAwareGateway {
   private readonly routeFailures = new Map<string, number>();
   private readonly checkedJournalRuns = new Set<string>();
+  private readonly blockedJournalRuns = new Set<string>();
+  // An ambiguous provider settlement blocks further calls for this run even
+  // after the initial journal check has been cached. The durable journal also
+  // enforces this after process restart.
 
   constructor(
     private readonly budget: TokenBudget,
@@ -278,6 +282,9 @@ export class TokenAwareGateway {
 
     signal.throwIfAborted();
     if (this.settlementJournal && !runId) throw new GatewayError("model_call_failed", "missing_run_identity");
+    if (this.settlementJournal && this.blockedJournalRuns.has(runId!)) {
+      throw new GatewayError("model_call_failed", "unresolved_provider_settlement");
+    }
     if (this.settlementJournal && !this.checkedJournalRuns.has(runId!)) {
       if (await this.settlementJournal.hasUnresolved(runId!)) {
         throw new GatewayError("model_call_failed", "unresolved_provider_settlement");
@@ -390,8 +397,15 @@ export class TokenAwareGateway {
             const settled = lease.settle(error.usage);
             activeReservation = undefined;
             if (settled.usageKnown && journalAttempt && this.settlementJournal) {
-              await this.settlementJournal.settle(runId!, journalAttempt, error.usage);
-              journalAttempt = undefined;
+              try {
+                await this.settlementJournal.settle(runId!, journalAttempt, error.usage);
+                journalAttempt = undefined;
+              } catch (journalError) {
+                // The provider outcome is known but its durable settlement was not
+                // recorded. Block this run until reconciliation acknowledges it.
+                this.blockedJournalRuns.add(runId!);
+                throw journalError;
+              }
             }
             if (!settled.usageKnown) throw new GatewayError("invalid_usage");
             if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
@@ -411,8 +425,10 @@ export class TokenAwareGateway {
           // the run budget, preventing unmetered fallback calls.
           lease.settle();
           activeReservation = undefined;
-          // Keep the journal attempt unresolved when usage is unknown. A restart
-          // must not repeat a provider call whose billing outcome is ambiguous.
+          // Keep the journal attempt unresolved when usage is unknown. Block
+          // this run in-process too: checkedJournalRuns only caches the initial
+          // preflight and must not let a later call bypass the unresolved attempt.
+          if (journalAttempt && this.settlementJournal) this.blockedJournalRuns.add(runId!);
           if (!signal.aborted && !(error instanceof GatewayError)) {
             const id = candidate.route.id;
             this.routeFailures.set(id, (this.routeFailures.get(id) ?? 0) + 1);
