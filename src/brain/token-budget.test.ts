@@ -157,3 +157,49 @@ test("call and concurrency limits are enforced before mutation", () => {
   assert.equal(ledger.snapshot().calls, 1);
   assert.equal(ledger.snapshot().inFlight, 1);
 });
+
+
+test("settled token budget snapshots restore cumulative run and per-model limits", () => {
+  const original = budget();
+  original.reserve("internal-pool", { inputTokens: 7, outputTokens: 3 }).settle({
+    inputTokens: 5,
+    outputTokens: 2,
+  });
+  const saved = original.snapshot();
+  const restored = new TokenBudget(limit(), [{
+    key: "internal-pool",
+    limit: limit(),
+    price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 4n },
+  }], saved);
+
+  assert.deepEqual(restored.snapshot(), saved);
+  assert.throws(() => {
+    const constrained = new TokenBudget(limit(6), [{
+      key: "internal-pool",
+      limit: limit(6),
+      price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 4n },
+    }], saved);
+    constrained.reserve("internal-pool", { inputTokens: 1, outputTokens: 1 });
+  }, /exceeds configured limits/);
+});
+
+test("restored stopped budget remains stopped and model set mismatches fail closed", () => {
+  const original = budget();
+  original.reserve("internal-pool", { inputTokens: 1, outputTokens: 1 }).settle();
+  const saved = original.snapshot();
+
+  const restored = new TokenBudget(limit(), [{
+    key: "internal-pool",
+    limit: limit(),
+    price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 4n },
+  }], saved);
+  assert.equal(restored.snapshot().stopped, true);
+  assert.throws(() => restored.reserve("internal-pool", { inputTokens: 1, outputTokens: 1 }),
+    (error: unknown) => error instanceof BudgetError && error.code === "run_stopped");
+
+  assert.throws(() => new TokenBudget(limit(), [{
+    key: "different-route",
+    limit: limit(),
+    price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 4n },
+  }], saved), /model set does not match/);
+});
