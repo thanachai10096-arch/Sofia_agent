@@ -38,6 +38,26 @@ test("project memory rejects a valid JSON document with the wrong top-level shap
   assert.throws(() => store.readSync(), /must contain a JSON array/);
 });
 
+test("project memory preserves concurrent writes from separate store instances", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-concurrent-"));
+  const stores = Array.from({ length: 12 }, () => new FileProjectMemoryStore("concurrent-project", root));
+  const now = new Date().toISOString();
+  await Promise.all(stores.map((store, index) => store.save({
+    id: `entry-${index}`,
+    project: "concurrent-project",
+    kind: "decision",
+    content: `concurrent memory entry ${index}`,
+    confidence: 1,
+    createdAt: now,
+    updatedAt: now,
+    uses: 0,
+  })));
+
+  const entries = await new FileProjectMemoryStore("concurrent-project", root).list();
+  assert.equal(entries.length, 12, "concurrent read-modify-write operations must not lose entries");
+  assert.deepEqual(new Set(entries.map(entry => entry.id)), new Set(Array.from({ length: 12 }, (_, index) => `entry-${index}`)));
+});
+
 test("project memory writes valid JSON", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-json-"));
   const store = new FileProjectMemoryStore("project-b", root);
