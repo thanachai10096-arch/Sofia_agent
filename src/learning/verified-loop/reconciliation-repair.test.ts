@@ -61,3 +61,25 @@ test("rejects inconsistent reconciliation report metadata", () => {
     { ...report([{ kind: "missing-runtime-registration", skillId: "skill-1" }]), safe: true }, auth(),
   ), /Invalid reconciliation report/);
 });
+
+
+test("never auto-repairs runtime-only activation or policy mismatch", () => {
+  const runtimeOnly = planLearningReconciliationRepair(
+    report([{ kind: "runtime-active-without-learning-record", skillId: "skill-1" }]),
+    auth(),
+  );
+  assert.deepEqual(runtimeOnly.actions, []);
+  assert.deepEqual(runtimeOnly.blocked, [{ skillId: "skill-1", reason: "unsupported-issue" }]);
+  assert.equal(runtimeOnly.eligibleForExecutor, false);
+
+  const policyMismatch = planLearningReconciliationRepair(
+    report([{
+      kind: "policy-revision-mismatch", skillId: "skill-1",
+      learningRevision: "policy-6", runtimeRevision: "policy-7",
+    }]),
+    auth(),
+  );
+  assert.deepEqual(policyMismatch.actions, []);
+  assert.deepEqual(policyMismatch.blocked, [{ skillId: "skill-1", reason: "unsupported-issue" }]);
+  assert.equal(policyMismatch.eligibleForExecutor, false);
+});
