@@ -59,6 +59,7 @@ test("executes only after fresh checks and confirms the postcondition", async ()
   assert.equal(registrations, 1);
   assert.equal(journal.entries.get(action.idempotencyKey)?.state, "succeeded");
   assert.ok(journal.events.some(e => e.event === "repair_started"));
+  assert.ok(journal.events.some(e => e.event === "repair_revalidated" && e.detail?.includes("approval=approval-123")));
   assert.ok(journal.events.some(e => e.event === "repair_succeeded"));
 });
 
