@@ -32,7 +32,7 @@ export interface TelegramVoiceMessage {
 
 /** Optional voice callback; host must enforce the same identity policy and dedupe rules as text. */
 export interface TelegramAdapterOptions {
-  onVoiceMessage?: (message: TelegramVoiceMessage) => Promise<void>;
+  onVoiceMessage?: (message: TelegramVoiceMessage, signal: AbortSignal) => Promise<void>;
 }
 
 /** Adapter mapping authenticated Telegram updates to the shared gateway contract. */
@@ -64,7 +64,7 @@ export function createTelegramAdapter(transport: TelegramTransport, options: Tel
             ...(voice.file_size === undefined ? {} : { fileSizeBytes: voice.file_size }),
             durationMs: voice.duration * 1_000,
             receivedAt: msg.date * 1_000,
-          });
+          }, signal);
           return;
         }
         if (!msg.text && !msg.document) return;
