@@ -274,3 +274,108 @@ export function analyzeMemoryConsolidation(
     staleCandidates,
   };
 }
+
+
+export interface VerifiedMemoryRevalidationRecord {
+  id: string;
+  kind: string;
+  updatedAt?: string;
+  verification?: {
+    candidateId?: string;
+    runId?: string;
+    verifiedAt?: string;
+    evidenceIds?: string[];
+    checks?: Array<{ name?: string; passed?: boolean }>;
+  };
+}
+
+export interface VerifiedMemoryRevalidationCandidate {
+  id: string;
+  kind: string;
+  reason: "missing-provenance" | "incomplete-provenance" | "invalid-verification-time" | "verification-expired";
+  verifiedAt?: string;
+  ageDays?: number;
+}
+
+export interface VerifiedMemoryRevalidationReport {
+  scanned: number;
+  /** Durable knowledge records with complete verification provenance. */
+  verified: number;
+  /** Durable knowledge records that have not passed the promotion gate. */
+  unverified: number;
+  /** Verified records whose provenance or age requires human review. */
+  revalidationCandidates: VerifiedMemoryRevalidationCandidate[];
+}
+
+/**
+ * Read-only audit of durable project knowledge. Episodes and feedback are
+ * intentionally excluded: they are records of activity/signals, not promoted
+ * knowledge. Missing or expired verification never triggers an automatic
+ * demotion, deletion, rewrite, or confidence change.
+ */
+export function analyzeVerifiedMemoryRevalidation(
+  records: readonly VerifiedMemoryRevalidationRecord[],
+  options: { maxRecords?: number; revalidateAfterDays?: number; now?: string } = {},
+): VerifiedMemoryRevalidationReport {
+  const maxRecords = Math.max(1, Math.min(2_000, Math.floor(options.maxRecords ?? 500)));
+  const revalidateAfterDays = Math.max(1, Math.min(36_500, Math.floor(options.revalidateAfterDays ?? 180)));
+  const nowMs = Date.parse(options.now ?? new Date().toISOString());
+  if (!Number.isFinite(nowMs)) throw new Error("Invalid verified-memory analysis time.");
+
+  const bounded = records.slice(0, maxRecords).filter((record) =>
+    Boolean(record && typeof record.id === "string" && record.id.trim().length > 0 &&
+      ["convention", "repair", "decision"].includes(record.kind)),
+  );
+  let verified = 0;
+  let unverified = 0;
+  const revalidationCandidates: VerifiedMemoryRevalidationCandidate[] = [];
+
+  for (const record of bounded) {
+    const provenance = record.verification;
+    if (!provenance) {
+      unverified += 1;
+      revalidationCandidates.push({ id: record.id, kind: record.kind, reason: "missing-provenance" });
+      continue;
+    }
+
+    const complete = typeof provenance.candidateId === "string" && provenance.candidateId.trim().length > 0 &&
+      typeof provenance.runId === "string" && provenance.runId.trim().length > 0 &&
+      typeof provenance.verifiedAt === "string" && Array.isArray(provenance.evidenceIds) &&
+      provenance.evidenceIds.length > 0 && provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0) &&
+      Array.isArray(provenance.checks) && ["evidence", "regression", "policy"].every((required) =>
+        provenance.checks!.some((check) => check?.name === required && check.passed === true),
+      ) && provenance.checks.every((check) => check && check.passed === true);
+
+    if (!complete) {
+      unverified += 1;
+      revalidationCandidates.push({ id: record.id, kind: record.kind, reason: "incomplete-provenance" });
+      continue;
+    }
+
+    const verifiedAtMs = Date.parse(provenance.verifiedAt!);
+    if (!Number.isFinite(verifiedAtMs) || verifiedAtMs > nowMs) {
+      verified += 1;
+      revalidationCandidates.push({
+        id: record.id,
+        kind: record.kind,
+        reason: "invalid-verification-time",
+        verifiedAt: provenance.verifiedAt,
+      });
+      continue;
+    }
+
+    verified += 1;
+    const ageDays = Math.floor((nowMs - verifiedAtMs) / 86_400_000);
+    if (ageDays >= revalidateAfterDays) {
+      revalidationCandidates.push({
+        id: record.id,
+        kind: record.kind,
+        reason: "verification-expired",
+        verifiedAt: provenance.verifiedAt,
+        ageDays,
+      });
+    }
+  }
+
+  return { scanned: bounded.length, verified, unverified, revalidationCandidates };
+}
