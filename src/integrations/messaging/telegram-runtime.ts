@@ -2,6 +2,7 @@ import path from "node:path";
 import { SofiaClient } from "../../sdk/client.js";
 import { FileChatMessageDeduplicator } from "../file-chat-deduplicator.js";
 import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
+import { FileMessagingOutbox, flushMessagingOutbox } from "./file-outbox.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createTelegramAdapter } from "./telegram.js";
 import { createTelegramHttpTransport } from "./telegram-http-transport.js";
@@ -144,6 +145,19 @@ export function createTelegramMessagingRuntime(
     };
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
     let gateway: MessagingGateway | undefined;
+    const outbox = new FileMessagingOutbox(path.join(workspace, ".sofia", "messaging-outbox"));
+    const deliverQueued = async (message: OutboundMessage): Promise<boolean> => {
+      try {
+        const id = await outbox.enqueue("telegram", message);
+        const delivered = gateway ? await gateway.send("telegram", message) : false;
+        if (delivered) await outbox.markSent(id);
+        else onWarning("Telegram outbound delivery remains pending.");
+        return delivered;
+      } catch {
+        onWarning("Telegram outbound message could not be persisted; operator review is required.");
+        return false;
+      }
+    };
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
       onAccepted: ({ runId, message }) => {
@@ -152,9 +166,7 @@ export function createTelegramMessagingRuntime(
           runId,
           conversationId: message.identity.conversationId,
           waitForRun: (id, options) => client.waitForRun(id, options),
-          send: (outbound) => gateway
-            ? gateway.send("telegram", outbound)
-            : Promise.resolve(false),
+          send: deliverQueued,
           onWarning: (event) => onWarning("Telegram messaging warning: " + event + "."),
         });
       },
@@ -179,8 +191,13 @@ export function createTelegramMessagingRuntime(
       },
     });
     return {
-      start: () => gateway.start(),
-      stop: () => gateway.stop(),
+      async start() {
+        await gateway!.start();
+        const result = await flushMessagingOutbox(outbox, (target, message) => gateway!.send(target, message),
+          () => onWarning("Messaging outbox retry remains pending."));
+        if (result.pending > 0) onWarning("Messaging outbox has pending outbound messages.");
+      },
+      stop: () => gateway!.stop(),
     };
   } catch (error) {
     // Report only the static validation message from our own constructors. Never log
