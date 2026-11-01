@@ -33,13 +33,6 @@ function characterNgrams(value: string, max = 96): Set<string> {
   return grams;
 }
 
-function overlap(query: Set<string>, candidate: Set<string>): number {
-  if (!query.size || !candidate.size) return 0;
-  let count = 0;
-  for (const item of query) if (candidate.has(item)) count += 1;
-  return count / query.size;
-}
-
 /**
  * Deterministic hybrid lexical retrieval: exact phrase + word terms + character
  * n-grams. Recency is only a tie-breaker; it cannot make an irrelevant item match.
