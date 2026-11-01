@@ -102,6 +102,7 @@ export function createLineHttpTransport(options: LineHttpTransportOptions): Line
       let acceptedEvents = 0;
       let deliveryFailed = false;
       for (const event of envelope.events) {
+        if (!event || typeof event !== "object") continue;
         if (stopped || activeSignal?.aborted) return { status: 503, acceptedEvents };
         if (event.type !== "message" || event.message?.type !== "text" ||
             typeof event.message.text !== "string" || !event.message.id ||
