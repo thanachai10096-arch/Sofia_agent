@@ -44,11 +44,6 @@ function normalizeMemorySearchText(value: string): string {
   return value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim();
 }
 
-const MEMORY_NEGATION_MARKERS = new Set([
-  "not", "no", "never", "dont", "doesnt", "isnt", "cant", "wont",
-  "ไม่", "ไม่ใช่", "เลิก",
-]);
-
 function memoryPolarityText(value: string): { terms: Set<string>; negated: boolean } {
   const normalized = normalizeMemorySearchText(value);
   const negated = /\\b(?:not|no|never|dont|doesnt|isnt|cant|wont)\\b/u.test(normalized) ||
