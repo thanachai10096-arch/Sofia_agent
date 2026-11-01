@@ -108,6 +108,28 @@ test("manifest rejects case-folded, Unicode-normalized, and file-directory path 
   }), /unique|duplicate|portable filesystem collision|both files and directories/);
 });
 
+test("manifest reserves its root manifest.json path and descendants", () => {
+  for (const path of ["manifest.json", "MANIFEST.JSON", "manifest.json/payload.bin"]) {
+    assert.throws(
+      () => createBackupManifest([{ path, content: Buffer.from("x") }], createdAt),
+      /reserved "manifest.json"/,
+      `expected reserved manifest path to be rejected: ${path}`,
+    );
+  }
+
+  const valid = createBackupManifest([{ path: "state.json", content: Buffer.from("x") }], createdAt);
+  for (const path of ["manifest.json", "MANIFEST.JSON", "manifest.json/payload.bin"]) {
+    assert.throws(
+      () => validateBackupManifest({
+        ...valid,
+        entries: [{ ...valid.entries[0], path }],
+      }),
+      /reserved "manifest.json"/,
+      `expected untrusted reserved manifest path to be rejected: ${path}`,
+    );
+  }
+});
+
 test("manifest paths reject Windows device names, alternate streams, controls, and non-portable segments", () => {
   for (const path of [
     "CON", "con.txt", "NUL.json", "folder/COM1.log", "folder/LPT9",
