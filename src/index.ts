@@ -125,4 +125,6 @@ export type { ManagedMcpServer, ManagedMcpServerOptions } from "./mcp/managed-se
 export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHAT_DEDUPE_RELEASE_SCRIPT } from "./integrations/redis-chat-deduplicator.js";
 export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
+export { MarkdownUserMemoryStore, MarkdownProjectMemoryStore } from "./brain/markdown-memory.js";
+export type { MarkdownMemoryOptions } from "./brain/markdown-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
