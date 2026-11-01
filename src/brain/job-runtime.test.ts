@@ -75,6 +75,77 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
 });
 
 
+test("DurableJobRuntime fences stale worker writes after an expired lease is reclaimed", async () => {
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-lease-fence-"));
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "job-runtime-lease-fence-" + randomUUID();
+  const stateFile = path.join(
+    root,
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  const runtime = new DurableJobRuntime(() => ({
+    run: async ({ signal }: { signal?: AbortSignal }) => new Promise((resolve) => {
+      if (signal?.aborted) return resolve({ completed: false, state: "cancelled" });
+      signal?.addEventListener("abort", () => resolve({ completed: false, state: "cancelled" }), { once: true });
+    }),
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  try {
+    const submitted = await runtime.submit({ task: "prove stale lease fencing" });
+    let records: Array<{ id: string; status: string; leaseOwnerToken?: string; leaseExpiresAt?: string }> = [];
+    const startDeadline = Date.now() + 5_000;
+    let active = false;
+    while (Date.now() < startDeadline) {
+      try {
+        records = JSON.parse(await readFile(stateFile, "utf8")) as typeof records;
+        active = records.some((item) => item.id === submitted.id && item.status === "running" && Boolean(item.leaseOwnerToken));
+      } catch { /* wait for the initial claim */ }
+      if (active) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(active, "first worker must acquire a durable lease");
+    const original = records.find((item) => item.id === submitted.id)!;
+    const staleToken = original.leaseOwnerToken!;
+
+    // Simulate lease expiry, then let a replacement worker atomically claim it.
+    original.leaseExpiresAt = new Date(0).toISOString();
+    await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+    await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+    const internalState = (runtime as unknown as {
+      state: {
+        claim(id: string, ownerToken: string, leaseMs: number): Promise<{ id: string; status: string; leaseOwnerToken?: string } | undefined>;
+        save(record: { id: string; status: string; leaseOwnerToken?: string; result?: unknown; updatedAt: string }): Promise<boolean>;
+      };
+    }).state;
+    const replacement = await internalState.claim(submitted.id, "replacement-worker-token", 15_000);
+    assert.equal(replacement?.leaseOwnerToken, "replacement-worker-token");
+    assert.equal(replacement?.status, "running");
+
+    const staleWriteAccepted = await internalState.save({
+      id: submitted.id,
+      status: "completed",
+      leaseOwnerToken: staleToken,
+      result: { completed: true, state: "completed", output: "stale worker" },
+      updatedAt: new Date().toISOString(),
+    });
+    assert.equal(staleWriteAccepted, false, "a worker with an expired lease must not persist a late result");
+
+    const persisted = await runtime.get(submitted.id);
+    assert.equal(persisted?.status, "running");
+    assert.equal(persisted?.leaseOwnerToken, undefined, "lease capabilities must remain private in public reads");
+    assert.equal(persisted?.result, undefined, "stale worker results must not appear in durable state");
+  } finally {
+    await runtime.cancel((await runtime.list()).find((job) => job.task === "prove stale lease fencing")?.id ?? "");
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
 test("DurableJobRuntime cancels an active run and persists the terminal state", async () => {
   const namespace = "job-runtime-cancel-" + randomUUID();
   let started!: () => void;
