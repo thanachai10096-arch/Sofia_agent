@@ -8,7 +8,7 @@ import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { rankMemoryDocuments } from "./memory-retrieval.js";
 
 export interface ProjectMemoryEntry {
-  id: string; project: string; kind: "convention" | "repair" | "decision"; content: string;
+  id: string; project: string; kind: "convention" | "repair" | "decision" | "episode"; content: string;
   source?: string; confidence: number; createdAt: string; updatedAt: string; uses: number;
 }
 export interface ProjectMemoryStore {
@@ -79,3 +79,90 @@ export function memoryEntryFromConvention(project:string,content:string,source="
 export function memoryEntryFromRepair(project:string,category:FailureCategory,strategy:Strategy,message:string):ProjectMemoryEntry{
   const now=new Date().toISOString(); return {id:createHash("sha256").update(project+category+strategy+message).digest("hex"),project,kind:"repair",content:`Failure: ${category}\nStrategy: ${strategy}\nResolution: ${message.slice(0,1200)}`,source:"brain-recovery",confidence:0.75,createdAt:now,updatedAt:now,uses:0};
 }
+
+/** A compact, project-scoped record of one completed or failed agent run. */
+export interface EpisodicMemoryEvent {
+  /** Stable run identifier; also provides idempotency for repeated writes. */
+  runId: string;
+  outcome: "completed" | "failed";
+  taskSummary: string;
+  resultSummary: string;
+  occurredAt?: string;
+  evidenceIds?: string[];
+  tags?: string[];
+}
+
+export interface EpisodicMemoryStore {
+  record(project: string, event: EpisodicMemoryEvent): Promise<void>;
+  find(project: string, query: string, limit?: number): Promise<EpisodicMemoryEvent[]>;
+}
+
+/**
+ * Reuses the existing project-memory store as the canonical persistence layer.
+ * Recording is explicit/opt-in: callers decide which runs are appropriate to retain.
+ */
+export class ProjectEpisodicMemoryStore implements EpisodicMemoryStore {
+  constructor(private readonly store: ProjectMemoryStore) {}
+
+  async record(project: string, event: EpisodicMemoryEvent): Promise<void> {
+    const entry = memoryEntryFromEpisode(project, event);
+    await this.store.save(entry);
+  }
+
+  async find(project: string, query: string, limit = 5): Promise<EpisodicMemoryEvent[]> {
+    const matches = await this.store.find(query);
+    const bounded = matches
+      .filter((entry) => entry.project === project && entry.kind === "episode")
+      .slice(0, Math.max(1, Math.min(20, Math.floor(limit))));
+    const events: EpisodicMemoryEvent[] = [];
+    for (const entry of bounded) {
+      try {
+        const value: unknown = JSON.parse(entry.content);
+        if (isEpisodicMemoryEvent(value)) events.push(value);
+      } catch {
+        // Ignore malformed legacy or manually edited episode projections.
+      }
+    }
+    return events;
+  }
+}
+
+function isEpisodicMemoryEvent(value: unknown): value is EpisodicMemoryEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const event = value as Partial<EpisodicMemoryEvent>;
+  return typeof event.runId === "string" && event.runId.length > 0 &&
+    (event.outcome === "completed" || event.outcome === "failed") &&
+    typeof event.taskSummary === "string" && typeof event.resultSummary === "string";
+}
+
+export function memoryEntryFromEpisode(project: string, event: EpisodicMemoryEvent): ProjectMemoryEntry {
+  if (!project.trim() || !event.runId.trim()) throw new Error("Project and run identity are required for episodic memory.");
+  if (!isEpisodicMemoryEvent(event)) throw new Error("Invalid episodic memory event.");
+  const now = new Date().toISOString();
+  const occurredAt = event.occurredAt && Number.isFinite(Date.parse(event.occurredAt))
+    ? new Date(event.occurredAt).toISOString()
+    : now;
+  const safeEvent: EpisodicMemoryEvent = {
+    runId: event.runId.slice(0, 200),
+    outcome: event.outcome,
+    taskSummary: event.taskSummary.trim().slice(0, 500),
+    resultSummary: event.resultSummary.trim().slice(0, 1_000),
+    occurredAt,
+    evidenceIds: (event.evidenceIds ?? []).filter((id) => typeof id === "string").slice(0, 20).map((id) => id.slice(0, 200)),
+    tags: (event.tags ?? []).filter((tag) => typeof tag === "string").slice(0, 12).map((tag) => tag.slice(0, 64)),
+  };
+  if (!safeEvent.taskSummary || !safeEvent.resultSummary) throw new Error("Episodic memory summaries cannot be empty.");
+  const id = createHash("sha256").update(project + "\\u0000episode\\u0000" + safeEvent.runId).digest("hex");
+  return {
+    id,
+    project,
+    kind: "episode",
+    content: JSON.stringify(safeEvent),
+    source: "episodic-memory",
+    confidence: 1,
+    createdAt: occurredAt,
+    updatedAt: now,
+    uses: 0,
+  };
+}
+
