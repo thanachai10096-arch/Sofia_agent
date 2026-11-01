@@ -106,3 +106,15 @@ test("project memory rejects an explicitly empty owner scope", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-empty-owner-"));
   assert.throws(() => new FileProjectMemoryStore("shared-workspace", root, "  "), /owner scope/i);
 });
+
+
+test("concurrent project memory writes do not overwrite each other", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-concurrent-writes-"));
+  const store = new FileProjectMemoryStore("concurrent-project", root);
+  await Promise.all([
+    store.save(memoryEntryFromConvention("concurrent-project", "First independent convention")),
+    store.save(memoryEntryFromConvention("concurrent-project", "Second independent convention")),
+    store.save(memoryEntryFromConvention("concurrent-project", "Third independent convention")),
+  ]);
+  assert.equal((await store.list()).length, 3);
+});
