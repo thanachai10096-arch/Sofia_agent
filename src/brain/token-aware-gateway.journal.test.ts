@@ -161,3 +161,41 @@ test("gateway blocks same-run retries when metered usage is invalid", async () =
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("independent gateways sharing a journal cannot invoke the same run concurrently", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-gateway-journal-workers-"));
+  try {
+    let providerCalls = 0;
+    let markProviderStarted!: () => void;
+    let releaseProvider!: () => void;
+    const providerStarted = new Promise<void>((resolve) => { markProviderStarted = resolve; });
+    const providerGate = new Promise<void>((resolve) => { releaseProvider = resolve; });
+    const firstJournal = new FileSettlementJournal("workspace", root);
+    const secondJournal = new FileSettlementJournal("workspace", root);
+    const firstGateway = new TokenAwareGateway(createBudget(), [createRoute(async () => {
+      providerCalls += 1;
+      markProviderStarted();
+      await providerGate;
+      return { value: { ok: true }, usage: { inputTokens: 2, outputTokens: 2 }, finishReason: "complete" };
+    })], 45_000, firstJournal);
+    const secondGateway = new TokenAwareGateway(createBudget(), [createRoute(async () => {
+      providerCalls += 1;
+      return { value: { duplicate: true }, usage: { inputTokens: 2, outputTokens: 2 }, finishReason: "complete" };
+    })], 45_000, secondJournal);
+
+    const first = firstGateway.generateMetered(request, undefined, "shared-run");
+    await providerStarted;
+    await assert.rejects(
+      secondGateway.generateMetered(request, undefined, "shared-run"),
+      (error: unknown) => error instanceof GatewayError && error.code === "settlement_run_claimed",
+    );
+    assert.equal(providerCalls, 1, "the competing gateway must not invoke a second provider");
+    releaseProvider();
+    await first;
+    assert.equal(providerCalls, 1);
+    assert.equal(await firstJournal.hasUnresolved("shared-run"), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
