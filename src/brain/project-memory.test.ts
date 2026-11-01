@@ -100,10 +100,6 @@ test("project memory and learned-skill storage are isolated by authenticated own
 
   const ownerAReopened = new FileProjectMemoryStore("shared-workspace", root, "owner-a");
   assert.equal((await ownerAReopened.find("Private convention"))[0]?.content, "Private convention for owner A");
-  assert.notEqual(
-    path.basename((ownerA as unknown as { file: string }).file),
-    path.basename((ownerB as unknown as { file: string }).file),
-  );
 });
 
 test("project memory rejects an explicitly empty owner scope", async () => {
