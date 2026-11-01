@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, unlink, chmod } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, unlink, chmod, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ChatPlatform } from "../chat-adapter.js";
 import type { OutboundMessage } from "./types.js";
@@ -12,6 +12,7 @@ export interface MessagingOutboxRecord {
 }
 const SAFE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_RECORD_BYTES = 128_000;
+const DEFAULT_LEASE_MS = 5 * 60_000;
 
 /**
  * Restart-persistent outbound spool. Files contain already-redacted message text;
@@ -40,6 +41,81 @@ export class FileMessagingOutbox {
   private file(id: string): string {
     if (!SAFE_ID.test(id)) throw new Error("Unsafe messaging outbox id.");
     return path.join(this.directory, id + ".json");
+  }
+  private lockDirectory(id: string): string {
+    if (!SAFE_ID.test(id)) throw new Error("Unsafe messaging outbox id.");
+    return path.join(this.directory, id + ".lock");
+  }
+
+  /** Atomically claim one record across processes using an exclusive lock directory. */
+  async claim(id: string, leaseMs = DEFAULT_LEASE_MS, now = Date.now()): Promise<string | undefined> {
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1_000 || leaseMs > 60 * 60_000) {
+      throw new Error("Invalid messaging outbox lease duration.");
+    }
+    await this.ensureDirectory();
+    const lock = this.lockDirectory(id);
+    const token = randomUUID();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await mkdir(lock, { mode: 0o700 });
+        try {
+          const handle = await open(path.join(lock, "owner.json"), "wx", 0o600);
+          try {
+            await handle.writeFile(JSON.stringify({ token, expiresAt: now + leaseMs }), "utf8");
+            await handle.sync();
+          } finally { await handle.close(); }
+          return token;
+        } catch {
+          await rm(lock, { recursive: true, force: true });
+          throw new Error("Messaging outbox lease could not be persisted.");
+        }
+      } catch (error) {
+        if (!(error && typeof error === "object" && "code" in error && error.code === "EEXIST")) throw error;
+      }
+
+      let expired = false;
+      try {
+        const owner = JSON.parse(await readFile(path.join(lock, "owner.json"), "utf8")) as { expiresAt?: number };
+        expired = typeof owner.expiresAt === "number" && Number.isFinite(owner.expiresAt) && owner.expiresAt <= now;
+      } catch {
+        try { expired = now - (await stat(lock)).mtimeMs >= leaseMs; } catch { continue; }
+      }
+      if (!expired) return undefined;
+      const stale = lock + ".stale." + randomUUID();
+      try {
+        await rename(lock, stale);
+        await rm(stale, { recursive: true, force: true });
+      } catch (error) {
+        if (!(error && typeof error === "object" && "code" in error && ["ENOENT", "EEXIST"].includes(String(error.code)))) {
+          throw new Error("Expired messaging outbox lease could not be reclaimed.");
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /** A stale worker cannot acknowledge a record after another worker reclaimed its lease. */
+  async markSent(id: string, token: string): Promise<boolean> {
+    await this.chain;
+    const lock = this.lockDirectory(id);
+    try {
+      const owner = JSON.parse(await readFile(path.join(lock, "owner.json"), "utf8")) as { token?: string };
+      if (owner.token !== token) return false;
+      await unlink(this.file(id));
+      await rm(lock, { recursive: true, force: true });
+      return true;
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false;
+      throw new Error("Messaging outbox acknowledgement failed.");
+    }
+  }
+
+  async releaseClaim(id: string, token: string): Promise<void> {
+    const lock = this.lockDirectory(id);
+    try {
+      const owner = JSON.parse(await readFile(path.join(lock, "owner.json"), "utf8")) as { token?: string };
+      if (owner.token === token) await rm(lock, { recursive: true, force: true });
+    } catch { /* Lease may already have expired or been reclaimed. */ }
   }
 
   async enqueue(platform: ChatPlatform, message: OutboundMessage): Promise<string> {
@@ -101,14 +177,6 @@ export class FileMessagingOutbox {
     return records;
   }
 
-  async markSent(id: string): Promise<void> {
-    await this.chain;
-    try { await unlink(this.file(id)); }
-    catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return;
-      throw new Error("Messaging outbox acknowledgement failed.");
-    }
-  }
 }
 
 // Prevent overlapping flushes for the same spool within one Node.js process.
@@ -132,14 +200,17 @@ export async function flushMessagingOutbox(
   try {
     for (const record of await outbox.pending()) {
       if (platformFilter && record.platform !== platformFilter) continue;
+      const lease = await outbox.claim(record.id);
+      if (!lease) continue;
       try {
         if (await send(record.platform, record.message)) {
-          await outbox.markSent(record.id);
-          sent++;
+          if (await outbox.markSent(record.id, lease)) sent++;
         } else {
+          await outbox.releaseClaim(record.id, lease);
           onFailure?.(record.platform);
         }
       } catch {
+        await outbox.releaseClaim(record.id, lease);
         onFailure?.(record.platform);
       }
     }
