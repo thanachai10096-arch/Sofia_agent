@@ -215,6 +215,52 @@ test("SQLite learning store rejects candidate payload identity drift from indexe
   }
 });
 
+test("SQLite learning store refuses evaluations without a persisted candidate", async () => {
+  const store = await SqliteLearningTransactionStore.open(":memory:");
+  try {
+    await assert.rejects(
+      store.transaction(scope, tx => tx.recordEvaluation(scope, "missing-candidate", {
+        regressionRunId: "regression-run", passed: false,
+        checks: [{ name: "build", passed: false }],
+        regressionEvidenceIds: ["regression-evidence"],
+      })),
+      /Learning evaluation requires a persisted candidate/,
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("SQLite learning store rejects malformed persisted evaluation fields before writing", async () => {
+  const store = await SqliteLearningTransactionStore.open(":memory:");
+  try {
+    await store.transaction(scope, async tx => {
+      await tx.putCandidate({
+        id: "evaluation-candidate", scope, experienceId: "experience-r1",
+        name: "candidate", trigger: "task", procedure: ["inspect"], confidence: 0.8,
+      });
+      await assert.rejects(
+        tx.recordEvaluation(scope, "evaluation-candidate", {
+          regressionRunId: "regression-run", passed: true,
+          checks: [{ name: " ", passed: true }],
+          regressionEvidenceIds: ["regression-evidence"],
+        }),
+        /Corrupt persisted learning evaluation/,
+      );
+      await assert.rejects(
+        tx.recordEvaluation(scope, "evaluation-candidate", {
+          regressionRunId: "regression-run", passed: true,
+          checks: [{ name: "build", passed: true }],
+          regressionEvidenceIds: [""],
+        }),
+        /Corrupt persisted learning evaluation/,
+      );
+    });
+  } finally {
+    store.close();
+  }
+});
+
 test("SQLite learning store serializes overlapping async transactions on one connection", async () => {
   const store = await SqliteLearningTransactionStore.open(":memory:");
   try {
