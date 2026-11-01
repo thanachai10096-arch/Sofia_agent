@@ -126,6 +126,10 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
     if (!Array.isArray(parsed)) {
       throw new Error("Project memory file must contain a JSON array.");
     }
+    if (parsed.some(entry => !entry || typeof entry !== "object" ||
+        (entry as ProjectMemoryEntry).project !== this.project)) {
+      throw new Error("Project memory file contains an entry outside its project boundary.");
+    }
     return parsed.filter((entry): entry is ProjectMemoryEntry =>
       Boolean(entry && typeof entry === "object" &&
         typeof (entry as ProjectMemoryEntry).content === "string" &&
