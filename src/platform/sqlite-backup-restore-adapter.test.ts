@@ -11,6 +11,20 @@ import { sqliteFileBackupRestoreAdapter } from "./sqlite-backup-restore-adapter.
 const createdAt = "2026-10-29T04:00:00.000Z";
 const sqliteBytes = (suffix: string) => Buffer.concat([Buffer.from("SQLite format 3\0", "ascii"), Buffer.from(suffix)]);
 
+async function validSqliteBytes(directory: string, filename: string): Promise<Uint8Array> {
+  const { DatabaseSync } = await import("node:sqlite");
+  const databasePath = path.join(directory, filename);
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("CREATE TABLE restore_probe (value TEXT NOT NULL); INSERT INTO restore_probe VALUES ('valid');");
+  } finally {
+    database.close();
+  }
+  const bytes = await readFile(databasePath);
+  await rm(databasePath, { force: true });
+  return bytes;
+}
+
 test("SQLite restore adapter snapshots before mutation and uses close-replace-reopen lifecycle", async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-sqlite-restore-"));
   const database = path.join(parent, "sessions.sqlite");
@@ -32,9 +46,10 @@ test("SQLite restore adapter snapshots before mutation and uses close-replace-re
     async reopen() { events.push("reopen"); },
   };
   try {
+    const restoredBytes = await validSqliteBytes(parent, "restored-fixture.sqlite");
     const bundle = await createBackupBundle([{
       name: "sessions",
-      async snapshot() { return [{ path: "sessions/snapshot.sqlite", content: sqliteBytes("restored") }]; },
+      async snapshot() { return [{ path: "sessions/snapshot.sqlite", content: restoredBytes }]; },
     }], createdAt);
     const adapter = sqliteFileBackupRestoreAdapter("sessions", database, "sessions/snapshot.sqlite", lifecycle);
     await adapter.preflight(bundle, ["sessions/snapshot.sqlite"]);
@@ -76,6 +91,39 @@ test("SQLite restore adapter rejects invalid database headers before lifecycle m
     }], createdAt);
     const adapter = sqliteFileBackupRestoreAdapter("sessions", database, "sessions/snapshot.sqlite", lifecycle);
     await assert.rejects(adapter.preflight(bundle, ["sessions/snapshot.sqlite"]), /valid SQLite database header/);
+    assert.equal(lifecycleCalls, 0);
+    assert.deepEqual(await readFile(database), sqliteBytes("original"));
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+
+test("SQLite restore adapter rejects a corrupt database with a valid SQLite header", async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-sqlite-integrity-"));
+  const database = path.join(parent, "sessions.sqlite");
+  await writeFile(database, sqliteBytes("original"));
+  let lifecycleCalls = 0;
+  const lifecycle = {
+    getOpenStore() {
+      return { createConsistentSnapshot(destination: string) {
+        lifecycleCalls += 1;
+        requireFsWrite(destination, sqliteBytes("original"));
+        return destination;
+      } };
+    },
+    async close() { lifecycleCalls += 1; },
+    async reopen() { lifecycleCalls += 1; },
+  };
+  try {
+    const bundle = await createBackupBundle([{
+      name: "sessions",
+      async snapshot() {
+        return [{ path: "sessions/snapshot.sqlite", content: sqliteBytes("truncated-corrupt-database") }];
+      },
+    }], createdAt);
+    const adapter = sqliteFileBackupRestoreAdapter("sessions", database, "sessions/snapshot.sqlite", lifecycle);
+    await assert.rejects(adapter.preflight(bundle, ["sessions/snapshot.sqlite"]), /integrity validation/);
     assert.equal(lifecycleCalls, 0);
     assert.deepEqual(await readFile(database), sqliteBytes("original"));
   } finally {
