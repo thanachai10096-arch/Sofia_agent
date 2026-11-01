@@ -152,3 +152,6 @@ export type { SandboxedTelegramAudioInspectorOptions, TelegramAudioInspection } 
 
 export { createVoiceSession } from "./voice/session.js";
 export type { VoiceSession, VoiceSessionOptions, VoiceSessionSnapshot, VoiceSessionState } from "./voice/session.js";
+
+export { iterateBoundedVoiceAudio } from "./voice/audio-stream.js";
+export type { VoiceAudioChunk, VoiceAudioStreamLimits } from "./voice/audio-stream.js";
