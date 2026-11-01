@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { FileSettlementJournal } from "./settlement-journal.js";
 
 import {
   BudgetError,
@@ -245,6 +246,7 @@ export class TokenAwareGateway {
     private readonly budget: TokenBudget,
     private readonly routes: readonly InternalRoute[],
     private readonly timeoutMs = 45_000,
+    private readonly settlementJournal?: FileSettlementJournal,
   ) {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
       throw new Error("Invalid model timeout");
@@ -266,6 +268,7 @@ export class TokenAwareGateway {
   async generateMetered(
     request: InferenceRequest,
     callerSignal?: AbortSignal,
+    runId?: string,
   ): Promise<{ value: unknown; usage: TokenUsage }> {
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const signal = callerSignal
@@ -273,6 +276,10 @@ export class TokenAwareGateway {
       : timeout;
 
     signal.throwIfAborted();
+    if (this.settlementJournal && !runId) throw new GatewayError("model_call_failed", "missing_run_identity");
+    if (this.settlementJournal && await this.settlementJournal.hasUnresolved(runId!)) {
+      throw new GatewayError("model_call_failed", "unresolved_provider_settlement");
+    }
     const input = structuredClone(request);
 
     const candidates: Array<{
@@ -348,7 +355,14 @@ export class TokenAwareGateway {
           continue;
         }
 
+        let journalAttempt: { id: string } | undefined;
         try {
+          if (this.settlementJournal) {
+            journalAttempt = await this.settlementJournal.begin(runId!, {
+              inputTokens: candidate.prepared.inputTokensUpperBound,
+              outputTokens: candidate.maxOutputTokens,
+            });
+          }
           const reply = await candidate.prepared.invoke({
             signal,
             maxOutputTokens: candidate.maxOutputTokens,
@@ -358,6 +372,10 @@ export class TokenAwareGateway {
 
           const settled = lease.settle(reply.usage);
           activeReservation = undefined;
+          if (settled.usageKnown && journalAttempt && this.settlementJournal) {
+            await this.settlementJournal.settle(runId!, journalAttempt, reply.usage);
+            journalAttempt = undefined;
+          }
           if (!settled.usageKnown) throw new GatewayError("invalid_usage");
           if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
           if (reply.finishReason !== "complete") throw new GatewayError("incomplete_output");
@@ -367,6 +385,10 @@ export class TokenAwareGateway {
           if (error instanceof MeteredProviderError) {
             const settled = lease.settle(error.usage);
             activeReservation = undefined;
+            if (settled.usageKnown && journalAttempt && this.settlementJournal) {
+              await this.settlementJournal.settle(runId!, journalAttempt, error.usage);
+              journalAttempt = undefined;
+            }
             if (!settled.usageKnown) throw new GatewayError("invalid_usage");
             if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
 
@@ -385,6 +407,8 @@ export class TokenAwareGateway {
           // the run budget, preventing unmetered fallback calls.
           lease.settle();
           activeReservation = undefined;
+          // Keep the journal attempt unresolved when usage is unknown. A restart
+          // must not repeat a provider call whose billing outcome is ambiguous.
           if (!signal.aborted && !(error instanceof GatewayError)) {
             const id = candidate.route.id;
             this.routeFailures.set(id, (this.routeFailures.get(id) ?? 0) + 1);
