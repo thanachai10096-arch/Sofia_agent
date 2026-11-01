@@ -241,6 +241,7 @@ function observeWithAbort<T>(
 
 export class TokenAwareGateway {
   private readonly routeFailures = new Map<string, number>();
+  private readonly checkedJournalRuns = new Set<string>();
 
   constructor(
     private readonly budget: TokenBudget,
@@ -277,8 +278,11 @@ export class TokenAwareGateway {
 
     signal.throwIfAborted();
     if (this.settlementJournal && !runId) throw new GatewayError("model_call_failed", "missing_run_identity");
-    if (this.settlementJournal && await this.settlementJournal.hasUnresolved(runId!)) {
-      throw new GatewayError("model_call_failed", "unresolved_provider_settlement");
+    if (this.settlementJournal && !this.checkedJournalRuns.has(runId!)) {
+      if (await this.settlementJournal.hasUnresolved(runId!)) {
+        throw new GatewayError("model_call_failed", "unresolved_provider_settlement");
+      }
+      this.checkedJournalRuns.add(runId!);
     }
     const input = structuredClone(request);
 
