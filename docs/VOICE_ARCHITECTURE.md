@@ -201,3 +201,15 @@ Evidence levels:
 - [ ] Audio retention and logging follow the privacy contract.
 - [ ] No Production deployment or secret change occurs as part of this architecture task.
 - [ ] Readiness reports separate implemented code, passing automated tests, live-tested providers, and planned channels.
+
+
+## Shared voice session lifecycle (feature branch)
+
+The feature branch adds `src/voice/session.ts` as a small coordinator around the existing `VoiceWorkflow`. It provides:
+- one active turn per session (overlapping turns are rejected);
+- explicit `idle`, `processing`, `interrupting`, and `closed` lifecycle states;
+- interruption and close operations that abort the active workflow;
+- caller cancellation propagation and observer callbacks;
+- no audio persistence, provider credentials, transport, or second agent runtime.
+
+This is a lifecycle foundation for barge-in behavior, **not a realtime streaming engine**. The current `VoiceWorkflow` still processes complete audio turns. Streaming media transport, incremental STT/TTS, voice activity detection, playback cancellation at the client, and live latency tests remain unimplemented. Channel adapters must connect their transport-level stop/interruption events to `VoiceSession.interrupt()` and must not claim realtime support until those integrations are tested.
