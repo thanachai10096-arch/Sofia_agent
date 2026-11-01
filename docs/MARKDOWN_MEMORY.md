@@ -119,3 +119,9 @@ This is a feedback ledger, not autonomous self-training. It does not infer that 
 ## Consolidation review report
 
 `analyzeMemoryConsolidation` combines exact/near-duplicate analysis, explicit-negation conflict candidates, and stale-record review candidates into one bounded, read-only report. Staleness uses the structured `updatedAt` timestamp and a configurable age window (180 days by default); invalid and future timestamps are ignored. A stale record is only a request to revalidate it, not evidence that it is false or safe to delete. The report never edits memory, merges records, changes confidence, or promotes an episode into a durable convention. Pass an explicit `now` value when deterministic reports are needed in tests or scheduled diagnostics.
+
+## Verified project-memory promotion
+
+`promoteVerifiedProjectMemory` is an explicit, additive gate for turning a proposed project memory into a durable record. The caller must provide a receipt containing passing `evidence`, `regression`, and `policy` checks, a verification run ID, a timestamp, and evidence IDs. All supplied checks must pass; confidence must meet the configured threshold (0.8 by default). Feedback records alone do not satisfy the gate.
+
+The helper rejects malformed candidates, low-confidence candidates, and content flagged by the prompt-injection guard. It redacts secrets, bounds the stored content and provenance, derives an idempotent record ID from project/candidate/verification-run identity, and writes through the existing `ProjectMemoryStore`. It does not execute candidate text, change source-memory confidence, activate skills, or bypass approval/policy systems. The caller remains responsible for obtaining trustworthy verification receipts; the helper validates their shape and declared outcomes, not the honesty of an external verifier.
