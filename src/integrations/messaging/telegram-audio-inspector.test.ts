@@ -6,12 +6,12 @@ import { createSandboxedTelegramAudioInspector } from "./telegram-audio-inspecto
 
 function sandboxWith(
   output: { stdout: string; stderr: string; code: number },
-  inspect?: (command: string, args: string[], limits: SandboxLimits) => Promise<void>,
+  inspect?: (command: string, args: string[], limits: SandboxLimits, signal?: AbortSignal) => Promise<void>,
 ): Sandbox {
   return {
     isolation: "container",
-    async run(command, args, limits) {
-      await inspect?.(command, args, limits);
+    async run(command, args, limits, signal) {
+      await inspect?.(command, args, limits, signal);
       return output;
     },
   };
@@ -85,4 +85,38 @@ test("sandboxed Telegram inspector enforces byte and duration limits before acce
   });
   await assert.rejects(inspector.inspect({ bytes: new Uint8Array([1, 2, 3]), signal: new AbortController().signal }), /byte limits/);
   await assert.rejects(inspector.inspect({ bytes: new Uint8Array([1]), signal: new AbortController().signal }), /duration exceeds/);
+});
+
+test("sandboxed Telegram inspector forwards cancellation and output bounds and cleans up after sandbox failure", async () => {
+  const controller = new AbortController();
+  let workspace = "";
+  const inspector = createSandboxedTelegramAudioInspector({
+    sandbox: sandboxWith({ stdout: "", stderr: "", code: 1 }, async (_command, _args, limits, signal) => {
+      workspace = limits.workspaceRoot;
+      assert.equal(limits.maxOutputBytes, 1234);
+      assert.equal(signal, controller.signal);
+      assert.deepEqual([...await readFile(workspace + "/input.audio")], [9, 8, 7]);
+      throw new Error("sandbox runner failed");
+    }),
+    maxOutputBytes: 1234,
+  });
+
+  await assert.rejects(
+    inspector.inspect({ bytes: new Uint8Array([9, 8, 7]), signal: controller.signal }),
+    /sandbox runner failed/,
+  );
+  await assert.rejects(access(workspace), /ENOENT/);
+});
+
+test("sandboxed Telegram inspector rejects an already-aborted signal before creating a workspace", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let invoked = false;
+  const inspector = createSandboxedTelegramAudioInspector({
+    sandbox: sandboxWith({ stdout: metadata, stderr: "", code: 0 }, async () => { invoked = true; }),
+  });
+  await assert.rejects(
+    inspector.inspect({ bytes: new Uint8Array([1]), signal: controller.signal }),
+  );
+  assert.equal(invoked, false);
 });
