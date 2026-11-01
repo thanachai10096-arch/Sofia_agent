@@ -134,6 +134,9 @@ export class FileSettlementJournal {
   }
 
   async begin(runId: string, maximum: TokenUsage): Promise<SettlementAttempt> {
+    // Callers performing inference must hold claimRun(runId) from preflight
+    // through provider settlement. This keeps the journal API append-only while
+    // making the gateway's check-and-start sequence mutually exclusive.
     if (!runId || !Number.isSafeInteger(maximum.inputTokens) || maximum.inputTokens < 0 ||
         !Number.isSafeInteger(maximum.outputTokens) || maximum.outputTokens < 0) {
       throw new Error("Invalid settlement journal attempt");
@@ -189,14 +192,30 @@ export class FileSettlementJournal {
 
   async acknowledgeCheckpoint(runId: string): Promise<void> {
     if (!runId) throw new Error("Invalid settlement journal checkpoint");
-    await this.append(runId, { version: 1, type: "checkpoint", at: new Date().toISOString() });
+    // Checkpoint acknowledgement happens after provider execution. It must use
+    // the same claim boundary so a new worker cannot observe a partially-written
+    // checkpoint and begin another billable request concurrently.
+    const claim = await this.claimRun(runId);
+    try {
+      await this.append(runId, { version: 1, type: "checkpoint", at: new Date().toISOString() });
+    } finally {
+      await claim.release();
+    }
   }
 
   async deleteRun(runId: string): Promise<void> {
+    if (!runId) throw new Error("Invalid settlement journal run deletion");
+    // Retention cleanup must not remove evidence while a provider attempt owns
+    // the run. The same fail-closed claim serializes deletion with inference.
+    const claim = await this.claimRun(runId);
     try {
-      await fs.unlink(this.file(runId));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      try {
+        await fs.unlink(this.file(runId));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    } finally {
+      await claim.release();
     }
   }
 }
