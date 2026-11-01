@@ -87,3 +87,12 @@ The transport treats HTTP 409 as terminal and emits `poll_conflict` rather than 
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+
+### Channel health and explicit restart
+
+- `createMessagingGateway` exposes `getStatus()` and an explicit `restart()`. Restart aborts the previous generation, stops all adapters, creates a fresh abort signal, and starts the same adapters again.
+- Inbound callbacks are generation-fenced: callbacks retained by an old adapter generation are ignored after stop/restart. Authorization, rate limiting, deduplication, and the existing handler remain in the same gateway.
+- Telegram transport emits safe lifecycle states through `onStatus`: `starting`, `polling`, `stopped`, `webhook_conflict`, `poll_conflict`, and `preflight_failed`. The runtime exposes these through `getStatus()` and an operator-triggered `restart()`.
+- A 409 remains terminal. Do not call `restart()` until the operator has identified and resolved the competing `getUpdates` consumer. Restarting without remediation will simply encounter the conflict again; no automatic retry or webhook deletion is performed.
+- A Telegram runtime status of `poll_conflict` or `webhook_conflict` means the core Sofia API may still be healthy while that channel is unavailable. Surface the channel state in operational health reporting rather than treating it as overall API health.
