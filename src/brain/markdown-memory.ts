@@ -139,7 +139,7 @@ export class MarkdownUserMemoryStore implements UserMemoryStore {
 
   async clear(userId: string): Promise<void> {
     await this.store.clear(userId);
-    await this.sync(userId);
+    await fs.rm(this.fileFor(userId), { force: true });
   }
 }
 
