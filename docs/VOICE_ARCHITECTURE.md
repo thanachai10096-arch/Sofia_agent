@@ -220,3 +220,8 @@ This is a lifecycle foundation for barge-in behavior, **not a realtime streaming
 The feature branch adds `src/voice/audio-stream.ts` with `iterateBoundedVoiceAudio()`. It validates monotonically increasing zero-based chunk sequence numbers, non-empty byte payloads, per-chunk size, total stream size, chunk count, final-chunk ordering, and cancellation between received chunks. Each yielded chunk is copied so later mutation by the transport cannot alter bytes already handed to the consumer.
 
 The iterator does not concatenate or persist the stream. Its memory bound is per-chunk at this layer; adapters must separately bound their own network/socket buffers and ensure their source iterator responds to cancellation while waiting for data. This contract is not itself streaming STT, streaming TTS, WebSocket/WebRTC transport, or a live microphone implementation. The existing complete-audio `VoiceWorkflow` remains unchanged and is still the only connected STT → Sofia callback → optional TTS path at this stage.
+
+
+## Voice activity detection boundary
+
+`createVoiceActivityDetector` is a provider-neutral utterance-boundary state machine. A host supplies one speech probability per fixed-duration frame from its chosen VAD implementation. The detector applies start/stop hysteresis, minimum speech duration, end-of-silence detection, and a hard maximum utterance duration. It emits only start/end events; it does not decode audio, buffer frames, persist samples, select a VAD model, or invoke Sofia. A channel adapter remains responsible for bounded audio buffering, pre-roll, cancellation, and forwarding completed utterances to the existing `VoiceSession` / `VoiceWorkflow` path. This contract is not itself a microphone or real-time transport implementation.
