@@ -74,7 +74,7 @@ export function createLineMessagingRuntime(
       try {
         await outbox.enqueue(platform, { conversationId, text });
         const result = await flushMessagingOutbox(outbox, (target, message) => gateway?.send(target, message) ?? Promise.resolve(false),
-          () => onWarning(platform.toUpperCase() + " outbound delivery remains pending."));
+          () => onWarning(platform.toUpperCase() + " outbound delivery remains pending."), platform);
         if (result.pending > 0) onWarning(platform.toUpperCase() + " outbound delivery queue has pending messages.");
       } catch {
         onWarning(platform.toUpperCase() + " outbound message could not be persisted; operator review is required.");
@@ -131,7 +131,7 @@ export function createLineMessagingRuntime(
       async start() {
         await gateway!.start();
         const result = await flushMessagingOutbox(outbox, (target, message) => gateway!.send(target, message),
-          () => onWarning("Messaging outbox retry remains pending."));
+          () => onWarning("Messaging outbox retry remains pending."), "line");
         if (result.pending > 0) onWarning("Messaging outbox has pending outbound messages.");
       },
       stop: () => gateway!.stop(),
