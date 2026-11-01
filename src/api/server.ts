@@ -479,14 +479,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               (input.decision !== "keep-both" && input.decision !== "keep-existing")) {
             return json(res, 400, { error: "invalid_memory_review" }, origin, config);
           }
-          if (input.decision === "keep-existing") {
-            return json(res, 200, { saved: false, decision: "keep-existing" }, origin, config);
-          }
           try {
             const entry = createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
             const conflicts = await deps.userMemoryStore.findPotentialConflicts?.(auth.keyId, entry) ?? [];
             if (!conflicts.length) {
               return json(res, 409, { error: "memory_conflict_changed", message: "No matching conflict remains; submit the memory through POST /v1/memory." }, origin, config);
+            }
+            if (input.decision === "keep-existing") {
+              return json(res, 200, { saved: false, decision: "keep-existing", retainedConflicts: conflicts.length }, origin, config);
             }
             await deps.userMemoryStore.save(auth.keyId, entry);
             const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
