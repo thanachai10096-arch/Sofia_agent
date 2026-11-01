@@ -208,3 +208,69 @@ export function detectMemoryConflicts(
 
   return conflicts;
 }
+
+export interface StaleMemoryCandidate {
+  id: string;
+  kind: string;
+  updatedAt: string;
+  ageDays: number;
+  reason: "older-than-retention-window";
+}
+
+export interface MemoryConsolidationReport {
+  /** Existing duplicate and near-duplicate analysis; no records are modified. */
+  maintenance: MemoryMaintenanceReport;
+  /** Explicit-negation candidates for human review. */
+  conflicts: MemoryConflictReviewPair[];
+  /** Old records to revalidate; age alone never authorizes deletion or demotion. */
+  staleCandidates: StaleMemoryCandidate[];
+}
+
+/**
+ * Produce one bounded, read-only maintenance report for a memory review screen.
+ * Staleness is a prompt to revalidate, not a claim that a memory is false.
+ */
+export function analyzeMemoryConsolidation(
+  records: readonly MemoryMaintenanceRecord[],
+  options: {
+    maxRecords?: number;
+    reviewThreshold?: number;
+    maxReviewPairs?: number;
+    maxConflictPairs?: number;
+    staleAfterDays?: number;
+    now?: string;
+  } = {},
+): MemoryConsolidationReport {
+  const maxRecords = Math.max(1, Math.min(2_000, Math.floor(options.maxRecords ?? 500)));
+  const bounded = records.slice(0, maxRecords).filter((record) =>
+    Boolean(record && typeof record.id === "string" && record.id.length > 0 &&
+      typeof record.kind === "string" && typeof record.content === "string" &&
+      record.content.trim().length > 0),
+  );
+  const staleAfterDays = Math.max(1, Math.min(36_500, Math.floor(options.staleAfterDays ?? 180)));
+  const nowMs = Date.parse(options.now ?? new Date().toISOString());
+  if (!Number.isFinite(nowMs)) throw new Error("Invalid consolidation analysis time.");
+  const staleCandidates = bounded.flatMap((record) => {
+    if (typeof record.updatedAt !== "string") return [];
+    const updatedMs = Date.parse(record.updatedAt);
+    if (!Number.isFinite(updatedMs) || updatedMs > nowMs) return [];
+    const ageDays = Math.floor((nowMs - updatedMs) / 86_400_000);
+    return ageDays >= staleAfterDays
+      ? [{ id: record.id, kind: record.kind, updatedAt: record.updatedAt, ageDays, reason: "older-than-retention-window" as const }]
+      : [];
+  }).sort((a, b) => b.ageDays - a.ageDays || a.id.localeCompare(b.id));
+
+  return {
+    maintenance: analyzeMemoryEntries(bounded, {
+      maxRecords,
+      reviewThreshold: options.reviewThreshold,
+      maxReviewPairs: options.maxReviewPairs,
+    }),
+    conflicts: detectMemoryConflicts(bounded, {
+      maxRecords,
+      reviewThreshold: options.reviewThreshold,
+      maxPairs: options.maxConflictPairs,
+    }),
+    staleCandidates,
+  };
+}
