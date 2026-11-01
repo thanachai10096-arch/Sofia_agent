@@ -21,6 +21,10 @@ const MAX_RECORD_BYTES = 128_000;
  */
 export class FileMessagingOutbox {
   private readonly directory: string;
+
+  /** Stable local key used only to serialize flushes in this process. */
+  getDirectoryKey(): string { return this.directory; }
+
   private chain: Promise<void> = Promise.resolve();
 
   constructor(directory: string) {
@@ -107,24 +111,41 @@ export class FileMessagingOutbox {
   }
 }
 
+// Prevent overlapping flushes for the same spool within one Node.js process.
+// Cross-process coordination is deliberately not implied by this in-process guard.
+const activeFlushes = new Set<string>();
+
 /** Retry pending outbound messages without re-executing their original Sofia runs. */
 export async function flushMessagingOutbox(
   outbox: FileMessagingOutbox,
   send: (platform: ChatPlatform, message: OutboundMessage) => Promise<boolean>,
   onFailure?: (platform: ChatPlatform) => void,
+  platformFilter?: ChatPlatform,
 ): Promise<{ sent: number; pending: number }> {
+  const key = outbox.getDirectoryKey();
+  if (activeFlushes.has(key)) {
+    const pending = await outbox.pending();
+    return { sent: 0, pending: platformFilter ? pending.filter((item) => item.platform === platformFilter).length : pending.length };
+  }
+  activeFlushes.add(key);
   let sent = 0;
-  for (const record of await outbox.pending()) {
-    try {
-      if (await send(record.platform, record.message)) {
-        await outbox.markSent(record.id);
-        sent++;
-      } else {
+  try {
+    for (const record of await outbox.pending()) {
+      if (platformFilter && record.platform !== platformFilter) continue;
+      try {
+        if (await send(record.platform, record.message)) {
+          await outbox.markSent(record.id);
+          sent++;
+        } else {
+          onFailure?.(record.platform);
+        }
+      } catch {
         onFailure?.(record.platform);
       }
-    } catch {
-      onFailure?.(record.platform);
     }
+    const pending = await outbox.pending();
+    return { sent, pending: platformFilter ? pending.filter((item) => item.platform === platformFilter).length : pending.length };
+  } finally {
+    activeFlushes.delete(key);
   }
-  return { sent, pending: (await outbox.pending()).length };
 }
