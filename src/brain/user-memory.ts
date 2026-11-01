@@ -21,6 +21,8 @@ export interface UserMemoryStore {
   save(userId: string, entry: UserMemoryEntry): Promise<void>;
   list(userId: string): Promise<UserMemoryEntry[]>;
   find(userId: string, query: string, limit?: number): Promise<UserMemoryEntry[]>;
+  /** Advisory-only conflict candidates; implementations may omit this capability. */
+  findPotentialConflicts?(userId: string, entry: UserMemoryEntry): Promise<UserMemoryEntry[]>;
   delete(userId: string, id: string): Promise<boolean>;
   clear(userId: string): Promise<void>;
 }
@@ -40,6 +42,22 @@ function redactMemorySecrets(content: string): string {
 
 function normalizeMemorySearchText(value: string): string {
   return value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+const MEMORY_NEGATION_MARKERS = new Set([
+  "not", "no", "never", "dont", "doesnt", "isnt", "cant", "wont",
+  "ไม่", "ไม่ใช่", "เลิก",
+]);
+
+function memoryPolarityText(value: string): { terms: Set<string>; negated: boolean } {
+  const normalized = normalizeMemorySearchText(value)
+    .replace(/\\b(don't|doesn't|isn't|can't|won't)\\b/gu, (match) => match.replace("'", ""));
+  const tokens = normalized.split(/\\s+/u).filter(Boolean);
+  const negated = tokens.some((token) => MEMORY_NEGATION_MARKERS.has(token));
+  return {
+    terms: new Set(tokens.filter((token) => !MEMORY_NEGATION_MARKERS.has(token))),
+    negated,
+  };
 }
 
 function memorySearchTerms(value: string): string[] {
@@ -163,6 +181,22 @@ export class FileUserMemoryStore implements UserMemoryStore {
         entries.push({ ...safeEntry, updatedAt: now });
       }
       await this.writeEntries(userId, entries.slice(-MAX_ENTRIES));
+    });
+  }
+
+  async findPotentialConflicts(userId: string, entry: UserMemoryEntry): Promise<UserMemoryEntry[]> {
+    userKey(userId);
+    if (!validEntry(entry) || containsPromptInjection(entry.content)) return [];
+    const candidate = memoryPolarityText(entry.content);
+    if (candidate.terms.size === 0) return [];
+    const entries = await this.read(userId);
+    return entries.filter((existing) => {
+      if (existing.id === entry.id || existing.kind !== entry.kind) return false;
+      const prior = memoryPolarityText(existing.content);
+      if (prior.negated === candidate.negated || prior.terms.size === 0) return false;
+      const shared = [...candidate.terms].filter((term) => prior.terms.has(term)).length;
+      const overlap = shared / Math.max(candidate.terms.size, prior.terms.size);
+      return overlap >= 0.6;
     });
   }
 
