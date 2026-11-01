@@ -1224,7 +1224,8 @@ export class SofiaBrain {
         const evidenceIds = verification.flatMap((item) => item.evidenceIds);
         const learnedCandidate: LearnedSkillCandidate = {
           name: "repair-" + last.category,
-          trigger: last.message.slice(0, 240),
+          // Learned skills are project-shared; never persist raw user diagnostics.
+          trigger: `Detected ${last.category} during a verified repair.`,
           category: last.category,
           strategy,
           procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
@@ -1254,7 +1255,7 @@ export class SofiaBrain {
         if (this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
-          const entry: ProjectMemoryEntry = { id, project: this.projectContext.root, kind: "repair", content: "Failure: " + last.category + "\nStrategy: " + strategy + "\nResolution: " + last.message.slice(0, 1200), source: "brain-recovery", confidence: 0.85, createdAt: now, updatedAt: now, uses: 0 };
+          const entry: ProjectMemoryEntry = { id, project: this.projectContext.root, kind: "repair", content: "Failure category: " + last.category + "\nStrategy: " + strategy + "\nResolution: verified repair completed; task-specific diagnostic details intentionally omitted.", source: "brain-recovery", confidence: 0.85, createdAt: now, updatedAt: now, uses: 0 };
           await this.wait(() => this.dependencies.projectMemory!.save(entry));
           this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
         }
