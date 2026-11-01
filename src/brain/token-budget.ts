@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
@@ -26,7 +28,7 @@ export interface TokenBudgetAccountSnapshot {
   committedCostNanoUsd: string;
 }
 export interface TokenBudgetSnapshot {
-  version: 1;
+  version: 2;
   total: TokenBudgetAccountSnapshot;
   models: Record<string, TokenBudgetAccountSnapshot>;
   unmeteredCalls: number;
@@ -144,7 +146,7 @@ export class TokenBudget {
   }
 
   private restore(snapshot: TokenBudgetSnapshot): void {
-    if (snapshot.version !== 1 || !nonNegativeInteger(snapshot.unmeteredCalls) ||
+    if ((snapshot.version !== 1 && snapshot.version !== 2) || !nonNegativeInteger(snapshot.unmeteredCalls) ||
         typeof snapshot.stopped !== "boolean" || !snapshot.total ||
         !snapshot.models || typeof snapshot.models !== "object" || Array.isArray(snapshot.models)) {
       throw new Error("Invalid token budget snapshot");
@@ -163,12 +165,17 @@ export class TokenBudget {
     };
     const savedKeys = Object.keys(snapshot.models).sort();
     const configuredKeys = [...this.models.keys()].sort();
-    if (savedKeys.length !== configuredKeys.length || savedKeys.some((key, i) => key !== configuredKeys[i])) {
+    const keyFor = (key: string) => snapshot.version === 1
+      ? key
+      : createHash("sha256").update("sofia-budget-route-v1\\0").update(key).digest("hex");
+    const expectedKeys = configuredKeys.map(keyFor).sort();
+    if (savedKeys.length !== expectedKeys.length || savedKeys.some((key, i) => key !== expectedKeys[i])) {
       throw new Error("Restored token budget model set does not match configuration");
     }
     restoreAccount(this.total, snapshot.total);
-    for (const [key, saved] of Object.entries(snapshot.models)) {
-      const model = this.models.get(key);
+    for (const [savedKey, saved] of Object.entries(snapshot.models)) {
+      const key = snapshot.version === 1 ? savedKey : configuredKeys.find((candidate) => keyFor(candidate) === savedKey);
+      const model = key ? this.models.get(key) : undefined;
       if (!model) throw new Error("Unknown model in token budget snapshot");
       restoreAccount(model.account, saved);
     }
@@ -258,9 +265,13 @@ export class TokenBudget {
       committedCostNanoUsd: account.chargedCost.toString(),
     });
     return {
-      version: 1,
+      version: 2,
       total: save(this.total),
-      models: Object.fromEntries([...this.models].map(([key, model]) => [key, save(model.account)])),
+      // Persist only a one-way route fingerprint; provider/model route names are not needed to restore accounting.
+      models: Object.fromEntries([...this.models].map(([key, model]) => [
+        createHash("sha256").update("sofia-budget-route-v1\\0").update(key).digest("hex"),
+        save(model.account),
+      ])),
       unmeteredCalls: this.unmeteredCalls,
       stopped: this.stopped,
     };
