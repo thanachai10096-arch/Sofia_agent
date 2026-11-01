@@ -208,10 +208,9 @@ test("restored stopped budget remains stopped and model set mismatches fail clos
 test("persisted budget snapshots do not disclose configured route identifiers", () => {
   const saved = budget().snapshot();
   assert.equal(saved.version, 2);
-  assert.deepEqual(Object.keys(saved.models), [
-    Object.keys(saved.models)[0],
-  ]);
-  assert.equal(Object.keys(saved.models)[0]!.includes("internal-pool"), false);
+  assert.equal(Object.keys(saved.models).length, 1);
+  assert.match(Object.keys(saved.models)[0]!, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(saved).includes("internal-pool"), false);
 
   const restored = new TokenBudget(limit(), [{
     key: "internal-pool",
