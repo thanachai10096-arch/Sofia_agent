@@ -933,11 +933,15 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
     } as unknown as SofiaBrain), runStore, namespace);
     const submitted = await runtime.submit({ task: "task token=" + secret });
     let record = await runtime.get(submitted.id);
-    for (let attempt = 0; attempt < 100 && record?.status !== "failed"; attempt += 1) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    // macOS runners can take longer to acquire the durable file lock while the
+    // full suite is running. Poll to a wall-clock deadline rather than imposing
+    // an arbitrary 500 ms limit on this asynchronous worker transition.
+    const executionDeadline = Date.now() + 5_000;
+    while (Date.now() < executionDeadline && record?.status !== "failed") {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
       record = await runtime.get(submitted.id);
     }
-    assert.equal(record?.status, "failed");
+    assert.equal(record?.status, "failed", "submitted job should reach its failed terminal state");
     assert.ok(record);
     assert.ok(!JSON.stringify(record).includes(secret), "public job reads must redact credential-shaped content");
     assert.equal(record.leaseOwnerToken, undefined, "public job reads must not expose lease ownership");
