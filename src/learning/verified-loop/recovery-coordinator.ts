@@ -125,6 +125,18 @@ export async function inspectLearningRecovery(
       });
       continue;
     }
+    // Approval and evidence resolution may take time. Re-read policy after both
+    // gates so this advisory assessment never reports eligibility on a known stale revision.
+    const finalPolicyRevision = await host.currentPolicyRevision({ ...scope });
+    if (!validRevision(finalPolicyRevision)) throw new Error("Authoritative policy service returned an invalid revision");
+    if (finalPolicyRevision !== currentPolicyRevision) {
+      assessments.push({
+        skillId, issueKinds: kinds, disposition: "blocked-policy-drift",
+        reason: "Authoritative policy revision changed while approval and evidence were being revalidated",
+        learningPolicyRevision: skill.policyRevision, currentPolicyRevision: finalPolicyRevision,
+      });
+      continue;
+    }
     assessments.push({
       skillId, issueKinds: kinds, disposition: "eligible-for-reviewed-repair",
       reason: "Read-only gates passed; a separate explicit repair plan and executor revalidation are still required",
