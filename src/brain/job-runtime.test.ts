@@ -615,7 +615,7 @@ test("DurableJobRuntime admits only one resumed execution across separate proces
     import { appendFile } from "node:fs/promises";
     import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
     const runtime = new DurableJobRuntime(() => ({
-      run: async (input: BrainRunInput) => {
+      run: async (input) => {
         if (!input.resume) throw new Error("expected a resume checkpoint");
         await appendFile(${JSON.stringify(markerFile)}, process.pid + "\\n");
         await new Promise((resolve) => setTimeout(resolve, 300));
