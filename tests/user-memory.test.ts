@@ -134,9 +134,12 @@ test("user memory supports deletion and full forget", async () => {
     const entry = createUserMemoryEntry("goal", "Build an open source multi-platform agent");
     await store.save("user", entry);
     assert.equal(await store.delete("user", entry.id), true);
+    assert.deepEqual(await store.find("user", "open source multi-platform agent"), []);
     await store.save("user", createUserMemoryEntry("fact", "Uses Node.js"));
+    assert.deepEqual((await store.find("user", "Node.js")).map((item) => item.content), ["Uses Node.js"]);
     await store.clear("user");
     assert.deepEqual(await store.list("user"), []);
+    assert.deepEqual(await store.find("user", "Node.js"), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
