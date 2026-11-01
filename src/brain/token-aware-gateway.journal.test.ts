@@ -48,6 +48,8 @@ test("gateway persists known settlement before completing the inference", async 
     }))], 45_000, journal);
     const result = await gateway.generateMetered(request, undefined, "run-1");
     assert.deepEqual(result.usage, { inputTokens: 4, outputTokens: 3 });
+    assert.equal(await journal.hasUnresolved("run-1"), true);
+    await journal.acknowledgeCheckpoint("run-1");
     assert.equal(await journal.hasUnresolved("run-1"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
