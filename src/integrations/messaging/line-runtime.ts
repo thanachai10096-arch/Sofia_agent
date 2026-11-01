@@ -2,6 +2,7 @@ import path from "node:path";
 import { SofiaClient } from "../../sdk/client.js";
 import { FileChatMessageDeduplicator } from "../file-chat-deduplicator.js";
 import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
+import { FileMessagingOutbox, flushMessagingOutbox } from "./file-outbox.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createLineAdapter } from "./line.js";
 import { createLineHttpTransport } from "./line-http-transport.js";
@@ -68,6 +69,17 @@ export function createLineMessagingRuntime(
     };
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
     let gateway: MessagingGateway | undefined;
+    const outbox = new FileMessagingOutbox(path.join(workspace, ".sofia", "messaging-outbox"));
+    const queueDelivery = async (platform: "line" | "whatsapp", conversationId: string, text: string) => {
+      try {
+        await outbox.enqueue(platform, { conversationId, text });
+        const result = await flushMessagingOutbox(outbox, (target, message) => gateway?.send(target, message) ?? Promise.resolve(false),
+          () => onWarning(platform.toUpperCase() + " outbound delivery remains pending."));
+        if (result.pending > 0) onWarning(platform.toUpperCase() + " outbound delivery queue has pending messages.");
+      } catch {
+        onWarning(platform.toUpperCase() + " outbound message could not be persisted; operator review is required.");
+      }
+    };
     const handler = createSofiaMessagingHandler({
       client,
       accessPolicy,
@@ -79,10 +91,8 @@ export function createLineMessagingRuntime(
           try {
             run = await client.waitForRun(runId, { timeoutMs: 30 * 60_000, intervalMs: 1_000 });
           } catch {
-            await gateway?.send("line", {
-              conversationId: message.identity.conversationId,
-              text: "Sofia could not retrieve the final result for run " + runId + ". Check the Sofia run status.",
-            });
+            await queueDelivery("line", message.identity.conversationId,
+              "Sofia could not retrieve the final result for run " + runId + ". Check the Sofia run status.");
             return;
           }
           const output = typeof run.result?.output === "string"
@@ -95,7 +105,7 @@ export function createLineMessagingRuntime(
           const text = status === "completed"
             ? "Sofia completed the task.\nRun ID: " + runId + (output ? "\n\n" + output : "\n\nThe run completed but returned no text output.")
             : "Sofia task " + status + ".\nRun ID: " + runId + (status === "failed" && safeError ? "\nReason: " + safeError : "");
-          await gateway?.send("line", { conversationId: message.identity.conversationId, text });
+          await queueDelivery("line", message.identity.conversationId, text);
         })().catch(() => onWarning("LINE completion delivery failed."));
       },
     });
@@ -117,7 +127,16 @@ export function createLineMessagingRuntime(
         warn: (event) => onWarning("LINE messaging warning: " + event + "."),
       },
     });
-    return { start: () => gateway!.start(), stop: () => gateway!.stop(), webhookTransport: transport };
+    return {
+      async start() {
+        await gateway!.start();
+        const result = await flushMessagingOutbox(outbox, (target, message) => gateway!.send(target, message),
+          () => onWarning("Messaging outbox retry remains pending."));
+        if (result.pending > 0) onWarning("Messaging outbox has pending outbound messages.");
+      },
+      stop: () => gateway!.stop(),
+      webhookTransport: transport,
+    };
   } catch (error) {
     const message = error instanceof Error && /LINE_ALLOWED_(USER|CONVERSATION)_IDS must (be a comma-separated list of valid LINE IDs|not contain duplicate IDs)\./.test(error.message)
       ? error.message
