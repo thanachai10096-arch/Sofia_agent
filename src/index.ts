@@ -89,6 +89,8 @@ export type { MessagingGateway, MessagingGatewayOptions, MessagingRateLimiter } 
 export { RedisMessagingRateLimiter, REDIS_MESSAGING_RATE_LIMIT_SCRIPT } from "./integrations/messaging/redis-rate-limiter.js";
 export type { RedisEvalClient, RedisMessagingRateLimiterOptions } from "./integrations/messaging/redis-rate-limiter.js";
 export { createTelegramAdapter } from "./integrations/messaging/telegram.js";
+export { createTelegramVoiceMessageHandler } from "./integrations/messaging/telegram-voice-handler.js";
+export type { TelegramVoiceHandlerOptions, TelegramAudioInspector, TelegramVoiceMediaClient, TelegramVoiceDeduplicator } from "./integrations/messaging/telegram-voice-handler.js";
 export type { TelegramAdapterOptions, TelegramVoiceMessage, TelegramTransport, TelegramUpdate } from "./integrations/messaging/telegram.js";
 export { createTelegramHttpTransport } from "./integrations/messaging/telegram-http-transport.js";
 export type { TelegramHttpTransportOptions } from "./integrations/messaging/telegram-http-transport.js";
