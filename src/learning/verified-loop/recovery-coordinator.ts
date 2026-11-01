@@ -88,10 +88,16 @@ export async function inspectLearningRecovery(
   for (const [skillId, issues] of issuesBySkill) {
     const kinds = issues.map(issue => issue.kind);
     const skill = learningById.get(skillId);
-    if (kinds.length !== 1 || kinds[0] !== "missing-runtime-registration" || !skill) {
+    const matchingRuntimeEntries = runtimeSkills.filter(runtime => runtime.id === skillId);
+    // Reconciliation uses the same issue kind for an absent registration and an
+    // existing inactive entry. Only a truly absent entry is eligible for review;
+    // an inactive runtime object may encode a deliberate disable/revocation.
+    if (kinds.length !== 1 || kinds[0] !== "missing-runtime-registration" || !skill || matchingRuntimeEntries.length > 0) {
       assessments.push({
         skillId, issueKinds: kinds, disposition: "manual-review",
-        reason: "Duplicate, runtime-only, policy-mismatch, or conflicting state requires manual reconciliation",
+        reason: matchingRuntimeEntries.length > 0
+          ? "An inactive or otherwise existing runtime entry requires manual reconciliation; do not reactivate it automatically"
+          : "Duplicate, runtime-only, policy-mismatch, or conflicting state requires manual reconciliation",
         ...(skill ? { learningPolicyRevision: skill.policyRevision } : {}),
         currentPolicyRevision,
       });
