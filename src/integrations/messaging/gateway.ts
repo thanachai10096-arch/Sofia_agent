@@ -27,6 +27,9 @@ export interface MessagingGatewayOptions {
 export interface MessagingGateway {
   start(): Promise<void>;
   stop(): Promise<void>;
+  /** Explicitly restart all adapters after an operator has resolved provider conflicts. */
+  restart(): Promise<void>;
+  getStatus(): "disabled" | "idle" | "starting" | "running" | "stopped";
   dispatch(message: InboundMessage): Promise<{ status: "disabled" | "forbidden" | "duplicate" | "rate_limited" | "handled" }>;
   send(platform: ChatPlatform, message: OutboundMessage): Promise<boolean>;
 }
@@ -42,9 +45,11 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
     adapters.set(adapter.platform, adapter);
   }
   const counts = new Map<string, number[]>();
-  const controller = new AbortController();
+  let controller = new AbortController();
   let started = false;
   let stopped = false;
+  let lifecycle: "idle" | "starting" | "running" | "stopped" = "idle";
+  let generation = 0;
   const now = options.now ?? Date.now;
   const log = options.logger;
   function key(...parts: string[]) {
@@ -52,10 +57,16 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
   }
   return {
     async start() {
-      if (!enabled || started || stopped) return;
+      if (!enabled || started) return;
+      if (stopped) return;
       started = true;
+      lifecycle = "starting";
+      const runGeneration = ++generation;
+      const runController = controller;
       try {
-        await Promise.all([...adapters.values()].map((adapter) => adapter.start(controller.signal, async (message) => {
+        await Promise.all([...adapters.values()].map((adapter) => adapter.start(runController.signal, async (message) => {
+          // Fence callbacks from an adapter generation that has already stopped/restarted.
+          if (runGeneration !== generation || runController.signal.aborted || stopped) return;
           try {
             await this.dispatch(message);
           } catch (error) {
@@ -65,22 +76,41 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
             });
           }
         })));
+        if (runGeneration === generation && !stopped) lifecycle = "running";
       } catch (error) {
-        controller.abort();
-        stopped = true;
-        await Promise.allSettled([...adapters.values()].map((adapter) => adapter.stop()));
-        started = false;
+        if (runGeneration === generation) {
+          runController.abort();
+          stopped = true;
+          lifecycle = "stopped";
+          await Promise.allSettled([...adapters.values()].map((adapter) => adapter.stop()));
+          started = false;
+        }
         log?.warn("messaging_start_failed", { errorType: error instanceof Error ? error.name : "unknown" });
         throw error;
       }
     },
     async stop() {
-      if (stopped) return;
+      if (stopped && !started) return;
+      // Invalidate callbacks before awaiting adapter shutdown.
+      generation++;
       stopped = true;
+      lifecycle = "stopped";
       controller.abort();
       await Promise.allSettled([...adapters.values()].map((adapter) => adapter.stop()));
       started = false;
       counts.clear();
+    },
+    async restart() {
+      if (!enabled) return;
+      await this.stop();
+      controller = new AbortController();
+      stopped = false;
+      started = false;
+      lifecycle = "idle";
+      await this.start();
+    },
+    getStatus() {
+      return enabled ? lifecycle : "disabled";
     },
     async dispatch(message) {
       if (!enabled || stopped) return { status: "disabled" };
