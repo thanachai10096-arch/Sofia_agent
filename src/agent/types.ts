@@ -6,6 +6,7 @@ import type { AcceptanceCriterion, BrainEvent, CompletionReport } from "../brain
 import type { SofiaBrain } from "../brain/executor.js";
 import type { JobRuntime } from "../brain/job-runtime.js";
 import type { BrainRunSnapshot } from "../brain/run-state.js";
+import type { TokenBudgetSnapshot } from "../brain/token-budget.js";
 import type { SecurityController } from "../security/controller.js";
 import type { SecurityAuditSink } from "../security/audit.js";
 import type { DesktopCapability } from "../desktop/types.js";
@@ -41,7 +42,7 @@ export interface AgentDependencies {
  tools?:ToolRegistry;
  policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
- brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
+ brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;budgetSnapshot?: TokenBudgetSnapshot;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
  jobRuntime?: JobRuntime;
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;
