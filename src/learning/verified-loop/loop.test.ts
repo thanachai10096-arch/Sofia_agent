@@ -235,3 +235,52 @@ test("does not activate a skill if policy changes during lifecycle promotion", a
   assert.equal(state.active.length, 0);
 });
 
+
+
+test("recovers runtime promotion when learning-store activation commit fails", async () => {
+  const state = makeHost();
+  let runtimeActive = false;
+  let runtimeRegistrations = 0;
+  state.host.promoteCandidate = async () => {
+    // The lifecycle adapter must be idempotent across the cross-store crash window.
+    if (!runtimeActive) {
+      runtimeActive = true;
+      runtimeRegistrations++;
+    }
+    return true;
+  };
+
+  const transaction = state.host.transaction.bind(state.host);
+  let failActivationOnce = true;
+  state.host.transaction = async (requestedScope, operation) => transaction(requestedScope, tx => operation({
+    ...tx,
+    async activateSkill(skill) {
+      if (failActivationOnce) {
+        failActivationOnce = false;
+        throw new Error("simulated learning-store commit failure after runtime promotion");
+      }
+      return tx.activateSkill(skill);
+    },
+  }));
+
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "cross-store-1", "run1");
+  addReceipt(state, "cross-store-2", "run2");
+  addReceipt(state, "cross-store-3", "run3");
+  await loop.recordVerifiedCompletion(scope, "cross-store-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "cross-store-2", "Fix TypeScript build");
+
+  await assert.rejects(
+    () => loop.recordVerifiedCompletion(scope, "cross-store-3", "Fix TypeScript build"),
+    /simulated learning-store commit failure/,
+  );
+  assert.equal(runtimeActive, true);
+  assert.equal(state.active.length, 0);
+
+  // Retrying the same durable receipt re-runs the idempotent lifecycle gate,
+  // observes the already-active runtime skill, and completes the learning row.
+  const recovered = await loop.recordVerifiedCompletion(scope, "cross-store-3", "Fix TypeScript build");
+  assert.ok(recovered.skillActivated);
+  assert.equal(runtimeRegistrations, 1, "runtime registration must not be duplicated");
+  assert.equal(state.active.length, 1);
+});
