@@ -70,11 +70,22 @@ function hasNegation(value: string): boolean {
 }
 
 function contentTerms(value: string): Set<string> {
-  return tokens(
-    value
-      .replace(ENGLISH_NEGATION, " ")
-      .replace(/(?:ไม่ใช่|ไม่ได้|ไม่มี|ไม่|มิได้|ห้าม)/gu, " "),
-  );
+  const withoutNegation = value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(ENGLISH_NEGATION, " ")
+    .replace(/(?:ไม่ใช่|ไม่ได้|ไม่มี|ไม่|มิได้|ห้าม)/gu, " ");
+  const result = tokens(withoutNegation);
+
+  // Thai/CJK text often has no whitespace-delimited words. Add character
+  // bigrams from those script runs so overlap remains useful without a tokenizer.
+  for (const run of withoutNegation.match(/[\\p{Script=Thai}\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}]+/gu) ?? []) {
+    const chars = Array.from(run);
+    for (let index = 0; index < chars.length - 1; index += 1) {
+      result.add(chars[index]! + chars[index + 1]!);
+    }
+  }
+  return result;
 }
 
 /**
