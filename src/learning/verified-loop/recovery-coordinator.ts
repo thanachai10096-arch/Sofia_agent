@@ -7,7 +7,6 @@ import {
 } from "./reconciliation.js";
 
 export type LearningRecoveryDisposition =
-  | "healthy"
   | "eligible-for-reviewed-repair"
   | "blocked-policy-drift"
   | "blocked-approval"
