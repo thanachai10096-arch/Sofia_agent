@@ -159,3 +159,9 @@ knowledge. These helpers are explicit APIs, not an automatic interception layer:
 callers must authorize the actor and decide when an update or rollback is allowed.
 A failed update may leave an extra safe snapshot, but the previous record is never
 deleted as part of the operation.
+
+## Principal-scoped project memory access
+
+`ScopedProjectMemoryStore` is an additive capability wrapper around the existing `ProjectMemoryStore` contract. Construct it only after the application has authenticated the caller and resolved the projects that principal is authorized to access. The wrapper filters list and retrieval results to that fixed project set, rejects writes outside it, supports read-only/write-disabled capabilities, and can emit allow/deny events through the existing `SecurityAuditSink`. Version-history helpers can use the wrapper as their store so their project reads and writes remain inside the same scope.
+
+The wrapper does not authenticate users, establish project ownership, or infer access from a caller-supplied project name. The application must supply a trusted principal ID and trusted authorized-project list. It intentionally does not add a delete method because the existing `ProjectMemoryStore` contract has no delete operation. Existing unscoped stores remain available for trusted internal callers and backward compatibility.
