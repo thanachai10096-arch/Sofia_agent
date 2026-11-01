@@ -100,7 +100,10 @@ export function buildSkillCandidate(input: {
 }): LearnedSkillCandidate {
   return {
     name: `repair-${input.category}`,
-    // Do not persist raw failure text: it may contain user prompts, file excerpts,\n    // paths, or secrets. Learned skills are project-shared, so keep triggers\n    // category-level and content-free. The message remains diagnostic input only.\n    trigger: `Detected ${input.category} during a verified repair.`,
+    // Do not persist raw failure text: it may contain user prompts, file excerpts,
+    // paths, or secrets. Learned skills are project-shared, so keep triggers
+    // category-level and content-free.
+    trigger: `Detected ${input.category} during a verified repair.`,
     category: input.category,
     strategy: input.strategy,
     procedure: [
