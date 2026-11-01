@@ -199,6 +199,27 @@ test("fails closed when the regression adapter returns malformed output", async 
   assert.equal(state.active.length, 0);
 });
 
+test("fails closed when regression evidence adapter returns malformed rows", async () => {
+  const state = makeHost();
+  const getEvidence = state.host.verification.getEvidence;
+  state.host.verification.getEvidence = async (requestedScope, ids) => {
+    if (ids.some(id => id.startsWith("reg-"))) return [null as unknown as RunEvidence];
+    return getEvidence(requestedScope, ids);
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "malformed-evidence-1", "run1");
+  addReceipt(state, "malformed-evidence-2", "run2");
+  addReceipt(state, "malformed-evidence-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "malformed-evidence-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "malformed-evidence-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "malformed-evidence-3", "Fix TypeScript build");
+
+  assert.equal(result.recorded, true);
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
 test("does not activate a learned skill without the existing lifecycle promotion gate", async () => {
   const state = makeHost();
   delete state.host.promoteCandidate;
