@@ -321,68 +321,79 @@ export class TokenAwareGateway {
 
     if (candidates.length === 0) throw new GatewayError("no_eligible_route");
 
-    let chosen: (typeof candidates)[number] | undefined;
-    let reservation: Reservation | undefined;
-
-    for (const candidate of candidates) {
-      try {
-        signal.throwIfAborted();
-        reservation = this.budget.reserve(candidate.route.budgetKey, {
-          inputTokens: candidate.prepared.inputTokensUpperBound,
-          outputTokens: candidate.maxOutputTokens,
-        });
-        chosen = candidate;
-        break;
-      } catch (error: unknown) {
-        if (!(error instanceof BudgetError)) throw error;
-        if (error.code === "run_stopped") throw error;
-      }
-    }
-
-    if (!chosen || !reservation) throw new GatewayError("no_available_budget");
-
-    const selection = chosen;
-    const lease = reservation;
-
     const work = (async (): Promise<{ value: unknown; usage: TokenUsage }> => {
-      if (signal.aborted) {
-        lease.settle({ inputTokens: 0, outputTokens: 0 });
-        throw new GatewayError("cancelled_or_timed_out");
-      }
+      let reservedAny = false;
+      let lastMeteredFailure: string | undefined;
 
-      try {
-        const reply = await selection.prepared.invoke({
-          signal,
-          maxOutputTokens: selection.maxOutputTokens,
-          requestId: randomUUID(),
-          maxAttempts: 1,
-        });
+      for (const candidate of candidates) {
+        signal.throwIfAborted();
+        let lease: Reservation;
 
-        const settled = lease.settle(reply.usage);
-        if (!settled.usageKnown) throw new GatewayError("invalid_usage");
-        if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
-        if (reply.finishReason !== "complete") throw new GatewayError("incomplete_output");
-
-        return { value: reply.value, usage: reply.usage };
-      } catch (error: unknown) {
-        lease.settle(error instanceof MeteredProviderError ? error.usage : undefined);
-
-        if (!signal.aborted) {
-          const id = selection.route.id;
-          this.routeFailures.set(id, (this.routeFailures.get(id) ?? 0) + 1);
+        try {
+          lease = this.budget.reserve(candidate.route.budgetKey, {
+            inputTokens: candidate.prepared.inputTokensUpperBound,
+            outputTokens: candidate.maxOutputTokens,
+          });
+          reservedAny = true;
+        } catch (error: unknown) {
+          if (!(error instanceof BudgetError)) throw error;
+          if (error.code === "run_stopped") throw error;
+          continue;
         }
 
-        if (error instanceof GatewayError) throw error;
-        // Preserve only a bounded, allowlisted diagnostic category. Never forward
-        // provider response bodies because they can contain secrets or user data.
-        throw new GatewayError("model_call_failed", safeProviderFailureReason(error));
+        try {
+          const reply = await candidate.prepared.invoke({
+            signal,
+            maxOutputTokens: candidate.maxOutputTokens,
+            requestId: randomUUID(),
+            maxAttempts: 1,
+          });
+
+          const settled = lease.settle(reply.usage);
+          if (!settled.usageKnown) throw new GatewayError("invalid_usage");
+          if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
+          if (reply.finishReason !== "complete") throw new GatewayError("incomplete_output");
+
+          return { value: reply.value, usage: reply.usage };
+        } catch (error: unknown) {
+          if (error instanceof MeteredProviderError) {
+            const settled = lease.settle(error.usage);
+            if (!settled.usageKnown) throw new GatewayError("invalid_usage");
+            if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
+
+            if (!signal.aborted) {
+              const id = candidate.route.id;
+              this.routeFailures.set(id, (this.routeFailures.get(id) ?? 0) + 1);
+            }
+            lastMeteredFailure = safeProviderFailureReason(error);
+            // A metered provider rejection is safe to fail over: actual usage has
+            // been charged before another route is attempted.
+            continue;
+          }
+
+          // Unknown usage, cancellation, invalid output, and cap violations are not
+          // retried. Settling without usage charges the full reservation and stops
+          // the run budget, preventing unmetered fallback calls.
+          lease.settle();
+          if (!signal.aborted && !(error instanceof GatewayError)) {
+            const id = candidate.route.id;
+            this.routeFailures.set(id, (this.routeFailures.get(id) ?? 0) + 1);
+          }
+          if (error instanceof GatewayError) throw error;
+          throw new GatewayError("model_call_failed", safeProviderFailureReason(error));
+        }
       }
+
+      if (lastMeteredFailure) {
+        throw new GatewayError("model_call_failed", lastMeteredFailure);
+      }
+      if (!reservedAny) throw new GatewayError("no_available_budget");
+      throw new GatewayError("no_eligible_route");
     })();
 
     return observeWithAbort(work, signal, () => {
-      // Settle the outstanding reservation at its full reserved amount when provider
-      // usage is unknown. This releases in-flight capacity without undercounting cost.
-      lease.settle();
+      // The in-flight reservation is settled by the active attempt's catch path.
+      // Stop the run immediately on cancellation; no further route may be attempted.
       this.budget.stop();
     });
   }
