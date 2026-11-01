@@ -129,8 +129,8 @@ export class SqliteLearningTransactionStore {
     const db = this.db;
     const tx: LearningTransaction = {
       insertExperienceIfAbsent: async experience => {
-        assertSameScope(experience.scope, scope);
-        const result = db.prepare("INSERT INTO learning_experiences (tenant_id, principal_id, project_id, receipt_id, experience_id, payload) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING").run(...values, experience.receiptId, experience.id, encode(experience));
+        const safeExperience = decodeExperience(encode(experience), scope);
+        const result = db.prepare("INSERT INTO learning_experiences (tenant_id, principal_id, project_id, receipt_id, experience_id, payload) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING").run(...values, safeExperience.receiptId, safeExperience.id, encode(safeExperience));
         return Number(result.changes) === 1;
       },
       listExperiences: async (requestedScope, limit) => {
@@ -150,8 +150,8 @@ export class SqliteLearningTransactionStore {
         return row ? decodeExperience(row.payload, requestedScope) : undefined;
       },
       putCandidate: async candidate => {
-        assertSameScope(candidate.scope, scope);
-        db.prepare("INSERT INTO learning_candidates VALUES (?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, candidate_id) DO UPDATE SET payload=excluded.payload").run(...values, candidate.id, encode(candidate));
+        const safeCandidate = decodeCandidate(encode(candidate), scope);
+        db.prepare("INSERT INTO learning_candidates VALUES (?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, candidate_id) DO UPDATE SET payload=excluded.payload").run(...values, safeCandidate.id, encode(safeCandidate));
       },
       getCandidate: async (requestedScope, id) => {
         assertSameScope(requestedScope, scope);
@@ -160,12 +160,12 @@ export class SqliteLearningTransactionStore {
       },
       recordEvaluation: async (requestedScope, candidateId, evaluation) => {
         assertSameScope(requestedScope, scope);
-        db.prepare("INSERT INTO learning_evaluations VALUES (?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, candidate_id) DO UPDATE SET payload=excluded.payload").run(...values, candidateId, encode(evaluation));
+        const safeEvaluation = decodeEvaluation(encode(evaluation));
+        db.prepare("INSERT INTO learning_evaluations VALUES (?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, candidate_id) DO UPDATE SET payload=excluded.payload").run(...values, candidateId, encode(safeEvaluation));
       },
       activateSkill: async skill => {
-        assertSameScope(skill.scope, scope);
-        if (skill.status !== "active" || !skill.policyRevision) throw new Error("Invalid active learning skill");
-        db.prepare("INSERT INTO learning_active_skills VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, skill_id) DO UPDATE SET skill_name=excluded.skill_name, policy_revision=excluded.policy_revision, payload=excluded.payload").run(...values, skill.id, skill.name, skill.policyRevision, encode(skill));
+        const safeSkill = decodeActiveSkill(encode(skill), scope);
+        db.prepare("INSERT INTO learning_active_skills VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, skill_id) DO UPDATE SET skill_name=excluded.skill_name, policy_revision=excluded.policy_revision, payload=excluded.payload").run(...values, safeSkill.id, safeSkill.name, safeSkill.policyRevision, encode(safeSkill));
       },
       listActiveSkills: async requestedScope => {
         assertSameScope(requestedScope, scope);
