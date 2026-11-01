@@ -145,5 +145,7 @@ export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-c
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
 
+export { FileMessagingOutbox, flushMessagingOutbox } from "./integrations/messaging/file-outbox.js";
+export type { MessagingOutboxRecord } from "./integrations/messaging/file-outbox.js";
 export { createLineMessagingRuntime } from "./integrations/messaging/line-runtime.js";
 export type { LineMessagingEnvironment, LineMessagingRuntime } from "./integrations/messaging/line-runtime.js";
