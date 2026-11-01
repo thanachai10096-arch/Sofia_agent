@@ -129,8 +129,8 @@ export { MarkdownUserMemoryStore, MarkdownProjectMemoryStore } from "./brain/mar
 export type { MarkdownMemoryOptions } from "./brain/markdown-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
 
-export { analyzeMemoryEntries, detectMemoryConflicts, normalizeMemoryForComparison } from "./brain/memory-maintenance.js";
-export type { MemoryMaintenanceRecord, MemoryMaintenanceReport, DuplicateMemoryGroup, MemoryReviewPair, MemoryConflictReviewPair } from "./brain/memory-maintenance.js";
+export { analyzeMemoryEntries, analyzeMemoryConsolidation, detectMemoryConflicts, normalizeMemoryForComparison } from "./brain/memory-maintenance.js";
+export type { MemoryMaintenanceRecord, MemoryMaintenanceReport, MemoryConsolidationReport, StaleMemoryCandidate, DuplicateMemoryGroup, MemoryReviewPair, MemoryConflictReviewPair } from "./brain/memory-maintenance.js";
 
 export { rankMemoryDocuments } from "./brain/memory-retrieval.js";
 export type { MemorySearchDocument, RankedMemory } from "./brain/memory-retrieval.js";
