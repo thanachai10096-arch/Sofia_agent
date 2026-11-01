@@ -28,7 +28,7 @@ export interface TokenBudgetAccountSnapshot {
   committedCostNanoUsd: string;
 }
 export interface TokenBudgetSnapshot {
-  version: 2;
+  version: 1 | 2;
   total: TokenBudgetAccountSnapshot;
   models: Record<string, TokenBudgetAccountSnapshot>;
   unmeteredCalls: number;
