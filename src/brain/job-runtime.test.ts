@@ -1032,9 +1032,6 @@ test("DurableJobRuntime preserves the selected model route when resuming a check
 test("DurableJobRuntime preserves the selected model route on submitted jobs", async () => {
   const namespace = "job-runtime-model-route-" + randomUUID();
   let selectedRoute: string | undefined;
-  const brain = {
-    run: async () => ({ completed: true, state: "completed" }),
-  } as unknown as SofiaBrain;
   const runtime = new DurableJobRuntime((options) => {
     selectedRoute = options.modelRouteId;
     return brain;
