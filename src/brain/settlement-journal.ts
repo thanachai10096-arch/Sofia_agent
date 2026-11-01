@@ -182,18 +182,73 @@ export class FileSettlementJournal {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
     }
-    let hasUncheckpointedAttempt = false;
+
+    // A checkpoint may acknowledge only known, matched settlements. It must
+    // never erase an attempt whose provider outcome or usage is ambiguous.
+    const pendingAttempts = new Set<string>();
+    let uncheckpointedKnownSettlement = false;
+    let ambiguousEvidence = false;
+
     for (const line of source.split("\n")) {
       if (!line) continue;
-      let event: JournalEvent;
-      try { event = JSON.parse(line) as JournalEvent; }
+      let raw: unknown;
+      try { raw = JSON.parse(line) as unknown; }
       catch { return true; }
-      if (event.version !== 1) return true;
-      if (event.type === "checkpoint") hasUncheckpointedAttempt = false;
-      else if (event.type === "started") hasUncheckpointedAttempt = true;
-      else if (event.type !== "settled" || typeof event.attemptId !== "string") return true;
+      if (!raw || typeof raw !== "object") return true;
+      const event = raw as Record<string, unknown>;
+      if (event.version !== 1 || typeof event.at !== "string" || !Number.isFinite(Date.parse(event.at))) {
+        return true;
+      }
+
+      if (event.type === "checkpoint") {
+        // Do not allow a checkpoint to clear an unmatched start or an
+        // unknown-usage settlement. Those require operator reconciliation.
+        if (pendingAttempts.size === 0 && !ambiguousEvidence) {
+          uncheckpointedKnownSettlement = false;
+        }
+        continue;
+      }
+
+      if (event.type === "started") {
+        if (typeof event.attemptId !== "string" || !event.attemptId ||
+            !Number.isSafeInteger(event.maxInputTokens) || (event.maxInputTokens as number) < 0 ||
+            !Number.isSafeInteger(event.maxOutputTokens) || (event.maxOutputTokens as number) < 0 ||
+            pendingAttempts.has(event.attemptId)) {
+          ambiguousEvidence = true;
+          continue;
+        }
+        pendingAttempts.add(event.attemptId);
+        continue;
+      }
+
+      if (event.type === "settled") {
+        if (typeof event.attemptId !== "string" || !event.attemptId ||
+            typeof event.usageKnown !== "boolean" || !pendingAttempts.has(event.attemptId)) {
+          ambiguousEvidence = true;
+          continue;
+        }
+        pendingAttempts.delete(event.attemptId);
+        if (!event.usageKnown) {
+          ambiguousEvidence = true;
+          continue;
+        }
+        const usage = event.usage;
+        if (!usage || typeof usage !== "object" ||
+            !Number.isSafeInteger((usage as Record<string, unknown>).inputTokens) ||
+            ((usage as Record<string, number>).inputTokens < 0) ||
+            !Number.isSafeInteger((usage as Record<string, unknown>).outputTokens) ||
+            ((usage as Record<string, number>).outputTokens < 0)) {
+          ambiguousEvidence = true;
+          continue;
+        }
+        uncheckpointedKnownSettlement = true;
+        continue;
+      }
+
+      ambiguousEvidence = true;
     }
-    return hasUncheckpointedAttempt;
+
+    return pendingAttempts.size > 0 || ambiguousEvidence || uncheckpointedKnownSettlement;
   }
 
   async acknowledgeCheckpoint(runId: string): Promise<void> {
