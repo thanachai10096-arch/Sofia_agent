@@ -48,6 +48,12 @@ export class VerifiedLearningLoop {
       const currentPolicy = await this.host.currentPolicyRevision(scope);
       if (receipt.policyRevision !== currentPolicy) return { recorded: false };
       const evidence = await this.host.verification.getEvidence(scope, receipt.evidenceIds);
+      // Persisted verification adapters are an untrusted boundary. A malformed
+      // collection or row must reject the receipt instead of throwing or learning.
+      if (!Array.isArray(evidence) || receipt.evidenceIds.some(id =>
+        !evidence.some(item => validEvidence(item, receipt) && item.id === id))) {
+        return { recorded: false };
+      }
       const trustedIds = new Set(evidence.filter(item => validEvidence(item, receipt)).map(item => item.id));
       if (receipt.evidenceIds.some(id => !trustedIds.has(id))) return { recorded: false };
 
