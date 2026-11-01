@@ -10,7 +10,7 @@ import {
   validateRestoreJournalRecord,
 } from "./restore-journal.js";
 
-const rootRecord = (transactionId = "restore-transaction-0001") => createRestoreJournalRecord({
+const rootRecord = (transactionId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa") => createRestoreJournalRecord({
   transactionId,
   createdAt: "2026-11-01T08:00:00.000Z",
   manifestSha256: "a".repeat(64),
@@ -120,8 +120,8 @@ test("restore journal list returns the latest revision for every transaction", a
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-restore-journal-list-"));
   try {
     const store = new FileRestoreJournalStore(root);
-    const first = rootRecord("restore-transaction-0001");
-    const second = rootRecord("restore-transaction-0002");
+    const first = rootRecord("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    const second = rootRecord("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     await store.create(first);
     await store.create(second);
     const next = advanceRestoreJournal(first, {
