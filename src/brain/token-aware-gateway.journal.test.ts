@@ -105,6 +105,37 @@ test("gateway blocks a second same-run provider call after an unknown-usage sett
 });
 
 
+test("gateway rejects concurrent provider calls for the same run identity", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-gateway-journal-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+    let providerCalls = 0;
+    let markProviderStarted!: () => void;
+    let releaseProvider!: () => void;
+    const providerStarted = new Promise<void>(resolve => { markProviderStarted = resolve; });
+    const providerGate = new Promise<void>(resolve => { releaseProvider = resolve; });
+    const gateway = new TokenAwareGateway(createBudget(), [createRoute(async () => {
+      providerCalls += 1;
+      markProviderStarted();
+      await providerGate;
+      return { value: { ok: true }, usage: { inputTokens: 2, outputTokens: 2 }, finishReason: "complete" };
+    })], 45_000, journal);
+
+    const first = gateway.generateMetered(request, undefined, "concurrent-run");
+    await providerStarted;
+    await assert.rejects(
+      gateway.generateMetered(request, undefined, "concurrent-run"),
+      (error: unknown) => error instanceof GatewayError && error.message.includes("concurrent_provider_call_same_run"),
+    );
+    assert.equal(providerCalls, 1);
+    releaseProvider();
+    await first;
+    assert.equal(providerCalls, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("gateway blocks same-run retries when metered usage is invalid", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-gateway-journal-"));
   try {
