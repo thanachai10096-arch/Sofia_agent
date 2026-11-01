@@ -494,6 +494,7 @@ test("Brain re-executes a completed step ID when a replan changes its action", a
     dependencies: {
       reasoner, tools, allowShell: false, allowNetwork: false, skillLedger,
       async onSkillCandidate(candidate) { learnedTrigger = candidate.trigger; return false; },
+      projectContext: { root: "/workspace/privacy-test", files: [], summary: "test project" },
       projectMemory: {
         async save(entry) { savedRepairMemories.push(entry); },
         async list() { return []; },
