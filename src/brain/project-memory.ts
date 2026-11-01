@@ -8,7 +8,7 @@ import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { rankMemoryDocuments } from "./memory-retrieval.js";
 
 export interface ProjectMemoryEntry {
-  id: string; project: string; kind: "convention" | "repair" | "decision" | "episode"; content: string;
+  id: string; project: string; kind: "convention" | "repair" | "decision" | "episode" | "feedback"; content: string;
   source?: string; confidence: number; createdAt: string; updatedAt: string; uses: number;
 }
 export interface ProjectMemoryStore {
@@ -164,5 +164,114 @@ export function memoryEntryFromEpisode(project: string, event: EpisodicMemoryEve
     updatedAt: now,
     uses: 0,
   };
+}
+
+
+
+/** Explicit feedback about whether a stored memory helped a particular run. */
+export interface MemoryFeedbackEvent {
+  memoryId: string;
+  sourceRunId: string;
+  signal: "helpful" | "not_helpful" | "incorrect" | "outdated";
+  note?: string;
+  occurredAt?: string;
+}
+
+export interface MemoryFeedbackSummary {
+  project: string;
+  memoryId: string;
+  total: number;
+  helpful: number;
+  notHelpful: number;
+  incorrect: number;
+  outdated: number;
+  /** Bounded aggregate in [-1, 1]; a signal for review, not an automatic confidence update. */
+  utilityScore: number;
+}
+
+export interface MemoryFeedbackStore {
+  record(project: string, event: MemoryFeedbackEvent): Promise<void>;
+  summarize(project: string, memoryId: string): Promise<MemoryFeedbackSummary>;
+}
+
+function isMemoryFeedbackEvent(value: unknown): value is MemoryFeedbackEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const event = value as Partial<MemoryFeedbackEvent>;
+  return typeof event.memoryId === "string" && event.memoryId.length > 0 &&
+    typeof event.sourceRunId === "string" && event.sourceRunId.length > 0 &&
+    (event.signal === "helpful" || event.signal === "not_helpful" ||
+      event.signal === "incorrect" || event.signal === "outdated");
+}
+
+/**
+ * Feedback is stored alongside project memory, not in a second database.
+ * Each (project, memory, source run) tuple is idempotent. Summaries are
+ * derived on read and never silently rewrite the source memory's confidence.
+ */
+export class ProjectMemoryFeedbackStore implements MemoryFeedbackStore {
+  constructor(private readonly store: ProjectMemoryStore) {}
+
+  async record(project: string, event: MemoryFeedbackEvent): Promise<void> {
+    if (!project.trim() || !isMemoryFeedbackEvent(event)) {
+      throw new Error("Project, memory identity, source run, and feedback signal are required.");
+    }
+    const now = new Date().toISOString();
+    const occurredAt = event.occurredAt && Number.isFinite(Date.parse(event.occurredAt))
+      ? new Date(event.occurredAt).toISOString()
+      : now;
+    const safeEvent: MemoryFeedbackEvent = {
+      memoryId: event.memoryId.slice(0, 200),
+      sourceRunId: event.sourceRunId.slice(0, 200),
+      signal: event.signal,
+      ...(typeof event.note === "string" && event.note.trim()
+        ? { note: event.note.trim().slice(0, 500) }
+        : {}),
+      occurredAt,
+    };
+    const id = createHash("sha256")
+      .update(project + "\\u0000feedback\\u0000" + safeEvent.memoryId + "\\u0000" + safeEvent.sourceRunId)
+      .digest("hex");
+    await this.store.save({
+      id,
+      project,
+      kind: "feedback",
+      content: JSON.stringify(safeEvent),
+      source: "memory-feedback",
+      confidence: 1,
+      createdAt: occurredAt,
+      updatedAt: now,
+      uses: 0,
+    });
+  }
+
+  async summarize(project: string, memoryId: string): Promise<MemoryFeedbackSummary> {
+    const entries = await this.store.list();
+    const events: MemoryFeedbackEvent[] = [];
+    for (const entry of entries) {
+      if (entry.project !== project || entry.kind !== "feedback") continue;
+      try {
+        const value: unknown = JSON.parse(entry.content);
+        if (isMemoryFeedbackEvent(value) && value.memoryId === memoryId) events.push(value);
+      } catch {
+        // Ignore malformed feedback records; never reinterpret arbitrary text.
+      }
+    }
+    const summary: MemoryFeedbackSummary = {
+      project,
+      memoryId,
+      total: events.length,
+      helpful: events.filter((event) => event.signal === "helpful").length,
+      notHelpful: events.filter((event) => event.signal === "not_helpful").length,
+      incorrect: events.filter((event) => event.signal === "incorrect").length,
+      outdated: events.filter((event) => event.signal === "outdated").length,
+      utilityScore: 0,
+    };
+    if (summary.total > 0) {
+      summary.utilityScore = Number(Math.max(-1, Math.min(1,
+        (summary.helpful - summary.notHelpful - summary.incorrect * 2 - summary.outdated) / summary.total,
+      )).toFixed(3));
+    }
+    return summary;
+  }
 }
 
