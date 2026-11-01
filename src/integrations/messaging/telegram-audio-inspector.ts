@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { Sandbox } from "../sandbox.js";
+import type { Sandbox } from "../../sandbox.js";
 
 export interface TelegramAudioInspection {
   mimeType: string;
