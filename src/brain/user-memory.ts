@@ -44,16 +44,14 @@ function normalizeMemorySearchText(value: string): string {
 
 function memorySearchTerms(value: string): string[] {
   const chunks = value.split(/\s+/u).map((term) => term.trim()).filter((term) => term.length > 1);
-  if (chunks.length !== 1 || !/[\u0E00-\u0E7F]/u.test(chunks[0]!)) return chunks;
-
-  // Thai text is commonly written without spaces between words. Use overlapping
-  // Unicode-code-point bigrams so a short task can retrieve related Thai memories
-  // without introducing a language-specific tokenizer dependency.
-  const characters = Array.from(chunks[0]!);
-  if (characters.length < 2) return [];
-  return Array.from(new Set(
-    characters.slice(0, -1).map((character, index) => character + characters[index + 1]),
-  )).slice(0, 32);
+  // Thai text is commonly written without spaces between words, including in
+  // mixed Thai/English tasks. Tokenize each Thai chunk into overlapping bigrams.
+  const terms = chunks.flatMap((chunk) => {
+    if (!/[\u0E00-\u0E7F]/u.test(chunk)) return [chunk];
+    const characters = Array.from(chunk);
+    return characters.slice(0, -1).map((character, index) => character + characters[index + 1]);
+  });
+  return Array.from(new Set(terms)).slice(0, 32);
 }
 
 function defaultUserMemoryDirectory(): string {
