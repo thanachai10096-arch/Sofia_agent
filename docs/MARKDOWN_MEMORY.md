@@ -21,7 +21,8 @@ Use the templates in `templates/memory/` when creating operator-managed Markdown
 - Keep project memory separate from user memory. A workspace must not be able to read another tenant's user memory.
 - Apply restrictive directory and file permissions, atomic writes, bounded file sizes, and safe path handling.
 - Back up private state securely; do not commit runtime memory files.
-- Markdown is an export / human-review format until a deployment explicitly wires a Markdown adapter into its memory lifecycle. The existing JSON stores remain the canonical runtime stores.
+- Runtime factories decorate the existing JSON stores with Markdown projections. JSON remains canonical; Markdown is a human-readable snapshot, not a second source of truth.
+- Set `SOFIA_STATE_DIR` to an absolute persistent private directory in production. The project-memory helper otherwise uses the OS temporary directory by design.
 
 ## Read lifecycle
 
@@ -54,7 +55,7 @@ Use the templates in `templates/memory/` when creating operator-managed Markdown
 
 The current user memory implementation is in `src/brain/user-memory.ts`; its API and security boundaries are described in [USER_MEMORY.md](./USER_MEMORY.md). Project memory is in `src/brain/project-memory.ts`. Agent-side user-memory retrieval is in `src/agent/core.ts`.
 
-The existing user-memory API derives the owner from the authenticated API key. It supports scoped read/write operations, bounded retrieval, secret redaction, prompt-injection checks, and per-identity storage. This Markdown companion does not claim that the runtime automatically reads or writes `MEMORY.md` / `USER.md` yet.
+The existing user-memory API derives the owner from the authenticated API key. It supports scoped read/write operations, bounded retrieval, secret redaction, prompt-injection checks, and per-identity storage. The runtime automatically writes private Markdown projections after successful memory mutations. Retrieval continues to use the canonical structured stores.
 
 ## Templates
 
