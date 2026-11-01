@@ -440,6 +440,7 @@ export class SofiaBrain {
         prepared.invoke({
           signal: this.signal,
           maxOutputTokens: this.limits.maxOutputTokens,
+          runId: this.runId,
         }),
       );
 
