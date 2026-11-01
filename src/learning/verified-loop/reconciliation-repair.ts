@@ -7,8 +7,10 @@ export interface LearningRepairAuthorization {
   actorId: string;
   /** Caller-provided key persisted by the eventual repair executor for idempotent replay. */
   idempotencyKey: string;
-  /** Explicitly approved skill IDs. Approval is scoped to this plan and does not itself execute repair. */
+  /** Explicitly approved skill IDs, derived from authoritative approval records. */
   approvedSkillIds: string[];
+  /** Persisted approval receipt IDs keyed by skill ID; never model-generated. */
+  approvalIds: Record<string, string>;
   /** Policy revision from the freshly re-read authoritative learning record. */
   learningPolicyRevisions: Record<string, string>;
   /** Current policy revision from the authoritative policy service. */
@@ -22,6 +24,8 @@ export interface LearningRepairAction {
   expectedPolicyRevision: string;
   scope: LearningScope;
   actorId: string;
+  /** Immutable approval receipt that the executor must resolve and bind to this exact action. */
+  approvalId: string;
   idempotencyKey: string;
 }
 export interface LearningRepairBlock {
@@ -59,6 +63,7 @@ export function planLearningReconciliationRepair(
   if (!validText(authorization?.actorId, 200) || !validText(authorization?.idempotencyKey, 200) ||
       !Array.isArray(authorization.approvedSkillIds) ||
       !authorization.approvedSkillIds.every(id => validText(id, 200)) ||
+      !authorization.approvalIds || typeof authorization.approvalIds !== "object" || Array.isArray(authorization.approvalIds) ||
       !Array.isArray(authorization.trustedEvidenceSkillIds) ||
       !authorization.trustedEvidenceSkillIds.every(id => validText(id, 200)) ||
       !authorization.learningPolicyRevisions || typeof authorization.learningPolicyRevisions !== "object" || Array.isArray(authorization.learningPolicyRevisions) ||
@@ -88,7 +93,7 @@ export function planLearningReconciliationRepair(
       blocked.push({ skillId, reason: skillIssues.some(issue => issue.kind === "missing-runtime-registration") ? "conflicting-issues" : "unsupported-issue" });
       continue;
     }
-    if (!authorization.approvedSkillIds.includes(skillId)) {
+    if (!authorization.approvedSkillIds.includes(skillId) || !validText(authorization.approvalIds[skillId], 200)) {
       blocked.push({ skillId, reason: "not-explicitly-approved" });
       continue;
     }
@@ -103,7 +108,7 @@ export function planLearningReconciliationRepair(
       blocked.push({ skillId, reason: "trusted-evidence-missing" });
       continue;
     }
-    actions.push({ kind: "register-missing-runtime-skill", skillId, expectedPolicyRevision, scope: { ...scope }, actorId: authorization.actorId, idempotencyKey: JSON.stringify([authorization.idempotencyKey, skillId]) });
+    actions.push({ kind: "register-missing-runtime-skill", skillId, expectedPolicyRevision, scope: { ...scope }, actorId: authorization.actorId, approvalId: authorization.approvalIds[skillId], idempotencyKey: JSON.stringify([authorization.idempotencyKey, skillId]) });
   }
   return { planId: authorization.idempotencyKey, scope: { ...scope }, actions, blocked, eligibleForExecutor: actions.length > 0 && blocked.length === 0 };
 }
