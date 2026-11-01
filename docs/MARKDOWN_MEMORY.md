@@ -115,3 +115,7 @@ This first version does not automatically learn from every run, infer reusable p
 
 This is a feedback ledger, not autonomous self-training. It does not infer that a memory is true merely because it was helpful once, and it does not promote a strategy without independent evidence and a verification step.
 
+
+## Consolidation review report
+
+`analyzeMemoryConsolidation` combines exact/near-duplicate analysis, explicit-negation conflict candidates, and stale-record review candidates into one bounded, read-only report. Staleness uses the structured `updatedAt` timestamp and a configurable age window (180 days by default); invalid and future timestamps are ignored. A stale record is only a request to revalidate it, not evidence that it is false or safe to delete. The report never edits memory, merges records, changes confidence, or promotes an episode into a durable convention. Pass an explicit `now` value when deterministic reports are needed in tests or scheduled diagnostics.
