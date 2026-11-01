@@ -35,7 +35,9 @@ export function createWhatsAppAdapter(transport: WhatsAppTransport): MessagingAd
             identity: {
               platform: "whatsapp",
               userId: event.userId,
-              channelId: event.phoneNumberId,
+              // WhatsApp Cloud API conversations are one-to-one with the sender ID.
+              // Keep channelId aligned with conversationId for the shared gateway allowlist contract.
+              channelId: event.userId,
               conversationId: event.userId,
             },
             text: event.text,
