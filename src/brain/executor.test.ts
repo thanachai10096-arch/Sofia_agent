@@ -720,3 +720,57 @@ test("Brain saves reusable workflow memory only after verified completion and ex
   assert.match(learned.content, /Verification evidence:/);
   assert.doesNotMatch(learned.content, /"content":"hello"/);
 });
+
+
+test("Brain invokes the independent durable snapshot callback when RunStore persistence fails", async () => {
+  let runStoreAttempts = 0;
+  let callbackSnapshots = 0;
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      runStore: {
+        async save() {
+          runStoreAttempts += 1;
+          throw new Error("simulated RunStore disk failure");
+        },
+        async load() { return undefined; },
+        async delete() {},
+      },
+      onRunSnapshot() {
+        callbackSnapshots += 1;
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.ok(runStoreAttempts > 0, "the dedicated RunStore path should be attempted");
+  assert.ok(callbackSnapshots > 0, "the independent host durability callback must still run");
+});
