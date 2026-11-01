@@ -18,7 +18,7 @@ export { planLearningReconciliationRepair } from "./reconciliation-repair.js";
 export type { LearningRepairAuthorization, LearningRepairAction, LearningRepairBlock, LearningRepairPlan } from "./reconciliation-repair.js";
 
 export { executeLearningRepairPlan, SqliteLearningRepairJournal } from "./reconciliation-repair-executor.js";
-export type { LearningRepairState, LearningRepairJournalEntry, LearningRepairAuditEvent, LearningRepairJournal, LearningRepairSnapshot, LearningRepairExecutorHost, LearningRepairExecutionResult } from "./reconciliation-repair-executor.js";
+export type { LearningRepairState, LearningRepairJournalEntry, LearningRepairAuditEvent, LearningRepairJournal, LearningRepairSnapshot, LearningRepairApprovalBinding, LearningRepairExecutorHost, LearningRepairExecutionResult } from "./reconciliation-repair-executor.js";
 
 export { inspectLearningRecovery } from "./recovery-coordinator.js";
 export type { LearningRecoveryDisposition, LearningRecoveryAssessment, LearningRecoveryInspection, LearningRecoveryCoordinatorHost } from "./recovery-coordinator.js";
