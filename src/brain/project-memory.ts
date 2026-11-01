@@ -18,8 +18,16 @@ export interface ProjectMemoryStore {
 
 export class FileProjectMemoryStore implements ProjectMemoryStore {
   private readonly file: string;
-  constructor(project: string, root = sofiaStateDirectory("memory")) {
-    const key = createHash("sha256").update(project).digest("hex"); this.file = path.join(root, key + ".json");
+  constructor(project: string, root = sofiaStateDirectory("memory"), ownerScope?: string) {
+    if (ownerScope !== undefined && (!ownerScope.trim() || ownerScope.length > 512)) {
+      throw new Error("A valid authenticated owner scope is required for project memory.");
+    }
+    // Preserve the legacy single-user path when no owner is supplied. API-created
+    // brains pass the authenticated principal so project memory and learned skills
+    // are partitioned per owner even when they share the same workspace.
+    const namespace = ownerScope === undefined ? project : JSON.stringify([ownerScope, project]);
+    const key = createHash("sha256").update(namespace).digest("hex");
+    this.file = path.join(root, key + ".json");
   }
   private async read(): Promise<ProjectMemoryEntry[]> {
     try { return JSON.parse(await fs.readFile(this.file, "utf8")) as ProjectMemoryEntry[]; }
