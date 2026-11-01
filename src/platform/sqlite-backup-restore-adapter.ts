@@ -57,10 +57,6 @@ export function sqliteFileBackupRestoreAdapter(
     if (!parentInfo.isDirectory() || parentInfo.isSymbolicLink()) {
       throw new Error("SQLite restore database parent must be a real directory.");
     }
-    const realParent = await fs.realpath(parent);
-    if (path.resolve(realParent) !== path.resolve(parent)) {
-      throw new Error("SQLite restore database parent must not traverse symlinked path components.");
-    }
     const info = await fs.lstat(database).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
