@@ -76,6 +76,13 @@ function reservePortablePath(value: string, seen: Set<string>): void {
   seen.add(normalized);
 }
 
+function assertNotReservedManifestPath(value: string): void {
+  const normalized = value.normalize("NFC").toLowerCase();
+  if (normalized === "manifest.json" || normalized.startsWith("manifest.json/")) {
+    throw new Error('Backup entry path conflicts with the reserved "manifest.json" file.');
+  }
+}
+
 function digest(content: Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
 }
@@ -100,6 +107,7 @@ export function createBackupManifest(
   let totalBytes = 0;
   const entries = files.map(({ path, content }) => {
     if (!safeRelativePath(path)) throw new Error("Backup entry path must be a safe relative POSIX path.");
+    assertNotReservedManifestPath(path);
     reservePortablePath(path, seen);
     if (!(content instanceof Uint8Array)) throw new TypeError("Backup entry content must be bytes.");
     if (content.byteLength > MAX_BACKUP_ENTRY_BYTES) throw new Error("Backup entry exceeds the maximum allowed size.");
@@ -135,6 +143,7 @@ export function validateBackupManifest(value: unknown): BackupManifest {
     if (!isRecord(entry) || !safeRelativePath(entry.path)) {
       throw new Error("Backup manifest contains an unsafe path.");
     }
+    assertNotReservedManifestPath(entry.path);
     reservePortablePath(entry.path, seen);
     if (!Number.isSafeInteger(entry.size) || (entry.size as number) < 0 ||
         (entry.size as number) > MAX_BACKUP_ENTRY_BYTES) {
