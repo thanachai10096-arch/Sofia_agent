@@ -203,3 +203,38 @@ test("restored stopped budget remains stopped and model set mismatches fail clos
     price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 4n },
   }], saved), /model set does not match/);
 });
+
+
+test("persisted budget snapshots do not disclose configured route identifiers", () => {
+  const saved = budget().snapshot();
+  assert.equal(saved.version, 2);
+  assert.deepEqual(Object.keys(saved.models), [
+    Object.keys(saved.models)[0],
+  ]);
+  assert.equal(Object.keys(saved.models)[0]!.includes("internal-pool"), false);
+
+  const restored = new TokenBudget(limit(), [{
+    key: "internal-pool",
+    limit: limit(),
+    price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 4n },
+  }], saved);
+  assert.deepEqual(restored.snapshot(), saved);
+});
+
+test("legacy version-one budget snapshots remain readable", () => {
+  const legacy = {
+    version: 1 as const,
+    total: { chargedTokens: 3, calls: 1, committedCostNanoUsd: "7" },
+    models: {
+      "internal-pool": { chargedTokens: 3, calls: 1, committedCostNanoUsd: "7" },
+    },
+    unmeteredCalls: 0,
+    stopped: false,
+  };
+  const restored = new TokenBudget(limit(), [{
+    key: "internal-pool",
+    limit: limit(),
+    price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 4n },
+  }], legacy);
+  assert.equal(restored.snapshot().total.chargedTokens, 3);
+});
