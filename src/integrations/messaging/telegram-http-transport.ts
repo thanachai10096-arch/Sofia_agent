@@ -153,6 +153,12 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       }
       loop = poll(activeController.signal, onUpdate).finally(() => {
         signal.removeEventListener("abort", stopFromParent);
+        // A terminal polling conflict ends this transport instance. Mark it
+        // stopped so callers can safely start it again after fixing the cause.
+        if (controller === activeController) {
+          stopped = true;
+          controller = undefined;
+        }
       });
       // Return after launching the loop; the polling promise is joined by stop().
     },
