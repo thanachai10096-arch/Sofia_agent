@@ -53,7 +53,7 @@ export interface LearningRepairSnapshot {
   policyRevision: string;
   explicitlyApproved: boolean;
   /** Returned only after resolving the persisted approval receipt authoritatively. */
-  approvalBinding?: LearningRepairApprovalBinding;
+  approvalBinding: LearningRepairApprovalBinding;
   trustedEvidenceValid: boolean;
 }
 export interface LearningRepairExecutorHost {
@@ -281,7 +281,7 @@ export async function executeLearningRepairPlan(
       throw new Error("Authoritative repair revalidation returned invalid state");
     }
     if (existing?.state === "succeeded") {
-      if (snapshot.exists && snapshot.active && snapshot.policyRevision === action.expectedPolicyRevision && snapshot.explicitlyApproved && snapshot.trustedEvidenceValid && snapshot.approvalBinding?.id === action.approvalId) {
+      if (snapshot.exists && snapshot.active && snapshot.policyRevision === action.expectedPolicyRevision && snapshot.explicitlyApproved && snapshot.trustedEvidenceValid && snapshot.approvalBinding.id === action.approvalId) {
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "succeeded", reason: "journal and authoritative state agree" });
       } else {
         results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: "journal says succeeded but authoritative state drifted; manual reconciliation required" });
@@ -369,6 +369,8 @@ export async function executeLearningRepairPlan(
       // Require a durable start audit before any mutation.
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
       if (heartbeatLost) throw new Error("Repair lease heartbeat lost before lifecycle mutation; authoritative reconciliation required");
+      await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_revalidated", at: now(), detail: "approval=" + action.approvalId + "; policy=" + action.expectedPolicyRevision });
+      if (heartbeatLost) throw new Error("Repair lease heartbeat lost after authoritative revalidation; lifecycle mutation blocked");
       await host.registerThroughLifecycle(action);
       if (heartbeatLost) throw new Error("Repair lease heartbeat lost; authoritative reconciliation required");
       // Registration may already have succeeded; do not skip authoritative
@@ -383,7 +385,7 @@ export async function executeLearningRepairPlan(
       if (!after || !validScope(after.scope) || !sameScope(after.scope, action.scope) ||
           !after.exists || !after.active || after.policyRevision !== action.expectedPolicyRevision ||
           !after.explicitlyApproved || !after.trustedEvidenceValid ||
-          after.approvalBinding?.id !== action.approvalId || after.approvalBinding.actorId !== action.actorId ||
+          after.approvalBinding.id !== action.approvalId || after.approvalBinding.actorId !== action.actorId ||
           after.approvalBinding.skillId !== action.skillId || !sameScope(after.approvalBinding.scope, action.scope) ||
           after.approvalBinding.policyRevision !== action.expectedPolicyRevision || after.approvalBinding.status !== "approved") {
         throw new Error("Post-repair authoritative verification failed");
