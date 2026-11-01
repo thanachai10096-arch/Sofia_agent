@@ -71,7 +71,8 @@ export async function promoteVerifiedProjectMemory(
       !Array.isArray(receipt.checks) || !Array.isArray(receipt.evidenceIds) ||
       !receipt.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 200) ||
       receipt.evidenceIds.length === 0 ||
-      !receipt.checks.every((check) => check && typeof check.name === "string" && typeof check.passed === "boolean")) {
+      !receipt.checks.every((check) => check && typeof check.name === "string" && typeof check.passed === "boolean" &&
+        (check.evidenceIds === undefined || (Array.isArray(check.evidenceIds) && check.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 200))))) {
     return { promoted: false, reason: "invalid_receipt" };
   }
   const required = ["evidence", "regression", "policy"];
@@ -79,12 +80,9 @@ export async function promoteVerifiedProjectMemory(
     receipt.checks.some((check) => check.name === name && check.passed === true),
   ) && receipt.checks.every((check) => check.passed === true);
   if (!checksPassed) return { promoted: false, reason: "checks_failed" };
-  const candidateEvidence = new Set(candidate.evidenceIds);
   const evidenceCheck = receipt.checks.find((check) => check.name === "evidence" && check.passed);
-  const verifiedEvidence = new Set(receipt.evidenceIds);
-  for (const evidenceId of evidenceCheck?.evidenceIds ?? []) verifiedEvidence.add(evidenceId);
-  if (!candidate.evidenceIds.some((id) => verifiedEvidence.has(id)) ||
-      (evidenceCheck?.evidenceIds && !evidenceCheck.evidenceIds.every((id) => typeof id === "string" && id.length <= 200))) {
+  const verifiedEvidence = new Set([...receipt.evidenceIds, ...(evidenceCheck?.evidenceIds ?? [])]);
+  if (!candidate.evidenceIds.some((id) => verifiedEvidence.has(id))) {
     return { promoted: false, reason: "evidence_mismatch" };
   }
   if (candidate.confidence < minimumConfidence) {
