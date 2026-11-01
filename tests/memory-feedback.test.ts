@@ -86,7 +86,7 @@ test("verified memory promotion requires evidence, regression, and policy checks
   const receipt = {
     runId: "verify-run-1", verifiedAt: "2026-11-01T10:00:00.000Z",
     checks: [
-      { name: "evidence", passed: true },
+      { name: "evidence", passed: true, evidenceIds: ["test-run-1"] },
       { name: "regression", passed: true },
       { name: "policy", passed: true },
     ],
@@ -99,7 +99,10 @@ test("verified memory promotion requires evidence, regression, and policy checks
   assert.equal(backing.entries.length, 1);
   assert.equal(backing.entries[0]?.project, "project-a");
   assert.equal(backing.entries[0]?.kind, "decision");
-  assert.match(backing.entries[0]?.source ?? "", /verified-run:verify-run-1/);
+  assert.equal(backing.entries[0]?.verification?.runId, "verify-run-1");
+  assert.deepEqual(backing.entries[0]?.verification?.evidenceIds, ["test-run-1", "regression-run-1"]);
+  assert.deepEqual(backing.entries[0]?.verification?.checks.map((check) => check.name), ["evidence", "regression", "policy"]);
+  assert.equal(backing.entries[0]?.source, "verified-repair");
 });
 
 test("feedback alone cannot promote a memory and failed checks never write", async () => {
@@ -150,4 +153,44 @@ test("verified memory promotion enforces confidence, scope, and injection checks
   }, receipt);
   assert.equal(unsafe.reason, "unsafe_content");
   assert.equal(backing.entries.length, 0);
+});
+
+test("verified memory rejects receipts whose evidence does not support the candidate", async () => {
+  const { promoteVerifiedProjectMemory } = await import("../src/brain/verified-memory.js");
+  const backing = new MemoryStore();
+  const result = await promoteVerifiedProjectMemory(backing, {
+    id: "candidate-mismatch", project: "project-a", kind: "decision",
+    content: "Keep retries bounded", source: "test", confidence: 0.99, evidenceIds: ["candidate-evidence"],
+  }, {
+    runId: "unrelated-run", verifiedAt: "2026-11-01T10:00:00Z",
+    checks: [
+      { name: "evidence", passed: true, evidenceIds: ["other-evidence"] },
+      { name: "regression", passed: true },
+      { name: "policy", passed: true },
+    ],
+    evidenceIds: ["other-evidence"],
+  });
+  assert.equal(result.promoted, false);
+  assert.equal(result.reason, "evidence_mismatch");
+  assert.equal(backing.entries.length, 0);
+});
+
+test("verified memory promotion is idempotent for the same candidate and verification run", async () => {
+  const { promoteVerifiedProjectMemory } = await import("../src/brain/verified-memory.js");
+  const backing = new MemoryStore();
+  const candidate = {
+    id: "candidate-repeat", project: "project-a", kind: "repair" as const,
+    content: "Use a bounded retry strategy", source: "repair", confidence: 0.9, evidenceIds: ["test-evidence"],
+  };
+  const receipt = {
+    runId: "same-verification-run", verifiedAt: "2026-11-01T10:00:00Z",
+    checks: [
+      { name: "evidence", passed: true, evidenceIds: ["test-evidence"] },
+      { name: "regression", passed: true },
+      { name: "policy", passed: true },
+    ], evidenceIds: ["test-evidence"],
+  };
+  await promoteVerifiedProjectMemory(backing, candidate, receipt);
+  await promoteVerifiedProjectMemory(backing, candidate, receipt);
+  assert.equal(backing.entries.length, 1);
 });
