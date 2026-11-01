@@ -96,3 +96,14 @@ The existing `UserMemoryStore.find` and `ProjectMemoryStore.find` contracts rema
 - differ by an explicit English or Thai negation marker.
 
 It reports the original entry IDs, scope kind, and lexical similarity. This is not general semantic contradiction detection: phrasing, double negatives, implicit opposites, temporal changes, and domain-specific meaning may be missed or misclassified. Treat every result as a prompt for human review. The helper never chooses an authoritative entry and never changes stored memory. Scans and result counts are bounded.
+
+## Episodic memory (opt-in)
+
+Episodic records reuse the existing project-memory store; they do not introduce another database or persistence engine. Use `ProjectEpisodicMemoryStore` with the existing `ProjectMemoryStore` implementation to record selected run outcomes and retrieve relevant episodes.
+
+An episode contains a stable run ID, completed/failed outcome, short task and result summaries, optional timestamp, bounded evidence IDs, and bounded tags. Its deterministic ID is derived from the project and run ID, so retrying the same record updates the same entry instead of creating duplicates.
+
+Recording is intentionally explicit. Integrators must decide which runs are appropriate to retain and should avoid storing raw prompts, full tool outputs, credentials, or private user content. The underlying project-memory store continues to apply its existing prompt-injection and secret-redaction protections. Episodes are project-scoped and appear in the generated `MEMORY.md` projection as untrusted reference data.
+
+This first version does not automatically learn from every run, infer reusable procedures, or declare a failed strategy universally invalid. Retrieval returns matching episodes for later reasoning; callers remain responsible for relevance, privacy, and any promotion into verified project knowledge.
+
