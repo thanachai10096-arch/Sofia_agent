@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -202,5 +202,62 @@ test("checkpoint cannot clear an unsettled or unknown-usage provider attempt", a
       "a checkpoint cannot resolve a provider attempt without a settlement record");
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("journal refuses a symlinked namespace directory and does not write through it", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-symlink-"));
+  const outside = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-outside-"));
+  try {
+    const { createHash } = await import("node:crypto");
+    const namespaceDirectory = path.join(root, createHash("sha256").update("workspace").digest("hex"));
+    await symlink(outside, namespaceDirectory, "dir");
+    const journal = new FileSettlementJournal("workspace", root);
+    await assert.rejects(journal.claimRun("symlink-run"), /must be a real directory/);
+    assert.deepEqual(await (await import("node:fs/promises")).readdir(outside), []);
+  } catch (error) {
+    if (error && typeof error === "object" &&
+        ["EPERM", "EACCES", "ENOTSUP", "UNKNOWN"].includes(String((error as NodeJS.ErrnoException).code))) {
+      t.skip("This platform does not permit creating directory symlinks in the test environment");
+      return;
+    }
+    throw error;
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("journal append refuses a symlink record without modifying its target", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-file-symlink-"));
+  const outside = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-target-"));
+  try {
+    const { createHash } = await import("node:crypto");
+    const directory = path.join(root, createHash("sha256").update("workspace").digest("hex"));
+    await (await import("node:fs/promises")).mkdir(directory, { recursive: true });
+    const target = path.join(outside, "target.jsonl");
+    await writeFile(target, "preserve-this-file\n", "utf8");
+    const record = path.join(directory, createHash("sha256").update("symlink-run").digest("hex") + ".jsonl");
+    await symlink(target, record, "file");
+    const journal = new FileSettlementJournal("workspace", root);
+    const claim = await journal.claimRun("symlink-run");
+    try {
+      await assert.rejects(
+        journal.begin("symlink-run", { inputTokens: 1, outputTokens: 1 }, claim),
+      );
+    } finally {
+      await claim.release();
+    }
+    assert.equal(await readFile(target, "utf8"), "preserve-this-file\n");
+  } catch (error) {
+    if (error && typeof error === "object" &&
+        ["EPERM", "EACCES", "ENOTSUP", "UNKNOWN"].includes(String((error as NodeJS.ErrnoException).code))) {
+      t.skip("This platform does not permit creating file symlinks in the test environment");
+      return;
+    }
+    throw error;
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   }
 });
