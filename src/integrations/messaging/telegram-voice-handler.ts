@@ -22,6 +22,8 @@ export interface TelegramAudioInspector {
 
 export interface TelegramVoiceDeduplicator {
   claim(key: string): boolean | Promise<boolean>;
+  /** Release only when failure happened before Sofia agent execution began. */
+  release?(key: string): void | Promise<void>;
 }
 
 export interface TelegramVoiceHandlerOptions {
@@ -77,6 +79,7 @@ export function createTelegramVoiceMessageHandler(options: TelegramVoiceHandlerO
       return "duplicate";
     }
 
+    let workflowStarted = false;
     try {
       if (message.fileSizeBytes !== undefined &&
           (!Number.isSafeInteger(message.fileSizeBytes) || message.fileSizeBytes < 1 || message.fileSizeBytes > maxInputBytes)) {
@@ -104,6 +107,9 @@ export function createTelegramVoiceMessageHandler(options: TelegramVoiceHandlerO
         mimeType: inspected.mimeType.toLowerCase(),
         durationMs: inspected.durationMs,
       };
+      // Once agent execution begins, retain the claim: an ambiguous downstream failure
+      // must not cause a retry that could execute the user's task twice.
+      workflowStarted = true;
       const result = await options.workflow.processAudio(audio, signal);
 
       if (replyMode !== "audio" || !result.audioReply) {
@@ -122,6 +128,9 @@ export function createTelegramVoiceMessageHandler(options: TelegramVoiceHandlerO
       }
       return "processed";
     } catch (error) {
+      if (!workflowStarted && options.deduplicator.release) {
+        try { await options.deduplicator.release(key); } catch { /* preserve the original failure */ }
+      }
       options.onWarning?.("telegram_voice_failed");
       throw error;
     }
