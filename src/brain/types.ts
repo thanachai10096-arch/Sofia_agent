@@ -104,6 +104,7 @@ export interface PreparedInference {
   invoke(options: {
     signal: AbortSignal;
     maxOutputTokens: number;
+    runId: string;
   }): Promise<{ value: unknown; usage: { inputTokens: number; outputTokens: number } }>;
 }
 
