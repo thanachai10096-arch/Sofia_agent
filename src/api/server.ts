@@ -175,8 +175,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
-  const persist = (run: ActiveRun) => {
-    if (!runStore) return;
+  const persist = (run: ActiveRun): Promise<boolean> => {
+    if (!runStore) return Promise.resolve(true);
     const record: RunRecord = {
       id: run.id, status: run.status,
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
@@ -185,7 +185,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(run.idempotencyId ? { idempotencyId: run.idempotencyId } : {}),
       ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
-    void runStore.save(record);
+    return runStore.save(record).then(() => true, () => false);
   };
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
@@ -581,7 +581,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(idempotencyId ? { idempotencyId, requestFingerprint } : {}),
           };
           runs.set(runId, run);
-          persist(run);
+          if (!(await persist(run))) {
+            runs.delete(runId);
+            return json(res, 503, { error: "run_persistence_unavailable", message: "The run could not be durably recorded, so no work was started. Retry with the same idempotency key." }, origin, config);
+          }
           if (idempotencyId) idempotency.set(idempotencyId, { runId, fingerprint: requestFingerprint });
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
