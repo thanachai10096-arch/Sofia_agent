@@ -99,3 +99,5 @@ The transport treats HTTP 409 as terminal and emits `poll_conflict` rather than 
 
 - The API `GET /health` response now includes a `channels` object when the host supplies `SofiaApiConfig.channelHealth`. The entrypoint reports Telegram's live transport state and whether Discord is configured and started. Only safe status strings are exposed; credentials, allowlists, and message data are never included.
 - Channel diagnostics are optional and isolated: if the diagnostic callback throws, `/health` still returns HTTP 200 for the core API and omits the `channels` field.
+
+- Discord's HTTP interaction transport exposes a read-only `getStatus()` snapshot (`running` or `stopped`). The public health endpoint uses this live state rather than treating a configured transport as permanently running; a parent abort is reflected immediately.
