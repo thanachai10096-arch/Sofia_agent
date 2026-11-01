@@ -292,13 +292,23 @@ export class CronScheduler {
       if (!await this.authorize(actor, "cancel", schedule)) throw new Error("Not authorized to cancel cron schedule");
       schedule.status = "disabled";
       schedule.updatedAt = this.now().toISOString();
+      // Persist cancellation against every in-flight occurrence. This closes the
+      // claim -> submit race where cancel() can run before executeClaim stores jobId.
+      const jobIds = new Set<string>();
+      for (const execution of state.history) {
+        if (execution.scheduleId !== id || (execution.status !== "claimed" && execution.status !== "running")) continue;
+        execution.status = "cancelled";
+        execution.finishedAt = schedule.updatedAt;
+        execution.error ??= "Scheduled execution cancelled by owner.";
+        if (execution.jobId) jobIds.add(execution.jobId);
+      }
       await this.recordAudit(state, { at: schedule.updatedAt, actor, action: "schedule.cancelled", scheduleId: id });
-      return { ...schedule, jobId: schedule.lastJobId };
+      return { ...schedule, jobIds: [...jobIds] };
     });
     if (!target) return false;
     const controller = this.active.get(id);
     controller?.abort(new Error("Scheduled execution cancelled"));
-    if (target.jobId) await this.runtime.cancel(target.jobId);
+    await Promise.all((target.jobIds as string[]).map(jobId => this.runtime.cancel(jobId).catch(() => false)));
     return true;
   }
   async history(id: string, actor: string): Promise<CronExecution[]> {
@@ -536,16 +546,25 @@ export class CronScheduler {
             errorText = String(controller.signal.reason ?? "Scheduled execution cancelled");
             break;
           }
-          await this.store.transact(async state => {
+          const dispatchAllowed = await this.store.transact(async state => {
             const execution = state.history.find(h => h.id === executionId);
-            if (execution) {
-              execution.status = "running";
-              execution.jobId = submitted.id;
-              execution.attempt = attempt;
-            }
+            if (!execution || execution.status === "cancelled" || execution.status === "completed" ||
+                execution.status === "failed" || execution.status === "skipped") return false;
+            execution.status = "running";
+            execution.jobId = submitted.id;
+            execution.attempt = attempt;
             const current = state.schedules.find(s => s.id === schedule.id);
             if (current) current.lastJobId = submitted.id;
+            return true;
           });
+          if (!dispatchAllowed || controller.signal.aborted) {
+            // cancel() may have won after submit() returned but before its job ID
+            // was persisted. Reconcile by cancelling this newly-created runtime job.
+            await this.runtime.cancel(submitted.id).catch(() => false);
+            status = "cancelled";
+            errorText = String(controller.signal.reason ?? "Scheduled execution cancelled");
+            break;
+          }
 
           const timeout = new AbortController();
           const timeoutId = setTimeout(() => timeout.abort(new Error("Scheduled task timed out")), schedule.timeoutMs);
@@ -592,7 +611,7 @@ export class CronScheduler {
     await this.store.transact(async state => {
       const execution = state.history.find(h => h.id === executionId);
       const current = state.schedules.find(s => s.id === schedule.id);
-      if (execution) {
+      if (execution && execution.status !== "cancelled") {
         execution.status = status;
         execution.finishedAt = this.now().toISOString();
         if (job) execution.jobId = job.id;
