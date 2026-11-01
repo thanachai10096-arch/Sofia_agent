@@ -120,3 +120,51 @@ test("WhatsApp runtime constructs only when all required settings are present", 
   assert.equal(runtime.webhookTransport.verifyChallenge({ mode: "subscribe", token: "verify", challenge: "challenge" }), "challenge");
   await runtime.stop();
 });
+
+
+test("WhatsApp outbound transport uses the configured Graph API phone endpoint and server-side bearer token", async () => {
+  let requestedUrl = "";
+  let authorization = "";
+  let requestBody: Record<string, unknown> = {};
+  const transport = createWhatsAppHttpTransport({
+    ...options,
+    fetchImpl: async (input, init) => {
+      requestedUrl = String(input);
+      authorization = new Headers(init?.headers).get("authorization") ?? "";
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ messages: [{ id: "wamid.sent" }] }), { status: 200 });
+    },
+  });
+  await transport.start(new AbortController().signal, async () => undefined);
+  assert.deepEqual(await transport.sendText("66812345678", "hello"), { messageId: "wamid.sent" });
+  assert.equal(requestedUrl, "https://graph.facebook.com/v99.0/12345678901/messages");
+  assert.equal(authorization, "Bearer test-access-token");
+  assert.deepEqual(requestBody, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: "66812345678",
+    type: "text",
+    text: { preview_url: false, body: "hello" },
+  });
+  await transport.stop();
+});
+
+test("WhatsApp outbound transport reports provider failures without exposing response bodies", async () => {
+  const transport = createWhatsAppHttpTransport({
+    ...options,
+    fetchImpl: async () => new Response("sensitive provider diagnostic", { status: 500 }),
+  });
+  await transport.start(new AbortController().signal, async () => undefined);
+  await assert.rejects(() => transport.sendText("66812345678", "hello"), /WhatsApp API request failed/);
+  await transport.stop();
+});
+
+test("WhatsApp webhook transport rejects oversized bodies before signature parsing", async () => {
+  const transport = createWhatsAppHttpTransport(options);
+  await transport.start(new AbortController().signal, async () => undefined);
+  assert.deepEqual(await transport.handleWebhook(new Uint8Array(1_000_001), "sha256=" + "a".repeat(64)), {
+    status: 413,
+    acceptedEvents: 0,
+  });
+  await transport.stop();
+});
