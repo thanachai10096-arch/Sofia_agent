@@ -28,6 +28,15 @@ export interface MemoryReviewPair {
   reason: "similar-content";
 }
 
+export interface MemoryMaintenanceReport {
+  /** Number of valid records included in the bounded scan. */
+  scanned: number;
+  /** Exact duplicate groups, scoped to the same memory kind. */
+  duplicates: DuplicateMemoryGroup[];
+  /** Near-duplicate pairs that require human review. */
+  reviewPairs: MemoryReviewPair[];
+}
+
 export interface MemoryConflictReviewPair {
   firstId: string;
   secondId: string;
@@ -44,13 +53,13 @@ export function normalizeMemoryForComparison(value: string): string {
   return value
     .normalize("NFKC")
     .toLocaleLowerCase()
-    .replace(/[\\p{P}\\p{S}\\s]+/gu, " ")
+    .replace(/[\p{P}\p{S}\s]+/gu, " ")
     .trim();
 }
 
 function tokens(value: string): Set<string> {
   return new Set(
-    (value.match(/[\\p{L}\\p{N}_-]+/gu) ?? [])
+    (value.match(/[\p{L}\p{N}_-]+/gu) ?? [])
       .filter((token) => Array.from(token).length > 1),
   );
 }
@@ -62,7 +71,7 @@ function similarity(left: Set<string>, right: Set<string>): number {
   return intersection / Math.min(left.size, right.size);
 }
 
-const ENGLISH_NEGATION = /\\b(?:not|no|never|cannot|can't|cant|don't|dont|doesn't|doesnt|didn't|didnt|isn't|isnt|aren't|arent|wasn't|wasnt|won't|wont|without)\\b/iu;
+const ENGLISH_NEGATION = /\b(?:not|no|never|cannot|can't|cant|don't|dont|doesn't|doesnt|didn't|didnt|isn't|isnt|aren't|arent|wasn't|wasnt|won't|wont|without)\b/iu;
 const THAI_NEGATION = /(?:ไม่ใช่|ไม่ได้|ไม่มี|ไม่|มิได้|ห้าม)/u;
 
 function hasNegation(value: string): boolean {
@@ -79,7 +88,7 @@ function contentTerms(value: string): Set<string> {
 
   // Thai/CJK text often has no whitespace-delimited words. Add character
   // bigrams from those script runs so overlap remains useful without a tokenizer.
-  for (const run of withoutNegation.match(/[\\p{Script=Thai}\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}]+/gu) ?? []) {
+  for (const run of withoutNegation.match(/[\p{Script=Thai}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/gu) ?? []) {
     const chars = Array.from(run);
     for (let index = 0; index < chars.length - 1; index += 1) {
       result.add(chars[index]! + chars[index + 1]!);
@@ -109,7 +118,7 @@ export function analyzeMemoryEntries(
   const exact = new Map<string, { kind: string; ids: string[] }>();
   const prepared = bounded.map((record) => {
     const normalized = normalizeMemoryForComparison(record.content);
-    const key = record.kind + "\\u0000" + normalized;
+    const key = record.kind + "\u0000" + normalized;
     const group = exact.get(key) ?? { kind: record.kind, ids: [] };
     group.ids.push(record.id);
     exact.set(key, group);
