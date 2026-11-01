@@ -217,10 +217,14 @@ export class FileUserMemoryStore implements UserMemoryStore {
       const content = normalizeMemorySearchText(entry.content);
       const searchable = normalizeMemorySearchText(entry.kind + " " + entry.content);
       const matchedTerms = terms.filter((term) => searchable.includes(term));
-      if (matchedTerms.length === 0) return { entry, score: 0 };
       const coverage = matchedTerms.length / terms.length;
       const phraseMatch = content.includes(normalizedQuery);
       const kindMatch = normalizeMemorySearchText(entry.kind) === normalizedQuery;
+      // A single incidental word should not pull an otherwise unrelated memory
+      // into the model context. Exact phrase and kind queries remain eligible.
+      if (matchedTerms.length === 0 || (!phraseMatch && !kindMatch && coverage < 0.5)) {
+        return { entry, score: 0 };
+      }
       const confidence = Math.max(0, Math.min(1, entry.confidence));
       const ageMs = Math.max(0, now - Date.parse(entry.updatedAt));
       const recency = Number.isFinite(ageMs) ? 1 / (1 + ageMs / (30 * 24 * 60 * 60 * 1000)) : 0;
