@@ -75,3 +75,17 @@ The code outline above is not a claim that the repository's API server is alread
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+
+## Telegram voice media building block
+
+`createTelegramVoiceMediaClient` is an opt-in media helper for a future Telegram voice adapter. It is separate from the existing text messaging poller and does not start a second polling loop or automatically execute voice messages.
+
+- `downloadVoice(fileId, signal)` calls Telegram `getFile`, validates the returned relative path, permits only known audio extensions, and downloads only from the fixed `https://api.telegram.org/file/` origin.
+- File metadata and the streamed response are both checked against a configurable byte limit (10 MiB by default; maximum configurable limit 50 MiB).
+- `sendVoice(chatId, audio, signal)` uploads audio using multipart form data and validates the chat ID, MIME type, and byte limit.
+- Requests use HTTPS, reject redirects, support cancellation, and never accept a caller-provided download URL.
+- This helper does not verify actual media duration or decode the audio. The future voice adapter must validate the Telegram-provided duration against decoded media duration before invoking `VoiceWorkflow`.
+- It is not wired into `createTelegramMessagingRuntime`; text messaging behavior is unchanged. A single Telegram update dispatcher must route voice and text events without running two competing `getUpdates` loops.
+
+Automated tests cover fixed-origin downloads, path traversal rejection, extension allowlisting, streamed size limits, multipart upload, and cancellation. These are mocked HTTP tests, not a live Telegram bot test.
