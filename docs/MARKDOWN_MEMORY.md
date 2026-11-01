@@ -87,3 +87,12 @@ User and project memory keep their existing store interfaces and now share `rank
 - Retrieval is deterministic and local. This is lexical hybrid retrieval, not vector/embedding search; an embedding index can be added later behind the same retrieval boundary if evaluation justifies its cost.
 
 The existing `UserMemoryStore.find` and `ProjectMemoryStore.find` contracts remain unchanged, so agent context injection and callers continue to use the same APIs.
+
+## Conflict review
+
+`detectMemoryConflicts` in `src/brain/memory-maintenance.ts` is a conservative candidate generator for entries that:
+- belong to the same memory kind;
+- share a high proportion of content terms after recognized negation markers are removed; and
+- differ by an explicit English or Thai negation marker.
+
+It reports the original entry IDs, scope kind, and lexical similarity. This is not general semantic contradiction detection: phrasing, double negatives, implicit opposites, temporal changes, and domain-specific meaning may be missed or misclassified. Treat every result as a prompt for human review. The helper never chooses an authoritative entry and never changes stored memory. Scans and result counts are bounded.
