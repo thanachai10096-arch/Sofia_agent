@@ -128,3 +128,6 @@ export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessa
 export { MarkdownUserMemoryStore, MarkdownProjectMemoryStore } from "./brain/markdown-memory.js";
 export type { MarkdownMemoryOptions } from "./brain/markdown-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
+
+export { analyzeMemoryEntries, normalizeMemoryForComparison } from "./brain/memory-maintenance.js";
+export type { MemoryMaintenanceRecord, MemoryMaintenanceReport, DuplicateMemoryGroup, MemoryReviewPair } from "./brain/memory-maintenance.js";
