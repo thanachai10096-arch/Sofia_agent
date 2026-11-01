@@ -187,13 +187,32 @@ test("user memory search ranks phrase and multi-term matches above weak partial 
     const ranked = await store.find("user", "TypeScript core agent", 3);
     assert.equal(ranked[0]?.id, phrase.id);
     assert.equal(ranked[1]?.id, multi.id);
-    assert.equal(ranked[2]?.id, weak.id);
+    assert.equal(ranked.length, 2);
+    assert.deepEqual(await store.find("user", "TypeScript unrelated astronomy telescope"), []);
     assert.deepEqual(await store.find("another-user", "TypeScript core agent"), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
+
+
+test("user memory search excludes incidental single-term matches", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-relevance-floor-"));
+  try {
+    const store = new FileUserMemoryStore(root);
+    const incidental = createUserMemoryEntry("fact", "Uses TypeScript for a tiny utility");
+    const relevant = createUserMemoryEntry("goal", "Build a secure agent platform with persistent memory");
+    await store.save("user", incidental);
+    await store.save("user", relevant);
+
+    assert.deepEqual(await store.find("user", "TypeScript unrelated astronomy"), []);
+    assert.deepEqual((await store.find("user", "secure agent platform")).map((entry) => entry.id), [relevant.id]);
+    assert.deepEqual((await store.find("user", "TypeScript")).map((entry) => entry.id), [incidental.id]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("user memory search retrieves Thai text without whitespace between words", async () => {
   const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-thai-search-"));
