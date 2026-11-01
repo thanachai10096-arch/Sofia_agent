@@ -64,7 +64,7 @@ Telegram returns HTTP 409 for a long-polling conflict when another consumer is u
 4. After the conflict is resolved, restart the intended test instance and verify that it receives a message from an allowlisted user, rejects an unallowlisted user, and can deliver a real Sofia result.
 5. If HTTP 409 persists, record only the timestamp, service/deployment ID, and status code. Never include the token, full Bot API URL, chat contents, or raw provider response in diagnostics.
 
-The transport treats HTTP 409 as terminal and emits `poll_conflict` rather than entering an exponential retry loop. This makes the failure visible and avoids futile retries; it does not automatically find or stop the competing consumer. The Sofia API can remain available while Telegram polling is stopped.
+The transport treats HTTP 409 as terminal and emits `poll_conflict` rather than entering an exponential retry loop. It marks the polling transport stopped after the loop exits, rejects outbound sends while stopped, and permits an explicit `start()` after the conflict is resolved. This makes the failure visible and avoids futile retries; it does not automatically find or stop the competing consumer. The Sofia API can remain available while Telegram polling is stopped.
 
 ## Production acceptance checklist
 
