@@ -284,6 +284,46 @@ test("one-time schedules reject ambiguous or invalid timing input", async () => 
 });
 
 
+test("cross-instance cancellation fences a cron dispatch while runtime submission is pending", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let resolveSubmit!: (job: JobRecord) => void;
+  let markSubmitStarted!: () => void;
+  const submitStarted = new Promise<void>(resolve => { markSubmitStarted = resolve; });
+  const submitGate = new Promise<JobRecord>(resolve => { resolveSubmit = resolve; });
+  let cancelCalls = 0;
+  const runtime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      markSubmitStarted();
+      return submitGate;
+    },
+    async get() { return undefined; },
+    async cancel() { cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const dispatcher = new CronScheduler(runtime, { store, now: () => now });
+  const canceller = new CronScheduler(runtime, { store, now: () => now });
+  const created = await dispatcher.create({
+    name: "cross-instance-cancel", task: "must not survive cancellation",
+    cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  await dispatcher.tick();
+  await submitStarted;
+
+  // A different API/scheduler process cannot abort dispatcher's local controller.
+  // The durable execution record must therefore carry the cancellation decision.
+  assert.equal(await canceller.cancel(created.id, "alice"), true);
+  resolveSubmit({ id: "late-submitted-job", status: "queued", task: "must not survive cancellation" } as JobRecord);
+
+  for (let i = 0; i < 100 && cancelCalls === 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(cancelCalls, 1, "the late runtime job must be cancelled after its ID becomes known");
+  assert.equal(state.history[0].status, "cancelled", "late dispatcher finalization must not overwrite durable cancellation");
+  assert.equal(state.schedules[0].status, "disabled");
+});
+
+
 test("cancelling a running schedule disables it and cancels the runtime job", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
