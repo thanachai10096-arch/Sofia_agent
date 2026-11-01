@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileSettlementJournal } from "./settlement-journal.js";
-import { GatewayError, TokenAwareGateway, type InferenceRequest, type InternalRoute } from "./token-aware-gateway.js";
+import { GatewayError, TokenAwareGateway, type InferenceRequest, type InternalRoute, type PreparedCall, type ProviderReply } from "./token-aware-gateway.js";
 import { TokenBudget } from "./token-budget.js";
 
 const request: InferenceRequest = {
@@ -24,7 +24,7 @@ function createBudget() {
   }]);
 }
 
-function createRoute(invoke: InternalRoute["prepare"] extends (...args: never[]) => infer R ? (options: Parameters<NonNullable<R extends { invoke: infer I } ? I : never>>[0]) => Promise<{ value: unknown; usage: { inputTokens: number; outputTokens: number }; finishReason: "complete" }> : never): InternalRoute {
+function createRoute(invoke: (options: Parameters<PreparedCall["invoke"]>[0]) => Promise<ProviderReply>): InternalRoute {
   return {
     id: "private-route-name",
     budgetKey: "route",
