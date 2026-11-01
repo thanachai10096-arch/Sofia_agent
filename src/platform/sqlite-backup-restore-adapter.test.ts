@@ -157,7 +157,8 @@ test("SQLite restore adapter revalidates bundle bytes immediately before live mu
     const adapter = sqliteFileBackupRestoreAdapter("sessions", database, "sessions/snapshot.sqlite", lifecycle);
     await adapter.preflight(bundle, ["sessions/snapshot.sqlite"]);
     // Preserve the SQLite magic header but corrupt the database page after preflight.
-    validBytes[100] = 0xff;
+    const bundledBytes = bundle.files.get("sessions/snapshot.sqlite")!;
+    bundledBytes[100] = 0xff;
     await assert.rejects(adapter.apply(bundle, ["sessions/snapshot.sqlite"]), /integrity validation/);
     assert.equal(lifecycleCalls, 0);
     assert.deepEqual(await readFile(database), sqliteBytes("original"));
