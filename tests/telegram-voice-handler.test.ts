@@ -13,7 +13,7 @@ function setup(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
   const workflow = new VoiceWorkflow(
     { async transcribe(input) { calls.push("stt:" + input.durationMs + ":" + input.mimeType); return "hello"; } },
-    async (transcript) => { calls.push("agent:" + transcript); return { text: "Hi there" }; },
+    async (transcript) => { calls.push("agent:" + transcript); if (overrides.agentFailure) throw new Error("agent failed"); return { text: "Hi there" }; },
     { async synthesize() { calls.push("tts"); return { bytes: new Uint8Array([8, 9]), mimeType: "audio/mpeg" }; } },
   );
   let claimed = false;
@@ -34,6 +34,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     },
     deduplicator: {
       async claim(key: string) { calls.push("claim:" + key); if (overrides.duplicate) return false; if (claimed) return false; claimed = true; return true; },
+      async release(key: string) { calls.push("release:" + key); claimed = false; },
     },
     async sendText() { calls.push("sendText"); },
     ...(overrides.replyMode ? { replyMode: overrides.replyMode as "text" | "audio" | "both" } : {}),
@@ -76,4 +77,21 @@ test("Telegram voice can deliver text only without sending synthesized audio", a
   assert.equal(await handler(message, new AbortController().signal), "processed");
   assert.ok(calls.includes("sendText"));
   assert.equal(calls.some(x => x.startsWith("sendVoice:")), false);
+});
+
+test("Telegram voice releases its dedupe claim when download or inspection fails before agent execution", async () => {
+  const download = setup({ media: { async downloadVoice() { throw new Error("temporary download failure"); } } });
+  await assert.rejects(download.handler(message, new AbortController().signal), /temporary download failure/);
+  assert.equal(download.calls.some((x) => x.startsWith("release:")), true);
+
+  const inspection = setup({ inspector: { async inspect() { throw new Error("decoder unavailable"); } } });
+  await assert.rejects(inspection.handler(message, new AbortController().signal), /decoder unavailable/);
+  assert.equal(inspection.calls.some((x) => x.startsWith("release:")), true);
+});
+
+test("Telegram voice retains its dedupe claim after agent execution begins", async () => {
+  const { handler, calls } = setup({ agentFailure: true });
+  await assert.rejects(handler(message, new AbortController().signal), /agent failed/);
+  assert.ok(calls.some((x) => x.startsWith("agent:")));
+  assert.equal(calls.some((x) => x.startsWith("release:")), false);
 });
