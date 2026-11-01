@@ -194,7 +194,7 @@ export function createTelegramMessagingRuntime(
       async start() {
         await gateway!.start();
         const result = await flushMessagingOutbox(outbox, (target, message) => gateway!.send(target, message),
-          () => onWarning("Messaging outbox retry remains pending."));
+          () => onWarning("Messaging outbox retry remains pending."), "telegram");
         if (result.pending > 0) onWarning("Messaging outbox has pending outbound messages.");
       },
       stop: () => gateway!.stop(),
