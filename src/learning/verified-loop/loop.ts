@@ -132,6 +132,15 @@ export class VerifiedLearningLoop {
       const regressionEvidence = evaluation.regressionEvidenceIds.length > 0
         ? await this.host.verification.getEvidence(scope, evaluation.regressionEvidenceIds)
         : [];
+      // Verification adapters are external boundaries: malformed persisted evidence
+      // must fail closed rather than throwing while fields are inspected.
+      if (!Array.isArray(regressionEvidence) || regressionEvidence.some(item =>
+        !item || typeof item !== "object" || typeof item.id !== "string" ||
+        typeof item.runId !== "string" || !item.scope || typeof item.scope !== "object" ||
+        typeof item.trusted !== "boolean" || typeof item.success !== "boolean" ||
+        typeof item.kind !== "string")) {
+        return { recorded: true, experienceId: prepared.experienceId };
+      }
       const verifiedRegressionIds = new Set(regressionEvidence.filter(item =>
         item.trusted === true && item.success === true && item.kind === "regression" &&
         item.runId === evaluation.regressionRunId && sameScope(item.scope, scope) &&
