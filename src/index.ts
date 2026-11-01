@@ -82,6 +82,7 @@ export { createTelegramAdapter } from "./integrations/messaging/telegram.js";
 export type { TelegramTransport, TelegramUpdate } from "./integrations/messaging/telegram.js";
 export { createTelegramHttpTransport } from "./integrations/messaging/telegram-http-transport.js";
 export type { TelegramHttpTransportOptions } from "./integrations/messaging/telegram-http-transport.js";
+export type { TelegramTransportStatus } from "./integrations/messaging/telegram-http-transport.js";
 export { createDiscordAdapter } from "./integrations/messaging/discord.js";
 export type { DiscordTransport, VerifiedDiscordMessage } from "./integrations/messaging/discord.js";
 export { createDiscordInteractionTransport } from "./integrations/messaging/discord-interaction-transport.js";
