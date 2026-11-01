@@ -76,10 +76,11 @@ function publicJobRecord(record: JobRecord): JobRecord {
 
 export interface JobRuntime {
   submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
-  get(id: string): Promise<JobRecord | undefined>;
-  resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
-  cancel(id: string): Promise<boolean>;
-  list(): Promise<JobRecord[]>;
+  /** Optional owner scope is enforced inside the runtime, not only by HTTP handlers. */
+  get(id: string, ownerKeyId?: string): Promise<JobRecord | undefined>;
+  resume(id: string, signal?: AbortSignal, ownerKeyId?: string): Promise<JobRecord>;
+  cancel(id: string, ownerKeyId?: string): Promise<boolean>;
+  list(ownerKeyId?: string): Promise<JobRecord[]>;
   markNotificationDelivered?(id: string): Promise<void>;
 }
 
@@ -426,7 +427,7 @@ class FileJobStateStore {
     });
   }
 
-  async list(): Promise<JobRecord[]> {
+  async list(ownerKeyId?: string): Promise<JobRecord[]> {
     return this.read();
   }
 
@@ -486,14 +487,17 @@ export class DurableJobRuntime implements JobRuntime {
     return record;
   }
 
-  async get(id: string): Promise<JobRecord | undefined> {
+  async get(id: string, ownerKeyId?: string): Promise<JobRecord | undefined> {
     const existing = this.jobs.get(id);
+    // A scoped caller must never learn whether another owner's job exists.
+    if (existing && ownerKeyId !== undefined && existing.ownerKeyId !== ownerKeyId) return undefined;
     // Keep the canonical record stable while a local worker is atomically claiming it.
     // After startup, non-local reads refresh from disk to observe cancellation/expiry.
     if (existing && (this.controllers.has(id) || this.starting.has(id))) return publicJobRecord(existing);
 
     const stored = await this.state.get(id);
     if (!stored) return existing ? publicJobRecord(existing) : undefined;
+    if (ownerKeyId !== undefined && stored.ownerKeyId !== ownerKeyId) return undefined;
     const loadedSnapshot = stored.snapshot?.runId && this.runStore
       ? await this.runStore.load(stored.snapshot.runId)
       : undefined;
@@ -552,16 +556,16 @@ export class DurableJobRuntime implements JobRuntime {
       await this.recoverInterrupted(hydrated);
       this.jobs.set(hydrated.id, hydrated);
     }
-    return [...this.jobs.values()].map(publicJobRecord);
+    return [...this.jobs.values()].filter((record) => ownerKeyId === undefined || record.ownerKeyId === ownerKeyId).map(publicJobRecord);
   }
 
-  async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
+  async resume(id: string, signal?: AbortSignal, ownerKeyId?: string): Promise<JobRecord> {
     // Reserve the resume slot before the first await. Otherwise two callers can both
     // pass the guard while get() is pending and race to resume the same checkpoint.
     if (this.resuming.has(id)) throw new Error("Job is already being resumed");
     this.resuming.add(id);
     try {
-      const fetched = await this.get(id);
+      const fetched = await this.get(id, ownerKeyId);
       if (!fetched) throw new Error("Unknown job");
       // get() returns a defensive copy; mutations must target the canonical live record.
       const record = this.jobs.get(id) ?? fetched;
@@ -583,7 +587,11 @@ export class DurableJobRuntime implements JobRuntime {
     }
   }
 
-  async cancel(id: string): Promise<boolean> {
+  async cancel(id: string, ownerKeyId?: string): Promise<boolean> {
+    // Verify ownership before mutating the durable record. Missing and foreign jobs
+    // intentionally have the same result to avoid identifier enumeration.
+    const owned = await this.get(id, ownerKeyId);
+    if (!owned) return false;
     const controller = this.controllers.get(id);
     const persisted = await this.state.cancel(id);
     if (!persisted || persisted.status !== "cancelled") return false;
