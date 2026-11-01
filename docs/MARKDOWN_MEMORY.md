@@ -107,3 +107,11 @@ Recording is intentionally explicit. Integrators must decide which runs are appr
 
 This first version does not automatically learn from every run, infer reusable procedures, or declare a failed strategy universally invalid. Retrieval returns matching episodes for later reasoning; callers remain responsible for relevance, privacy, and any promotion into verified project knowledge.
 
+## Memory feedback and verified usefulness
+
+`ProjectMemoryFeedbackStore` records explicit feedback about a memory after a run. Supported signals are `helpful`, `not_helpful`, `incorrect`, and `outdated`. Each feedback record is idempotent for a project + memory ID + source run ID tuple, and is persisted through the existing `ProjectMemoryStore`.
+
+`summarize(project, memoryId)` derives counts and a bounded utility score from the feedback records. The score weights `incorrect` more strongly than ordinary negative feedback; it is only a review signal. It does not rewrite the original memory, change its confidence, delete it, or automatically suppress it. Callers should gather feedback only from trusted, explicit user or verifier actions and retain the project/memory scope.
+
+This is a feedback ledger, not autonomous self-training. It does not infer that a memory is true merely because it was helpful once, and it does not promote a strategy without independent evidence and a verification step.
+
