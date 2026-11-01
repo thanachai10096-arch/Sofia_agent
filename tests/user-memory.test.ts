@@ -109,3 +109,34 @@ test("user memory search ranks phrase and multi-term matches above weak partial 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("user memory search retrieves Thai text without whitespace between words", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-thai-search-"));
+  try {
+    const store = new FileUserMemoryStore(root);
+    const relevant = createUserMemoryEntry("goal", "เป้าหมายคือพัฒนาโครงการ Sofia Agent ให้เป็นแพลตฟอร์มโอเพนซอร์ส");
+    const unrelated = createUserMemoryEntry("fact", "ชอบดื่มกาแฟในตอนเช้า");
+    await store.save("user", unrelated);
+    await store.save("user", relevant);
+
+    const results = await store.find("user", "พัฒนาโครงการ Sofia", 5);
+    assert.equal(results[0]?.id, relevant.id);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("user memory search safely handles zero, negative, and non-finite limits", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-limits-"));
+  try {
+    const store = new FileUserMemoryStore(root);
+    await store.save("user", createUserMemoryEntry("fact", "Uses Sofia Agent"));
+    assert.deepEqual(await store.find("user", "Sofia", 0), []);
+    assert.deepEqual(await store.find("user", "Sofia", -3), []);
+    assert.equal((await store.find("user", "Sofia", Number.NaN)).length, 1);
+    assert.equal((await store.find("user", "Sofia", Number.POSITIVE_INFINITY)).length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
