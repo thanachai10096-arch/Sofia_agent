@@ -46,7 +46,7 @@ test("coordinator marks only fully gated missing registration as eligible for re
   assert.equal(result.readOnly, true);
   assert.equal(result.report.safe, false);
   assert.deepEqual(result.assessments.map(item => item.disposition), ["eligible-for-reviewed-repair"]);
-  assert.deepEqual(h.state.calls, ["learning", "runtime", "policy", "approval", "evidence"]);
+  assert.deepEqual(h.state.calls, ["learning", "runtime", "policy", "approval", "evidence", "policy"]);
 });
 
 test("coordinator blocks missing registration when policy has drifted", async () => {
