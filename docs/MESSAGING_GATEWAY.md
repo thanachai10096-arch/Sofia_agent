@@ -96,3 +96,6 @@ The transport treats HTTP 409 as terminal and emits `poll_conflict` rather than 
 - Telegram transport emits safe lifecycle states through `onStatus`: `starting`, `polling`, `stopped`, `webhook_conflict`, `poll_conflict`, and `preflight_failed`. The runtime exposes these through `getStatus()` and an operator-triggered `restart()`.
 - A 409 remains terminal. Do not call `restart()` until the operator has identified and resolved the competing `getUpdates` consumer. Restarting without remediation will simply encounter the conflict again; no automatic retry or webhook deletion is performed.
 - A Telegram runtime status of `poll_conflict` or `webhook_conflict` means the core Sofia API may still be healthy while that channel is unavailable. Surface the channel state in operational health reporting rather than treating it as overall API health.
+
+- The API `GET /health` response now includes a `channels` object when the host supplies `SofiaApiConfig.channelHealth`. The entrypoint reports Telegram's live transport state and whether Discord is configured and started. Only safe status strings are exposed; credentials, allowlists, and message data are never included.
+- Channel diagnostics are optional and isolated: if the diagnostic callback throws, `/health` still returns HTTP 200 for the core API and omits the `channels` field.
