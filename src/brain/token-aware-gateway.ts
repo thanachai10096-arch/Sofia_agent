@@ -243,6 +243,7 @@ export class TokenAwareGateway {
   private readonly routeFailures = new Map<string, number>();
   private readonly checkedJournalRuns = new Set<string>();
   private readonly blockedJournalRuns = new Set<string>();
+  private readonly activeJournalRuns = new Set<string>();
   // An ambiguous provider settlement blocks further calls for this run even
   // after the initial journal check has been cached. The durable journal also
   // enforces this after process restart.
@@ -282,16 +283,23 @@ export class TokenAwareGateway {
 
     signal.throwIfAborted();
     if (this.settlementJournal && !runId) throw new GatewayError("model_call_failed", "missing_run_identity");
-    if (this.settlementJournal && this.blockedJournalRuns.has(runId!)) {
-      throw new GatewayError("model_call_failed", "unresolved_provider_settlement");
+    const lockedRunId = this.settlementJournal ? runId : undefined;
+    if (lockedRunId && this.activeJournalRuns.has(lockedRunId)) {
+      throw new GatewayError("model_call_failed", "concurrent_provider_call_same_run");
     }
-    if (this.settlementJournal && !this.checkedJournalRuns.has(runId!)) {
-      if (await this.settlementJournal.hasUnresolved(runId!)) {
+    if (lockedRunId) this.activeJournalRuns.add(lockedRunId);
+    let journalRunLockTransferred = false;
+    try {
+      if (lockedRunId && this.blockedJournalRuns.has(lockedRunId)) {
         throw new GatewayError("model_call_failed", "unresolved_provider_settlement");
       }
-      this.checkedJournalRuns.add(runId!);
-    }
-    const input = structuredClone(request);
+      if (lockedRunId && !this.checkedJournalRuns.has(lockedRunId)) {
+        if (await this.settlementJournal!.hasUnresolved(lockedRunId)) {
+          throw new GatewayError("model_call_failed", "unresolved_provider_settlement");
+        }
+        this.checkedJournalRuns.add(lockedRunId);
+      }
+      const input = structuredClone(request);
 
     const candidates: Array<{
       route: InternalRoute;
@@ -346,6 +354,7 @@ export class TokenAwareGateway {
 
     let activeReservation: Reservation | undefined;
     const work = (async (): Promise<{ value: unknown; usage: TokenUsage }> => {
+      try {
       let reservedAny = false;
       let lastMeteredFailure: string | undefined;
 
@@ -446,8 +455,14 @@ export class TokenAwareGateway {
       }
       if (!reservedAny) throw new GatewayError("no_available_budget");
       throw new GatewayError("no_eligible_route");
+      } finally {
+        // Keep the run lock until the provider promise actually settles, even if
+        // the caller stops waiting after an abort signal.
+        if (lockedRunId) this.activeJournalRuns.delete(lockedRunId);
+      }
     })();
 
+    journalRunLockTransferred = true;
     return observeWithAbort(work, signal, () => {
       // Release the active reservation immediately even if the provider promise
       // ignores cancellation; settlement is idempotent when its rejection arrives.
@@ -455,5 +470,9 @@ export class TokenAwareGateway {
       activeReservation = undefined;
       this.budget.stop();
     });
+    } finally {
+      // Covers failures before the asynchronous provider work takes ownership.
+      if (!journalRunLockTransferred && lockedRunId) this.activeJournalRuns.delete(lockedRunId);
+    }
   }
 }
