@@ -1051,3 +1051,60 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime retention removes expired terminal jobs and linked private run data", async () => {
+  const namespace = "job-runtime-retention-" + randomUUID();
+  const runId = "retention-run-" + randomUUID();
+  let deletedRun: string | undefined;
+  const snapshot = {
+    version: 1,
+    runId,
+    task: "private task payload",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "cp",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const brain = {
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(
+    ({ onRunSnapshot }) => ({
+      run: async () => {
+        await onRunSnapshot?.(snapshot);
+        return { completed: true, state: "completed" };
+      },
+    } as unknown as SofiaBrain),
+    { save: async () => undefined, load: async () => undefined, delete: async (id) => { deletedRun = id; } },
+    namespace,
+    async (id) => { deletedRun = id; },
+  );
+  const submitted = await runtime.submit({ task: "private task payload" });
+  let record = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && record?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    record = await runtime.get(submitted.id);
+  }
+  assert.equal(record?.status, "completed");
+
+  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; updatedAt: string }>;
+  const saved = records.find((item) => item.id === submitted.id);
+  assert.ok(saved);
+  saved.updatedAt = new Date(0).toISOString();
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+  const count = await runtime.pruneExpired(60_000);
+  assert.equal(count, 1);
+  assert.equal(deletedRun, runId);
+  assert.equal(await runtime.get(submitted.id), undefined);
+});
