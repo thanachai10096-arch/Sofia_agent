@@ -5,6 +5,7 @@ import {
   TokenBudget,
   type Reservation,
   type TokenUsage,
+  type TokenBudgetSnapshot,
 } from "./token-budget.js";
 
 export type BrainPhase =
@@ -248,6 +249,10 @@ export class TokenAwareGateway {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
       throw new Error("Invalid model timeout");
     }
+  }
+
+  getBudgetSnapshot(): TokenBudgetSnapshot {
+    return this.budget.snapshot();
   }
 
   async generate(
