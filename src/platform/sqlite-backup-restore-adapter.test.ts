@@ -131,6 +131,41 @@ test("SQLite restore adapter rejects a corrupt database with a valid SQLite head
   }
 });
 
+
+test("SQLite restore adapter revalidates bundle bytes immediately before live mutation", async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-sqlite-toctou-"));
+  const database = path.join(parent, "sessions.sqlite");
+  await writeFile(database, sqliteBytes("original"));
+  let lifecycleCalls = 0;
+  const lifecycle = {
+    getOpenStore() {
+      return { createConsistentSnapshot(destination: string) {
+        lifecycleCalls += 1;
+        requireFsWrite(destination, sqliteBytes("original"));
+        return destination;
+      } };
+    },
+    async close() { lifecycleCalls += 1; },
+    async reopen() { lifecycleCalls += 1; },
+  };
+  try {
+    const validBytes = Buffer.from(await validSqliteBytes(parent, "valid-before-mutation.sqlite"));
+    const bundle = await createBackupBundle([{
+      name: "sessions",
+      async snapshot() { return [{ path: "sessions/snapshot.sqlite", content: validBytes }]; },
+    }], createdAt);
+    const adapter = sqliteFileBackupRestoreAdapter("sessions", database, "sessions/snapshot.sqlite", lifecycle);
+    await adapter.preflight(bundle, ["sessions/snapshot.sqlite"]);
+    // Preserve the SQLite magic header but corrupt the database page after preflight.
+    validBytes[100] = 0xff;
+    await assert.rejects(adapter.apply(bundle, ["sessions/snapshot.sqlite"]), /integrity validation/);
+    assert.equal(lifecycleCalls, 0);
+    assert.deepEqual(await readFile(database), sqliteBytes("original"));
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
 function requireFsWrite(destination: string, bytes: Uint8Array): void {
   // Synchronous fixture helper keeps the lifecycle callback's contract synchronous.
   writeFileSync(destination, bytes, { mode: 0o600 });
