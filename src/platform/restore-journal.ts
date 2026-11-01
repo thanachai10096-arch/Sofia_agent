@@ -345,3 +345,44 @@ export class FileRestoreJournalStore implements RestoreJournalStore {
     return records.sort((a, b) => a.transactionId < b.transactionId ? -1 : a.transactionId > b.transactionId ? 1 : 0);
   }
 }
+
+
+export type RestoreJournalRecoveryStatus =
+  | "not_started"
+  | "completed"
+  | "interrupted"
+  | "rollback_incomplete";
+
+export interface RestoreJournalRecoveryInspection {
+  transactionId: string;
+  revision: number;
+  phase: RestoreJournalPhase;
+  status: RestoreJournalRecoveryStatus;
+  requiresOperator: boolean;
+  targets: Array<{ name: string; phase: RestoreJournalTargetPhase }>;
+}
+
+/**
+ * Read-only startup inspection. It never resumes a restore or mutates targets:
+ * incomplete transactions are surfaced for an explicit recovery workflow.
+ */
+export async function inspectRestoreJournalRecovery(
+  store: RestoreJournalStore,
+): Promise<RestoreJournalRecoveryInspection[]> {
+  const records = await store.list();
+  return records.map((value) => {
+    const record = validateRestoreJournalRecord(value);
+    const status: RestoreJournalRecoveryStatus =
+      record.phase === "prepared" ? "not_started" :
+      record.phase === "committed" || record.phase === "rolled_back" ? "completed" :
+      record.phase === "rollback_failed" ? "rollback_incomplete" : "interrupted";
+    return {
+      transactionId: record.transactionId,
+      revision: record.revision,
+      phase: record.phase,
+      status,
+      requiresOperator: status === "interrupted" || status === "rollback_incomplete",
+      targets: record.targets.map(({ name, phase }) => ({ name, phase })),
+    };
+  });
+}
