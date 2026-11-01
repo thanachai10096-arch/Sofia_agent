@@ -506,16 +506,17 @@ export class CronScheduler {
     await this.store.transact(async state => {
       const execution = state.history.find(item => item.id === executionId);
       const current = state.schedules.find(item => item.id === schedule.id);
-      if (execution && (execution.status === "claimed" || execution.status === "running")) {
+      const stillActive = !!execution && (execution.status === "claimed" || execution.status === "running");
+      if (stillActive) {
         execution.status = status;
         execution.finishedAt = this.now().toISOString();
         if (errorText) execution.error = errorText;
-      }
-      if (current) {
-        current.lastRunAt = this.now().toISOString();
-        current.lastJobId = jobId;
-        current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled"
-          ? current.consecutiveFailures : current.consecutiveFailures + 1;
+        if (current) {
+          current.lastRunAt = execution.finishedAt;
+          current.lastJobId = jobId;
+          current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled"
+            ? current.consecutiveFailures : current.consecutiveFailures + 1;
+        }
       }
       await this.recordAudit(state, {
         at: this.now().toISOString(), actor: "scheduler", action: "schedule.recovery.finished",
@@ -611,16 +612,19 @@ export class CronScheduler {
     await this.store.transact(async state => {
       const execution = state.history.find(h => h.id === executionId);
       const current = state.schedules.find(s => s.id === schedule.id);
-      if (execution && execution.status !== "cancelled") {
+      const stillActive = !!execution && execution.status !== "cancelled" &&
+        execution.status !== "completed" && execution.status !== "failed" && execution.status !== "skipped";
+      if (stillActive) {
         execution.status = status;
         execution.finishedAt = this.now().toISOString();
         if (job) execution.jobId = job.id;
         if (errorText) execution.error = errorText;
-      }
-      if (current) {
-        current.lastRunAt = this.now().toISOString();
-        current.lastJobId = job?.id;
-        current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled" ? current.consecutiveFailures : current.consecutiveFailures + 1;
+        if (current) {
+          current.lastRunAt = execution.finishedAt;
+          if (job) current.lastJobId = job.id;
+          current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled"
+            ? current.consecutiveFailures : current.consecutiveFailures + 1;
+        }
       }
       await this.recordAudit(state, { at: this.now().toISOString(), actor: "scheduler", action: "schedule.finished", scheduleId: schedule.id, detail: status });
     }).catch(() => undefined);
