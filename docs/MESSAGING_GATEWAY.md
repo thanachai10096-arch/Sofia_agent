@@ -20,7 +20,7 @@ Status: opt-in gateway, natural-chat command bridge, Telegram Bot API long polli
 
 ## Durable outbound completion delivery (LINE and WhatsApp)
 
-LINE and WhatsApp runtimes persist redacted completion messages to `.sofia/messaging-outbox` before attempting delivery. Pending records are retried when the runtime starts and when a new completion message is queued. A confirmed provider send removes the record; a failed or unavailable send leaves it pending. This retry path sends the saved response and **never re-runs the Sofia task**.
+Telegram, LINE, and WhatsApp runtimes persist redacted completion messages to `.sofia/messaging-outbox` before attempting delivery. Pending records are retried when the runtime starts and when a new completion message is queued. A confirmed provider send removes the record; a failed or unavailable send leaves it pending. This retry path sends the saved response and **never re-runs the Sofia task**.
 
 The outbox is bounded to 500 records and 128 KB per message. Its directory is created with owner-only permissions where supported. Because message text is stored on disk, deployments must protect the Sofia workspace and its backups as user data. Do not enqueue credentials or raw provider payloads; the LINE/WhatsApp runtime redacts secrets before persistence.
 
