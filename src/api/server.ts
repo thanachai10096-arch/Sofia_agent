@@ -451,10 +451,47 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           }
           try {
             const entry = createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
+            const conflicts = await deps.userMemoryStore.findPotentialConflicts?.(auth.keyId, entry) ?? [];
+            if (conflicts.length) {
+              return json(res, 409, {
+                error: "memory_conflict_review_required",
+                candidate: { kind: entry.kind, content: entry.content },
+                conflicts,
+                decisions: ["keep-both", "keep-existing"],
+              }, origin, config);
+            }
             await deps.userMemoryStore.save(auth.keyId, entry);
             const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
             if (!saved) return json(res, 500, { error: "memory_write_failed" }, origin, config);
             return json(res, 201, { memory: saved }, origin, config);
+          } catch {
+            return json(res, 400, { error: "memory_entry_rejected" }, origin, config);
+          }
+        }
+        if (req.method === "POST" && requestUrl.pathname === "/v1/memory/review") {
+          if (!auth.scopes.includes("memory:write")) return json(res, 403, { error: "forbidden", requiredScope: "memory:write" }, origin, config);
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_memory_review" }, origin, config);
+          const input = raw as Record<string, unknown>;
+          const kinds = ["preference", "fact", "goal", "instruction"];
+          if (typeof input.kind !== "string" || !kinds.includes(input.kind) ||
+              typeof input.content !== "string" || input.content.trim().length < 3 || input.content.length > 1200 ||
+              (input.decision !== "keep-both" && input.decision !== "keep-existing")) {
+            return json(res, 400, { error: "invalid_memory_review" }, origin, config);
+          }
+          if (input.decision === "keep-existing") {
+            return json(res, 200, { saved: false, decision: "keep-existing" }, origin, config);
+          }
+          try {
+            const entry = createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
+            const conflicts = await deps.userMemoryStore.findPotentialConflicts?.(auth.keyId, entry) ?? [];
+            if (!conflicts.length) {
+              return json(res, 409, { error: "memory_conflict_changed", message: "No matching conflict remains; submit the memory through POST /v1/memory." }, origin, config);
+            }
+            await deps.userMemoryStore.save(auth.keyId, entry);
+            const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
+            if (!saved) return json(res, 500, { error: "memory_write_failed" }, origin, config);
+            return json(res, 201, { saved: true, decision: "keep-both", memory: saved, retainedConflicts: conflicts.length }, origin, config);
           } catch {
             return json(res, 400, { error: "memory_entry_rejected" }, origin, config);
           }
