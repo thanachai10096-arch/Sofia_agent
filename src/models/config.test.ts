@@ -17,6 +17,13 @@ const names = [
   "GEMINI_CODING_MODEL",
   "GEMINI_REASONING_MODEL",
   "GEMINI_VISION_MODEL",
+  "DEEPSEEK_API_KEY",
+  "DEEPSEEK_BASE_URL",
+  "DEEPSEEK_MODEL",
+  "DEEPSEEK_FAST_MODEL",
+  "DEEPSEEK_CODING_MODEL",
+  "DEEPSEEK_REASONING_MODEL",
+  "DEEPSEEK_VISION_MODEL",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_MODEL",
@@ -51,6 +58,35 @@ afterEach(() => {
   for (const [name, value] of original) {
     if (value !== undefined) process.env[name] = value;
   }
+});
+
+test("DeepSeek provider uses the official OpenAI-compatible endpoint and supports route overrides", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.DEEPSEEK_CODING_MODEL = "deepseek-v4-pro";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.providers.fast?.apiKey, "deepseek-test-key");
+  assert.equal(config.providers.fast?.model, "deepseek-flash");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
+  assert.equal(config.providers.coding?.model, "deepseek-v4-pro");
+});
+
+test("DeepSeek can be selected explicitly alongside other configured providers", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "deepseek-test-key");
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+});
+
+test("DeepSeek provider rejects missing credentials", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  assert.throws(loadModelConfigFromEnv, /requires DEEPSEEK_API_KEY/);
 });
 
 test("Gemini key selects direct Google Gemini API when no other provider is configured", () => {
