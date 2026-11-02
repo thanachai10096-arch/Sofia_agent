@@ -15,6 +15,7 @@ A Vercel Node Function exists at `api/telegram/webhook.ts` on this PR branch. It
 - Only normal text messages are dispatched in this first version.
 - A stable key derived from Telegram `update_id` is sent as `Idempotency-Key`.
 - The adapter calls `POST /v1/agent/runs` with `async: true` on the separately hosted Sofia API.
+- Transient upstream failures (`408`, `425`, `429`, and `5xx`) return a retryable HTTP `503` to Telegram; permanent upstream rejections are acknowledged without retry loops. A malformed successful upstream response returns `502` because acceptance is ambiguous.
 - The upstream API key is `SOFIA_UPSTREAM_API_KEY`, deliberately separate from the model-provider `SOFIA_API_KEY`.
 - Never expose the bot token, webhook secret, or upstream API key to a browser/client.
 
