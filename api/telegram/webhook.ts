@@ -161,8 +161,23 @@ export default async function telegramWebhook(req: IncomingMessage, res: ServerR
     });
     let data: { id?: unknown } = {};
     try { data = await response.json() as typeof data; } catch { /* fail closed below */ }
-    if (!response.ok || typeof data.id !== "string") {
-      reply(res, 200, { ok: true, accepted: false, error: "sofia_api_rejected_request" });
+    if (!response.ok) {
+      // Let Telegram retry transient upstream failures instead of acknowledging
+      // and permanently dropping a message that Sofia could not accept.
+      const retryable = response.status === 408 || response.status === 425 ||
+        response.status === 429 || response.status >= 500;
+      if (retryable) {
+        reply(res, 503, { error: "sofia_api_temporarily_unavailable" });
+      } else {
+        // Permanent request/auth/policy errors should not create a retry loop.
+        reply(res, 200, { ok: true, accepted: false, error: "sofia_api_rejected_request" });
+      }
+      return;
+    }
+    if (typeof data.id !== "string" || !data.id.trim()) {
+      // A successful but malformed upstream response is ambiguous: ask Telegram
+      // to retry with the same update-scoped idempotency key.
+      reply(res, 502, { error: "sofia_api_invalid_response" });
       return;
     }
 
