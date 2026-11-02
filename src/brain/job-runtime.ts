@@ -428,7 +428,10 @@ class FileJobStateStore {
   }
 
   async list(ownerKeyId?: string): Promise<JobRecord[]> {
-    return this.read();
+    const records = await this.read();
+    return ownerKeyId === undefined
+      ? records
+      : records.filter((record) => record.ownerKeyId === ownerKeyId);
   }
 
   async get(id: string): Promise<JobRecord | undefined> {
@@ -539,12 +542,12 @@ export class DurableJobRuntime implements JobRuntime {
     return expired.length;
   }
 
-  async list(): Promise<JobRecord[]> {
+  async list(ownerKeyId?: string): Promise<JobRecord[]> {
     const retentionDays = Number(process.env.SOFIA_JOB_RETENTION_DAYS ?? "30");
     if (Number.isSafeInteger(retentionDays) && retentionDays >= 1 && retentionDays <= 3650) {
       await this.pruneExpired(retentionDays * 24 * 60 * 60 * 1000);
     }
-    const stored = await this.state.list();
+    const stored = await this.state.list(ownerKeyId);
     for (const persisted of stored) {
       if (this.controllers.has(persisted.id) || this.starting.has(persisted.id)) continue;
       const loadedSnapshot = persisted.snapshot?.runId && this.runStore
