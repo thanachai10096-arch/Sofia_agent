@@ -3,12 +3,18 @@ import { mkdir, open, readFile, readdir, rename, unlink, chmod, rm, stat } from 
 import path from "node:path";
 import type { ChatPlatform } from "../chat-adapter.js";
 import type { OutboundMessage } from "./types.js";
+import { calculateMessagingRetry } from "./outbox-retry-policy.js";
 
 export interface MessagingOutboxRecord {
   id: string;
   platform: ChatPlatform;
   message: OutboundMessage;
   createdAt: number;
+  attemptCount?: number;
+  lastAttemptAt?: number;
+  nextAttemptAt?: number;
+  lastErrorCode?: "provider_unavailable";
+  state?: "pending" | "dead_letter";
 }
 const SAFE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_RECORD_BYTES = 128_000;
@@ -110,6 +116,52 @@ export class FileMessagingOutbox {
     }
   }
 
+  async recordFailure(id: string, token: string, now = Date.now()): Promise<void> {
+    const lock = this.lockDirectory(id);
+    try {
+      const owner = JSON.parse(await readFile(path.join(lock, "owner.json"), "utf8")) as { token?: string };
+      if (owner.token !== token) return;
+      const target = this.file(id);
+      const record = JSON.parse(await readFile(target, "utf8")) as MessagingOutboxRecord;
+      const decision = calculateMessagingRetry(record.attemptCount ?? 0, now);
+      const updated: MessagingOutboxRecord = {
+        ...record,
+        attemptCount: decision.attemptCount,
+        lastAttemptAt: now,
+        nextAttemptAt: decision.nextAttemptAt,
+        lastErrorCode: "provider_unavailable",
+        state: decision.deadLetter ? "dead_letter" : "pending",
+      };
+      const temporary = target + "." + process.pid + "." + randomUUID() + ".tmp";
+      const handle = await open(temporary, "wx", 0o600);
+      try {
+        await handle.writeFile(JSON.stringify(updated), "utf8");
+        await handle.sync();
+      } finally { await handle.close(); }
+      await rename(temporary, target);
+    } catch {
+      throw new Error("Messaging outbox retry metadata could not be persisted.");
+    }
+  }
+
+  async requeue(id: string): Promise<boolean> {
+    const target = this.file(id);
+    try {
+      await stat(this.lockDirectory(id));
+      return false;
+    } catch { /* no active lease */ }
+    try {
+      const record = JSON.parse(await readFile(target, "utf8")) as MessagingOutboxRecord;
+      const updated = { ...record, attemptCount: 0, nextAttemptAt: undefined, lastErrorCode: undefined, state: "pending" as const };
+      const temporary = target + "." + process.pid + "." + randomUUID() + ".tmp";
+      const handle = await open(temporary, "wx", 0o600);
+      try { await handle.writeFile(JSON.stringify(updated), "utf8"); await handle.sync(); }
+      finally { await handle.close(); }
+      await rename(temporary, target);
+      return true;
+    } catch { return false; }
+  }
+
   async releaseClaim(id: string, token: string): Promise<void> {
     const lock = this.lockDirectory(id);
     try {
@@ -189,6 +241,7 @@ export async function flushMessagingOutbox(
   send: (platform: ChatPlatform, message: OutboundMessage) => Promise<boolean>,
   onFailure?: (platform: ChatPlatform) => void,
   platformFilter?: ChatPlatform,
+  now: () => number = Date.now,
 ): Promise<{ sent: number; pending: number }> {
   const key = outbox.getDirectoryKey();
   if (activeFlushes.has(key)) {
@@ -200,16 +253,19 @@ export async function flushMessagingOutbox(
   try {
     for (const record of await outbox.pending()) {
       if (platformFilter && record.platform !== platformFilter) continue;
+      if (record.state === "dead_letter" || (record.nextAttemptAt !== undefined && record.nextAttemptAt > now())) continue;
       const lease = await outbox.claim(record.id);
       if (!lease) continue;
       try {
         if (await send(record.platform, record.message)) {
           if (await outbox.markSent(record.id, lease)) sent++;
         } else {
+          await outbox.recordFailure(record.id, lease, now());
           await outbox.releaseClaim(record.id, lease);
           onFailure?.(record.platform);
         }
       } catch {
+        await outbox.recordFailure(record.id, lease, now()).catch(() => undefined);
         await outbox.releaseClaim(record.id, lease);
         onFailure?.(record.platform);
       }
