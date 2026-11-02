@@ -11,6 +11,7 @@ import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import { scopedSessionId } from "../session/store.js";
 
 interface ActiveRun {
   id: string;
@@ -219,7 +220,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
           ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
-          ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
+          ...(input.sessionId !== undefined ? { sessionId: scopedSessionId(run.ownerKeyId, input.sessionId) } : {}),
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
@@ -478,7 +479,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
-            ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
+            ...(input.sessionId !== undefined ? { sessionId: scopedSessionId(auth.keyId, input.sessionId) } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
