@@ -230,8 +230,21 @@ export class SqliteSessionStore {
   }
 
   delete(id: string): void {
-    this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-    if (this.ftsAvailable) this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
+    // Keep the transcript rows (via ON DELETE CASCADE) and their FTS index in
+    // one transaction. A partial delete must not leave searchable transcript
+    // text behind after the session itself has disappeared.
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+      if (this.ftsAvailable) {
+        this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    restrictSqlitePermissions(this.filePath);
   }
 
   close(): void { this.db.close(); }
