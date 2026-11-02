@@ -176,7 +176,14 @@ async function main() {
   }
   function connect() {
     if (stopped) return;
-    const target = sessionId && resumeUrl\n      ? (() => { const url = new URL(resumeUrl); url.searchParams.set("v", "10"); url.searchParams.set("encoding", "json"); return url.toString(); })()\n      : DISCORD_GATEWAY_URL;
+    const target = sessionId && resumeUrl
+      ? (() => {
+          const url = new URL(resumeUrl);
+          url.searchParams.set("v", "10");
+          url.searchParams.set("encoding", "json");
+          return url.toString();
+        })()
+      : DISCORD_GATEWAY_URL;
     socket = new WebSocket(target);
     socket.addEventListener("open", () => console.log("discord_gateway_socket_open"));
     socket.addEventListener("message", (event) => {
