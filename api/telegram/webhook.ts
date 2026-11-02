@@ -89,7 +89,8 @@ export default async function telegramWebhook(req: IncomingMessage, res: ServerR
     reply(res, 503, { error: "telegram_integration_not_configured" });
     return;
   }
-  if (!constantTimeSecretEqual(req.headers["x-telegram-bot-api-secret-token"] as string | undefined, webhookSecret)) {
+  const suppliedSecret = req.headers["x-telegram-bot-api-secret-token"];
+  if (!constantTimeSecretEqual(typeof suppliedSecret === "string" ? suppliedSecret : undefined, webhookSecret)) {
     reply(res, 401, { error: "invalid_telegram_webhook_secret" });
     return;
   }
