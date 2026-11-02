@@ -100,6 +100,7 @@ async function runSofia({ apiBase, apiKey, bypass, message }) {
       signal: controller.signal,
     });
     const data = await response.json().catch(() => ({}));
+    console.log("sofia_api_response", response.status, Object.keys(data ?? {}).slice(0, 12).join(","));
     if (!response.ok) {
       if (response.status === 429) return "ตอนนี้ Sofia มีคำขอมากเกินไป ลองใหม่อีกครั้งในอีกสักครู่นะครับ";
       throw new Error(`Sofia API request failed: HTTP ${response.status}`);
@@ -138,9 +139,12 @@ async function main() {
 
   async function processMessage(message) {
     if (!message?.id || !message.channel_id || !message.author?.id || message.author.bot) return;
-    if (!allowedUsers.has(message.author.id) || !allowedChannels.has(message.channel_id)) return;
+    if (!allowedUsers.has(message.author.id)) { console.log("discord_message_ignored", "user_not_allowlisted", message.author.id); return; }
+    if (!allowedChannels.has(message.channel_id)) { console.log("discord_message_ignored", "channel_not_allowlisted", message.channel_id); return; }
     if (seen.has(message.id) || inflight.has(message.id)) return;
-    if (!message.content?.trim() || message.content.trim().startsWith("/")) return;
+    if (!message.content?.trim()) { console.warn("discord_message_content_empty", "Enable Message Content Intent in Discord Developer Portal > Bot > Privileged Gateway Intents."); return; }
+    if (message.content.trim().startsWith("/")) { console.log("discord_slash_message_ignored"); return; }
+    console.log("discord_message_received", message.id, message.channel_id);
     inflight.add(message.id);
     pendingMessages.push(message);
     void drainMessages();
