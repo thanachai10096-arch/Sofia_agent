@@ -376,14 +376,14 @@ export async function executeLearningRepairPlan(
       continue;
     }
     const heartbeatTimer = setInterval(() => {
-      void journal.heartbeat(action.idempotencyKey, action.scope, entry.claimToken!, now())
+      void journal.heartbeat!(action.idempotencyKey, action.scope, entry.claimToken!, now())
         .then(owned => { if (!owned) heartbeatLost = true; })
         .catch(() => { heartbeatLost = true; });
     }, 1_000);
     try {
       // Prove lease ownership immediately; the periodic timer alone may not have
       // fired yet (or may have been delayed by event-loop pressure).
-      const initialHeartbeat = await journal.heartbeat(action.idempotencyKey, action.scope, entry.claimToken, now());
+      const initialHeartbeat = await journal.heartbeat!(action.idempotencyKey, action.scope, entry.claimToken, now());
       if (!initialHeartbeat) throw new Error("Repair lease heartbeat lost before lifecycle mutation; authoritative reconciliation required");
       // Require a durable start audit before any mutation.
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
