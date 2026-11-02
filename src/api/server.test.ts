@@ -151,3 +151,85 @@ test("API rejects unknown model routes before starting a run", async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("job API never exposes or mutates another API key owner's job", async () => {
+  const records = new Map<string, { id: string; status: "queued" | "completed"; ownerKeyId: string; task: string }>();
+  const calls: Array<{ operation: string; owner?: string }> = [];
+  const jobRuntime = {
+    submit: async (input: { task: string; ownerKeyId?: string }) => {
+      const record = { id: "job-owner-a-0001", status: "queued" as const, ownerKeyId: input.ownerKeyId!, task: input.task };
+      records.set(record.id, record);
+      calls.push({ operation: "submit", owner: input.ownerKeyId });
+      return record;
+    },
+    get: async (id: string, owner?: string) => {
+      calls.push({ operation: "get", owner });
+      const record = records.get(id);
+      return record?.ownerKeyId === owner ? record : undefined;
+    },
+    list: async (owner?: string) => {
+      calls.push({ operation: "list", owner });
+      return [...records.values()].filter((record) => record.ownerKeyId === owner);
+    },
+    resume: async (id: string, _signal?: AbortSignal, owner?: string) => {
+      calls.push({ operation: "resume", owner });
+      const record = records.get(id);
+      if (!record || record.ownerKeyId !== owner) throw new Error("Unknown job");
+      return record;
+    },
+    cancel: async (id: string, owner?: string) => {
+      calls.push({ operation: "cancel", owner });
+      const record = records.get(id);
+      if (!record || record.ownerKeyId !== owner) return false;
+      record.status = "completed";
+      return true;
+    },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    jobRuntime: jobRuntime as never,
+  }, {
+    apiKeys: {
+      "owner-a-key": ["agent:run", "agent:read"],
+      "owner-b-key": ["agent:run", "agent:read"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  const request = (key: string, url: string, method = "GET", body?: unknown) =>
+    fetch(base + url, {
+      method,
+      headers: { authorization: "Bearer " + key, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  try {
+    const created = await request("owner-a-key", "/v1/jobs", "POST", { task: "private owner A task" });
+    assert.equal(created.status, 202);
+    const job = await created.json() as { id: string };
+
+    assert.equal((await request("owner-b-key", "/v1/jobs/" + job.id)).status, 404);
+    assert.equal((await request("owner-b-key", "/v1/jobs/" + job.id + "/cancel", "POST")).status, 404);
+    assert.equal((await request("owner-b-key", "/v1/jobs/" + job.id + "/resume", "POST")).status, 404);
+    const ownerBList = await request("owner-b-key", "/v1/jobs");
+    assert.deepEqual((await ownerBList.json() as { jobs: unknown[] }).jobs, []);
+
+    assert.equal((await request("owner-a-key", "/v1/jobs/" + job.id)).status, 200);
+    assert.equal((await request("owner-a-key", "/v1/jobs/" + job.id + "/cancel", "POST")).status, 202);
+
+    const ownerA = createHash("sha256").update("owner-a-key").digest("hex").slice(0, 32);
+    const ownerB = createHash("sha256").update("owner-b-key").digest("hex").slice(0, 32);
+    assert.ok(calls.some((call) => call.operation === "get" && call.owner === ownerA));
+    assert.ok(calls.some((call) => call.operation === "get" && call.owner === ownerB));
+    assert.ok(calls.some((call) => call.operation === "list" && call.owner === ownerB));
+    assert.ok(calls.some((call) => call.operation === "cancel" && call.owner === ownerA));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
