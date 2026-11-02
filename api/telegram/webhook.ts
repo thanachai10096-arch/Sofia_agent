@@ -81,7 +81,7 @@ export default async function telegramWebhook(req: IncomingMessage, res: ServerR
   const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const apiBase = process.env.SOFIA_API_BASE_URL;
-  const apiKey = process.env.SOFIA_API_KEY;
+  const apiKey = process.env.SOFIA_UPSTREAM_API_KEY;
   if (!webhookSecret || !botToken || !apiBase || !apiKey) {
     reply(res, 503, { error: "telegram_integration_not_configured" });
     return;
@@ -166,9 +166,9 @@ export default async function telegramWebhook(req: IncomingMessage, res: ServerR
       return;
     }
 
-    // Acknowledge the update only after the API has durably accepted it.
-    // Completion delivery is a separate durable-worker integration and is
-    // intentionally not claimed by this ingress-only endpoint.
+    // Acknowledge only after the upstream API has accepted the request.
+    // This upstream API currently uses process-local idempotency and is
+    // not a shared durable queue; completion delivery is also outside this ingress-only endpoint.
     try {
       await sendTelegramMessage(botToken, message.chat.id, `Sofia รับงานแล้ว\nJob ID: ${data.id}`, controller.signal);
     } catch {
