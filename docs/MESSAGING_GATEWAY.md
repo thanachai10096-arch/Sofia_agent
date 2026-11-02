@@ -1,6 +1,6 @@
 # Messaging Gateway (incremental integration)
 
-Status: opt-in gateway, command bridge, Telegram Bot API long polling transport, and Discord interaction verification/REST transport. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
+Status: opt-in messaging gateway, Telegram Bot API long polling, Discord signed HTTP interactions, and a separate Discord Gateway natural-chat transport. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
 
 ## Safety defaults
 
@@ -17,6 +17,23 @@ Status: opt-in gateway, command bridge, Telegram Bot API long polling transport,
 - The standalone API entrypoint requires both `DISCORD_ALLOWED_USER_IDS` and `DISCORD_ALLOWED_CHANNEL_IDS` whenever Discord is enabled. Both must be comma-separated numeric Discord IDs; empty, malformed, or duplicate entries fail startup. Do not omit the user allowlist: channel membership alone must not grant permission to execute Sofia tasks.
 - Treat attachment URLs as untrusted; do not download or open them without a separately secured downloader that blocks private/loopback/link-local destinations, re-checks redirects and DNS, caps response size/time, and avoids forwarding credentials.
 - The default gateway rate limiter is in-memory and per process. For shared deployments, `RedisMessagingRateLimiter` provides an atomic fixed-window implementation using a node-redis v4-compatible `eval(script, { keys, arguments })` client; inject it as `rateLimiter: new RedisMessagingRateLimiter({ client })`. The Lua counter operation is atomic across workers, raw scope identifiers are SHA-256 hashed before being used as Redis keys, and Redis errors fail closed (the message is rate-limited). For cross-worker message deduplication, `RedisChatMessageDeduplicator` provides atomic `SET NX PX` claims and ownership-checked release; inject it into the command handler, not twice in both layers.
+
+## Standalone Discord Gateway natural chat
+
+The API entrypoint supports an additional opt-in Gateway connection. It reuses the existing `DurableJobRuntime` and per-Discord-user owner key (`discord:<user-id>`); it does not create a second Agent runtime.
+
+Set these on a dedicated test service:
+
+- `DISCORD_GATEWAY_ENABLED=true`
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_ALLOWED_USER_IDS` — comma-separated numeric user IDs
+- `DISCORD_ALLOWED_CHANNEL_IDS` — comma-separated numeric channel IDs
+
+Enable the privileged **Message Content Intent** in the Discord Developer Portal. The runtime must provide global WebSocket support. Gateway mode is independent of the signed HTTP interactions endpoint; configure `DISCORD_PUBLIC_KEY` as well only if slash commands are also wanted.
+
+Direct messages accept natural chat without `/run`. In guild channels, Sofia responds only when explicitly mentioned or when the user replies to Sofia. Unaddressed group chatter is ignored. Both allowlists are required. Message deduplication in the entrypoint is process-local; use a shared atomic deduplicator before running multiple replicas.
+
+Do not enable on Production until a real Discord test bot confirms DM, mention/reply, allowlist denials, reconnect, and completion delivery.
 
 ## Standalone Telegram runtime configuration
 
