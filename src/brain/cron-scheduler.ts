@@ -48,7 +48,7 @@ export interface CronAuditEvent {
   scheduleId: string;
   detail?: string;
 }
-interface SchedulerState {
+export interface SchedulerState {
   schedules: CronSchedule[];
   history: CronExecution[];
   audit: CronAuditEvent[];
