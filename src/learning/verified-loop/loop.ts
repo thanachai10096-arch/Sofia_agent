@@ -206,6 +206,10 @@ export class VerifiedLearningLoop {
     try {
       const policyRevision = await this.host.currentPolicyRevision(scope);
       return await this.host.transaction(scope, async tx => {
+        // A queued transaction may begin after the policy snapshot above has
+        // become stale. Fail closed rather than returning skills authorized
+        // under a superseded policy revision.
+        if (await this.host.currentPolicyRevision(scope) !== policyRevision) return [];
         const skills = await tx.listActiveSkills(scope);
         return skills.filter(skill =>
           skill.status === "active" && skill.policyRevision === policyRevision &&
