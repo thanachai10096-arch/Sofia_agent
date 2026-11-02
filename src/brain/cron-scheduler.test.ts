@@ -424,6 +424,42 @@ test("cancelled recovered execution does not overwrite schedule completion metad
 });
 
 
+test("concurrent recovery monitors emit one terminal audit for a shared execution", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let reads = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      return { id, status: reads <= 2 ? "queued" : "completed", task: "shared recovered job" } as JobRecord;
+    },
+    async cancel() { return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const first = new CronScheduler(runtime, { store });
+  const second = new CronScheduler(runtime, { store });
+  const schedule = await first.create({
+    name: "concurrent-recovery", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "shared-recovered-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "shared-recovered-job", attempt: 1,
+  });
+
+  await Promise.all([first.recover(), second.recover()]);
+  for (let i = 0; i < 100 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  // Let the losing monitor finish its finalizer after observing the terminal record.
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(state.history[0].status, "completed");
+  assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 1);
+});
+
 test("recovery terminalizes orphaned executions whose schedule record is missing", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
