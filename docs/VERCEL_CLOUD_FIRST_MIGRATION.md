@@ -15,12 +15,25 @@ The current `main` branch contains a Node HTTP API and local-process composition
 - `src/api/entrypoint.ts` starts a long-lived HTTP server and composes the Core.
 - Telegram currently uses Bot API long polling via `createTelegramMessagingRuntime`.
 - The optional Discord Gateway transport is a persistent connection (currently in a draft PR); Discord signed HTTP interactions are the serverless-compatible path.
-- `src/api/server.ts` starts the in-process CronScheduler timer after the server emits `listening`.
+- `src/api/server.ts` constructs a `CronScheduler` and owns process-local timer lifecycle.
 - Job state, Brain checkpoints, project memory, API run records, usage state, and message deduplication use local filesystem-backed stores.
 - The README explicitly says file-backed state is single-process and temporary storage is not sufficient for production recovery.
 - `CloudExecutionBackend` currently has only `LocalJobBackend`; it is not a remote execution backend.
 - The repository has no root `vercel.json` and no Vercel function entrypoint for the existing API.
-- The Vercel project `i888` is connected to this repository and has successfully built the isolated Preview smoke-test function. It is not yet a production-ready Sofia deployment: no PostgreSQL resource is configured, the existing API composition root still assumes a long-lived process, and the Preview endpoint has not yet been independently verified through an HTTP request.
+- The Vercel project `i888` is connected to this repository and has successfully built the isolated Preview smoke-test function. It is not yet a production-ready Sofia deployment: no PostgreSQL resource or project connector is configured, the existing API composition root still assumes a long-lived process, and the Preview endpoint has not yet been independently verified through an HTTP request.
+
+### Additional source-level verification
+
+The existing source was inspected directly on the migration branch:
+
+- `src/api/entrypoint.ts` reads `SOFIA_API_KEY` at module startup and throws if it is absent; it creates a workspace directory and constructs local dependencies before listening.
+- The same entrypoint starts the Telegram runtime after the HTTP server begins listening.
+- When Discord Gateway configuration is enabled, the entrypoint starts a persistent transport and a five-second recovery interval. These are worker/process lifecycle concerns, not request-scoped function work.
+- `src/api/server.ts` creates process-local `Map` instances for active runs and idempotency. It starts async run execution using a detached promise after returning an accepted response. A serverless request must not rely on that promise or warm-instance memory to finish work.
+- The API's run-record persistence is optional and currently wired by the local entrypoint to `FileRunRecordStore`. The usage limiter also receives a local file path.
+- The Vercel project connector query returned an empty connector list. This is evidence that no database connector is currently attached to this project, not evidence that no external database could ever be configured.
+
+These findings mean the current entrypoint must not be imported or wrapped as a Vercel Function. Doing so would risk dropped background tasks, lost in-memory idempotency/active-run state, duplicated work after retries, and non-durable local-file writes.
 
 These are architectural blockers, not merely deployment-setting changes.
 
@@ -64,10 +77,10 @@ Sofia Core must remain provider-agnostic and must not be reimplemented inside ch
 
 ### P0 — Establish a Vercel preview target
 
-1. Add a Vercel-compatible HTTP entrypoint without starting a listener, polling loop, or permanent timer during module initialization.
-2. Keep the existing Node server entrypoint unchanged for Railway and local deployments.
-3. Add a dedicated Vercel project connected to this repository only after the preview entrypoint and build are ready.
-4. Deploy a non-production branch first; verify function routing, Node runtime, environment isolation, and redacted logs.
+1. Keep the existing isolated `api/health.ts` smoke-test function separate from Sofia Core.
+2. Add a Vercel-compatible Core adapter only after its dependencies are request-safe and durable; it must not start a listener, polling loop, detached task, or permanent timer during module initialization.
+3. Keep the existing Node server entrypoint unchanged for Railway and local deployments.
+4. Verify function routing, Node runtime, environment isolation, and redacted logs on Preview.
 5. Keep `main` and the existing Railway service as the rollback path.
 
 ### P1 — Replace local-only state with shared durable storage
