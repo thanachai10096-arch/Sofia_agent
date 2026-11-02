@@ -124,3 +124,89 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("DeepSeek OpenAI-compatible gateway sends bearer auth, chat-completions payload, and tool schemas", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let requestedHeaders: Record<string, string> = {};
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input);
+    requestedHeaders = init?.headers as Record<string, string>;
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      id: "chatcmpl_deepseek_test",
+      choices: [{
+        index: 0,
+        message: {
+          role: "assistant",
+          content: "I will inspect the repository.",
+          tool_calls: [{
+            id: "call_deepseek_1",
+            type: "function",
+            function: { name: "workspace.list_files", arguments: "{\\"path\\":\\"src\\"}" },
+          }],
+        },
+        finish_reason: "tool_calls",
+      }],
+      usage: { prompt_tokens: 31, completion_tokens: 14, total_tokens: 45 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://api.deepseek.com",
+        apiKey: "deepseek-test-secret",
+        model: "deepseek-flash",
+        protocol: "openai-compatible",
+      },
+    });
+    const result = await gateway.generate({
+      task: "Inspect src",
+      kind: "coding",
+      step: 1,
+      messages: [
+        { role: "system", content: "You are Sofia." },
+        { role: "user", content: "Inspect src" },
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "workspace.list_files",
+          description: "List workspace files.",
+          parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        },
+      }],
+    }, route, { maxOutputTokens: 768 });
+
+    assert.equal(requestedUrl, "https://api.deepseek.com/chat/completions");
+    assert.equal(requestedHeaders.authorization, "Bearer deepseek-test-secret");
+    assert.equal(requestedHeaders["content-type"], "application/json");
+    assert.equal(requestedBody.model, "deepseek-flash");
+    assert.equal(requestedBody.max_tokens, 768);
+    assert.deepEqual(requestedBody.messages, [
+      { role: "system", content: "You are Sofia." },
+      { role: "user", content: "Inspect src" },
+    ]);
+    assert.deepEqual(requestedBody.tools, [{
+      type: "function",
+      function: {
+        name: "workspace.list_files",
+        description: "List workspace files.",
+        parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      },
+    }]);
+    assert.equal(requestedBody.tool_choice, "auto");
+    assert.equal(result.text, "I will inspect the repository.");
+    assert.deepEqual(result.toolCalls, [{
+      id: "call_deepseek_1",
+      name: "workspace.list_files",
+      input: { path: "src" },
+    }]);
+    assert.deepEqual(result.usage, { inputTokens: 31, outputTokens: 14 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
