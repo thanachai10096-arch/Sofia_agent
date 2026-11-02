@@ -488,8 +488,26 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
-  const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
+  const workerCount = 12;
+  const started = Array.from({ length: workerCount }, () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  });
+  const settled = Array.from({ length: workerCount }, () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  });
+  const runtimes = Array.from({ length: workerCount }, (_, index) => new DurableJobRuntime(() => ({
+    run: async ({ signal }: { signal?: AbortSignal }) => {
+      started[index]!.resolve();
+      if (!signal) throw new Error("Runtime did not pass an abort signal");
+      if (signal.aborted) return { completed: false, state: "cancelled" };
+      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+      settled[index]!.resolve();
+      return { completed: false, state: "cancelled" };
+    },
   } as unknown as SofiaBrain), undefined, namespace));
 
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
@@ -504,9 +522,23 @@ test("DurableJobRuntime preserves concurrent submissions from independent runtim
   assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
   for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
 
-  // Do not remove the persisted file while the submitted workers are still active.
-  // Each test uses a unique namespace, so leaving this isolated temp record avoids
-  // racing a worker heartbeat/terminal write against test cleanup.
+  // Wait until every worker owns its lease before cancelling; this proves cleanup
+  // happens only after the workers have observed cancellation and settled.
+  await Promise.all(started.map((item) => item.promise));
+  await Promise.all(runtimes.map((runtime, index) => runtime.cancel(submitted[index]!.id)));
+  await Promise.all(settled.map((item) => item.promise));
+
+  const terminal = await reader.list();
+  assert.equal(terminal.length, workerCount);
+  assert.ok(terminal.every((record) => record.status === "cancelled"), "all workers must persist cancellation before cleanup");
+
+  const file = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  await rm(file, { force: true });
+  await rm(file + ".lock", { force: true });
 });
 
 
