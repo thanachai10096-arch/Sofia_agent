@@ -161,6 +161,42 @@ No production cutover until all applicable checks pass on the exact preview comm
 - Sofia messaging gateway: `docs/MESSAGING_GATEWAY.md`
 - Sofia unified access architecture: `docs/UNIFIED_ACCESS_ARCHITECTURE.md`
 
+
+### P1 storage contract audit — 2026-11-02
+
+The following matrix records the actual seams inspected in the migration branch. It distinguishes reusable contracts from stores that still need an additive cloud contract. This is an architecture audit only; no database provider, schema, credentials, or migration has been selected.
+
+| State domain | Current source contract / implementation | Cloud-readiness finding | Safe next step |
+|---|---|---|---|
+| Cron schedules/history/audit | `CronStore.transact(operation)`; `FileCronStore` | The transaction boundary is a good adapter seam, but the `SchedulerState` type passed through the public interface is not exported. File locking is local-filesystem coordination, not a multi-host database lock. | Export or relocate the state contract additively, add contract tests, then implement a transactional shared-store adapter. Keep `FileCronStore` as default for local/Railway. |
+| Long-running Brain jobs | `JobRuntime` is public; `FileJobStateStore` is private inside `src/brain/job-runtime.ts` | Job state has leases, heartbeats, fencing tokens, cancellation, and checkpoint persistence, but the state-store contract is private and the runtime owns process-local maps/controllers. | Extract a public additive `JobStateStore` contract without changing `JobRuntime`; make lease claim/heartbeat/save/cancel atomic in a shared adapter and test two-worker races. |
+| API run records | `RunRecordStore.save/remove/loadAllSync`; `FileRunRecordStore` | The synchronous full-store read blocks a clean remote database implementation. API startup rehydrates records synchronously; writes are best-effort and swallowed on failure. | Introduce an async `RunRecordRepository`/initialization path alongside the legacy interface. Preserve record validation, owner scoping, capability allowlist, idempotency hash and request fingerprint. |
+| API active runs/idempotency/concurrency | Local `Map` objects inside `createSofiaApi` | These maps are not shared across instances; detached run execution is not durable under serverless termination. | Move acceptance, idempotency reservation, per-owner concurrency reservation, and status transitions into transactional shared storage; dispatch work to durable workflow only after commit. |
+| User memory | `UserMemoryStore`; `FileUserMemoryStore` | The interface is reusable. The implementation hashes user IDs for filenames and applies secret redaction and prompt-injection filtering, but its write queue is process-local and files are local. | Implement a shared adapter preserving user scoping, validation, limits, redaction, prompt-injection checks, and explicit-write semantics. Add cross-user isolation and concurrent-write tests. |
+| Project memory / skill ledger | `ProjectMemoryStore`; `FileProjectMemoryStore`; `PersistentSkillLedger` | The contract is reusable, but file writes do not use a cross-process transaction/lock. The ledger has a synchronous file-backed warm cache and async fire-and-forget persistence, which is not a durable cloud commit boundary. | Add an awaited durable ledger path and a cloud-safe cache/reload strategy; retain existing file implementation for local use. Preserve evidence IDs and provenance. |
+| Usage quotas | `UsageLimiter` in `src/api/usage.ts` | With no storage path, counters are in-memory. With a path, it uses synchronous local file locking and filesystem persistence. Neither is a cross-instance serverless quota authority. | Add an async atomic quota-reservation contract with database-side increment/limit enforcement. Keep current limiter for local/single-process compatibility. |
+| Session/conversation state | Existing session wiring requires further path-level audit | Do not assume the existing session persistence is cloud-safe based on memory APIs. | Trace session identity and store wiring separately before selecting a schema; require owner + channel + conversation scoping and retention/deletion behavior. |
+| Provider event deduplication | API idempotency is reconstructed from run records; channel dedupe is a separate concern | Rehydrating a local map is not sufficient for concurrent webhook deliveries across instances. | Add provider-scoped unique event keys and atomic insert-or-return semantics; keep raw provider secrets and raw idempotency keys out of storage/logs. |
+
+#### Required compatibility design
+
+1. Keep existing file stores and their constructors as the local/Railway defaults. Cloud adapters are opt-in through composition-root dependency injection; no environment variable should silently switch an existing deployment to a new database.
+2. Introduce async contracts additively. Do not change `loadAllSync()` in place or make existing synchronous callers unexpectedly asynchronous. Add a new cloud initialization/repository path and migrate callers in a separately reviewed change.
+3. Make the database transaction the authority for uniqueness and concurrency: owner-scoped idempotency, provider event dedupe, job leases/fencing, quota reservations, and schedule claims must not rely on process-local maps or file locks.
+4. Preserve the current validation and security behavior at adapter boundaries: `ownerKeyId`, `desktopCapabilities`, allowed capability values, hashed idempotency identifiers, request fingerprints, prompt-injection filtering, secret redaction, and tenant isolation.
+5. Define retention, export, deletion, backup, restore, and encryption expectations before storing personal conversation or memory data in a hosted database. Do not log memory contents, provider tokens, API keys, or raw webhook bodies.
+6. Add shared contract tests that run against both the existing file implementation and each future cloud adapter. Add concurrency tests with two independent adapter instances, not only one in-process instance.
+
+#### Implementation order after a database choice is approved
+
+- **P1a — Contracts and tests:** export stable cron state types; extract job-state contract; define async run-record repository and quota reservation contract. No schema or provider dependency yet.
+- **P1b — Shared persistence adapter:** select a supported PostgreSQL provider only after explicit provider/region/retention approval; add migrations as additive tables, indexes, and constraints. Never run destructive migration automatically.
+- **P1c — Composition:** inject cloud stores into a new Vercel-specific composition root; keep Railway/local composition untouched. Do not import `src/api/entrypoint.ts` from a Function.
+- **P2 — Workflow dispatch:** transactionally persist and enqueue a durable workflow; add outbox/reconciliation if enqueue and database commit cannot be atomic. Do not use detached in-process promises as the execution guarantee.
+- **P3 — Cutover gate:** run compatibility, concurrency, recovery, security, privacy, and iPhone acceptance tests on Preview before any production decision.
+
+No database implementation is started in this change because the project currently has no configured database connector and the user has not selected a provider or approved its data residency/retention. This avoids creating an unreviewed data-processing dependency or requesting credentials in chat.
+
 ## Implemented preview smoke test
 
 The additive root-level `api/health.ts` function is a routing smoke test for Vercel Preview deployments. It supports GET/HEAD and returns an explicit status document. A successful response proves only that Vercel routed a request to a Node Function; it intentionally reports Sofia Core, durable storage, and durable execution as not connected. It must not be used as a production-readiness signal.
