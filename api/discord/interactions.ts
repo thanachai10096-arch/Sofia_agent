@@ -67,7 +67,7 @@ export default async function discordInteractions(req: IncomingMessage, res: Ser
 
   const publicKey = process.env.DISCORD_PUBLIC_KEY;
   const apiBase = process.env.SOFIA_API_BASE_URL;
-  const apiKey = process.env.SOFIA_API_KEY;
+  const apiKey = process.env.SOFIA_UPSTREAM_API_KEY;
   if (!publicKey || !apiBase || !apiKey) {
     reply(res, 503, { error: "discord_integration_not_configured" });
     return;
