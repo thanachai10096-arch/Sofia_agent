@@ -28,6 +28,7 @@ const names = [
   "SOFIA_MODEL_PROVIDER",
   "SOFIA_BASE_URL",
   "SOFIA_API_KEY",
+  "SOFIA_MODEL_API_KEY",
   "SOFIA_MODEL",
   "BASE_URL",
   "API_KEY",
@@ -123,6 +124,19 @@ test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, 
   assert.equal(config.providers.fast?.model, "vendor/model-default");
   assert.equal(config.providers.coding?.model, "vendor/model-code");
   assert.equal(config.providers.reasoning?.model, "vendor/model-default");
+});
+
+test("DeepSeek custom provider uses a dedicated model key without reusing Sofia API authentication", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_BASE_URL = "https://api.deepseek.com";
+  process.env.SOFIA_API_KEY = "sofia-api-auth-secret";
+  process.env.SOFIA_MODEL_API_KEY = "deepseek-provider-secret";
+  process.env.SOFIA_MODEL = "deepseek-chat";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.providers.fast?.apiKey, "deepseek-provider-secret");
+  assert.equal(config.providers.fast?.model, "deepseek-chat");
 });
 
 test("generic BASE_URL, API_KEY, and MODEL aliases are supported", () => {
