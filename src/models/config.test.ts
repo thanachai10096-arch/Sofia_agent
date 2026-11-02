@@ -17,6 +17,13 @@ const names = [
   "GEMINI_CODING_MODEL",
   "GEMINI_REASONING_MODEL",
   "GEMINI_VISION_MODEL",
+  "KIMI_API_KEY",
+  "KIMI_BASE_URL",
+  "KIMI_MODEL",
+  "KIMI_FAST_MODEL",
+  "KIMI_CODING_MODEL",
+  "KIMI_REASONING_MODEL",
+  "KIMI_VISION_MODEL",
   "DEEPSEEK_API_KEY",
   "DEEPSEEK_BASE_URL",
   "DEEPSEEK_MODEL",
@@ -58,6 +65,45 @@ afterEach(() => {
   for (const [name, value] of original) {
     if (value !== undefined) process.env[name] = value;
   }
+});
+
+test("Kimi provider uses the official OpenAI-compatible endpoint and supports route overrides", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "kimi";
+  process.env.KIMI_API_KEY = "kimi-test-key";
+  process.env.KIMI_CODING_MODEL = "kimi-k3";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.moonshot.ai/v1");
+  assert.equal(config.providers.fast?.apiKey, "kimi-test-key");
+  assert.equal(config.providers.fast?.model, "kimi-k3");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
+  assert.equal(config.providers.coding?.model, "kimi-k3");
+});
+
+test("Kimi provider accepts an explicit compatible base URL and model", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "kimi";
+  process.env.KIMI_API_KEY = "kimi-test-key";
+  process.env.KIMI_BASE_URL = "https://api.moonshot.cn/v1";
+  process.env.KIMI_MODEL = "kimi-custom-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.moonshot.cn/v1");
+  assert.equal(config.providers.fast?.model, "kimi-custom-model");
+});
+
+test("Kimi provider rejects missing credentials", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "kimi";
+  assert.throws(loadModelConfigFromEnv, /requires KIMI_API_KEY/);
+});
+
+test("Kimi is auto-selected when it is the only configured built-in provider", () => {
+  clear();
+  process.env.KIMI_API_KEY = "kimi-test-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.moonshot.ai/v1");
+  assert.equal(config.providers.fast?.apiKey, "kimi-test-key");
+  assert.equal(config.providers.fast?.model, "kimi-k3");
 });
 
 test("DeepSeek provider uses the official OpenAI-compatible endpoint and supports route overrides", () => {
