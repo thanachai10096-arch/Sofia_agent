@@ -119,8 +119,14 @@ async function main() {
   const allowedUsers = parseIds("DISCORD_ALLOWED_USER_IDS");
   const allowedChannels = parseIds("DISCORD_ALLOWED_CHANNEL_IDS");
   const base = new URL(apiBase);
-  if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash) {
-    throw new Error("SOFIA_API_BASE_URL must be a clean HTTPS origin.");
+  const configuredHosts = (process.env.SOFIA_API_ALLOWED_HOSTS || "")
+    .split(",").map((host) => host.trim().toLowerCase()).filter(Boolean);
+  const allowedHost = configuredHosts.length
+    ? configuredHosts.includes(base.hostname.toLowerCase())
+    : base.hostname.toLowerCase().endsWith(".vercel.app");
+  if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash ||
+      base.port || base.pathname !== "/" || !allowedHost) {
+    throw new Error("SOFIA_API_BASE_URL must be an allowed HTTPS origin. Set SOFIA_API_ALLOWED_HOSTS for a custom host.");
   }
 
   let stopped = false;
