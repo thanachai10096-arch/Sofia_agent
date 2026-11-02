@@ -282,10 +282,10 @@ test("personal memory is principal-isolated and fenced before reaching the model
     provider: {
       async generate(request) {
         calls.push({
-          principal: request.messages.some((message) => String(message.content).includes("principal B"))
+          principal: (request.messages ?? []).some((message) => String(message.content).includes("principal B"))
             ? "principal-b"
             : "principal-a",
-          content: request.messages.map((message) => String(message.content)).join("\n"),
+          content: (request.messages ?? []).map((message) => String(message.content)).join("\n"),
         });
         return { text: "Implemented and verified." };
       },
