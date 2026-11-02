@@ -607,6 +607,13 @@ export async function executeBackupRestoreTransaction(
         }
       }
     }
+    if (journalRecord?.phase === "rollback_required" && applied.length === 0) {
+      try {
+        await persistJournal("rolling_back", journalTargets, "restore_apply_failed");
+      } catch (error) {
+        rollbackErrors.push({ target: "restore_journal", error });
+      }
+    }
     if (journalRecord) {
       try {
         await persistJournal(
