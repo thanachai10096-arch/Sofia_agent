@@ -76,6 +76,31 @@ test("learns only after repeated verified experiences and passing regression evi
   assert.equal((await loop.retrieveSkills(scope, "TypeScript")).length, 1);
   assert.equal((await loop.retrieveSkills({ ...scope, tenantId: "other" }, "TypeScript")).length, 0);
 });
+test("does not retrieve active skills when policy changes before the read transaction", async () => {
+  const state = makeHost();
+  state.active.push({
+    id: "policy-bound-skill", scope, experienceId: "experience-1",
+    name: "learned-policy-bound", trigger: "TypeScript task",
+    procedure: ["inspect", "verify"], confidence: 0.9,
+    status: "active", activatedAt: new Date().toISOString(), policyRevision: "policy-1",
+  });
+  const originalTransaction = state.host.transaction.bind(state.host);
+  let policyRevision = "policy-1";
+  state.host.currentPolicyRevision = async () => policyRevision;
+  let changed = false;
+  state.host.transaction = async (requestedScope, operation) => {
+    if (!changed) {
+      changed = true;
+      policyRevision = "policy-2";
+    }
+    return originalTransaction(requestedScope, operation);
+  };
+
+  const loop = new VerifiedLearningLoop(state.host);
+  const retrieved = await loop.retrieveSkills(scope, "TypeScript");
+  assert.deepEqual(retrieved, []);
+});
+
 test("does not learn from missing or cross-scope evidence and deduplicates receipts", async () => {
   const state = makeHost();
   const loop = new VerifiedLearningLoop(state.host);
