@@ -4,6 +4,7 @@ import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
@@ -31,6 +32,7 @@ if (discordRequested && !discordConfigured) {
   console.error("Discord integration disabled: required configuration is incomplete; API will continue without Discord.");
 }
 let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
+let discordGatewayTransport: ReturnType<typeof createDiscordGatewayTransport> | undefined;
 const discordAbort = new AbortController();
 let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -209,6 +211,70 @@ if (discordConfigured) {
   discordRecoveryTimer.unref?.();
 }
 
+
+/** Optional natural-chat Gateway; shares the existing per-user durable job runtime. */
+if (process.env.DISCORD_GATEWAY_ENABLED === "true") {
+  const botToken = discordBotToken;
+  try {
+    if (!botToken || !rawDiscordUserIds?.trim() || !rawDiscordChannelIds?.trim()) {
+      throw new Error("bot token and explicit user/channel allowlists are required");
+    }
+    const allowedUsers = new Set(parseDiscordIdAllowlist(rawDiscordUserIds, "DISCORD_ALLOWED_USER_IDS"));
+    const allowedChannels = new Set(parseDiscordIdAllowlist(rawDiscordChannelIds, "DISCORD_ALLOWED_CHANNEL_IDS"));
+    if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable");
+    discordGatewayTransport = createDiscordGatewayTransport({
+      botToken,
+      onError: (event, status) => console.error("Discord Gateway:", event, status ?? ""),
+    });
+    const seenMessageIds = new Set<string>();
+    await discordGatewayTransport.start(discordAbort.signal, async (message) => {
+      if (!allowedUsers.has(message.author.id) || !allowedChannels.has(message.channelId)) return;
+      if (!message.directMessage && !message.addressedToBot) return;
+      const rawText = message.content.trim();
+      if (!rawText || /^\/(status|cancel|resume)(\s|$)/.test(rawText)) return;
+      if (seenMessageIds.has(message.id)) return;
+      seenMessageIds.add(message.id);
+      if (seenMessageIds.size > 10_000) {
+        const oldest = seenMessageIds.values().next().value;
+        if (oldest) seenMessageIds.delete(oldest);
+      }
+      try {
+        deps.securityController?.assertRunning();
+        const task = rawText === "/run" ? "" : rawText.startsWith("/run ") ? rawText.slice(5).trim() : rawText;
+        if (!task) {
+          await discordGatewayTransport?.sendMessage(message.channelId, "Please include a task after /run.", message.id);
+          return;
+        }
+        const principalId = "discord:" + message.author.id;
+        const sessionKey = messagingSessionKey({ platform: "discord", userId: message.author.id, channelId: message.channelId, conversationId: message.channelId });
+        const sessionContext = await buildDiscordSessionContext(deps.jobRuntime!, sessionKey);
+        const taskWithMemory = sessionContext ? task + "\n\n" + sessionContext : task;
+        const handle = await submitDiscordTask(deps.jobRuntime!, taskWithMemory, principalId, discordAbort.signal, {
+          channelId: message.channelId, sessionKey, sessionTask: task,
+        });
+        await discordGatewayTransport?.sendMessage(message.channelId,
+          "Sofia accepted your message.\nJob ID: " + handle.id + "\nI will send the result here.", message.id);
+        void waitForDiscordTask(handle, { signal: discordAbort.signal }).then(async (result) => {
+          const prefix = result.status === "completed" ? "Sofia completed the task." : "Sofia job " + result.status + ".";
+          const response = prefix + "\nJob ID: " + result.id + "\n" + result.summary;
+          await discordGatewayTransport?.sendMessage(message.channelId, response.length > 1900 ? response.slice(0, 1890) + "… (truncated)" : response);
+          await deps.jobRuntime?.markNotificationDelivered?.(result.id);
+        }).catch(async () => {
+          try { await discordGatewayTransport?.sendMessage(message.channelId, "Sofia could not report the result for job " + handle.id + "."); } catch { /* durable state remains */ }
+        });
+      } catch (error) {
+        console.error("Discord Gateway task failed:", error instanceof Error ? error.name : "UnknownError");
+        try { await discordGatewayTransport?.sendMessage(message.channelId, "Sofia could not process that message. Check server logs for a redacted error.", message.id); } catch { /* best effort */ }
+      }
+    });
+    console.log("Discord Gateway natural chat enabled.");
+  } catch (error) {
+    console.error("Discord Gateway disabled:", error instanceof Error ? error.message : "configuration_error");
+    await discordGatewayTransport?.stop();
+    discordGatewayTransport = undefined;
+  }
+}
+
 const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
@@ -229,6 +295,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     discordAbort.abort();
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
+    void discordGatewayTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
     server.close();
   });
