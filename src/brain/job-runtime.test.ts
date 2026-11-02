@@ -504,13 +504,9 @@ test("DurableJobRuntime preserves concurrent submissions from independent runtim
   assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
   for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
 
-  const file = path.join(
-    os.tmpdir(),
-    "sofia-agents-jobs",
-    createHash("sha256").update(namespace).digest("hex") + ".json",
-  );
-  await rm(file, { force: true });
-  await rm(file + ".lock", { force: true });
+  // Do not remove the persisted file while the submitted workers are still active.
+  // Each test uses a unique namespace, so leaving this isolated temp record avoids
+  // racing a worker heartbeat/terminal write against test cleanup.
 });
 
 
