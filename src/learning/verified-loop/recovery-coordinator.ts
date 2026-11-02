@@ -133,6 +133,24 @@ export async function inspectLearningRecovery(
       });
       continue;
     }
+    if (typeof host.resolveApprovalBinding !== "function") {
+      assessments.push({ skillId, issueKinds: kinds, disposition: "blocked-approval",
+        reason: "Approval service did not provide a persisted receipt bound to the authenticated actor, skill, scope, and policy revision",
+        learningPolicyRevision: skill.policyRevision, currentPolicyRevision });
+      continue;
+    }
+    const approvalBinding = await host.resolveApprovalBinding({ ...scope }, skillId, currentPolicyRevision);
+    if (!approvalBinding || typeof approvalBinding.id !== "string" || !approvalBinding.id.trim() ||
+        typeof approvalBinding.actorId !== "string" || !approvalBinding.actorId.trim() ||
+        approvalBinding.skillId !== skillId || approvalBinding.status !== "approved" ||
+        approvalBinding.policyRevision !== currentPolicyRevision ||
+        !approvalBinding.scope || approvalBinding.scope.tenantId !== scope.tenantId ||
+        approvalBinding.scope.principalId !== scope.principalId || approvalBinding.scope.projectId !== scope.projectId) {
+      assessments.push({ skillId, issueKinds: kinds, disposition: "blocked-approval",
+        reason: "Persisted approval receipt is missing, revoked, or bound to a different actor, skill, scope, or policy revision",
+        learningPolicyRevision: skill.policyRevision, currentPolicyRevision });
+      continue;
+    }
     const evidenceValid = await host.hasTrustedEvidence({ ...scope }, skill);
     if (evidenceValid !== true) {
       assessments.push({
@@ -157,7 +175,7 @@ export async function inspectLearningRecovery(
     assessments.push({
       skillId, issueKinds: kinds, disposition: "eligible-for-reviewed-repair",
       reason: "Read-only gates passed; a separate explicit repair plan and executor revalidation are still required",
-      learningPolicyRevision: skill.policyRevision, currentPolicyRevision,
+      learningPolicyRevision: skill.policyRevision, currentPolicyRevision, approvalBinding,
     });
   }
 
