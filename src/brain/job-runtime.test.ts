@@ -1133,6 +1133,68 @@ test("DurableJobRuntime enforces owner scope for get, list, resume, and cancel",
   assert.equal(await runtime.cancel(submitted.id, "owner-a"), true);
 });
 
+test("DurableJobRuntime acknowledges a settlement after the embedded Job checkpoint succeeds when RunStore fails", async () => {
+  const namespace = "job-runtime-checkpoint-fallback-" + randomUUID();
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-settlement-fallback-"));
+  const runId = "fallback-run-" + randomUUID();
+  const journal = new FileSettlementJournal("workspace", root);
+  const claim = await journal.claimRun(runId);
+  const attempt = await journal.begin(runId, { inputTokens: 2, outputTokens: 3 }, claim);
+  await journal.settle(runId, attempt, { inputTokens: 1, outputTokens: 1 }, claim);
+  await claim.release();
+
+  const snapshot = {
+    version: 1,
+    runId,
+    task: "checkpoint fallback",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "fallback-checkpoint",
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  let runStoreAttempts = 0;
+  let acknowledgementCompleted = false;
+  const unavailableRunStore = {
+    async save() {
+      runStoreAttempts += 1;
+      throw new Error("dedicated snapshot store unavailable");
+    },
+    async load() { return undefined; },
+    async delete() {},
+  };
+
+  try {
+    const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+      run: async () => {
+        await onRunSnapshot?.(snapshot);
+        await journal.acknowledgeCheckpoint(runId);
+        acknowledgementCompleted = true;
+        return { completed: true, state: "completed" };
+      },
+    } as unknown as SofiaBrain), unavailableRunStore, namespace);
+
+    const submitted = await runtime.submit({ task: "checkpoint fallback" });
+    let current = await runtime.get(submitted.id);
+    for (let attemptIndex = 0; attemptIndex < 100 && current?.status !== "completed"; attemptIndex += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      current = await runtime.get(submitted.id);
+    }
+    assert.equal(current?.status, "completed");
+    assert.ok(runStoreAttempts > 0, "the dedicated RunStore path should be attempted");
+    assert.equal(acknowledgementCompleted, true, "the embedded Job checkpoint should permit acknowledgement");
+    assert.equal(await journal.hasUnresolved(runId), false, "known settled usage should be resolved after durable Job checkpoint");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("DurableJobRuntime does not acknowledge a settlement when the Job checkpoint loses its lease", async () => {
   const namespace = "job-runtime-checkpoint-lease-loss-" + randomUUID();
   const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-settlement-"));
