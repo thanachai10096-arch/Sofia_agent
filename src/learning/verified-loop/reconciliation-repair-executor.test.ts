@@ -333,3 +333,33 @@ test("fails postcondition if the approval receipt is revoked during lifecycle mu
   assert.equal(active, true);
   assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
 });
+
+
+test("fails closed when the journal cannot renew a claimed repair lease", async () => {
+  const journal = new MemoryJournal();
+  journal.heartbeat = undefined as never;
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /does not support lease heartbeats/);
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
+
+test("checks lease ownership immediately before lifecycle mutation", async () => {
+  const journal = new MemoryJournal();
+  let heartbeatCalls = 0;
+  journal.heartbeat = async () => {
+    heartbeatCalls++;
+    return heartbeatCalls < 2;
+  };
+  let registrations = 0;
+  const host = hostWith(() => snapshot(), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /immediately before lifecycle mutation/);
+  assert.equal(heartbeatCalls, 2);
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
