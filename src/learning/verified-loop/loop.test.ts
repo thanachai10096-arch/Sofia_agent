@@ -240,6 +240,28 @@ test("fails closed when the regression adapter returns malformed output", async 
   assert.equal(state.active.length, 0);
 });
 
+test("fails closed when regression checks contain malformed details", async () => {
+  const state = makeHost();
+  state.host.verification.runRegression = async () => ({
+    regressionRunId: "regression-run",
+    passed: true,
+    regressionEvidenceIds: ["reg-evidence"],
+    checks: [{ name: "build", passed: true, detail: 42 as unknown as string }],
+  });
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "malformed-detail-1", "run1");
+  addReceipt(state, "malformed-detail-2", "run2");
+  addReceipt(state, "malformed-detail-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "malformed-detail-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "malformed-detail-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "malformed-detail-3", "Fix TypeScript build");
+
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+  assert.equal(state.evaluations.size, 0);
+});
+
 test("fails closed when regression evidence adapter returns malformed rows", async () => {
   const state = makeHost();
   const getEvidence = state.host.verification.getEvidence;
