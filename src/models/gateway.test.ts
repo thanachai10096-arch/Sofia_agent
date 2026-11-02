@@ -210,3 +210,46 @@ test("DeepSeek OpenAI-compatible gateway sends bearer auth, chat-completions pay
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("DeepSeek OpenAI-compatible gateway requests JSON mode for structured Brain envelopes", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input);
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      choices: [{ message: { role: "assistant", content: "{\\"ok\\":true}" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      reasoning: {
+        baseUrl: "https://api.deepseek.com",
+        apiKey: "deepseek-test-secret",
+        model: "deepseek-flash",
+        protocol: "openai-compatible",
+      },
+    });
+    const result = await gateway.generate({
+      task: "Plan safely",
+      kind: "analysis",
+      step: 1,
+      context: JSON.stringify({
+        phase: "plan",
+        instructions: "Return a structured plan",
+        acceptanceCriteria: ["valid JSON"],
+      }),
+    }, { ...route, id: "reasoning", providerId: "reasoning" }, { maxOutputTokens: 512 });
+
+    assert.equal(requestedUrl, "https://api.deepseek.com/chat/completions");
+    assert.deepEqual(requestedBody.response_format, { type: "json_object" });
+    assert.equal(requestedBody.max_tokens, 512);
+    assert.equal(result.text, "{\\"ok\\":true}");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
