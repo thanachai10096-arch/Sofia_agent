@@ -997,3 +997,58 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime rebinds the authenticated owner principal when resuming a checkpoint", async () => {
+  const namespace = "job-runtime-resume-principal-" + randomUUID();
+  const ownerKeyId = "authenticated-owner-hash-7f3a";
+  const snapshot = {
+    version: 1,
+    runId: "principal-resume-" + randomUUID(),
+    task: "resume under the authenticated owner",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "owner-bound-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const observedPrincipals: Array<string | undefined> = [];
+  let calls = 0;
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async (input: { principalId?: string; resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      observedPrincipals.push(input.principalId);
+      calls += 1;
+      if (!input.resume) {
+        await onRunSnapshot?.(snapshot);
+        return { completed: false, state: "failed" };
+      }
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  const submitted = await runtime.submit({
+    task: snapshot.task,
+    ownerKeyId,
+  });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "failed");
+  assert.equal(current?.ownerKeyId, ownerKeyId);
+  assert.equal(current?.snapshot?.checkpointId, snapshot.checkpointId);
+
+  const resumed = await runtime.resume(submitted.id);
+  assert.equal(resumed.status, "completed");
+  assert.equal(calls, 2);
+  assert.deepEqual(observedPrincipals, [ownerKeyId, ownerKeyId]);
+});
