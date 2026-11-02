@@ -131,14 +131,26 @@ async function main() {
   let resumeUrl = null;
   let reconnectDelay = 1000;
   const seen = new Map();
-  const inflight = new Set();\n  const pendingMessages = [];\n  let activeMessages = 0;\n  const MAX_CONCURRENT_MESSAGES = 2;
+  const inflight = new Set();
+  const pendingMessages = [];
+  let activeMessages = 0;
+  const MAX_CONCURRENT_MESSAGES = 2;\n  const pendingMessages = [];\n  let activeMessages = 0;\n  const MAX_CONCURRENT_MESSAGES = 2;
 
   async function processMessage(message) {
     if (!message?.id || !message.channel_id || !message.author?.id || message.author.bot) return;
     if (!allowedUsers.has(message.author.id) || !allowedChannels.has(message.channel_id)) return;
     if (seen.has(message.id) || inflight.has(message.id)) return;
-    if (!message.content?.trim()) return;
+    if (!message.content?.trim() || message.content.trim().startsWith("/")) return;
     inflight.add(message.id);
+    pendingMessages.push(message);
+    void drainMessages();
+  }
+
+  async function drainMessages() {
+    if (activeMessages >= MAX_CONCURRENT_MESSAGES) return;
+    const message = pendingMessages.shift();
+    if (!message) return;
+    activeMessages += 1;
     try {
       const reply = await runSofia({ apiBase: base, apiKey, bypass, message });
       if (reply) await sendDiscordMessage(token, message.channel_id, reply, message.id);
@@ -153,6 +165,8 @@ async function main() {
       }
     } finally {
       inflight.delete(message.id);
+      activeMessages -= 1;
+      void drainMessages();
     }
   }
 
@@ -222,6 +236,7 @@ async function main() {
     });
     socket.addEventListener("close", (event) => {
       stopHeartbeat();
+      if (event.code === 4007 || event.code === 4009) { sessionId = null; resumeUrl = null; sequence = null; }
       if (stopped) return;
       if ([4004, 4010, 4011, 4012, 4013, 4014].includes(event.code)) {
         console.error("discord_gateway_fatal_close", event.code);
