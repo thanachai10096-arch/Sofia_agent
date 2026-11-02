@@ -33,12 +33,12 @@ function configure(): void {
 
 async function invoke(input: {
   method?: string;
-  secret?: string;
+  secret?: string | string[];
   body?: unknown;
 } = {}): Promise<{ status: number; body: Record<string, unknown>; headers: Record<string, string> }> {
   const req = new PassThrough() as PassThrough & {
     method: string;
-    headers: Record<string, string>;
+    headers: Record<string, string | string[]>;
   };
   req.method = input.method ?? "POST";
   req.headers = input.secret ? { "x-telegram-bot-api-secret-token": input.secret } : {};
@@ -82,6 +82,16 @@ describe("Vercel Telegram webhook", () => {
     const result = await invoke({ secret: "wrong", body: sampleUpdate() });
     assert.equal(result.status, 401);
     assert.equal(result.body.error, "invalid_telegram_webhook_secret");
+  });
+
+  it("rejects duplicate secret headers without throwing or calling Sofia", async () => {
+    configure();
+    let called = false;
+    globalThis.fetch = (async () => { called = true; throw new Error("must not call"); }) as typeof fetch;
+    const result = await invoke({ secret: ["test-secret-token", "attacker-value"], body: sampleUpdate() });
+    assert.equal(result.status, 401);
+    assert.equal(result.body.error, "invalid_telegram_webhook_secret");
+    assert.equal(called, false);
   });
 
   it("rejects same-character-length non-ASCII secrets without throwing", async () => {
