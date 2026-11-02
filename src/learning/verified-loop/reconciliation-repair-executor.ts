@@ -376,10 +376,10 @@ export async function executeLearningRepairPlan(
       continue;
     }
     const heartbeatTimer = setInterval(() => {
-      void journal.heartbeat!(action.idempotencyKey, action.scope, entry.claimToken!, now())
+      void journal.heartbeat(action.idempotencyKey, action.scope, entry.claimToken!, now())
         .then(owned => { if (!owned) heartbeatLost = true; })
         .catch(() => { heartbeatLost = true; });
-    }, 1_000) : undefined;
+    }, 1_000);
     try {
       // Prove lease ownership immediately; the periodic timer alone may not have
       // fired yet (or may have been delayed by event-loop pressure).
