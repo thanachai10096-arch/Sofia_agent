@@ -40,6 +40,28 @@ test("SQLite transcript pagination and full-text search work", async () => {
   }
 });
 
+test("deleting a SQLite session atomically removes its transcript and search index", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-delete-"));
+  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  try {
+    store.save({
+      id: "private-conversation",
+      messages: ["user: confidential project codename Blue Lantern"],
+      updatedAt: 0,
+    });
+    assert.equal(store.search("Blue Lantern").length, 1);
+
+    store.delete("private-conversation");
+
+    assert.equal(store.get("private-conversation"), undefined);
+    assert.deepEqual(store.listMessages("private-conversation"), []);
+    assert.deepEqual(store.search("Blue Lantern"), []);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("invalid transcript writes do not replace stored messages", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-test-"));
   const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
