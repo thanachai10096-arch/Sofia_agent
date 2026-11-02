@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
-import { MemorySessionStore } from "../session/store.js";
+import { MemorySessionStore, scopedSessionId } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
 
@@ -61,12 +61,12 @@ test("API sessions are persisted and scoped to the authenticated API key", async
     await startAndWait("key-one", "first user's task");
     await startAndWait("key-two", "second user's task");
 
-    const idFor = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 32);
-    assert.deepEqual(sessions.get(`${idFor("key-one")}:shared-client-session`)?.messages, [
+    const idFor = (key: string) => scopedSessionId(createHash("sha256").update(key).digest("hex").slice(0, 32), "shared-client-session");
+    assert.deepEqual(sessions.get(idFor("key-one"))?.messages, [
       "user: first user's task",
       "assistant: Task completed.",
     ]);
-    assert.deepEqual(sessions.get(`${idFor("key-two")}:shared-client-session`)?.messages, [
+    assert.deepEqual(sessions.get(idFor("key-two"))?.messages, [
       "user: second user's task",
       "assistant: Task completed.",
     ]);
