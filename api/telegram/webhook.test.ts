@@ -84,6 +84,13 @@ describe("Vercel Telegram webhook", () => {
     assert.equal(result.body.error, "invalid_telegram_webhook_secret");
   });
 
+  it("rejects same-character-length non-ASCII secrets without throwing", async () => {
+    configure();
+    const result = await invoke({ secret: "tést-secret-token", body: sampleUpdate() });
+    assert.equal(result.status, 401);
+    assert.equal(result.body.error, "invalid_telegram_webhook_secret");
+  });
+
   it("ignores users outside the explicit allowlist without calling Sofia", async () => {
     configure();
     let called = false;
