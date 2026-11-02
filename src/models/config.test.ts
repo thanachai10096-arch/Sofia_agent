@@ -229,3 +229,21 @@ test("custom endpoints can opt into the Anthropic Messages protocol", () => {
   assert.equal(config.providers.fast?.protocol, "anthropic-messages");
   assert.equal(config.providers.fast?.baseUrl, "https://anthropic-proxy.example.test/v1");
 });
+
+
+test("DeepSeek is auto-selected when it is the only configured built-in provider", () => {
+  clear();
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.providers.fast?.apiKey, "deepseek-test-key");
+  assert.equal(config.providers.fast?.model, "deepseek-flash");
+});
+
+test("DeepSeek base URL rejects credential-bearing or malformed URLs", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.DEEPSEEK_BASE_URL = "https://user:password@api.deepseek.com";
+  assert.throws(loadModelConfigFromEnv, /must not contain credentials/);
+});
