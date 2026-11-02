@@ -112,6 +112,31 @@ describe("Vercel Telegram webhook", () => {
     assert.equal(called, false);
   });
 
+  it("asks Telegram to retry when the upstream Sofia API is temporarily unavailable", async () => {
+    configure();
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: "temporarily_unavailable" }), { status: 503 })) as typeof fetch;
+    const result = await invoke({ secret: "test-secret-token", body: sampleUpdate() });
+    assert.equal(result.status, 503);
+    assert.equal(result.body.error, "sofia_api_temporarily_unavailable");
+  });
+
+  it("does not retry permanent upstream rejections", async () => {
+    configure();
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: "forbidden" }), { status: 403 })) as typeof fetch;
+    const result = await invoke({ secret: "test-secret-token", body: sampleUpdate() });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.accepted, false);
+    assert.equal(result.body.error, "sofia_api_rejected_request");
+  });
+
+  it("asks Telegram to retry when a successful upstream response has no run ID", async () => {
+    configure();
+    globalThis.fetch = (async () => new Response(JSON.stringify({ status: "queued" }), { status: 202 })) as typeof fetch;
+    const result = await invoke({ secret: "test-secret-token", body: sampleUpdate() });
+    assert.equal(result.status, 502);
+    assert.equal(result.body.error, "sofia_api_invalid_response");
+  });
+
   it("forwards an allowlisted message to the Sofia API with an idempotency key", async () => {
     configure();
     const calls: Array<{ url: string; init?: RequestInit }> = [];
