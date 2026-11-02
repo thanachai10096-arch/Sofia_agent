@@ -25,7 +25,7 @@ Set these only in Vercel Project Settings → Environment Variables. Never commi
 - `DISCORD_ALLOWED_USER_IDS` — comma-separated Discord user IDs allowed to start runs. No wildcard support.
 - `DISCORD_ALLOWED_CHANNEL_IDS` — comma-separated Discord channel IDs allowed to start runs. No wildcard support.
 - `SOFIA_API_BASE_URL` — root HTTPS base URL of the separately hosted Sofia API, without credentials/query/fragment.
-- `SOFIA_API_KEY` — a narrowly scoped server-side API key allowed to start runs.
+- `SOFIA_UPSTREAM_API_KEY` — a narrowly scoped server-side API key allowed to start runs. This is separate from model-provider `SOFIA_API_KEY`.
 - Optional `DISCORD_COMMAND_NAME` — defaults to `run`.
 
 Do not configure Production variables until Preview has passed the acceptance checklist. The actual deployment URL must come from Vercel after a deployment; do not guess it.
