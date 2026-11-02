@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SqliteSessionStore } from "./sqlite-store.js";
+import { scopedSessionId } from "./store.js";
 
 test("SQLite sessions survive closing and reopening with exact transcript order", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-test-"));
@@ -217,6 +218,29 @@ test("SQLite session storage rejects a directory as a database path", {
     assert.equal(fs.readFileSync(existingFile, "utf8"), "leave this file alone");
     assert.equal(fs.statSync(existingFile).mode & 0o777, 0o644);
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("session identifiers are opaque and isolated by authenticated owner", async () => {
+  const ownerASession = scopedSessionId("authenticated-owner-a", "shared-client-session");
+  const ownerBSession = scopedSessionId("authenticated-owner-b", "shared-client-session");
+  assert.notEqual(ownerASession, ownerBSession);
+  assert.equal(ownerASession, scopedSessionId("authenticated-owner-a", "shared-client-session"));
+  assert.match(ownerASession, /^[a-f0-9]{64}$/);
+  assert.equal(ownerASession.includes("authenticated-owner-a"), false);
+  assert.equal(ownerASession.includes("shared-client-session"), false);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-owner-isolation-"));
+  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  try {
+    store.save({ id: ownerASession, messages: ["private owner A transcript"], updatedAt: 0 });
+    store.save({ id: ownerBSession, messages: ["private owner B transcript"], updatedAt: 0 });
+    assert.deepEqual(store.get(ownerASession)?.messages, ["private owner A transcript"]);
+    assert.deepEqual(store.get(ownerBSession)?.messages, ["private owner B transcript"]);
+  } finally {
+    store.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
