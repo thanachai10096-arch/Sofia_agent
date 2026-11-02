@@ -91,6 +91,19 @@ test("Kimi provider accepts an explicit compatible base URL and model", () => {
   assert.equal(config.providers.fast?.model, "kimi-custom-model");
 });
 
+test("Kimi Code membership endpoint can be selected without changing the provider adapter", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "kimi";
+  process.env.KIMI_API_KEY = "kimi-code-test-key";
+  process.env.KIMI_BASE_URL = "https://api.kimi.ai/coding/v1";
+  process.env.KIMI_MODEL = "kimi-for-coding";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.kimi.ai/coding/v1");
+  assert.equal(config.providers.fast?.apiKey, "kimi-code-test-key");
+  assert.equal(config.providers.fast?.model, "kimi-for-coding");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
+});
+
 test("Kimi provider rejects missing credentials", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "kimi";
