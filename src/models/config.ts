@@ -16,7 +16,7 @@ interface ProviderSelection {
   baseUrl: string;
   apiKey: string;
   defaultModel: string;
-  routeModelPrefix: "OPENROUTER" | "GEMINI" | "ANTHROPIC" | "DEEPSEEK" | "SOFIA";
+  routeModelPrefix: "OPENROUTER" | "GEMINI" | "ANTHROPIC" | "DEEPSEEK" | "KIMI" | "SOFIA";
   protocol: "openai-compatible" | "anthropic-messages";
 }
 
@@ -65,8 +65,8 @@ function selectProvider(): ProviderSelection {
   const anthropicKey = firstEnv("ANTHROPIC_API_KEY");
   const deepseekKey = firstEnv("DEEPSEEK_API_KEY");
 
-  if (requested && !["openrouter", "gemini", "anthropic", "deepseek", "custom", "openai-compatible"].includes(requested)) {
-    throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, anthropic, deepseek, or custom.");
+  if (requested && !["openrouter", "gemini", "anthropic", "deepseek", "kimi", "custom", "openai-compatible"].includes(requested)) {
+    throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, anthropic, deepseek, kimi, or custom.");
   }
 
   const chooseCustom = (): ProviderSelection => {
@@ -120,6 +120,17 @@ function selectProvider(): ProviderSelection {
     };
   };
 
+  const chooseKimi = (): ProviderSelection => {
+    if (!kimiKey) throw new Error("SOFIA_MODEL_PROVIDER=kimi requires KIMI_API_KEY.");
+    return {
+      baseUrl: normalizeBaseUrl(firstEnv("KIMI_BASE_URL") || "https://api.moonshot.ai/v1"),
+      apiKey: kimiKey,
+      defaultModel: firstEnv("KIMI_MODEL") || "kimi-k3",
+      routeModelPrefix: "KIMI",
+      protocol: "openai-compatible",
+    };
+  };
+
   const chooseAnthropic = (): ProviderSelection => {
     if (!anthropicKey) throw new Error("SOFIA_MODEL_PROVIDER=anthropic requires ANTHROPIC_API_KEY.");
     const model = firstEnv("ANTHROPIC_MODEL");
@@ -138,12 +149,13 @@ function selectProvider(): ProviderSelection {
   if (requested === "gemini") return chooseGemini();
   if (requested === "anthropic") return chooseAnthropic();
   if (requested === "deepseek") return chooseDeepSeek();
+  if (requested === "kimi") return chooseKimi();
 
   // A complete custom tuple is an explicit provider choice. If multiple
   // built-in providers are configured, require an explicit selection so adding
   // a second credential cannot silently redirect prompts to another vendor.
   if (hasCustomConfig) return chooseCustom();
-  const configuredBuiltIns = [openRouterKey, geminiKey, anthropicKey, deepseekKey].filter(Boolean).length;
+  const configuredBuiltIns = [openRouterKey, geminiKey, anthropicKey, deepseekKey, kimiKey].filter(Boolean).length;
   if (configuredBuiltIns > 1) {
     throw new Error("Multiple built-in provider credentials are configured; set SOFIA_MODEL_PROVIDER to choose explicitly.");
   }
@@ -151,10 +163,11 @@ function selectProvider(): ProviderSelection {
   if (geminiKey) return chooseGemini();
   if (anthropicKey) return chooseAnthropic();
   if (deepseekKey) return chooseDeepSeek();
+  if (kimiKey) return chooseKimi();
 
   throw new Error(
     "Configure SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL for an OpenAI-compatible endpoint, " +
-    "or set OPENROUTER_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, or DEEPSEEK_API_KEY.",
+    "or set OPENROUTER_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, or KIMI_API_KEY.",
   );
 }
 
