@@ -14,12 +14,12 @@ test("outbound messages survive restart and are removed only after confirmed del
     const failed = await flushMessagingOutbox(new FileMessagingOutbox(root), async (platform, message) => {
       attempts.push(platform + ":" + message.text);
       return false;
-    });
+    }, undefined, undefined, () => 1_000);
     assert.deepEqual(failed, { sent: 0, pending: 1 });
     const retried = await flushMessagingOutbox(new FileMessagingOutbox(root), async (platform, message) => {
       attempts.push(platform + ":" + message.text);
       return true;
-    });
+    }, undefined, undefined, () => 31_000);
     assert.deepEqual(retried, { sent: 1, pending: 0 });
     assert.deepEqual(attempts, ["line:completed output", "line:completed output"]);
   } finally {
@@ -115,10 +115,54 @@ test("outbox flush releases lease when provider send fails so another worker can
     const first = new FileMessagingOutbox(root);
     const second = new FileMessagingOutbox(root);
     await first.enqueue("whatsapp", { conversationId: "wa-chat", text: "retry me" });
-    const failed = await flushMessagingOutbox(first, async () => false);
+    const failed = await flushMessagingOutbox(first, async () => false, undefined, undefined, () => 1_000);
     assert.deepEqual(failed, { sent: 0, pending: 1 });
-    const succeeded = await flushMessagingOutbox(second, async () => true);
+    const succeeded = await flushMessagingOutbox(second, async () => true, undefined, undefined, () => 31_000);
     assert.deepEqual(succeeded, { sent: 1, pending: 0 });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("repeated outbound failures become retained dead letters and can be manually requeued", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-dead-letter-"));
+  try {
+    const outbox = new FileMessagingOutbox(root);
+    const id = await outbox.enqueue("line", { conversationId: "line-chat", text: "keep for review" });
+    let now = 1_000;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const result = await flushMessagingOutbox(outbox, async () => false, undefined, undefined, () => now);
+      assert.equal(result.pending, 1);
+      now += 60 * 60_000;
+    }
+    const dead = (await outbox.pending()).find((record) => record.id === id);
+    assert.equal(dead?.state, "dead_letter");
+    assert.equal(dead?.attemptCount, 8);
+    assert.equal(dead?.lastErrorCode, "provider_unavailable");
+    assert.equal(await outbox.requeue(id), true);
+    const requeued = (await outbox.pending()).find((record) => record.id === id);
+    assert.equal(requeued?.state, "pending");
+    assert.equal(requeued?.attemptCount, 0);
+    assert.equal(requeued?.nextAttemptAt, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("outbox does not send a record before its persisted retry time", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-backoff-"));
+  try {
+    const outbox = new FileMessagingOutbox(root);
+    await outbox.enqueue("line", { conversationId: "line-chat", text: "wait before retry" });
+    await flushMessagingOutbox(outbox, async () => false, undefined, undefined, () => 5_000);
+    let sends = 0;
+    const early = await flushMessagingOutbox(outbox, async () => { sends++; return true; }, undefined, undefined, () => 34_999);
+    assert.equal(sends, 0);
+    assert.equal(early.pending, 1);
+    const due = await flushMessagingOutbox(outbox, async () => { sends++; return true; }, undefined, undefined, () => 35_000);
+    assert.equal(sends, 1);
+    assert.equal(due.pending, 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
