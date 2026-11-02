@@ -139,11 +139,11 @@ async function main() {
 
   async function processMessage(message) {
     if (!message?.id || !message.channel_id || !message.author?.id || message.author.bot) return;
-    if (!allowedUsers.has(message.author.id)) { console.log("discord_message_ignored", "user_not_allowlisted", message.author.id); return; }
-    if (!allowedChannels.has(message.channel_id)) { console.log("discord_message_ignored", "channel_not_allowlisted", message.channel_id); return; }
+    if (!allowedUsers.has(message.author.id)) { console.log("discord_message_ignored", "user_not_allowlisted"); return; }
+    if (!allowedChannels.has(message.channel_id)) { console.log("discord_message_ignored", "channel_not_allowlisted"); return; }
     if (seen.has(message.id) || inflight.has(message.id)) return;
     if (!message.content?.trim()) { console.warn("discord_message_content_empty", "Enable Message Content Intent in Discord Developer Portal > Bot > Privileged Gateway Intents."); return; }
-    console.log("discord_message_received", message.id, message.channel_id, message.content.trim().slice(0, 80));
+    console.log("discord_message_received");
     inflight.add(message.id);
     pendingMessages.push(message);
     void drainMessages();
