@@ -53,6 +53,33 @@ test("SQLite learning transactions persist experiences and skills across reopen"
   }
 });
 
+test("SQLite learning store requires active skills to match persisted candidate provenance", async () => {
+  const store = await SqliteLearningTransactionStore.open(":memory:");
+  try {
+    await store.transaction(scope, async tx => {
+      const skill = activeSkill("unproven-skill");
+      await assert.rejects(
+        tx.activateSkill(skill),
+        /Active learning skill requires a persisted candidate/,
+      );
+
+      await tx.insertExperienceIfAbsent(experience("provenance-receipt", skill.experienceId));
+      await tx.putCandidate({
+        id: skill.id, scope, experienceId: skill.experienceId,
+        name: "different-name", trigger: skill.trigger,
+        procedure: [...skill.procedure], confidence: skill.confidence,
+      });
+      await assert.rejects(
+        tx.activateSkill(skill),
+        /Active learning skill does not match its persisted candidate/,
+      );
+      assert.deepEqual(await tx.listActiveSkills(scope), []);
+    });
+  } finally {
+    store.close();
+  }
+});
+
 test("SQLite learning store rejects an active-skill payload whose persisted scope was tampered", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-learning-tamper-"));
   const file = path.join(directory, "learning.sqlite");
