@@ -209,3 +209,48 @@ Validation evidence:
 - GitHub combined status for this commit reports Vercel checks failed because the account hit the deployment/build rate limit (`build-rate-limit`) for both `sofia-discord-test` and `i888`.
 - No build, typecheck, unit test, or runtime test result is available for this commit. Treat it as unverified until CI can run.
 - No deployment was created and no production environment was modified.
+
+
+## Follow-up: Job Runtime lease, heartbeat, cancellation, and recovery review
+
+Reviewed on the audit branch:
+- `src/brain/job-runtime.ts`
+- `src/brain/job-runtime.test.ts`
+- `src/platform/vercel-api-runtime.ts`
+- `src/brain/run-store.ts`
+
+### Existing behavior verified by source inspection
+
+The existing `DurableJobRuntime` already provides a meaningful single-host durability foundation:
+- Atomic file-store claims with an owner token and expiring lease.
+- Heartbeats that extend a lease only while the same owner token still holds a live lease.
+- Fencing on save: a worker whose lease token no longer matches cannot overwrite the current job record.
+- Cancellation is persisted before the local controller is aborted; a late success must not replace a terminal cancellation.
+- Checkpoints are redacted before being written to the separate RunStore and embedded job record.
+- Expired running jobs are marked interrupted and can be resumed from a persisted snapshot.
+- Public job records omit the internal lease owner token.
+- The file store uses an exclusive lock and explicitly fails closed on a lock owned by another host.
+
+The test file contains coverage for process restart recovery, checkpoint resume, duplicate resume prevention, active and cross-process cancellation, stale/foreign lock handling, redaction, private file permissions, and injected JobStateStore behavior. This is source-level test inventory only; these tests were not executed during this audit.
+
+### Remaining production gaps
+
+1. **No shared transactional cloud adapter is wired into the Vercel runtime.** The Vercel adapter constructs the default runtime dependencies and uses temporary filesystem paths. The JobStateStore injection seam is useful, but an interface alone does not provide multi-instance durability.
+2. **RunStore is also file-backed.** Its per-target save queue is process-local. It does not coordinate independent Function instances or provide transactional coupling with the job row.
+3. **Job state and checkpoint state are separate writes.** The code attempts to preserve an embedded snapshot fallback if RunStore save fails, but a cloud implementation still needs explicit consistency and recovery semantics.
+4. **Lease fencing cannot make external side effects exactly-once.** Tools that send messages, modify repositories, or call external APIs need idempotency keys/outbox records and reconciliation; a lease only fences job-state writes.
+5. **Cancellation is cooperative.** Tools and provider calls must honor AbortSignal or have bounded timeouts; aborting the Brain does not automatically undo an already-committed external side effect.
+
+### Safe implementation sequence
+
+- Keep `DurableJobRuntime`, Brain, and Executor as the existing execution engine.
+- Specify a shared transactional schema for jobs, leases, checkpoints, idempotency keys, and an outbox; enforce owner scoping and uniqueness in the database.
+- Implement a Postgres-backed `JobStateStore` with atomic claim/heartbeat/cancel/save transactions and lease-token fencing.
+- Implement a shared checkpoint store and ensure checkpoint/job transitions can be reconciled after partial failure.
+- Add an outbox-backed notification dispatcher with retry and deduplication.
+- Add integration tests with two independent runtime instances against the same database, forced lease expiry, stale-worker writes, cancellation races, duplicate side effects, and restart during notification.
+- Wire the shared adapters into Vercel only after those tests pass. Keep file adapters for local development.
+
+### Scope decision
+
+No change to `job-runtime.ts` was made in this follow-up. The inspected local implementation already has substantial lease and recovery protections; replacing it or adding another runtime would increase risk. The next implementation unit should be the shared storage adapter and its contract tests, not a rewrite of the existing executor.
