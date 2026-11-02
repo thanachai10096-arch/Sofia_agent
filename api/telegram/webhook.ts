@@ -39,8 +39,11 @@ async function readRawBody(req: IncomingMessage): Promise<Buffer | null> {
 }
 
 function constantTimeSecretEqual(actual: string | undefined, expected: string): boolean {
-  if (!actual || actual.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(actual, "utf8"), Buffer.from(expected, "utf8"));
+  if (!actual) return false;
+  const actualBytes = Buffer.from(actual, "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+  if (actualBytes.byteLength !== expectedBytes.byteLength) return false;
+  return timingSafeEqual(actualBytes, expectedBytes);
 }
 
 function allowlist(value: string | undefined): Set<string> {
