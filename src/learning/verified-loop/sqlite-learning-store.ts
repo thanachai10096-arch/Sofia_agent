@@ -192,6 +192,23 @@ export class SqliteLearningTransactionStore {
       },
       activateSkill: async skill => {
         const safeSkill = decodeActiveSkill(encode(skill), scope);
+        // The durable active record must be traceable to the exact candidate
+        // and verified experience already persisted in this same scope.
+        const candidateRow = db.prepare("SELECT candidate_id, payload FROM learning_candidates WHERE tenant_id=? AND principal_id=? AND project_id=? AND candidate_id=?").get(...values, safeSkill.id) as CandidateRow | undefined;
+        if (!candidateRow) throw new Error("Active learning skill requires a persisted candidate");
+        const candidate = decodeCandidate(candidateRow.payload, scope);
+        assertPersistedIdentity(candidate.id, candidateRow.candidate_id, "candidate");
+        if (candidate.experienceId !== safeSkill.experienceId ||
+            candidate.name !== safeSkill.name || candidate.trigger !== safeSkill.trigger ||
+            candidate.confidence !== safeSkill.confidence ||
+            JSON.stringify(candidate.procedure) !== JSON.stringify(safeSkill.procedure)) {
+          throw new Error("Active learning skill does not match its persisted candidate");
+        }
+        const experienceRow = db.prepare("SELECT receipt_id, experience_id, payload FROM learning_experiences WHERE tenant_id=? AND principal_id=? AND project_id=? AND experience_id=?").get(...values, safeSkill.experienceId) as ExperienceRow | undefined;
+        if (!experienceRow) throw new Error("Active learning skill requires a persisted experience");
+        const persistedExperience = decodeExperience(experienceRow.payload, scope);
+        assertPersistedIdentity(persistedExperience.id, experienceRow.experience_id, "experience");
+        assertPersistedIdentity(persistedExperience.receiptId, experienceRow.receipt_id, "experience receipt");
         db.prepare("INSERT INTO learning_active_skills VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, principal_id, project_id, skill_id) DO UPDATE SET skill_name=excluded.skill_name, policy_revision=excluded.policy_revision, payload=excluded.payload").run(...values, safeSkill.id, safeSkill.name, safeSkill.policyRevision, encode(safeSkill));
       },
       listActiveSkills: async requestedScope => {
