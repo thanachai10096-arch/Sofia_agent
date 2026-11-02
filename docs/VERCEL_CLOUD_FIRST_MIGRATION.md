@@ -174,3 +174,18 @@ After deploying this branch as Preview, verify:
 - The function does not read secrets, initialize local filesystem stores, start timers, or create background work.
 
 This smoke test is an isolated first step. The existing long-running Node API is still not adapted to Vercel Functions, and no production cutover is authorized.
+
+
+## Preview deployment verification — 2026-11-02
+
+A subsequent Preview deployment was created from commit `81e1c8cb67b26559249c66833af9af236c49090b`:
+
+- Deployment ID: `dpl_25mfzBvgWf6yUz9KLrXJ8mPm1FZr`
+- Project: `i888`
+- State: `READY`
+- Build logs show `npm run build` invoking `tsc -p tsconfig.build.json`, followed by `Build complete` and `Deployment completed`.
+- Vercel reported its separate Typecheck step as skipped because a Build Command is configured; TypeScript compilation nevertheless ran as part of the build command.
+- Build emitted an npm warning that the `esbuild@0.28.2` install script was not yet covered by the environment's `allowScripts` policy. The build still completed; do not silently approve install scripts without reviewing the dependency and build requirements.
+- An external HTTP GET to `/api/health` could not be completed using the available verification client. Runtime logs queried for the latest 30 minutes returned no entries; this does not prove that the endpoint was invoked or that it returned a successful response.
+
+Therefore, the deployment/build gate is passed for this Preview commit. The HTTP route gate remains pending. The deployment is still a smoke-test deployment, not a connected Sofia Core service.
