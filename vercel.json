@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "daemons": {
+    "discord-gateway": {
+      "root": "workers/discord-gateway/daemon/",
+      "entrypoint": "Dockerfile",
+      "command": ["node", "worker.mjs"],
+      "instances": { "iad1": 1 }
+    }
+  }
+}
