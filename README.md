@@ -87,7 +87,7 @@ UNDERSTAND ──► PLAN ──► EXECUTE
 | **Recovery & project memory** | Durable local checkpoints and run snapshots; guarded resume; searchable project conventions and repair/workflow patterns persisted locally. |
 | **Security boundaries** | Centralized tool permissions plus policy/process runners and an opt-in Docker-backed container sandbox. Process mode is **not** represented as a container. |
 | **Platform services** | Agent profiles and templates, skills platform, cloud execution backend contract, and evaluation runner. |
-| **Messaging gateway** | Opt-in Telegram Bot API and Discord interaction adapters share the existing Sofia command/API path, access policy, rate limits, and deduplication controls. Ordinary text can be dispatched as a task without `/run`; provider slash commands are not treated as tasks. |
+| **Messaging gateway** | Opt-in Telegram Bot API and Discord interaction adapters share the existing Sofia command/API path, access policy, rate limits, and deduplication controls. Natural-language chat is available through opt-in Telegram private chat and the opt-in Discord Gateway; Discord Gateway requires an explicit enable flag and Message Content intent. |
 | **SDK & API** | A stable, model-agnostic public surface for desktop, mobile, web, and third-party clients. |
 
 ## `> Quick start`
@@ -146,8 +146,8 @@ The SDK exposes `start()`, `getRun()`, `cancel()`, and `waitForRun()` for reconn
 Sofia has a shared messaging gateway with Telegram and Discord adapters. These adapters connect to the existing Sofia API/SDK and command dispatcher; they do not create a second agent runtime or bypass the normal authorization and tool-policy checks.
 
 - **Telegram:** Bot API long polling, allowlisted user/chat IDs, bounded message delivery, run-completion reporting, and deduplication.
-- **Discord:** Signed interaction verification, deferred interaction responses, allowlisted users/channels, and durable job commands.
-- **Natural-language chat:** Ordinary text messages are treated as tasks by the shared Sofia messaging handler by default, so users do not need to prefix every request with `/run`. The explicit `/run <task>` command remains supported. Other slash commands are ignored by the task dispatcher, and attachment-only messages do not start runs.
+- **Discord:** Signed slash-command interactions plus optional Gateway natural chat in DMs and mention/reply messages in allowlisted channels.
+- **Natural-language chat:** Discord Gateway mode must be explicitly enabled with `DISCORD_GATEWAY_ENABLED=true` and the privileged Message Content intent. DMs accept natural text; server channels require a mention or reply to Sofia. Unaddressed group chatter is ignored.
 - **Safety:** Integrations are opt-in. Configure explicit user and conversation allowlists, keep tokens/API keys server-side, expose Discord interactions over HTTPS, and use shared Redis-backed rate limiting/deduplication before multi-replica operation.
 
 The adapter and transport foundations are implemented, but this does not mean a bot is already configured or live in a server. A real provider-side smoke test is still required for each deployment. Start with a test environment and follow [Messaging Gateway configuration and acceptance checks](docs/MESSAGING_GATEWAY.md).
