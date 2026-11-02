@@ -64,6 +64,7 @@ function selectProvider(): ProviderSelection {
   const geminiKey = firstEnv("GEMINI_API_KEY", "Gemini_API_Key");
   const anthropicKey = firstEnv("ANTHROPIC_API_KEY");
   const deepseekKey = firstEnv("DEEPSEEK_API_KEY");
+  const kimiKey = firstEnv("KIMI_API_KEY");
 
   if (requested && !["openrouter", "gemini", "anthropic", "deepseek", "kimi", "custom", "openai-compatible"].includes(requested)) {
     throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, anthropic, deepseek, kimi, or custom.");
