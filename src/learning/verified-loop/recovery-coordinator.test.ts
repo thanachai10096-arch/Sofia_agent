@@ -17,6 +17,7 @@ function host(overrides: Partial<{
   approved: boolean;
   evidence: boolean;
   calls: string[];
+  approvalBinding?: { id: string; actorId: string; skillId: string; scope: LearningScope; policyRevision: string; status: "approved" };
 }> = {}) {
   const state = { learning: [skill], runtime: [] as RuntimeLearningSkill[], policy: "policy-1", approved: true, evidence: true, calls: [] as string[], ...overrides };
   return {
@@ -26,6 +27,7 @@ function host(overrides: Partial<{
       async listRuntimeSkills() { state.calls.push("runtime"); return state.runtime; },
       async currentPolicyRevision() { state.calls.push("policy"); return state.policy; },
       async isExplicitlyApproved() { state.calls.push("approval"); return state.approved; },
+      async resolveApprovalBinding() { state.calls.push("approval-receipt"); return state.approvalBinding; },
       async hasTrustedEvidence() { state.calls.push("evidence"); return state.evidence; },
     },
   };
@@ -46,7 +48,8 @@ test("coordinator marks only fully gated missing registration as eligible for re
   assert.equal(result.readOnly, true);
   assert.equal(result.report.safe, false);
   assert.deepEqual(result.assessments.map(item => item.disposition), ["eligible-for-reviewed-repair"]);
-  assert.deepEqual(h.state.calls, ["learning", "runtime", "policy", "approval", "evidence", "policy"]);
+  assert.equal(result.assessments[0]?.approvalBinding?.id, "receipt-1");
+  assert.deepEqual(h.state.calls, ["learning", "runtime", "policy", "approval", "approval-receipt", "evidence", "policy"]);
 });
 
 test("coordinator sends an existing inactive runtime entry to manual review", async () => {
@@ -114,4 +117,26 @@ test("coordinator fails closed on invalid policy revision and cross-scope data",
   await assert.rejects(() => inspectLearningRecovery(scope, invalid.adapter), /invalid revision/);
   const crossed = host({ learning: [{ ...skill, scope: { ...scope, tenantId: "tenant-b" } }] });
   await assert.rejects(() => inspectLearningRecovery(scope, crossed.adapter), /Cross-scope/);
+});
+
+
+test("coordinator blocks boolean-only approval when receipt resolver is unavailable", async () => {
+  const h = host();
+  const adapter = { ...h.adapter, resolveApprovalBinding: undefined };
+  const result = await inspectLearningRecovery(scope, adapter);
+  assert.equal(result.assessments[0]?.disposition, "blocked-approval");
+  assert.match(result.assessments[0]?.reason ?? "", /persisted receipt/);
+});
+
+test("coordinator rejects approval receipts bound to another actor, scope, or policy", async () => {
+  const mismatches = [
+    { actorId: "other-operator" },
+    { scope: { ...scope, tenantId: "other-tenant" } },
+    { policyRevision: "stale-policy" },
+  ];
+  for (const override of mismatches) {
+    const h = host({ approvalBinding: { id: "receipt-1", actorId: "operator-a", skillId: "skill-1", scope, policyRevision: "policy-1", status: "approved", ...override } });
+    const result = await inspectLearningRecovery(scope, h.adapter);
+    assert.equal(result.assessments[0]?.disposition, "blocked-approval");
+  }
 });
