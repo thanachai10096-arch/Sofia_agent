@@ -225,3 +225,8 @@ The iterator does not concatenate or persist the stream. Its memory bound is per
 ## Voice activity detection boundary
 
 `createVoiceActivityDetector` is a provider-neutral utterance-boundary state machine. A host supplies one speech probability per fixed-duration frame from its chosen VAD implementation. The detector applies start/stop hysteresis, minimum speech duration, end-of-silence detection, and a hard maximum utterance duration. It emits only start/end events; it does not decode audio, buffer frames, persist samples, select a VAD model, or invoke Sofia. A channel adapter remains responsible for bounded audio buffering, pre-roll, cancellation, and forwarding completed utterances to the existing `VoiceSession` / `VoiceWorkflow` path. This contract is not itself a microphone or real-time transport implementation.
+
+
+## Bounded in-memory voice pre-roll
+
+`createVoicePreRollBuffer` retains only the newest audio frames before a VAD start event. Defaults are 300 ms and 512 KiB, with hard configuration caps of 5 seconds and 4 MiB. It copies bytes on insertion and retrieval, evicts oldest frames when either budget is exceeded, and provides `take()` / `clear()` so a host can transfer the pre-roll into its utterance buffer and release retained audio. The host must call `clear()` on interruption, session close, or privacy-boundary changes. This is an in-memory utility, not a transport or automatic VAD integration.
