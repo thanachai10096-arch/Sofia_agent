@@ -360,17 +360,39 @@ export async function executeLearningRepairPlan(
     }
     let auditWarning: string | undefined;
     let heartbeatLost = false;
-    const heartbeatTimer = journal.heartbeat ? setInterval(() => {
+    // A claim token fences finalization, but without a renewable lease another
+    // process cannot distinguish a live long-running worker from a crashed one.
+    // Keep legacy journal adapters source-compatible, but refuse mutation unless
+    // they implement heartbeat and this owner can prove the claim is still live.
+    if (typeof journal.heartbeat !== "function") {
+      const reason = "repair journal does not support lease heartbeats; lifecycle mutation blocked";
+      try {
+        await journal.finish(action.idempotencyKey, action.scope, "failed", reason, entry.claimToken);
+      } catch {
+        results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason: reason + "; claim finalization failed" });
+        continue;
+      }
+      results.push({ key: action.idempotencyKey, skillId: action.skillId, state: "failed", reason });
+      continue;
+    }
+    const heartbeatTimer = setInterval(() => {
       void journal.heartbeat!(action.idempotencyKey, action.scope, entry.claimToken!, now())
         .then(owned => { if (!owned) heartbeatLost = true; })
         .catch(() => { heartbeatLost = true; });
     }, 1_000) : undefined;
     try {
+      // Prove lease ownership immediately; the periodic timer alone may not have
+      // fired yet (or may have been delayed by event-loop pressure).
+      const initialHeartbeat = await journal.heartbeat(action.idempotencyKey, action.scope, entry.claimToken, now());
+      if (!initialHeartbeat) throw new Error("Repair lease heartbeat lost before lifecycle mutation; authoritative reconciliation required");
       // Require a durable start audit before any mutation.
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_started", at: now(), detail: "attempt=" + entry.attempts });
       if (heartbeatLost) throw new Error("Repair lease heartbeat lost before lifecycle mutation; authoritative reconciliation required");
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_revalidated", at: now(), detail: "approval=" + action.approvalId + "; policy=" + action.expectedPolicyRevision });
       if (heartbeatLost) throw new Error("Repair lease heartbeat lost after authoritative revalidation; lifecycle mutation blocked");
+      // Reconfirm after potentially slow audit I/O, directly before the side effect.
+      const mutationHeartbeat = await journal.heartbeat(action.idempotencyKey, action.scope, entry.claimToken, now());
+      if (!mutationHeartbeat || heartbeatLost) throw new Error("Repair lease heartbeat lost immediately before lifecycle mutation; lifecycle mutation blocked");
       await host.registerThroughLifecycle(action);
       if (heartbeatLost) throw new Error("Repair lease heartbeat lost; authoritative reconciliation required");
       // Registration may already have succeeded; do not skip authoritative
