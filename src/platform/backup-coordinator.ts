@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,6 +18,13 @@ import {
   type BackupManifest,
   type BackupVerificationResult,
 } from "./backup-manifest.js";
+import {
+  advanceRestoreJournal,
+  createRestoreJournalRecord,
+  type RestoreJournalRecord,
+  type RestoreJournalStore,
+  type RestoreJournalTarget,
+} from "./restore-journal.js";
 
 export interface BackupSnapshotSource {
   /** Stable, non-secret identifier for diagnostics. */
@@ -453,9 +460,21 @@ export interface BackupRestoreTransactionResult {
  * best-effort multi-store transaction, not a filesystem-wide atomic commit:
  * callers must implement reliable snapshots and idempotent rollback adapters.
  */
+export interface BackupRestoreTransactionOptions {
+  /**
+   * Optional append-only intent journal. When supplied, every target transition
+   * is persisted before/after its mutation. This records process state only;
+   * adapters still need a separate durable snapshot store for crash recovery.
+   */
+  journal?: RestoreJournalStore;
+  /** Optional stable transaction ID for correlation; generated when omitted. */
+  transactionId?: string;
+}
+
 export async function executeBackupRestoreTransaction(
   bundle: unknown,
   adapters: readonly BackupRestoreTargetAdapter[],
+  options: BackupRestoreTransactionOptions = {},
 ): Promise<BackupRestoreTransactionResult> {
   // Runtime callers may cross JavaScript/plugin boundaries and bypass TypeScript.
   // Validate the complete adapter shape before mapping, preflight, or side effects.
@@ -497,29 +516,113 @@ export async function executeBackupRestoreTransaction(
     rollbackSnapshots.set(target.name, await adapter.captureRollback());
   }
 
+  let journalRecord: RestoreJournalRecord | undefined;
+  const persistJournal = async (
+    phase: RestoreJournalRecord["phase"],
+    targets?: readonly RestoreJournalTarget[],
+    failureCode?: string,
+  ): Promise<void> => {
+    if (!options.journal || !journalRecord) return;
+    const next = advanceRestoreJournal(journalRecord, {
+      phase,
+      updatedAt: new Date().toISOString(),
+      ...(targets ? { targets } : {}),
+      ...(failureCode ? { failureCode } : {}),
+    });
+    await options.journal.append(next, journalRecord.revision);
+    journalRecord = next;
+  };
+
+  if (options.journal) {
+    const transactionId = options.transactionId ?? randomUUID();
+    const manifestSha256 = createHash("sha256")
+      .update(serializeBackupManifest(record.manifest), "utf8")
+      .digest("hex");
+    journalRecord = createRestoreJournalRecord({
+      transactionId,
+      createdAt: new Date().toISOString(),
+      manifestSha256,
+      targets: plan.targets.map(({ name, paths }) => ({ name, paths: [...paths] })),
+    });
+    // Journal creation is a hard gate: no live mutation may start unless the
+    // initial intent is durably acknowledged by the configured store.
+    await options.journal.create(journalRecord);
+  }
+
   const applied: string[] = [];
+  let journalTargets: RestoreJournalTarget[] = plan.targets.map(({ name, paths }) => ({
+    name, paths: [...paths], phase: "pending",
+  }));
   try {
     for (const target of plan.targets) {
       const adapter = byName.get(target.name)!;
+      journalTargets = journalTargets.map((item) =>
+        item.name === target.name ? { ...item, phase: "applying" } : item);
+      if (journalRecord) await persistJournal("applying", journalTargets);
       // Record before apply: a rejected apply may have partially changed state.
       applied.push(target.name);
       await adapter.apply(record, target.paths);
+      journalTargets = journalTargets.map((item) =>
+        item.name === target.name ? { ...item, phase: "applied" } : item);
+      if (journalRecord) await persistJournal("applying", journalTargets);
     }
+    if (journalRecord) await persistJournal("committed", journalTargets);
     return { plan, appliedTargets: [...applied] };
   } catch (applyError) {
     const rollbackErrors: Array<{ target: string; error: unknown }> = [];
+    if (journalRecord) {
+      try {
+        journalTargets = journalTargets.map((item) =>
+          applied.includes(item.name) ? { ...item, phase: "rollback_pending" } : item);
+        await persistJournal("rollback_required", journalTargets, "restore_apply_failed");
+      } catch (error) {
+        rollbackErrors.push({ target: "restore_journal", error });
+      }
+    }
+
     for (const name of applied.reverse()) {
+      if (journalRecord) {
+        journalTargets = journalTargets.map((item) =>
+          item.name === name ? { ...item, phase: "rollback_pending" } : item);
+        try {
+          await persistJournal("rolling_back", journalTargets, "restore_apply_failed");
+        } catch (error) {
+          rollbackErrors.push({ target: "restore_journal", error });
+        }
+      }
       try {
         await byName.get(name)!.rollback(rollbackSnapshots.get(name));
+        journalTargets = journalTargets.map((item) =>
+          item.name === name ? { ...item, phase: "rolled_back" } : item);
       } catch (error) {
         rollbackErrors.push({ target: name, error });
+        journalTargets = journalTargets.map((item) =>
+          item.name === name ? { ...item, phase: "rollback_failed" } : item);
+      }
+      if (journalRecord) {
+        try {
+          await persistJournal("rolling_back", journalTargets, "restore_apply_failed");
+        } catch (error) {
+          rollbackErrors.push({ target: "restore_journal", error });
+        }
+      }
+    }
+    if (journalRecord) {
+      try {
+        await persistJournal(
+          rollbackErrors.length > 0 ? "rollback_failed" : "rolled_back",
+          journalTargets,
+          rollbackErrors.length > 0 ? "restore_rollback_incomplete" : "restore_apply_failed",
+        );
+      } catch (error) {
+        rollbackErrors.push({ target: "restore_journal", error });
       }
     }
     if (rollbackErrors.length > 0) {
       const details = rollbackErrors.map(({ target, error }) =>
         `${target}: ${error instanceof Error ? error.message : String(error)}`).join("; ");
       throw new Error(
-        `Restore apply failed and rollback was incomplete. Apply error: ${applyError instanceof Error ? applyError.message : String(applyError)}. Rollback errors: ${details}`,
+        `Restore apply failed and rollback was incomplete or its journal could not be confirmed. Apply error: ${applyError instanceof Error ? applyError.message : String(applyError)}. Rollback errors: ${details}`,
         { cause: applyError },
       );
     }
