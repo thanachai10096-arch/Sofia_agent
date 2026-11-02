@@ -90,6 +90,33 @@ test("concurrent settlement claim releases are idempotent", async () => {
   }
 });
 
+test("settlement claim release refuses to unlink a replacement owner's lock", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-claim-owner-change-"));
+  try {
+    const { createHash } = await import("node:crypto");
+    const journal = new FileSettlementJournal("workspace", root);
+    const claim = await journal.claimRun("owner-change-run");
+    const directory = path.join(root, createHash("sha256").update("workspace").digest("hex"));
+    const lockFile = path.join(directory, createHash("sha256").update("owner-change-run").digest("hex") + ".jsonl.lock");
+    const replacement = JSON.stringify({
+      version: 1,
+      token: "replacement-owner-token",
+      pid: process.pid,
+      hostname: os.hostname(),
+      createdAt: new Date().toISOString(),
+    }) + "\n";
+
+    await rm(lockFile);
+    await writeFile(lockFile, replacement, { encoding: "utf8", mode: 0o600 });
+
+    await assert.rejects(claim.release(), /ownership changed/);
+    assert.equal(await readFile(lockFile, "utf8"), replacement,
+      "release must preserve a lock whose owner token no longer matches");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("settlement run claim remains fail-closed while an existing claim is present", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-claim-"));
   try {
