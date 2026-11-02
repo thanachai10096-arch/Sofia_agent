@@ -20,7 +20,7 @@ The current `main` branch contains a Node HTTP API and local-process composition
 - The README explicitly says file-backed state is single-process and temporary storage is not sufficient for production recovery.
 - `CloudExecutionBackend` currently has only `LocalJobBackend`; it is not a remote execution backend.
 - The repository has no root `vercel.json` and no Vercel function entrypoint for the existing API.
-- The connected Vercel account is on the Hobby plan. The current Vercel team context has no project connected to `thanachai10096-arch/Sofia_agent`; existing projects belong to other repositories.
+- The Vercel project `i888` is connected to this repository and has successfully built the isolated Preview smoke-test function. It is not yet a production-ready Sofia deployment: no PostgreSQL resource is configured, the existing API composition root still assumes a long-lived process, and the Preview endpoint has not yet been independently verified through an HTTP request.
 
 These are architectural blockers, not merely deployment-setting changes.
 
@@ -148,13 +148,13 @@ No production cutover until all applicable checks pass on the exact preview comm
 - Sofia messaging gateway: `docs/MESSAGING_GATEWAY.md`
 - Sofia unified access architecture: `docs/UNIFIED_ACCESS_ARCHITECTURE.md`
 
-
 ## Implemented preview smoke test
 
 The additive root-level `api/health.ts` function is a routing smoke test for Vercel Preview deployments. It supports GET/HEAD and returns an explicit status document. A successful response proves only that Vercel routed a request to a Node Function; it intentionally reports Sofia Core, durable storage, and durable execution as not connected. It must not be used as a production-readiness signal.
 
-After deploying this branch as Preview, verify:
+The Preview deployment for commit `8c6948ebfa5a9d3bd62af6a7e0c4d03f87751903` reached Vercel state `READY` and the build log reported `Build complete` and `Deployment completed`. This verifies deployment/build completion, not successful external HTTP invocation. An HTTP request through the available web client could not access the endpoint, so the endpoint response remains unverified.
 
+After deploying this branch as Preview, verify:
 - `GET /api/health` returns HTTP 200 and `deployment: "serverless-function-reachable"`.
 - `POST /api/health` returns HTTP 405.
 - The response keeps `Cache-Control: no-store`.
