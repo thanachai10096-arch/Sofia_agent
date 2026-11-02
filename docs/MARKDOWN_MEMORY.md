@@ -160,6 +160,8 @@ callers must authorize the actor and decide when an update or rollback is allowe
 A failed update may leave an extra safe snapshot, but the previous record is never
 deleted as part of the operation.
 
+Project memory record identity is the pair `(project, id)`, not the ID alone. A shared workspace-backed store can therefore retain the same deterministic ID in two project scopes without one project's update overwriting the other's record. This preserves the existing workspace/skill-ledger layout while making upserts project-aware.
+
 ## Principal-scoped project memory access
 
 `ScopedProjectMemoryStore` is an additive capability wrapper around the existing `ProjectMemoryStore` contract. Construct it only after the application has authenticated the caller and resolved the projects that principal is authorized to access. The wrapper filters list and retrieval results to that fixed project set, rejects writes outside it, supports read-only/write-disabled capabilities, and can emit allow/deny events through the existing `SecurityAuditSink`. Version-history helpers can use the wrapper as their store so their project reads and writes remain inside the same scope.
