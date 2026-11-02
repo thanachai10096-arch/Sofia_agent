@@ -158,3 +158,6 @@ export type { VoiceAudioChunk, VoiceAudioStreamLimits } from "./voice/audio-stre
 
 export { createVoiceActivityDetector } from "./voice/activity.js";
 export type { VoiceActivityOptions, VoiceActivityEvent, VoiceActivityEndReason } from "./voice/activity.js";
+
+export { createVoicePreRollBuffer } from "./voice/pre-roll.js";
+export type { VoicePreRollFrame, VoicePreRollOptions } from "./voice/pre-roll.js";
