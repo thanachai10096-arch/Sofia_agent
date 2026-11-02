@@ -528,7 +528,11 @@ test("DurableJobRuntime preserves concurrent submissions from independent runtim
   await Promise.all(runtimes.map((runtime, index) => runtime.cancel(submitted[index]!.id)));
   await Promise.all(settled.map((item) => item.promise));
 
-  const terminal = await reader.list();
+  let terminal = await reader.list();
+  for (let attempt = 0; attempt < 100 && !terminal.every((record) => record.status === "cancelled"); attempt += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    terminal = await reader.list();
+  }
   assert.equal(terminal.length, workerCount);
   assert.ok(terminal.every((record) => record.status === "cancelled"), "all workers must persist cancellation before cleanup");
 
