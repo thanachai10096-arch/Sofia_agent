@@ -13,6 +13,15 @@ export type LearningRecoveryDisposition =
   | "blocked-evidence"
   | "manual-review";
 
+export interface LearningRecoveryApprovalBinding {
+  id: string;
+  actorId: string;
+  skillId: string;
+  scope: LearningScope;
+  policyRevision: string;
+  status: "approved";
+}
+
 export interface LearningRecoveryAssessment {
   skillId: string;
   issueKinds: LearningReconciliationIssue["kind"][];
