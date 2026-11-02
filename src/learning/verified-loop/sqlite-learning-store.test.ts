@@ -14,6 +14,15 @@ function activeSkill(id: string): ActiveLearningSkill {
   return { id, scope, experienceId: "experience-r1", name: "learned-task", trigger: "task", procedure: ["inspect", "verify"], confidence: 0.9, status: "active", activatedAt: new Date().toISOString(), policyRevision: "policy-1" };
 }
 
+async function seedSkillProvenance(tx: import("./ports.js").LearningTransaction, skill: ActiveLearningSkill): Promise<void> {
+  await tx.insertExperienceIfAbsent(experience("seed-" + skill.id, skill.experienceId));
+  await tx.putCandidate({
+    id: skill.id, scope: skill.scope, experienceId: skill.experienceId,
+    name: skill.name, trigger: skill.trigger, procedure: [...skill.procedure],
+    confidence: skill.confidence,
+  });
+}
+
 test("SQLite learning transactions persist experiences and skills across reopen", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-learning-store-"));
   const file = path.join(directory, "learning.sqlite");
@@ -24,7 +33,9 @@ test("SQLite learning transactions persist experiences and skills across reopen"
       assert.equal(await tx.insertExperienceIfAbsent(experience("r1", "duplicate")), false);
       assert.equal((await tx.getExperienceByReceipt(scope, "r1"))?.id, "experience-r1");
       assert.equal(await tx.getExperienceByReceipt(scope, "missing"), undefined);
-      await tx.activateSkill(activeSkill("skill-1"));
+      const skill = activeSkill("skill-1");
+      await seedSkillProvenance(tx, skill);
+      await tx.activateSkill(skill);
     });
     store.close();
 
@@ -48,7 +59,9 @@ test("SQLite learning store rejects an active-skill payload whose persisted scop
   try {
     const store = await SqliteLearningTransactionStore.open(file);
     await store.transaction(scope, async tx => {
-      await tx.activateSkill(activeSkill("tampered-skill"));
+      const skill = activeSkill("tampered-skill");
+      await seedSkillProvenance(tx, skill);
+      await tx.activateSkill(skill);
     });
     store.close();
 
@@ -83,7 +96,9 @@ test("SQLite learning store rejects active-skill payload identity drift from ind
   try {
     const store = await SqliteLearningTransactionStore.open(file);
     await store.transaction(scope, async tx => {
-      await tx.activateSkill(activeSkill("identity-skill"));
+      const skill = activeSkill("identity-skill");
+      await seedSkillProvenance(tx, skill);
+      await tx.activateSkill(skill);
     });
     store.close();
 
