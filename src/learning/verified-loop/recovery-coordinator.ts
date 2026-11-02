@@ -29,6 +29,7 @@ export interface LearningRecoveryAssessment {
   reason: string;
   learningPolicyRevision?: string;
   currentPolicyRevision: string;
+  approvalBinding?: LearningRecoveryApprovalBinding;
 }
 
 export interface LearningRecoveryInspection {
@@ -47,6 +48,7 @@ export interface LearningRecoveryCoordinatorHost {
   currentPolicyRevision(scope: LearningScope): Promise<string>;
   /** Must resolve a persisted human/operator approval for this exact skill and revision. */
   isExplicitlyApproved(scope: LearningScope, skillId: string, policyRevision: string): Promise<boolean>;
+  resolveApprovalBinding?(scope: LearningScope, skillId: string, policyRevision: string): Promise<LearningRecoveryApprovalBinding | undefined>;
   /** Must re-resolve trusted persisted evidence, not candidate/model-provided evidence. */
   hasTrustedEvidence(scope: LearningScope, skill: ActiveLearningSkill): Promise<boolean>;
 }
