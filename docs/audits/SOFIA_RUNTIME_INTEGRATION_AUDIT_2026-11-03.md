@@ -191,3 +191,21 @@ A release candidate is not ready until all applicable checks pass on the exact c
 - Do not merge open PRs automatically.
 - Do not modify production secrets, domains, or deployment targets as part of this audit.
 - Do not claim tests, readiness, or provider compatibility without exact evidence.
+
+
+## Follow-up hardening performed on the audit branch
+
+Commit `becb52081cd47c33366f3eac285f2f6045ee2a77` changes only
+`workers/discord-gateway/daemon/worker.mjs`:
+
+- Removes Discord user IDs from allowlist-denial logs.
+- Removes Discord channel IDs from allowlist-denial logs.
+- Removes message IDs, channel IDs, and the first 80 characters of message content from successful message-received logs.
+- Keeps event names and denial reasons so operators can diagnose flow without recording user content or direct identifiers.
+
+This is a privacy-minimizing change only. It does not alter authorization, message routing, or delivery behavior.
+
+Validation evidence:
+- GitHub combined status for this commit reports Vercel checks failed because the account hit the deployment/build rate limit (`build-rate-limit`) for both `sofia-discord-test` and `i888`.
+- No build, typecheck, unit test, or runtime test result is available for this commit. Treat it as unverified until CI can run.
+- No deployment was created and no production environment was modified.
