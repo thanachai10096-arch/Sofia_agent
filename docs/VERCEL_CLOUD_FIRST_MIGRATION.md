@@ -147,3 +147,17 @@ No production cutover until all applicable checks pass on the exact preview comm
 - Sofia API security: `docs/API_SECURITY.md`
 - Sofia messaging gateway: `docs/MESSAGING_GATEWAY.md`
 - Sofia unified access architecture: `docs/UNIFIED_ACCESS_ARCHITECTURE.md`
+
+
+## Implemented preview smoke test
+
+The additive root-level `api/health.ts` function is a routing smoke test for Vercel Preview deployments. It supports GET/HEAD and returns an explicit status document. A successful response proves only that Vercel routed a request to a Node Function; it intentionally reports Sofia Core, durable storage, and durable execution as not connected. It must not be used as a production-readiness signal.
+
+After deploying this branch as Preview, verify:
+
+- `GET /api/health` returns HTTP 200 and `deployment: "serverless-function-reachable"`.
+- `POST /api/health` returns HTTP 405.
+- The response keeps `Cache-Control: no-store`.
+- The function does not read secrets, initialize local filesystem stores, start timers, or create background work.
+
+This smoke test is an isolated first step. The existing long-running Node API is still not adapted to Vercel Functions, and no production cutover is authorized.
