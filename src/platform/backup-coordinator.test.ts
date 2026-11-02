@@ -7,6 +7,7 @@ import path from "node:path";
 import { FileProjectMemoryStore, memoryEntryFromConvention } from "../brain/project-memory.js";
 import { FileUserMemoryStore, createUserMemoryEntry } from "../brain/user-memory.js";
 import { SqliteSessionStore } from "../session/sqlite-store.js";
+import { FileRestoreJournalStore, inspectRestoreJournalRecovery } from "./restore-journal.js";
 
 const createdAt = "2026-10-29T04:00:00.000Z";
 
@@ -404,6 +405,89 @@ test("restore transaction rolls back in reverse order when an apply partially fa
     "apply:a-target", "apply:b-target",
     "rollback:b-target:old-b-target", "rollback:a-target:old-a-target",
   ]);
+});
+
+test("restore transaction journals each target transition and commits only after all applies", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-restore-journal-coordinator-"));
+  try {
+    const bundle = await createBackupBundle([
+      { name: "state", async snapshot() {
+        return [
+          { path: "a.json", content: Buffer.from("A") },
+          { path: "b.json", content: Buffer.from("B") },
+        ];
+      } },
+    ], createdAt);
+    const journal = new FileRestoreJournalStore(path.join(root, "journal"));
+    const events: string[] = [];
+    const makeAdapter = (name: string, targetPath: string) => ({
+      name,
+      paths: [targetPath],
+      async preflight() {},
+      async captureRollback() { return `old-${name}`; },
+      async apply() { events.push(`apply:${name}`); },
+      async rollback() { events.push(`rollback:${name}`); },
+    });
+
+    const result = await executeBackupRestoreTransaction(
+      bundle,
+      [makeAdapter("a", "a.json"), makeAdapter("b", "b.json")],
+      { journal, transactionId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" },
+    );
+
+    assert.deepEqual(result.appliedTargets, ["a", "b"]);
+    assert.deepEqual(events, ["apply:a", "apply:b"]);
+    const recovered = await journal.read("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    assert.equal(recovered?.phase, "committed");
+    assert.deepEqual(recovered?.targets.map((target) => target.phase), ["applied", "applied"]);
+    const inspection = await inspectRestoreJournalRecovery(journal);
+    assert.equal(inspection[0]?.status, "completed");
+    assert.equal(inspection[0]?.requiresOperator, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("restore transaction journals partial apply and reverse rollback outcomes", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-restore-journal-rollback-"));
+  try {
+    const bundle = await createBackupBundle([
+      { name: "state", async snapshot() {
+        return [
+          { path: "a.json", content: Buffer.from("A") },
+          { path: "b.json", content: Buffer.from("B") },
+        ];
+      } },
+    ], createdAt);
+    const journal = new FileRestoreJournalStore(path.join(root, "journal"));
+    const events: string[] = [];
+    const makeAdapter = (name: string, targetPath: string, fail = false) => ({
+      name,
+      paths: [targetPath],
+      async preflight() {},
+      async captureRollback() { return `old-${name}`; },
+      async apply() {
+        events.push(`apply:${name}`);
+        if (fail) throw new Error("simulated partial mutation");
+      },
+      async rollback() { events.push(`rollback:${name}`); },
+    });
+
+    await assert.rejects(executeBackupRestoreTransaction(
+      bundle,
+      [makeAdapter("a", "a.json"), makeAdapter("b", "b.json", true)],
+      { journal, transactionId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" },
+    ), /rollback was attempted/i);
+
+    assert.deepEqual(events, ["apply:a", "apply:b", "rollback:b", "rollback:a"]);
+    const recovered = await journal.read("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    assert.equal(recovered?.phase, "rolled_back");
+    assert.deepEqual(recovered?.targets.map((target) => target.phase), ["rolled_back", "rolled_back"]);
+    const inspection = await inspectRestoreJournalRecovery(journal);
+    assert.equal(inspection[0]?.status, "completed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("restore transaction refuses preflight failures before snapshots or writes", async () => {
