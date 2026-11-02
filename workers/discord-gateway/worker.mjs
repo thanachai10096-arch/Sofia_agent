@@ -134,7 +134,7 @@ async function main() {
   const inflight = new Set();
   const pendingMessages = [];
   let activeMessages = 0;
-  const MAX_CONCURRENT_MESSAGES = 2;\n  const pendingMessages = [];\n  let activeMessages = 0;\n  const MAX_CONCURRENT_MESSAGES = 2;
+  const MAX_CONCURRENT_MESSAGES = 2;
 
   async function processMessage(message) {
     if (!message?.id || !message.channel_id || !message.author?.id || message.author.bot) return;
