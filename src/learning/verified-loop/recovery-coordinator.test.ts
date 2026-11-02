@@ -19,7 +19,7 @@ function host(overrides: Partial<{
   calls: string[];
   approvalBinding?: { id: string; actorId: string; skillId: string; scope: LearningScope; policyRevision: string; status: "approved" };
 }> = {}) {
-  const state = { learning: [skill], runtime: [] as RuntimeLearningSkill[], policy: "policy-1", approved: true, evidence: true, calls: [] as string[], ...overrides };
+  const state = { learning: [skill], runtime: [] as RuntimeLearningSkill[], policy: "policy-1", approved: true, evidence: true, calls: [] as string[], approvalBinding: { id: "receipt-1", actorId: "operator-a", skillId: "skill-1", scope, policyRevision: "policy-1", status: "approved" as const }, ...overrides };
   return {
     state,
     adapter: {
