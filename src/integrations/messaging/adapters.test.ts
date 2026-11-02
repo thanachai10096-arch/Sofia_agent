@@ -35,3 +35,26 @@ test("Discord adapter ignores unverified events and bot messages", async () => {
   await onEvent!({ ...base, signatureVerified: true });
   assert.equal(received, 1);
 });
+
+
+test("Discord adapter accepts authenticated Gateway events and preserves addressing metadata", async () => {
+  let onEvent: ((message: VerifiedDiscordMessage) => Promise<void>) | undefined;
+  const adapter = createDiscordAdapter({
+    async start(_signal, callback) { onEvent = callback; },
+    async sendMessage() { return { messageId: "sent" }; },
+    async stop() {},
+  });
+  let received: unknown;
+  await adapter.start(new AbortController().signal, async (message) => { received = message; });
+  assert.ok(onEvent);
+  await onEvent!({
+    id: "gateway-1", channelId: "channel-1", author: { id: "user-1" }, content: "hello",
+    createdAt: 1, transportVerified: true, directMessage: true,
+  });
+  assert.equal((received as { directMessage?: boolean }).directMessage, true);
+  await onEvent!({
+    id: "gateway-2", channelId: "channel-1", author: { id: "user-1" }, content: "Sofia help",
+    createdAt: 2, transportVerified: true, addressedToBot: true,
+  });
+  assert.equal((received as { addressedToBot?: boolean }).addressedToBot, true);
+});
