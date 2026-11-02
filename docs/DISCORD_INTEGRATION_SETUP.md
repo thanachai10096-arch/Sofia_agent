@@ -89,9 +89,9 @@ npm start
 In a separate terminal with the same Discord application ID and bot token configured:
 
 ```sh
-DISCORD_APPLICATION_ID=your_application_id \\
-DISCORD_GUILD_ID=your_test_guild_id \\
-DISCORD_BOT_TOKEN=your_bot_token \\
+DISCORD_APPLICATION_ID=your_application_id \
+DISCORD_GUILD_ID=your_test_guild_id \
+DISCORD_BOT_TOKEN=your_bot_token \
 npm run discord:register-command
 ```
 
