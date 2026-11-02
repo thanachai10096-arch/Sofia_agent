@@ -39,7 +39,7 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
   async save(entry: ProjectMemoryEntry): Promise<void> {
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
     const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, entry.kind === "version" ? 12_000 : 4_000) };
-    const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
+    const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id && x.project===safeEntry.project); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
     const directory = path.dirname(this.file);
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     await fs.chmod(directory, 0o700);
