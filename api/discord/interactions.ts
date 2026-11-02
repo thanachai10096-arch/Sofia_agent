@@ -66,8 +66,11 @@ export default async function discordInteractions(req: IncomingMessage, res: Ser
   }
 
   const publicKey = process.env.DISCORD_PUBLIC_KEY;
-  const apiBase = process.env.SOFIA_API_BASE_URL;
-  const apiKey = process.env.SOFIA_UPSTREAM_API_KEY;
+  // Resolve the current Vercel deployment internally. No external API host or
+  // Railway service is part of Sofia's Preview architecture.
+  const apiBase = process.env.SOFIA_API_BASE_URL?.trim() ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+  const apiKey = process.env.SOFIA_INTERNAL_API_KEY;
   if (!publicKey || !apiBase || !apiKey) {
     reply(res, 503, { error: "discord_integration_not_configured" });
     return;
@@ -155,7 +158,7 @@ export default async function discordInteractions(req: IncomingMessage, res: Ser
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   try {
-    const response = await fetch(new URL("/v1/agent/runs", base), {
+    const response = await fetch(new URL("/api/v1/agent/runs", base), {
       method: "POST",
       headers: {
         authorization: `Bearer ${apiKey}`,
