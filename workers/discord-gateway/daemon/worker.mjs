@@ -74,7 +74,7 @@ async function sendDiscordMessage(token, channelId, content, replyTo) {
 }
 async function runSofia({ apiBase, apiKey, bypass, message }) {
   const task = message.content.trim();
-  if (!task || task.startsWith("/")) return null;
+  if (!task) return null;
   if (task.length > MAX_TASK_CHARS) return "ข้อความยาวเกินไป กรุณาแบ่งเป็นหลายข้อความครับ";
   const url = new URL("/api/v1/agent/runs", apiBase);
   if (bypass) url.searchParams.set("x-vercel-protection-bypass", bypass);
@@ -143,8 +143,7 @@ async function main() {
     if (!allowedChannels.has(message.channel_id)) { console.log("discord_message_ignored", "channel_not_allowlisted", message.channel_id); return; }
     if (seen.has(message.id) || inflight.has(message.id)) return;
     if (!message.content?.trim()) { console.warn("discord_message_content_empty", "Enable Message Content Intent in Discord Developer Portal > Bot > Privileged Gateway Intents."); return; }
-    if (message.content.trim().startsWith("/")) { console.log("discord_slash_message_ignored"); return; }
-    console.log("discord_message_received", message.id, message.channel_id);
+    console.log("discord_message_received", message.id, message.channel_id, message.content.trim().slice(0, 80));
     inflight.add(message.id);
     pendingMessages.push(message);
     void drainMessages();
