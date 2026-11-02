@@ -1131,6 +1131,12 @@ test("DurableJobRuntime enforces owner scope for get, list, resume, and cancel",
   assert.equal(await runtime.cancel(submitted.id, "owner-b"), false);
   assert.equal((await runtime.get(submitted.id, "owner-a"))?.status, "running");
   assert.equal(await runtime.cancel(submitted.id, "owner-a"), true);
+
+  // A fresh runtime must filter durable records before hydrating foreign owners.
+  const reopened = new DurableJobRuntime(() => brain, undefined, namespace);
+  assert.deepEqual(await reopened.list("owner-b"), []);
+  assert.equal(await reopened.get(submitted.id, "owner-b"), undefined);
+  assert.equal((await reopened.list("owner-a")).some((job) => job.id === submitted.id), true);
 });
 
 test("DurableJobRuntime acknowledges a settlement after the embedded Job checkpoint succeeds when RunStore fails", async () => {
