@@ -131,7 +131,7 @@ async function main() {
   let resumeUrl = null;
   let reconnectDelay = 1000;
   const seen = new Map();
-  const inflight = new Set();
+  const inflight = new Set();\n  const pendingMessages = [];\n  let activeMessages = 0;\n  const MAX_CONCURRENT_MESSAGES = 2;
 
   async function processMessage(message) {
     if (!message?.id || !message.channel_id || !message.author?.id || message.author.bot) return;
@@ -162,7 +162,7 @@ async function main() {
   }
   function connect() {
     if (stopped) return;
-    const target = sessionId && resumeUrl ? resumeUrl : DISCORD_GATEWAY_URL;
+    const target = sessionId && resumeUrl\n      ? (() => { const url = new URL(resumeUrl); url.searchParams.set("v", "10"); url.searchParams.set("encoding", "json"); return url.toString(); })()\n      : DISCORD_GATEWAY_URL;
     socket = new WebSocket(target);
     socket.addEventListener("open", () => console.log("discord_gateway_socket_open"));
     socket.addEventListener("message", (event) => {
