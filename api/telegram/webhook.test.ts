@@ -6,7 +6,7 @@ import telegramWebhook from "./webhook.js";
 type EnvSnapshot = Record<string, string | undefined>;
 const names = [
   "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_BOT_TOKEN", "SOFIA_API_BASE_URL",
-  "SOFIA_UPSTREAM_API_KEY", "TELEGRAM_ALLOWED_USER_IDS", "TELEGRAM_ALLOWED_CHAT_IDS",
+  "SOFIA_UPSTREAM_API_KEY", "SOFIA_API_KEY", "TELEGRAM_ALLOWED_USER_IDS", "TELEGRAM_ALLOWED_CHAT_IDS",
 ] as const;
 const originalEnv: EnvSnapshot = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 const originalFetch = globalThis.fetch;
@@ -97,6 +97,18 @@ describe("Vercel Telegram webhook", () => {
     }) });
     assert.equal(result.status, 200);
     assert.equal(result.body.ignored, true);
+    assert.equal(called, false);
+  });
+
+  it("does not fall back to the model-provider key when the upstream key is missing", async () => {
+    configure();
+    delete process.env.SOFIA_UPSTREAM_API_KEY;
+    process.env.SOFIA_API_KEY = "model-provider-secret";
+    let called = false;
+    globalThis.fetch = (async () => { called = true; throw new Error("must not call"); }) as typeof fetch;
+    const result = await invoke({ secret: "test-secret-token", body: sampleUpdate() });
+    assert.equal(result.status, 503);
+    assert.equal(result.body.error, "telegram_integration_not_configured");
     assert.equal(called, false);
   });
 
