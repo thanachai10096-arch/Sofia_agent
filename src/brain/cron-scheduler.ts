@@ -535,10 +535,14 @@ export class CronScheduler {
             ? current.consecutiveFailures : current.consecutiveFailures + 1;
         }
       }
-      await this.recordAudit(state, {
-        at: this.now().toISOString(), actor: "scheduler", action: "schedule.recovery.finished",
-        scheduleId: schedule.id, detail: status,
-      });
+      // Multiple scheduler instances may observe the same recovered job. Only
+      // the instance that wins the active -> terminal transition owns this audit.
+      if (stillActive) {
+        await this.recordAudit(state, {
+          at: this.now().toISOString(), actor: "scheduler", action: "schedule.recovery.finished",
+          scheduleId: schedule.id, detail: status,
+        });
+      }
     }).catch(() => undefined);
     this.active.delete(schedule.id);
   }
