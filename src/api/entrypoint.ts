@@ -6,7 +6,7 @@ import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { buildDiscordSessionContext, getDiscordOwnedJob, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
+import { buildDiscordSessionContext, buildDiscordUserMemoryContext, getDiscordOwnedJob, saveExplicitDiscordUserMemory, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 
@@ -193,6 +193,8 @@ if (discordGatewayRequested) {
     if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable");
     discordGatewayTransport = createDiscordGatewayTransport({
       botToken,
+      allowedUserIds: [...allowedUsers],
+      allowedChannelIds: [...allowedChannels],
       onError: (event, status) => console.error("Discord Gateway:", event, status ?? ""),
     });
     const seenMessageIds = new Set<string>();
@@ -210,6 +212,12 @@ if (discordGatewayRequested) {
       try {
         deps.securityController?.assertRunning();
         const principalId = "discord:" + message.author.id;
+        // Persist only explicit remember requests; ordinary messages remain task input.
+        const savedMemory = await saveExplicitDiscordUserMemory(deps.userMemoryStore, principalId, rawText);
+        if (savedMemory) {
+          await discordGatewayTransport?.sendMessage(message.channelId, "Sofia saved that to your private memory.", message.id);
+          return;
+        }
         const commandMatch = rawText.match(/^\/(status|cancel|resume)(?:\s+(.+))?$/);
         if (commandMatch) {
           const command = commandMatch[1]!;
@@ -253,8 +261,12 @@ if (discordGatewayRequested) {
           return;
         }
         const sessionKey = messagingSessionKey({ platform: "discord", userId: message.author.id, channelId: message.channelId, conversationId: message.channelId });
-        const sessionContext = await buildDiscordSessionContext(deps.jobRuntime!, sessionKey);
-        const taskWithMemory = sessionContext ? task + "\n\n" + sessionContext : task;
+        const [sessionContext, userMemoryContext] = await Promise.all([
+          buildDiscordSessionContext(deps.jobRuntime!, sessionKey),
+          buildDiscordUserMemoryContext(deps.userMemoryStore, principalId, task),
+        ]);
+        const memoryContext = [userMemoryContext, sessionContext].filter(Boolean).join("\n\n");
+        const taskWithMemory = memoryContext ? task + "\n\n" + memoryContext : task;
         const handle = await submitDiscordTask(deps.jobRuntime!, taskWithMemory, principalId, discordAbort.signal, {
           channelId: message.channelId, sessionKey, sessionTask: task,
         });
