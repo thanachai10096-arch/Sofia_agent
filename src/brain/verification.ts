@@ -28,12 +28,17 @@ export async function runVerification(
   signal: AbortSignal,
   runId = "verification",
 ): Promise<VerificationResult[]> {
+  if (kinds.length === 0) {
+    throw new Error("Verification requires at least one acceptance probe.");
+  }
   const criteria = verificationCriteria(kinds);
   const results: VerificationResult[] = [];
 
   const snapshot = await gateway.snapshot(signal);
-  if (typeof snapshot.revision !== "string" || !snapshot.revision.trim()) {
-    throw new Error("Verification snapshot returned no workspace revision.");
+  if (!snapshot || typeof snapshot.id !== "string" || !snapshot.id.trim() || snapshot.id.length > 500 ||
+      typeof snapshot.revision !== "string" || !snapshot.revision.trim() || snapshot.revision.length > 500 ||
+      typeof snapshot.evidenceId !== "string" || !snapshot.evidenceId.trim() || snapshot.evidenceId.length > 500) {
+    throw new Error("Verification snapshot returned incomplete workspace identity or evidence.");
   }
 
   for (const criterion of criteria) {
@@ -49,7 +54,7 @@ export async function runVerification(
 
     // A successful-looking payload is not sufficient: every verification result
     // must carry a durable evidence reference before it can satisfy acceptance.
-    if (typeof result.evidenceId !== "string" || !result.evidenceId.trim()) {
+    if (!result || typeof result.evidenceId !== "string" || !result.evidenceId.trim() || result.evidenceId.length > 500) {
       results.push({
         criterionId: criterion.id,
         passed: false,
@@ -63,7 +68,9 @@ export async function runVerification(
     // Bind the verification result to an unchanged workspace revision. A concurrent
     // writer must not make a passing probe certify a different workspace state.
     const afterProbe = await gateway.snapshot(signal);
-    if (typeof afterProbe.revision !== "string" || afterProbe.revision !== snapshot.revision) {
+    if (!afterProbe || typeof afterProbe.id !== "string" || !afterProbe.id.trim() || afterProbe.id.length > 500 ||
+        typeof afterProbe.revision !== "string" || afterProbe.revision !== snapshot.revision ||
+        typeof afterProbe.evidenceId !== "string" || !afterProbe.evidenceId.trim() || afterProbe.evidenceId.length > 500) {
       results.push({
         criterionId: criterion.id,
         passed: false,
