@@ -24,6 +24,9 @@ export interface JobRecord {
   /** Original user task before historical session context is appended. */
   sessionTask?: string;
   notificationDelivered?: boolean;
+  /** Internal lease fencing for cross-process recovery-notification delivery. */
+  notificationLeaseOwnerToken?: string;
+  notificationLeaseExpiresAt?: string;
   leaseOwnerToken?: string;
   leaseExpiresAt?: string;
   heartbeatAt?: string;
@@ -70,6 +73,7 @@ function publicJobRecord(record: JobRecord): JobRecord {
   // Lease ownership is an internal concurrency capability and must never be returned
   // to API/Discord clients, even though it remains in the durable store.
   delete safe.leaseOwnerToken;
+  delete safe.notificationLeaseOwnerToken;
   return safe;
 }
 
@@ -81,6 +85,8 @@ export interface JobRuntime {
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
   markNotificationDelivered?(id: string): Promise<void>;
+  claimNotificationDelivery?(id: string): Promise<boolean>;
+  releaseNotificationDelivery?(id: string): Promise<void>;
 }
 
 async function isExclusiveFileCollision(error: unknown, file: string): Promise<boolean> {
@@ -370,6 +376,47 @@ class FileJobStateStore {
     });
   }
 
+  async claimNotificationDelivery(id: string, ownerToken: string, leaseMs: number): Promise<boolean> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.notificationDelivered || (record.status !== "completed" && record.status !== "failed")) return false;
+      const expires = record.notificationLeaseExpiresAt ? Date.parse(record.notificationLeaseExpiresAt) : 0;
+      if (Number.isFinite(expires) && expires > Date.now()) return false;
+      record.notificationLeaseOwnerToken = ownerToken;
+      record.notificationLeaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return true;
+    });
+  }
+
+  async markNotificationDelivered(id: string, ownerToken: string): Promise<boolean> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.notificationLeaseOwnerToken !== ownerToken || record.notificationDelivered) return false;
+      record.notificationDelivered = true;
+      record.notificationLeaseOwnerToken = undefined;
+      record.notificationLeaseExpiresAt = undefined;
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return true;
+    });
+  }
+
+  async releaseNotificationDelivery(id: string, ownerToken: string): Promise<void> {
+    await this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.notificationLeaseOwnerToken !== ownerToken || record.notificationDelivered) return;
+      record.notificationLeaseOwnerToken = undefined;
+      record.notificationLeaseExpiresAt = undefined;
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+    });
+  }
+
   private async read(): Promise<JobRecord[]> {
     try {
       const records = JSON.parse(await fs.readFile(this.file, "utf8")) as JobRecord[];
@@ -418,6 +465,7 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly controllers = new Map<string, AbortController>();
   private readonly resuming = new Set<string>();
   private readonly starting = new Set<string>();
+  private readonly notificationClaims = new Map<string, string>();
   private readonly state: FileJobStateStore;
 
   constructor(
@@ -482,7 +530,28 @@ export class DurableJobRuntime implements JobRuntime {
     return publicJobRecord(hydrated);
   }
 
+  async claimNotificationDelivery(id: string): Promise<boolean> {
+    if (this.notificationClaims.has(id)) return false;
+    const token = randomUUID();
+    const claimed = await this.state.claimNotificationDelivery(id, token, 30_000);
+    if (claimed) this.notificationClaims.set(id, token);
+    return claimed;
+  }
+
+  async releaseNotificationDelivery(id: string): Promise<void> {
+    const token = this.notificationClaims.get(id);
+    if (!token) return;
+    this.notificationClaims.delete(id);
+    await this.state.releaseNotificationDelivery(id, token);
+  }
+
   async markNotificationDelivered(id: string): Promise<void> {
+    const claimToken = this.notificationClaims.get(id);
+    if (claimToken) {
+      this.notificationClaims.delete(id);
+      await this.state.markNotificationDelivered(id, claimToken);
+      return;
+    }
     const record = this.jobs.get(id) ?? await this.get(id);
     if (!record) return;
     const canonical = this.jobs.get(id) ?? record;
