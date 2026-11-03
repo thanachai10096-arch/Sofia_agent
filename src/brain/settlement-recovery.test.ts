@@ -59,3 +59,20 @@ test("a missing journal with an invalid claim is not treated as safe", () => {
     "operator_reconciliation_required",
   );
 });
+
+
+test("recovery decision fails closed on inconsistent inspection counters", () => {
+  const cases: SettlementRunInspection[] = [
+    inspection({ journal: "resolved", startedAttempts: -1 }),
+    inspection({ journal: "resolved", startedAttempts: 1, settledAttempts: 2 }),
+    inspection({ journal: "resolved", startedAttempts: 1, settledAttempts: 1, unknownUsageAttempts: 1, unresolved: false }),
+    inspection({ journal: "missing", startedAttempts: 1 }),
+  ];
+  for (const item of cases) {
+    const result = decideSettlementRecovery(item);
+    assert.equal(result.decision, "operator_reconciliation_required");
+    assert.equal(result.requiresOperator, true);
+    assert.ok(result.reasons.some((reason) =>
+      reason === "inspection_counts_invalid" || reason === "unknown_usage_reported"));
+  }
+});
