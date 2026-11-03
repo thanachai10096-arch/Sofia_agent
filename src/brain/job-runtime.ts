@@ -87,6 +87,7 @@ export interface JobRuntime {
   list(): Promise<JobRecord[]>;
   claimNotification?(id: string, ownerToken: string, leaseMs?: number): Promise<boolean>;
   renewNotificationClaim?(id: string, ownerToken: string, leaseMs?: number): Promise<boolean>;
+  resetNotificationDelivery?(id: string): Promise<boolean>;
   releaseNotificationClaim?(id: string, ownerToken: string): Promise<void>;
   markNotificationDelivered?(id: string, ownerToken?: string): Promise<void>;
 }
@@ -370,6 +371,20 @@ class FileJobStateStore {
     });
   }
 
+  async resetNotificationDelivery(id: string): Promise<boolean> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.status !== "failed") return false;
+      record.notificationDelivered = false;
+      delete record.notificationLeaseOwnerToken;
+      delete record.notificationLeaseExpiresAt;
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return true;
+    });
+  }
+
   async markNotificationDelivered(id: string, ownerToken?: string): Promise<boolean> {
     return this.withFileLock(async () => {
       const records = await this.read();
@@ -567,6 +582,10 @@ export class DurableJobRuntime implements JobRuntime {
     return this.state.renewNotificationClaim(id, ownerToken, leaseMs);
   }
 
+  async resetNotificationDelivery(id: string): Promise<boolean> {
+    return this.state.resetNotificationDelivery(id);
+  }
+
   async releaseNotificationClaim(id: string, ownerToken: string): Promise<void> {
     await this.state.releaseNotificationClaim(id, ownerToken);
   }
@@ -614,8 +633,11 @@ export class DurableJobRuntime implements JobRuntime {
       // A terminal status may be persisted just before the previous worker's finally block
       // removes its controller. Only the canonical status determines whether resume is blocked.
       if (record.status === "running") throw new Error("Job is already running");
-      // A resumed job needs a fresh completion notice; do not inherit the prior
-      // attempt's delivery marker if this attempt later finishes after a restart.
+      // A resumed attempt needs its own recovery notice. Atomically clear any
+      // previous delivery marker/lease so an old notifier cannot mark this attempt.
+      if (!(await this.state.resetNotificationDelivery(id))) {
+        throw new Error("Job state changed before notification delivery could be reset");
+      }
       record.notificationDelivered = false;
       const saved = await this.state.save(record);
       if (!saved) throw new Error("Job state changed before resume could be scheduled");
