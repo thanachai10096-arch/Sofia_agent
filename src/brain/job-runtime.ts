@@ -80,6 +80,11 @@ export interface JobRuntime {
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
+  /** Owner-scoped operations for multi-tenant API boundaries. */
+  getForOwner?(id: string, ownerKeyId: string): Promise<JobRecord | undefined>;
+  listForOwner?(ownerKeyId: string, limit?: number): Promise<JobRecord[]>;
+  cancelForOwner?(id: string, ownerKeyId: string): Promise<boolean>;
+  resumeForOwner?(id: string, ownerKeyId: string, signal?: AbortSignal): Promise<JobRecord>;
   markNotificationDelivered?(id: string): Promise<void>;
 }
 
@@ -120,6 +125,17 @@ export interface JobStateStore {
   save(record: JobRecord): Promise<boolean>;
   list(): Promise<JobRecord[]>;
   get(id: string): Promise<JobRecord | undefined>;
+}
+
+/**
+ * Optional tenant-aware storage capability. Cloud stores must implement these
+ * queries in the database itself; filtering a global list in API memory is not
+ * an acceptable multi-tenant implementation.
+ */
+export interface OwnedJobStateStore {
+  getForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined>;
+  listForOwner(ownerKeyId: string, limit: number): Promise<JobRecord[]>;
+  cancelForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined>;
 }
 
 class FileJobStateStore implements JobStateStore {
@@ -434,6 +450,34 @@ class FileJobStateStore implements JobStateStore {
   async get(id: string): Promise<JobRecord | undefined> {
     return (await this.read()).find((record) => record.id === id);
   }
+
+  async getForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined> {
+    const record = await this.get(id);
+    return record?.ownerKeyId === ownerKeyId ? record : undefined;
+  }
+
+  async listForOwner(ownerKeyId: string, limit: number): Promise<JobRecord[]> {
+    const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+    return (await this.read())
+      .filter((record) => record.ownerKeyId === ownerKeyId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, boundedLimit);
+  }
+
+  async cancelForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id && item.ownerKeyId === ownerKeyId);
+      if (!record || record.status === "completed" || record.status === "failed" || record.status === "cancelled") {
+        return undefined;
+      }
+      record.status = "cancelled";
+      record.error ??= "Job cancelled by caller.";
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return { ...record };
+    });
+  }
 }
 
 export class DurableJobRuntime implements JobRuntime {
@@ -504,6 +548,70 @@ export class DurableJobRuntime implements JobRuntime {
     await this.recoverInterrupted(hydrated);
     this.jobs.set(id, hydrated);
     return publicJobRecord(hydrated);
+  }
+
+  async getForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined> {
+    const ownedStore = this.state as JobStateStore & Partial<OwnedJobStateStore>;
+    const stored = ownedStore.getForOwner
+      ? await ownedStore.getForOwner(id, ownerKeyId)
+      : await this.state.get(id).then((record) => record?.ownerKeyId === ownerKeyId ? record : undefined);
+    if (!stored) return undefined;
+    const loadedSnapshot = stored.snapshot?.runId && this.runStore
+      ? await this.runStore.load(stored.snapshot.runId)
+      : undefined;
+    const hydrated = { ...stored, ...(loadedSnapshot ? { snapshot: redactSecrets(loadedSnapshot) as BrainRunSnapshot } : {}) };
+    await this.recoverInterrupted(hydrated);
+    this.jobs.set(id, hydrated);
+    return publicJobRecord(hydrated);
+  }
+
+  async listForOwner(ownerKeyId: string, limit = 100): Promise<JobRecord[]> {
+    const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+    const ownedStore = this.state as JobStateStore & Partial<OwnedJobStateStore>;
+    const stored = ownedStore.listForOwner
+      ? await ownedStore.listForOwner(ownerKeyId, boundedLimit)
+      : (await this.state.list())
+          .filter((record) => record.ownerKeyId === ownerKeyId)
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, boundedLimit);
+    const output: JobRecord[] = [];
+    for (const persisted of stored) {
+      if (persisted.ownerKeyId !== ownerKeyId) continue;
+      if (this.controllers.has(persisted.id) || this.starting.has(persisted.id)) {
+        const active = this.jobs.get(persisted.id);
+        if (active?.ownerKeyId === ownerKeyId) output.push(publicJobRecord(active));
+        continue;
+      }
+      const loadedSnapshot = persisted.snapshot?.runId && this.runStore
+        ? await this.runStore.load(persisted.snapshot.runId)
+        : undefined;
+      const hydrated = { ...persisted, ...(loadedSnapshot ? { snapshot: redactSecrets(loadedSnapshot) as BrainRunSnapshot } : {}) };
+      await this.recoverInterrupted(hydrated);
+      this.jobs.set(hydrated.id, hydrated);
+      output.push(publicJobRecord(hydrated));
+    }
+    return output;
+  }
+
+  async cancelForOwner(id: string, ownerKeyId: string): Promise<boolean> {
+    const ownedStore = this.state as JobStateStore & Partial<OwnedJobStateStore>;
+    const persisted = ownedStore.cancelForOwner
+      ? await ownedStore.cancelForOwner(id, ownerKeyId)
+      : await this.state.get(id).then(async (record) =>
+          record?.ownerKeyId === ownerKeyId ? await this.state.cancel(id) : undefined);
+    if (!persisted || persisted.ownerKeyId !== ownerKeyId || persisted.status !== "cancelled") return false;
+    const record = this.jobs.get(id);
+    if (record) Object.assign(record, persisted);
+    this.controllers.get(id)?.abort(new Error("Job cancelled by owner"));
+    return true;
+  }
+
+  async resumeForOwner(id: string, ownerKeyId: string, signal?: AbortSignal): Promise<JobRecord> {
+    const record = await this.getForOwner(id, ownerKeyId);
+    if (!record) throw new Error("Unknown job");
+    // Owner identity is immutable for a job. Shared stores must enforce the same
+    // owner predicate in getForOwner and keep ownership immutable after creation.
+    return this.resume(id, signal);
   }
 
   async markNotificationDelivered(id: string): Promise<void> {
