@@ -46,6 +46,8 @@ export interface LearningRecoveryCoordinatorHost {
   /** Must return runtime state from the authoritative lifecycle/runtime registry. */
   listRuntimeSkills(scope: LearningScope): Promise<RuntimeLearningSkill[]>;
   currentPolicyRevision(scope: LearningScope): Promise<string>;
+  /** Must resolve the authenticated operator identity from trusted host context, never model/user-supplied task data. */
+  authenticatedActorId(scope: LearningScope): Promise<string | undefined>;
   /** Must resolve a persisted human/operator approval for this exact skill and revision. */
   isExplicitlyApproved(scope: LearningScope, skillId: string, policyRevision: string): Promise<boolean>;
   resolveApprovalBinding?(scope: LearningScope, skillId: string, policyRevision: string): Promise<LearningRecoveryApprovalBinding | undefined>;
@@ -73,6 +75,7 @@ export async function inspectLearningRecovery(
   }
   if (!host || typeof host.listActiveLearningSkills !== "function" ||
       typeof host.listRuntimeSkills !== "function" || typeof host.currentPolicyRevision !== "function" ||
+      typeof host.authenticatedActorId !== "function" ||
       typeof host.isExplicitlyApproved !== "function" || typeof host.hasTrustedEvidence !== "function") {
     throw new Error("Incomplete learning recovery coordinator host");
   }
@@ -139,9 +142,17 @@ export async function inspectLearningRecovery(
         learningPolicyRevision: skill.policyRevision, currentPolicyRevision });
       continue;
     }
+    const authenticatedActorId = await host.authenticatedActorId({ ...scope });
+    if (typeof authenticatedActorId !== "string" || !authenticatedActorId.trim() || authenticatedActorId.length > 200) {
+      assessments.push({ skillId, issueKinds: kinds, disposition: "blocked-approval",
+        reason: "Authenticated operator identity is unavailable; approval receipt cannot be actor-bound",
+        learningPolicyRevision: skill.policyRevision, currentPolicyRevision });
+      continue;
+    }
     const approvalBinding = await host.resolveApprovalBinding({ ...scope }, skillId, currentPolicyRevision);
     if (!approvalBinding || typeof approvalBinding.id !== "string" || !approvalBinding.id.trim() ||
         typeof approvalBinding.actorId !== "string" || !approvalBinding.actorId.trim() ||
+        approvalBinding.actorId !== authenticatedActorId ||
         approvalBinding.skillId !== skillId || approvalBinding.status !== "approved" ||
         approvalBinding.policyRevision !== currentPolicyRevision ||
         !approvalBinding.scope || approvalBinding.scope.tenantId !== scope.tenantId ||
