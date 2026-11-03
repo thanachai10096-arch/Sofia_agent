@@ -376,6 +376,42 @@ test("settlement run claim excludes a separate Node.js worker process", async ()
 });
 
 
+test("abrupt worker process exit preserves claim and blocks replay", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-worker-crash-"));
+  try {
+    const moduleUrl = new URL("./settlement-journal.ts", import.meta.url).href;
+    const script = `
+      import { FileSettlementJournal } from ${JSON.stringify(moduleUrl)};
+      const journal = new FileSettlementJournal("crashed-worker-workspace", ${JSON.stringify(root)});
+      const claim = await journal.claimRun("crashed-worker-run");
+      await journal.begin("crashed-worker-run", { inputTokens: 12, outputTokens: 16 }, claim);
+      // Simulate abrupt process termination: deliberately do not release the claim.
+      process.exit(0);
+    `;
+    const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    assert.equal(child.status, 0, child.stderr || child.stdout);
+
+    const restartedWorker = new FileSettlementJournal("crashed-worker-workspace", root);
+    const inspection = await restartedWorker.inspectRun("crashed-worker-run");
+    assert.equal(inspection.claim, "active");
+    assert.equal(inspection.journal, "unresolved");
+    assert.equal(inspection.startedAttempts, 1);
+    assert.equal(inspection.settledAttempts, 0);
+    assert.equal(inspection.unresolved, true);
+    await assert.rejects(
+      restartedWorker.claimRun("crashed-worker-run"),
+      /already claimed/,
+      "a restarted worker must not replay a possibly billed provider attempt",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("journal writes reject missing, released, or mismatched run claims", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-claim-validation-"));
   try {
