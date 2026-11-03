@@ -52,5 +52,5 @@ test("evidence must be trusted, successful, same-run and explicitly referenced",
   assert.equal(validEvidence({ ...evidence, id: "unreferenced" }, receipt), false);
   assert.equal(validEvidence({ ...evidence, content: " " }, receipt), false);
   assert.equal(validEvidence({ ...evidence, createdAt: "not-a-date" }, receipt), false);
-  assert.equal(validEvidence({ ...evidence, kind: "model-output" as RunEvidence["kind"] }, receipt), false);
+  assert.equal(validEvidence({ ...evidence, kind: "model-output" as unknown as RunEvidence["kind"] }, receipt), false);
 });
