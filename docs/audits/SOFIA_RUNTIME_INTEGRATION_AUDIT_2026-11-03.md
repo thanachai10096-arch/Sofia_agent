@@ -292,3 +292,10 @@ Fix applied on the audit branch:
 Verification status:
 - Source and regression test were committed.
 - Tests were not executed in this environment, so this is not yet a passing test result.
+
+
+## Follow-up: atomic owner-scoped resume reservation (2026-11-03)
+
+The runtime now adds a short-lived `resumeReservationToken` / expiry and a storage capability `reserveResumeForOwner`. The local file store performs owner, checkpoint, state, active-lease, and reservation checks plus reservation write under the same file lock. `DurableJobRuntime.resumeForOwner` requires this capability for shared stores, reserves before dispatch, and relies on the normal lease claim to atomically transition to running and clear the reservation. Public job serialization removes the reservation token.
+
+A concurrent-resume regression test was added using two independent runtime instances against the same local store. The PostgreSQL schema draft now includes reservation columns, and the store contract requires a single conditional database mutation and a two-connection race test. This remains a contract/schema change only: no PostgreSQL adapter exists, and tests/build have not yet been run. The Vercel adapter therefore still uses its Preview-only local file store and is not production durable.
