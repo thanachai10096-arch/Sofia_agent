@@ -224,6 +224,86 @@ test("startup recovery refuses to run without the caller's exclusive lock", asyn
 });
 
 
+test("startup recovery retries an idempotent rollback when its journal acknowledgement fails", async () => {
+  const transactionId = "abababab-abab-abab-abab-abababababab";
+  const initial = createRestoreJournalRecord({
+    transactionId,
+    createdAt: "2026-11-03T00:00:00.000Z",
+    manifestSha256: "f".repeat(64),
+    targets: [{
+      name: "state",
+      paths: ["state.json"],
+      rollbackSnapshotRef: "snapshots/state",
+      rollbackSnapshotSha256: "a".repeat(64),
+    }],
+  });
+  const applying = advanceRestoreJournal(initial, {
+    phase: "applying",
+    updatedAt: "2026-11-03T00:00:01.000Z",
+    targets: initial.targets.map((target) => ({ ...target, phase: "applied" })),
+  });
+  const required = advanceRestoreJournal(applying, {
+    phase: "rollback_required",
+    updatedAt: "2026-11-03T00:00:02.000Z",
+    targets: applying.targets.map((target) => ({ ...target, phase: "rollback_pending" })),
+  });
+  const rolling = advanceRestoreJournal(required, {
+    phase: "rolling_back",
+    updatedAt: "2026-11-03T00:00:03.000Z",
+  });
+  let current = rolling;
+  let failNextAppend = true;
+  const journal: RestoreJournalStore = {
+    async create() { throw new Error("not used"); },
+    async append(next, expectedRevision) {
+      assert.equal(current.revision, expectedRevision);
+      if (failNextAppend) {
+        failNextAppend = false;
+        throw new Error("simulated journal disk-full failure");
+      }
+      current = next;
+    },
+    async read() { return current; },
+    async list() { return [current]; },
+  };
+  let targetState = "partially-restored";
+  let rollbackCalls = 0;
+  const options = {
+    transactionId,
+    journal,
+    snapshotStore: {
+      async write() { throw new Error("not used"); },
+      async read() { return new Uint8Array([1, 2, 3]); },
+    },
+    adapters: [{
+      name: "state",
+      paths: ["state.json"],
+      async rollbackFromSnapshotBytes(bytes: Uint8Array) {
+        assert.deepEqual([...bytes], [1, 2, 3]);
+        rollbackCalls += 1;
+        // Model an idempotent adapter: replaying the same snapshot is safe.
+        targetState = "before";
+      },
+    }],
+    async withExclusiveLock<T>(_id: string, operation: () => Promise<T>) { return operation(); },
+  };
+
+  await assert.rejects(
+    recoverInterruptedRestoreTransaction(options),
+    /simulated journal disk-full failure/,
+  );
+  assert.equal(targetState, "before");
+  assert.equal(rollbackCalls, 1);
+  assert.equal(current.phase, "rolling_back");
+  assert.equal(current.targets[0]?.phase, "rollback_pending");
+
+  const recovered = await recoverInterruptedRestoreTransaction(options);
+  assert.equal(recovered.phase, "rolled_back");
+  assert.equal(recovered.targets[0]?.phase, "rolled_back");
+  assert.equal(targetState, "before");
+  assert.equal(rollbackCalls, 2);
+});
+
 test("startup recovery resumes a partial rollback without repeating completed targets", async () => {
   const transactionId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
   const initial = createRestoreJournalRecord({
