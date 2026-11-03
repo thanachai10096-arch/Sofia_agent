@@ -246,3 +246,14 @@ Important boundary: this closes the terminal-transition/outbox gap only for host
 `OutboxWorker` provides a host-managed polling lifecycle around `OutboxDispatcher`: one loop per instance, bounded polling interval, error observation, and graceful stop that waits for an active dispatch. It does not spawn a process or start itself. A trusted long-lived host must explicitly construct and start it; do not run it inside a short-lived API request handler. Vercel Daemons are a possible host integration, but no daemon entrypoint or deployment has been added here.
 
 The worker does not renew leases. Keep sender request timeouts below the dispatcher lease duration until lease renewal is implemented. Delivery remains at-least-once.
+
+
+## Outbox lease renewal and safe claim cadence
+
+The outbox store now exposes optional `renewLease(id, workerToken, leaseMs)`. PostgreSQL renewal is fenced by message ID, processing status, worker token, and an unexpired lease; it can extend only a lease the worker still owns.
+
+The dispatcher renews leases at roughly one-third of the configured lease duration while a sender is active. It passes an `AbortSignal` to the sender and aborts when renewal returns false or errors. Sender adapters should honor the signal and enforce their own request timeout. A lease loss cannot undo a remote side effect already accepted by a provider; receiver-side idempotency remains necessary.
+
+The dispatcher now claims one message at a time, up to the configured batch size, rather than claiming a full batch and processing it sequentially. This prevents later messages from burning their leases while waiting behind a slow earlier send. This trades additional claim queries for safer lease ownership.
+
+Stores without `renewLease` remain compatible but rely on bounded sender timeouts and the original lease duration.
