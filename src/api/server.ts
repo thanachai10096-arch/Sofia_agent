@@ -320,14 +320,21 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               typeof input.content !== "string" || input.content.trim().length < 3 || input.content.length > 1200) {
             return json(res, 400, { error: "invalid_memory_entry" }, origin, config);
           }
+          let entry: ReturnType<typeof createUserMemoryEntry>;
           try {
-            const entry = createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
+            entry = createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
+          } catch {
+            return json(res, 400, { error: "memory_entry_rejected" }, origin, config);
+          }
+          try {
             await deps.userMemoryStore.save(auth.keyId, entry);
             const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
             if (!saved) return json(res, 500, { error: "memory_write_failed" }, origin, config);
             return json(res, 201, { memory: saved }, origin, config);
           } catch {
-            return json(res, 400, { error: "memory_entry_rejected" }, origin, config);
+            // Storage corruption, permission, and I/O failures are server faults,
+            // not invalid user input. Never misreport them as a client-side 400.
+            return json(res, 500, { error: "memory_write_failed" }, origin, config);
           }
         }
         if (req.method === "DELETE" && requestUrl.pathname === "/v1/memory") {
