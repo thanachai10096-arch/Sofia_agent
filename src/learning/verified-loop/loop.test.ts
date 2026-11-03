@@ -53,14 +53,15 @@ function makeHost() {
 }
 function addReceipt(state: ReturnType<typeof makeHost>, receiptId: string, runId: string) {
   const evidenceId = "evidence-" + receiptId;
+  const completedAt = new Date().toISOString();
   const receipt: VerificationReceipt = {
     id: receiptId, runId, scope, completed: true, verified: true, verifier: "trusted-verifier",
-    evidenceIds: [evidenceId], policyRevision: "policy-1", completedAt: new Date().toISOString(),
+    evidenceIds: [evidenceId], policyRevision: "policy-1", completedAt,
   };
   state.receipts.set(receiptId, receipt);
   state.evidence.set(evidenceId, {
     id: evidenceId, runId, scope, kind: "verification", trusted: true, success: true,
-    content: "passed", createdAt: new Date().toISOString(),
+    content: "passed", createdAt: completedAt,
   });
 }
 test("learns only after repeated verified experiences and passing regression evidence", async () => {
