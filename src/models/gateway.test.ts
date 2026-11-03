@@ -330,10 +330,10 @@ test("gateway rejects empty and duplicate tool-call IDs before returning executa
   const originalFetch = globalThis.fetch;
   try {
     for (const toolCalls of [
-      [{ id: "", function: { name: "workspace.read_file", arguments: "{\\"path\\":\\"README.md\\"}" } }],
+      [{ id: "", function: { name: "workspace.read_file", arguments: "{\"path\":\"README.md\"}" } }],
       [
-        { id: "same-call", function: { name: "workspace.read_file", arguments: "{\\"path\\":\\"README.md\\"}" } },
-        { id: "same-call", function: { name: "terminal.run", arguments: "{\\"command\\":\\"pwd\\"}" } },
+        { id: "same-call", function: { name: "workspace.read_file", arguments: "{\"path\":\"README.md\"}" } },
+        { id: "same-call", function: { name: "terminal.run", arguments: "{\"command\":\"pwd\"}" } },
       ],
     ]) {
       globalThis.fetch = async () => new Response(JSON.stringify({
