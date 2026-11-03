@@ -278,7 +278,9 @@ export class FileSettlementJournal {
         }
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (error instanceof SyntaxError) {
+        claim = "invalid";
+      } else if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         if ((error as NodeJS.ErrnoException).code === "ELOOP") claim = "invalid";
         else throw error;
       }
