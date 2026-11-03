@@ -47,12 +47,15 @@ test("separate lifecycle instances reload under the writer lock and preserve eac
     const first = firstWriter.propose(pkg("1.0.0"), {
       source: "writer-one", evidenceIds: ["writer-one-evidence"], confidence: 0.9,
     });
+    const evaluatedBySecondInstance = await secondWriter.evaluate(first.id);
+    assert.equal(evaluatedBySecondInstance.status, "verified", "a stale instance must refresh before looking up a candidate");
     const second = secondWriter.propose({ ...pkg("1.0.1"), skill: { ...pkg("1.0.1").skill, id: "second-skill" } }, {
       source: "writer-two", evidenceIds: ["writer-two-evidence"], confidence: 0.9,
     });
 
     const refreshedWriter = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
     assert.deepEqual(refreshedWriter.list().map(item => item.id).sort(), [first.id, second.id].sort());
+    assert.equal(refreshedWriter.get(first.id)?.status, "verified");
 
     const lockDirectory = file + ".lock";
     mkdirSync(lockDirectory);
