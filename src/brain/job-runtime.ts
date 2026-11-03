@@ -840,7 +840,7 @@ export class DurableJobRuntime implements JobRuntime {
           record.status = "cancelled";
           record.error ??= "Job cancelled by caller.";
           record.updatedAt = new Date().toISOString();
-          await this.state.save(record);
+          await this.persistTerminalRecord(record);
         }
         return;
       }
