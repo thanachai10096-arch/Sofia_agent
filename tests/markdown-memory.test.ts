@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createUserMemoryEntry, FileUserMemoryStore } from "../src/brain/user-memory.js";
+import type { UserMemoryStore } from "../src/brain/user-memory.js";
 import { MarkdownProjectMemoryStore, MarkdownUserMemoryStore } from "../src/brain/markdown-memory.js";
 import type { ProjectMemoryEntry, ProjectMemoryStore } from "../src/brain/project-memory.js";
 
