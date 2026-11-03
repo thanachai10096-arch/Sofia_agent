@@ -108,6 +108,31 @@ export class PostgresJobStateStore implements JobStateStore, OwnedJobStateStore 
     return this.get(id);
   }
 
+  async cancelWithOutbox(id: string, ownerKeyId?: string): Promise<JobRecord | undefined> {
+    const result = await this.db.query<JobRow>(
+      `WITH updated AS (
+        UPDATE sofia_agent_jobs SET status='cancelled',
+          error=COALESCE(error,'Job cancelled by caller.'),updated_at=now()
+        WHERE id=$1::uuid
+          AND ($2::text IS NULL OR owner_key_id=$2)
+          AND status NOT IN ('completed','failed','cancelled')
+        RETURNING ${COLUMNS},owner_key_id AS event_owner_key_id,
+          notification_channel_id AS event_destination
+      ), inserted AS (
+        INSERT INTO sofia_agent_outbox
+          (id,owner_key_id,job_id,event_type,destination,payload,available_at)
+        SELECT $3::uuid,u.event_owner_key_id,u.id,'job.cancelled',u.event_destination,
+          jsonb_build_object('jobId',u.id,'status','cancelled'),now()
+        FROM updated u WHERE u.event_destination IS NOT NULL
+        ON CONFLICT (job_id,event_type,destination) DO NOTHING
+        RETURNING id
+      )
+      SELECT ${COLUMNS} FROM updated`,
+      [id, ownerKeyId ?? null, randomUUID()],
+    );
+    return result.rows[0] ? fromRow(result.rows[0]) : undefined;
+  }
+
   async cancel(id: string): Promise<JobRecord | undefined> {
     const result = await this.db.query<JobRow>(
       `UPDATE sofia_agent_jobs SET status='cancelled',
