@@ -779,7 +779,13 @@ export class CronScheduler {
   }
   private async waitForRecoveredJob(id: string, signal: AbortSignal): Promise<JobRecord> {
     while (!signal.aborted) {
-      const record = await this.runtime.get(id);
+      let record: JobRecord | undefined;
+      try {
+        record = await this.runtime.get(id);
+      } catch {
+        // A transient runtime read failure is not evidence that the job failed.
+        // Retry under the same lease; the monitor timeout bounds this recovery.
+      }
       // Runtime stores may briefly hide a persisted job during restart or
       // replication. Keep the lease monitor alive and retry until timeout.
       if (record && (record.status === "completed" || record.status === "failed" || record.status === "cancelled")) {
