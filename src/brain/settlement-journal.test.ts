@@ -361,3 +361,26 @@ test("journal append refuses a symlink record without modifying its target", asy
     await rm(outside, { recursive: true, force: true });
   }
 });
+
+test("settlement journal treats symlinked evidence as unresolved", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-symlink-"));
+  const external = path.join(root, "external.jsonl");
+  const namespace = "symlink-workspace";
+  const runId = "symlink-run";
+  const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+  const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+  try {
+    const journal = new FileSettlementJournal(namespace, root);
+    const claim = await journal.claimRun(runId);
+    await claim.release();
+    await writeFile(external, "", "utf8");
+    await symlink(external, journalFile);
+    assert.equal(await journal.hasUnresolved(runId), true,
+      "a symlink must not be followed as an empty, resolved journal");
+    const inspection = await journal.inspectRun(runId);
+    assert.equal(inspection.journal, "corrupt");
+    assert.equal(inspection.unresolved, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
