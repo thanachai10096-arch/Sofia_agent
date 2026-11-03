@@ -15,11 +15,11 @@ export function validReceipt(receipt: VerificationReceipt, scope: LearningScope,
       !Number.isFinite(maxAgeMs) || maxAgeMs < 1) return false;
   const completedAt = Date.parse(receipt.completedAt);
   return receipt.completed === true && receipt.verified === true &&
-    typeof receipt.id === "string" && receipt.id.length > 0 &&
-    typeof receipt.runId === "string" && receipt.runId.length > 0 &&
+    typeof receipt.id === "string" && receipt.id.trim().length > 0 && receipt.id.length <= 500 &&
+    typeof receipt.runId === "string" && receipt.runId.trim().length > 0 && receipt.runId.length <= 500 &&
     sameScope(receipt.scope, scope) &&
-    typeof receipt.verifier === "string" && receipt.verifier.trim().length > 0 &&
-    typeof receipt.policyRevision === "string" && receipt.policyRevision.length > 0 &&
+    typeof receipt.verifier === "string" && receipt.verifier.trim().length > 0 && receipt.verifier.length <= 200 &&
+    typeof receipt.policyRevision === "string" && receipt.policyRevision.trim().length > 0 && receipt.policyRevision.length <= 500 &&
     Array.isArray(receipt.evidenceIds) && receipt.evidenceIds.length > 0 &&
     receipt.evidenceIds.every(id => typeof id === "string" && id.trim().length > 0 && id.length <= 500) &&
     new Set(receipt.evidenceIds).size === receipt.evidenceIds.length &&
