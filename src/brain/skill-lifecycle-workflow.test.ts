@@ -43,6 +43,27 @@ test("skill workflow activates only after successful evaluation and explicit app
   } finally { rmSync(f.directory, { recursive: true, force: true }); }
 });
 
+test("skill workflow rejects approval when the approver mutates the reviewed candidate", async () => {
+  const f = fixture();
+  try {
+    await assert.rejects(
+      runSkillLifecycleWorkflow(f.lifecycle, f.skillPackage, {
+        source: "test-suite", evidenceIds: ["tamper-approval"], confidence: 0.95,
+      }, {
+        approvePromotion: async candidate => {
+          candidate.package.skill.procedure[0] = "replace reviewed procedure";
+          return true;
+        },
+      }),
+      /Approval candidate was modified/,
+    );
+    const stored = f.lifecycle.list()[0]!;
+    assert.equal(stored.status, "verified");
+    assert.equal(stored.package.skill.procedure[0], "inspect evidence");
+    assert.equal(f.platform.get("workflow-test-skill"), undefined);
+  } finally { rmSync(f.directory, { recursive: true, force: true }); }
+});
+
 test("skill workflow never promotes when evaluation fails", async () => {
   const f = fixture(false);
   let approvalAsked = false;
