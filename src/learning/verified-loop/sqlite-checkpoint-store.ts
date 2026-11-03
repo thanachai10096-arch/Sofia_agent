@@ -5,7 +5,7 @@ import type { LearningScope } from "./ports.js";
 import type { SelfImprovementCheckpointStore, VerifiedExecutionNotification } from "./self-improvement.js";
 
 type SqliteDatabase = DatabaseSyncType;
-type CheckpointState = { lastSequence: number; pending: VerifiedExecutionNotification[] };
+type CheckpointState = { lastSequence: number; pending: VerifiedExecutionNotification[]; revision?: number };
 
 function validScope(scope: LearningScope): boolean {
   return Boolean(scope && typeof scope.tenantId === "string" && scope.tenantId.trim() &&
@@ -74,9 +74,14 @@ export class SqliteSelfImprovementCheckpointStore implements SelfImprovementChec
           last_sequence INTEGER NOT NULL CHECK (last_sequence >= 0),
           pending_json TEXT NOT NULL,
           updated_at INTEGER NOT NULL,
+          revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
           PRIMARY KEY (tenant_id, principal_id, project_id)
         );
       `);
+      const columns = db.prepare("PRAGMA table_info(verified_learning_checkpoints)").all() as Array<{ name?: unknown }>;
+      if (!columns.some(column => column.name === "revision")) {
+        db.exec("ALTER TABLE verified_learning_checkpoints ADD COLUMN revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0)");
+      }
       secureRegularFile(absolutePath);
       return new SqliteSelfImprovementCheckpointStore(db, absolutePath);
     } catch (error) {
@@ -88,18 +93,18 @@ export class SqliteSelfImprovementCheckpointStore implements SelfImprovementChec
   async read(scope: LearningScope): Promise<CheckpointState> {
     this.assertScope(scope);
     const row = this.db.prepare(`
-      SELECT last_sequence, pending_json FROM verified_learning_checkpoints
+      SELECT last_sequence, pending_json, revision FROM verified_learning_checkpoints
       WHERE tenant_id = ? AND principal_id = ? AND project_id = ?
     `).get(scope.tenantId, scope.principalId, scope.projectId) as
-      | { last_sequence: number; pending_json: string }
+      | { last_sequence: number; pending_json: string; revision: number }
       | undefined;
-    if (!row) return { lastSequence: 0, pending: [] };
+    if (!row) return { lastSequence: 0, pending: [], revision: 0 };
     let pending: unknown;
     try { pending = JSON.parse(row.pending_json); }
     catch { throw new Error("Corrupt self-improvement checkpoint JSON"); }
     const state = { lastSequence: row.last_sequence, pending } as CheckpointState;
     validateState(state);
-    return { lastSequence: state.lastSequence, pending: state.pending.map(item => ({ ...item })) };
+    return { lastSequence: state.lastSequence, pending: state.pending.map(item => ({ ...item })), revision: row.revision };
   }
 
   async write(scope: LearningScope, state: CheckpointState): Promise<void> {
@@ -115,7 +120,8 @@ export class SqliteSelfImprovementCheckpointStore implements SelfImprovementChec
         ON CONFLICT (tenant_id, principal_id, project_id) DO UPDATE SET
           last_sequence = excluded.last_sequence,
           pending_json = excluded.pending_json,
-          updated_at = excluded.updated_at
+          updated_at = excluded.updated_at,
+          revision = verified_learning_checkpoints.revision + 1
       `).run(scope.tenantId, scope.principalId, scope.projectId, state.lastSequence, JSON.stringify(pending), Date.now());
       this.db.exec("COMMIT");
     } catch (error) {
@@ -123,6 +129,54 @@ export class SqliteSelfImprovementCheckpointStore implements SelfImprovementChec
       throw error;
     }
     secureRegularFile(this.filePath);
+  }
+
+  async compareAndSet(
+    scope: LearningScope,
+    expectedRevision: number,
+    state: CheckpointState,
+  ): Promise<boolean> {
+    this.assertScope(scope);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new Error("Invalid checkpoint revision");
+    }
+    validateState(state);
+    const pending = [...state.pending].sort((a, b) => a.sequence - b.sequence);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db.prepare(`
+        SELECT revision FROM verified_learning_checkpoints
+        WHERE tenant_id = ? AND principal_id = ? AND project_id = ?
+      `).get(scope.tenantId, scope.principalId, scope.projectId) as { revision: number } | undefined;
+      const currentRevision = row?.revision ?? 0;
+      if (currentRevision !== expectedRevision) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
+      if (!row) {
+        this.db.prepare(`
+          INSERT INTO verified_learning_checkpoints
+            (tenant_id, principal_id, project_id, last_sequence, pending_json, updated_at, revision)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(scope.tenantId, scope.principalId, scope.projectId, state.lastSequence, JSON.stringify(pending), Date.now(), expectedRevision + 1);
+      } else {
+        const result = this.db.prepare(`
+          UPDATE verified_learning_checkpoints
+          SET last_sequence = ?, pending_json = ?, updated_at = ?, revision = revision + 1
+          WHERE tenant_id = ? AND principal_id = ? AND project_id = ? AND revision = ?
+        `).run(state.lastSequence, JSON.stringify(pending), Date.now(), scope.tenantId, scope.principalId, scope.projectId, expectedRevision);
+        if (Number(result.changes) !== 1) {
+          this.db.exec("ROLLBACK");
+          return false;
+        }
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* preserve original error */ }
+      throw error;
+    }
+    secureRegularFile(this.filePath);
+    return true;
   }
 
   close(): void { this.db.close(); }
