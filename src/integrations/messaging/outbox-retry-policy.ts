@@ -23,7 +23,8 @@ export function calculateMessagingRetry(
   policy: MessagingRetryPolicy = DEFAULT_MESSAGING_RETRY_POLICY,
 ): MessagingRetryDecision {
   if (!Number.isSafeInteger(previousAttempts) || previousAttempts < 0 ||
-      !Number.isFinite(now) ||
+      previousAttempts >= Number.MAX_SAFE_INTEGER ||
+      !Number.isSafeInteger(now) || now < 0 ||
       !Number.isSafeInteger(policy.baseDelayMs) || policy.baseDelayMs < 1_000 ||
       !Number.isSafeInteger(policy.maxDelayMs) || policy.maxDelayMs < policy.baseDelayMs ||
       !Number.isSafeInteger(policy.maxAttempts) || policy.maxAttempts < 1) {
@@ -31,9 +32,13 @@ export function calculateMessagingRetry(
   }
   const attemptCount = previousAttempts + 1;
   const delay = Math.min(policy.maxDelayMs, policy.baseDelayMs * (2 ** Math.min(attemptCount - 1, 30)));
+  const nextAttemptAt = now + delay;
+  if (!Number.isSafeInteger(nextAttemptAt)) {
+    throw new Error("Messaging retry timestamp exceeds the safe integer range.");
+  }
   return {
     attemptCount,
-    nextAttemptAt: now + delay,
+    nextAttemptAt,
     deadLetter: attemptCount >= policy.maxAttempts,
   };
 }
