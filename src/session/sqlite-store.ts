@@ -136,14 +136,20 @@ export class SqliteSessionStore {
   }
 
   get(id: string): Session | undefined {
-    const row = this.db.prepare("SELECT id, updated_at FROM sessions WHERE id = ?").get(id) as
-      | { id: string; updated_at: number }
-      | undefined;
+    // Read metadata and transcript in one statement so a concurrent save/delete
+    // cannot make the two reads observe different database snapshots.
+    const rows = this.db.prepare(
+      "SELECT s.id, s.updated_at, m.content " +
+      "FROM sessions s LEFT JOIN session_messages m ON m.session_id = s.id " +
+      "WHERE s.id = ? ORDER BY m.position ASC",
+    ).all(id) as Array<{ id: string; updated_at: number; content: string | null }>;
+    const row = rows[0];
     if (!row) return undefined;
-    const messages = this.db.prepare(
-      "SELECT content FROM session_messages WHERE session_id = ? ORDER BY position ASC",
-    ).all(id) as Array<{ content: string }>;
-    return { id: row.id, updatedAt: row.updated_at, messages: messages.map((message) => message.content) };
+    return {
+      id: row.id,
+      updatedAt: row.updated_at,
+      messages: rows.flatMap((item) => item.content === null ? [] : [item.content]),
+    };
   }
 
   getOrCreate(id: string): Session {
