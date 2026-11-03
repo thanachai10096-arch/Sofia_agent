@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { applySafeLocalConfigEnvironment, assertNoLegacyPlaintextApiKey, writeSafeLocalConfig } from "./config-file.js";
+import { resolveCliInvocation } from "./commands.js";
 
 test("local config stores only non-secret metadata with private permissions", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-config-test-"));
@@ -160,7 +161,6 @@ test("empty local metadata does not erase existing environment configuration", (
   assert.equal(environment.SOFIA_MODEL_NAME, "provider/model");
 });
 
-import { resolveCliInvocation } from "./commands.js";
 
 test("CLI argv resolves help and supported commands without side effects", () => {
   assert.deepEqual(resolveCliInvocation([]), { command: "help" });
