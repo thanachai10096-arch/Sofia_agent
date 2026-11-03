@@ -1428,18 +1428,18 @@ test("DurableJobRuntime retention deletes snapshots through each expired job own
     },
   });
   const deletedJournalEvidence: Array<{ runId: string; ownerKeyId?: string }> = [];
-  let nextRun = 0;
   const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
-    run: async () => {
+    run: async (input: { principalId?: string }) => {
+      const runId = input.principalId === "owner-a" ? "retention-run-owner-a" : "retention-run-owner-b";
       const snapshot = {
         version: 1,
-        runId: "retention-run-" + (++nextRun),
+        runId,
         task: "retention owner test",
         understanding: {},
         plan: {},
         acceptanceCriteria: [],
         completedStepIds: [],
-        checkpointId: "retention-checkpoint-" + nextRun,
+        checkpointId: "retention-checkpoint-" + runId,
         usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
         observations: [],
         diagnoses: [],
@@ -1472,10 +1472,10 @@ test("DurableJobRuntime retention deletes snapshots through each expired job own
   await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
 
   assert.equal(await runtime.pruneExpired(60_000), 2);
-  assert.deepEqual(deletedByOwner.get("owner-a"), ["retention-run-1"]);
-  assert.deepEqual(deletedByOwner.get("owner-b"), ["retention-run-2"]);
+  assert.deepEqual(deletedByOwner.get("owner-a"), ["retention-run-owner-a"]);
+  assert.deepEqual(deletedByOwner.get("owner-b"), ["retention-run-owner-b"]);
   assert.deepEqual(deletedJournalEvidence, [
-    { runId: "retention-run-1", ownerKeyId: "owner-a" },
-    { runId: "retention-run-2", ownerKeyId: "owner-b" },
+    { runId: "retention-run-owner-a", ownerKeyId: "owner-a" },
+    { runId: "retention-run-owner-b", ownerKeyId: "owner-b" },
   ]);
 });
