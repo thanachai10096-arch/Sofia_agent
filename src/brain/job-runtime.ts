@@ -623,11 +623,15 @@ export class DurableJobRuntime implements JobRuntime {
       // A terminal status may be persisted just before the previous worker's finally block
       // removes its controller. Only the canonical status determines whether resume is blocked.
       if (record.status === "running") throw new Error("Job is already running");
-      // The atomic failed->running claim inside execute() resets the previous
-      // attempt's notification marker and invalidates its lease together.
-      const saved = await this.state.save(record);
-      if (!saved) throw new Error("Job state changed before resume could be scheduled");
-      await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
+      // execute() performs the failed->running claim as its first durable
+      // operation, atomically resetting the old notification marker/lease.
+      const started = await this.execute(
+        record,
+        { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria },
+        signal,
+        record.snapshot,
+      );
+      if (!started) throw new Error("Job state changed before resume could be scheduled");
       return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);
@@ -649,8 +653,8 @@ export class DurableJobRuntime implements JobRuntime {
     input: Omit<BrainRunInput, "signal" | "resume">,
     externalSignal?: AbortSignal,
     resume?: BrainRunSnapshot,
-  ): Promise<void> {
-    if (record.status === "cancelled" || record.status === "completed") return;
+  ): Promise<boolean> {
+    if (record.status === "cancelled" || record.status === "completed") return false;
     const leaseToken = randomUUID();
     const leaseMs = 15_000;
     this.starting.add(record.id);
@@ -663,7 +667,7 @@ export class DurableJobRuntime implements JobRuntime {
     if (!claimed) {
       const latest = await this.state.get(record.id);
       if (latest) Object.assign(record, latest);
-      return;
+      return false;
     }
     Object.assign(record, claimed);
 
@@ -707,7 +711,7 @@ export class DurableJobRuntime implements JobRuntime {
       if (!latest || latest.status !== "running" || latest.leaseOwnerToken !== leaseToken) {
         if (latest) Object.assign(record, latest);
         controller.abort(new Error("Job execution lease was lost or cancelled before dispatch"));
-        return;
+        return false;
       }
       if (controller.signal.aborted || isJobCancelled(record)) {
         if (!isJobCancelled(record)) {
@@ -716,7 +720,7 @@ export class DurableJobRuntime implements JobRuntime {
           record.updatedAt = new Date().toISOString();
           await this.state.save(record);
         }
-        return;
+        return false;
       }
 
       const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot, ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}) });
@@ -752,6 +756,7 @@ export class DurableJobRuntime implements JobRuntime {
       }
       if (this.controllers.get(record.id) === controller) this.controllers.delete(record.id);
     }
+    return true;
   }
 
 }
