@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { FileProjectMemoryStore, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
@@ -127,4 +128,20 @@ test("concurrent project memory writes from separate store instances do not lose
     entries.map((entry) => entry.id).sort(),
     Array.from({ length: 32 }, (_, index) => `concurrent-${index}`).sort(),
   );
+});
+
+test("project memory refuses to read through a symlink", { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-symlink-"));
+  const project = "symlink-project";
+  const filename = createHash("sha256").update(project).digest("hex") + ".json";
+  const target = path.join(root, "outside.json");
+  const link = path.join(root, filename);
+  const original = JSON.stringify([memoryEntryFromConvention(project, "Do not follow this link")]);
+  await writeFile(target, original, "utf8");
+  await symlink(target, link);
+
+  const store = new FileProjectMemoryStore(project, root);
+  await assert.rejects(store.list(), /regular file/);
+  assert.deepEqual(store.readSync(), []);
+  assert.equal(await readFile(target, "utf8"), original);
 });
