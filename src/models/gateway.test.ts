@@ -325,6 +325,185 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
 });
 
 
+
+
+test("OpenAI-compatible gateway normalizes tool calls and metered usage", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let requestedHeaders: Record<string, string> = {};
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input);
+    requestedHeaders = init?.headers as Record<string, string>;
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      choices: [{
+        finish_reason: "tool_calls",
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call_openai_1",
+            type: "function",
+            function: { name: "workspace.read_file", arguments: JSON.stringify({ path: "README.md" }) },
+          }],
+        },
+      }],
+      usage: { prompt_tokens: 17, completion_tokens: 6, total_tokens: 23 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "openai-compatible-secret",
+        model: "vendor/tool-model",
+      },
+    });
+    const result = await gateway.generate({
+      task: "Read README.md",
+      kind: "coding",
+      step: 2,
+      messages: [
+        { role: "system", content: "You are Sofia." },
+        { role: "user", content: "Read README.md" },
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "workspace.read_file",
+          description: "Read a workspace file.",
+          parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        },
+      }],
+    }, { ...route, healthy: true });
+
+    assert.equal(requestedUrl, "https://provider.example.test/v1/chat/completions");
+    assert.equal(requestedHeaders.authorization, "Bearer openai-compatible-secret");
+    assert.equal(requestedHeaders["x-api-key"], undefined);
+    assert.equal(requestedBody.model, "vendor/tool-model");
+    assert.deepEqual(requestedBody.tool_choice, "auto");
+    assert.deepEqual(result.toolCalls, [{
+      id: "call_openai_1",
+      name: "workspace.read_file",
+      input: { path: "README.md" },
+    }]);
+    assert.deepEqual(result.usage, { inputTokens: 17, outputTokens: 6 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("OpenAI-compatible Brain requests use JSON mode without enabling tool calls", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      choices: [{ finish_reason: "stop", message: { role: "assistant", content: JSON.stringify({ ok: true }) } }],
+      usage: { prompt_tokens: 8, completion_tokens: 4 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "openai-compatible-secret",
+        model: "vendor/json-model",
+      },
+    });
+    const result = await gateway.generate({
+      task: "plan the task",
+      kind: "analysis",
+      step: 1,
+      context: JSON.stringify({ phase: "plan", instructions: "Return an object", acceptanceCriteria: [] }),
+    }, route, { maxOutputTokens: 256 });
+
+    assert.deepEqual(requestedBody.response_format, { type: "json_object" });
+    assert.equal("tools" in requestedBody, false);
+    assert.equal(result.text, JSON.stringify({ ok: true }));
+    assert.deepEqual(result.usage, { inputTokens: 8, outputTokens: 4 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Anthropic Messages adapter preserves assistant tool-use and correlated tool-result history", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      content: [{ type: "text", text: "The file contains project documentation." }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 31, output_tokens: 9 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://api.anthropic.com/v1",
+        apiKey: "anthropic-secret",
+        model: "claude-test-model",
+        protocol: "anthropic-messages",
+      },
+    });
+    await gateway.generate({
+      task: "Read the file and summarize it",
+      kind: "coding",
+      step: 2,
+      messages: [
+        { role: "system", content: "You are Sofia." },
+        { role: "user", content: "Read README.md" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "toolu_history_1",
+            name: "workspace.read_file",
+            arguments: JSON.stringify({ path: "README.md" }),
+          }],
+        },
+        {
+          role: "tool",
+          content: JSON.stringify({ text: "Project documentation" }),
+          toolCallId: "toolu_history_1",
+        },
+        { role: "user", content: "Now summarize it." },
+      ],
+    }, { ...route, healthy: true });
+
+    assert.deepEqual(requestedBody.messages, [
+      { role: "user", content: "Read README.md" },
+      {
+        role: "assistant",
+        content: [{
+          type: "tool_use",
+          id: "toolu_history_1",
+          name: "workspace.read_file",
+          input: { path: "README.md" },
+        }],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_history_1",
+            content: JSON.stringify({ text: "Project documentation" }),
+          },
+          { type: "text", text: "Now summarize it." },
+        ],
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Brain route adapter enforces explicitly declared feature support", () => {
   const modelProvider = {
     async generate() {
