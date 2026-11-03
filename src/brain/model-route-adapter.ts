@@ -132,10 +132,13 @@ export function createInternalRoute(
             throw new Error("Provider did not return token usage");
           }
 
+          const finishReason = response.finishReason ?? "complete";
           return {
-            value: parseStructured(response.text),
+            // Do not parse partial JSON: the metered gateway must settle usage
+            // and reject truncated output as incomplete before Brain consumes it.
+            value: finishReason === "length" ? undefined : parseStructured(response.text),
             usage: response.usage,
-            finishReason: "complete",
+            finishReason,
           };
         },
       };
