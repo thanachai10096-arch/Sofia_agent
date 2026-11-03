@@ -78,9 +78,11 @@ test("settlement recovery inspection classifies malformed journal evidence as co
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
     await writeFile(journalFile, '{"version":1,"type":"started"\n', { mode: 0o600 });
+    const lockFile = journalFile + ".lock";
+    await writeFile(lockFile, '{"version":1,"pid":', { mode: 0o600 });
     const journal = new FileSettlementJournal(namespace, root);
     const inspection = await journal.inspectRun(runId);
-    assert.equal(inspection.claim, "absent");
+    assert.equal(inspection.claim, "invalid", "malformed claim metadata must be reported, not trusted");
     assert.equal(inspection.journal, "corrupt");
     assert.equal(inspection.unresolved, true);
   } finally {
