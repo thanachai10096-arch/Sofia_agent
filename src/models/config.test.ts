@@ -101,6 +101,15 @@ test("OpenRouter can be selected and route-specific model IDs are respected", ()
   assert.equal(config.providers.coding?.model, "anthropic/claude-sonnet");
 });
 
+test("Sofia API authentication key does not accidentally select a custom model provider", () => {
+  clear();
+  process.env.SOFIA_API_KEY = "sofia-client-api-key";
+  process.env.OPENROUTER_API_KEY = "openrouter-provider-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "openrouter-provider-key");
+  assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
+});
+
 test("explicit provider selection wins when multiple provider credentials are present", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "gemini";
