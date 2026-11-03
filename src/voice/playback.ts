@@ -26,13 +26,19 @@ export function createVoicePlaybackController(adapter: VoicePlaybackAdapter): Vo
   let state: "idle" | "playing" | "closed" = "idle";
   let generation = 0;
   let active: AbortController | undefined;
+  let stopBarrier: Promise<void> = Promise.resolve();
 
   const stopCurrent = async (): Promise<void> => {
     const current = active;
     active = undefined;
     current?.abort(new Error("Voice playback interrupted"));
-    await adapter.stop();
-    if (state !== "closed" && !active) state = "idle";
+    const stopping = stopBarrier.then(() => adapter.stop()).then(() => undefined);
+    stopBarrier = stopping.catch(() => undefined);
+    try {
+      await stopping;
+    } finally {
+      if (state !== "closed" && !active) state = "idle";
+    }
   };
 
   return {
