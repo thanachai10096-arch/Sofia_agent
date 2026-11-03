@@ -473,14 +473,16 @@ export class SofiaModelGateway implements ModelProvider {
             .join("\n")
         : "";
 
-    if (!text && !calls.length) {
+    const providerFinishReason = data.choices?.[0]?.finish_reason;
+    const outputWasTruncated = providerFinishReason === "length" || providerFinishReason === "max_tokens";
+
+    if (!text && !calls.length && !outputWasTruncated) {
       if (message.refusal?.trim()) {
         return failResponse("Model gateway returned a refusal response.");
       }
-      const finishReason = data.choices?.[0]?.finish_reason;
       return failResponse(
-        finishReason
-          ? `Model gateway returned no usable content (finish_reason=${finishReason}).`
+        providerFinishReason
+          ? `Model gateway returned no usable content (finish_reason=${providerFinishReason}).`
           : "Model gateway returned an empty response.",
       );
     }
@@ -517,6 +519,7 @@ export class SofiaModelGateway implements ModelProvider {
         })),
       },
       ...(usage ? { usage } : {}),
+      finishReason: outputWasTruncated ? "length" : "complete",
     };
   }
 }
