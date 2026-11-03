@@ -115,6 +115,7 @@ export function validateRestoreJournalRecord(value: unknown): RestoreJournalReco
   }
   const names = new Set<string>();
   const paths = new Set<string>();
+  const portablePaths = new Set<string>();
   for (const target of record.targets) {
     if (!target || typeof target !== "object") throw new Error("Restore journal target is invalid.");
     assertSafeToken(target.name, "target name");
@@ -130,6 +131,26 @@ export function validateRestoreJournalRecord(value: unknown): RestoreJournalReco
       }
       if (paths.has(item)) throw new Error("Restore journal target paths overlap.");
       paths.add(item);
+
+      // Journal files are durable input at startup. Enforce the same portable
+      // destination rules as backup manifests, even if a record was tampered
+      // with after it was originally created.
+      const portable = item.normalize("NFC").toLowerCase();
+      if (portablePaths.has(portable)) {
+        throw new Error("Restore journal target paths collide on portable filesystems.");
+      }
+      const parts = portable.split("/");
+      for (let index = 1; index < parts.length; index += 1) {
+        if (portablePaths.has(parts.slice(0, index).join("/"))) {
+          throw new Error("Restore journal target paths conflict as files and directories.");
+        }
+      }
+      for (const existing of portablePaths) {
+        if (existing.startsWith(portable + "/")) {
+          throw new Error("Restore journal target paths conflict as files and directories.");
+        }
+      }
+      portablePaths.add(portable);
     }
     if (typeof target.phase !== "string" || !TARGET_PHASES.has(target.phase)) {
       throw new Error("Restore journal target phase is invalid.");
