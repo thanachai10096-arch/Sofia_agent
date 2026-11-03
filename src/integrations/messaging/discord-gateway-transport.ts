@@ -22,7 +22,7 @@ export interface DiscordGatewayTransportOptions {
   /** Inject a WebSocket factory for Node runtimes without a global WebSocket. */
   socketFactory?: DiscordGatewaySocketFactory;
   fetchImpl?: typeof fetch;
-  onError?: (event: "gateway_connect_failed" | "gateway_disconnected" | "message_handler_failed" | "message_delivery_failed", status?: number) => void;
+  onError?: (event: "gateway_connect_failed" | "gateway_disconnected" | "message_handler_failed" | "message_queue_full" | "message_delivery_failed", status?: number) => void;
 }
 const GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
 const GATEWAY_INTENTS = 1 | (1 << 9) | (1 << 12) | (1 << 15);
@@ -68,7 +68,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
     const key = JSON.stringify([userId, channelId]);
     const queued = queuedMessageCounts.get(key) ?? 0;
     if (queued >= MAX_QUEUED_MESSAGES_PER_SESSION) {
-      notify("message_handler_failed");
+      notify("message_queue_full");
       return;
     }
     queuedMessageCounts.set(key, queued + 1);
