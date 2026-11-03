@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PostgresOutboxStore, type OutboxMessage } from "./postgres-outbox-store.js";
+import { PostgresOutboxStore } from "./postgres-outbox-store.js";
 import type { PostgresExecutor } from "./postgres-job-state-store.js";
 
 const uuidA="00000000-0000-4000-8000-000000000001";
