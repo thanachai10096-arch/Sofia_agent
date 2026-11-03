@@ -278,3 +278,17 @@ Next safe implementation step:
 2. Add a PostgreSQL client and migration runner only after choosing the deployment database and supported connection model.
 3. Implement atomic SQL claim/heartbeat/cancel/save and checkpoint/outbox transactions.
 4. Run real PostgreSQL migration, contract, concurrency, owner-isolation, and restart tests before enabling it in Vercel Preview.
+
+
+## Critical follow-up: expired-lease late-save race
+
+A deeper review of `FileJobStateStore.save()` found a race not covered by the earlier lease summary: save previously rejected a stale worker only after another worker had replaced its lease token. If the lease had expired but no replacement worker had claimed the job yet, the old worker could still commit using the unchanged token.
+
+Fix applied on the audit branch:
+- `save()` now rejects writes when the persisted record is still `running` but its lease expiry is missing, invalid, or at/before the current time.
+- Added a regression test that expires a live job's lease, lets its worker finish before the next heartbeat, and observes the persisted state from a separate runtime instance. The expected state is recovered as failed rather than accepting the late completion.
+- This closes the identified local file-store race; the PostgreSQL adapter must implement the same expiry predicate in the same atomic SQL statement as token/status fencing.
+
+Verification status:
+- Source and regression test were committed.
+- Tests were not executed in this environment, so this is not yet a passing test result.
