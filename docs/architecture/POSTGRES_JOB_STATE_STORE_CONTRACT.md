@@ -257,3 +257,10 @@ The dispatcher renews leases at roughly one-third of the configured lease durati
 The dispatcher now claims one message at a time, up to the configured batch size, rather than claiming a full batch and processing it sequentially. This prevents later messages from burning their leases while waiting behind a slow earlier send. This trades additional claim queries for safer lease ownership.
 
 Stores without `renewLease` remain compatible but rely on bounded sender timeouts and the original lease duration.
+
+
+## Outbox lease renewal and acknowledgement ordering
+
+The PostgreSQL outbox store exposes an optional `renewLease(id, workerToken, leaseMs)` capability. Renewal extends only a live processing lease whose fencing token still matches. The dispatcher renews at roughly one-third of the lease duration while the sender is active and passes an `AbortSignal` to the sender. A sender should stop promptly when aborted and must still apply a bounded network timeout.
+
+The dispatcher now stops and joins the renewal task before attempting ACK or retry. If renewal reports a lost lease, it does not ACK or retry, even if a sender ignores the abort signal and later resolves. This avoids acknowledging a message after another worker may have reclaimed it. Renewal remains optional for compatible custom stores; those stores must use bounded sender timeouts shorter than their lease duration.
