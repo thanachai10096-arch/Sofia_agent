@@ -142,3 +142,20 @@ Resume requires special care: authorization and the state transition must be bou
 - A store configured as cloud/shared but missing the owner-scoped capability returns a service-unavailable/fail-closed result; it must not silently scan all tenants.
 - Local file mode preserves existing API compatibility while returning only the requesting owner's jobs.
 - Cursor pagination is stable under concurrent inserts and is bounded by a server-side maximum.
+
+
+## Atomic owner-scoped resume reservation
+
+The shared adapter MUST implement `reserveResumeForOwner(id, ownerKeyId, token, reservationMs)` as one database transaction / conditional update. A read followed by an application-side write is not sufficient.
+
+Required behavior:
+
+1. Match both `id` and `owner_key_id` in the mutation predicate.
+2. Reject completed/cancelled jobs, jobs without a checkpoint, and jobs with a non-expired running lease.
+3. Reject a job with an unexpired `resume_reservation_token`.
+4. Otherwise set a fresh opaque reservation token and expiry, returning the reserved row.
+5. The worker claim operation transitions the job to `running`, assigns its lease token, and clears both resume reservation columns atomically.
+6. A crashed caller cannot hold the job forever: another caller may replace an expired reservation. The reservation token is internal and MUST NOT be returned by API serializers.
+7. The adapter must verify that the returned owner matches the authenticated owner; a zero-row update is reported as unavailable, without revealing whether another owner owns the ID.
+
+A PostgreSQL implementation should use a single conditional `UPDATE ... WHERE ... AND (...reservation expired...) RETURNING *` (or an equivalent `SELECT FOR UPDATE` transaction). It must not perform an unscoped read first. Contract tests must race two independent connections and prove exactly one receives the reservation.
