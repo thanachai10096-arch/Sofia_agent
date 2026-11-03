@@ -70,7 +70,7 @@ export function createLineMessagingRuntime(
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
     let gateway: MessagingGateway | undefined;
     const outbox = new FileMessagingOutbox(path.join(workspace, ".sofia", "messaging-outbox"));
-    let retryWorker: { stop(): void } | undefined;
+    let retryWorker: { stop(): Promise<void> } | undefined;
     const queueDelivery = async (platform: "line" | "whatsapp", conversationId: string, text: string) => {
       try {
         await outbox.enqueue(platform, { conversationId, text });
@@ -141,7 +141,7 @@ export function createLineMessagingRuntime(
         });
       },
       stop: async () => {
-        retryWorker?.stop();
+        await retryWorker?.stop();
         retryWorker = undefined;
         await gateway!.stop();
       },
