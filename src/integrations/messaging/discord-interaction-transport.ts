@@ -215,7 +215,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
       });
       return { status: 200, body: { type: 5 } };
     },
-    async sendMessage(channelId, text, replyToMessageId, interactionId) {
+    async sendMessage(channelId, text, replyToMessageId, interactionId, nonce) {
       if (!active || !controller || controller.signal.aborted) throw new Error("Discord transport is stopped.");
       if (interactionId && pendingInteractions.has(interactionId)) {
         return sendInteractionMessage(interactionId, text);
