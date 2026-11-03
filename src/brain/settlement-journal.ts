@@ -516,6 +516,11 @@ export class FileSettlementJournal {
       } else if (event.type === "settled" &&
           typeof event.attemptId === "string" && event.attemptId.length > 0 &&
           typeof event.usageKnown === "boolean") {
+        if ((event.usageKnown && !isValidJournalUsage(event.usage)) ||
+            (!event.usageKnown && event.usage !== undefined)) {
+          corrupt = true;
+          break;
+        }
         settledAttempts += 1;
         if (!event.usageKnown) unknownUsageAttempts += 1;
       } else if (event.type === "checkpoint") {
