@@ -202,7 +202,7 @@ test("OpenAI-compatible structured Brain requests use JSON mode without enabling
   globalThis.fetch = async (_input, init) => {
     requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify({
-      choices: [{ message: { content: "{\\"ok\\":true}" }, finish_reason: "stop" }],
+      choices: [{ message: { content: "{\"ok\":true}" }],
       usage: { prompt_tokens: 8, completion_tokens: 3, total_tokens: 11 },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
