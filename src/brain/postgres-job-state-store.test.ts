@@ -161,6 +161,7 @@ test("cancelWithOutbox atomically cancels a queued job and inserts a destination
   assert.match(sql, /INSERT INTO sofia_agent_outbox/);
   assert.match(sql, /FROM updated u WHERE u.event_destination IS NOT NULL/);
   assert.match(sql, /'job.cancelled'/);
+  assert.match(sql, /'text','Sofia: งานถูกยกเลิกแล้ว'/);
   assert.match(sql, /owner_key_id=\$2/);
   assert.match(sql, /ON CONFLICT \(job_id,event_type,destination\) DO NOTHING/);
   assert.equal(values[1], "principal-a");
