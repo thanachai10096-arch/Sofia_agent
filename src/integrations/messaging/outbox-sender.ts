@@ -11,11 +11,13 @@ function parseDestination(value: string): { platform: "telegram" | "discord"; co
   }
   const platform = value.slice(0, separator);
   const conversationId = value.slice(separator + 1);
-  if ((platform !== "telegram" && platform !== "discord") ||
-      conversationId.length > 128 || /[\u0000-\u001f\u007f]/.test(conversationId)) {
-    throw new Error("Unsupported outbox messaging destination.");
-  }
-  return { platform, conversationId };
+  const validId = platform === "discord"
+    ? /^\d{1,24}$/.test(conversationId)
+    : platform === "telegram"
+      ? /^-?\d{1,20}$/.test(conversationId)
+      : false;
+  if (!validId) throw new Error("Unsupported outbox messaging destination.");
+  return { platform: platform as "telegram" | "discord", conversationId };
 }
 
 function notificationText(payload: unknown): string {
