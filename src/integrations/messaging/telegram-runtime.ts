@@ -2,7 +2,7 @@ import path from "node:path";
 import { SofiaClient } from "../../sdk/client.js";
 import { FileChatMessageDeduplicator } from "../file-chat-deduplicator.js";
 import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
-import { FileMessagingOutbox, flushMessagingOutbox } from "./file-outbox.js";
+import { FileMessagingOutbox, flushMessagingOutbox, startMessagingOutboxRetryWorker } from "./file-outbox.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createTelegramAdapter } from "./telegram.js";
 import { createTelegramHttpTransport } from "./telegram-http-transport.js";
@@ -146,6 +146,7 @@ export function createTelegramMessagingRuntime(
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
     let gateway: MessagingGateway | undefined;
     const outbox = new FileMessagingOutbox(path.join(workspace, ".sofia", "messaging-outbox"));
+    let retryWorker: { stop(): void } | undefined;
     const deliverQueued = async (message: OutboundMessage): Promise<boolean> => {
       try {
         const id = await outbox.enqueue("telegram", message);
@@ -207,8 +208,17 @@ export function createTelegramMessagingRuntime(
         const result = await flushMessagingOutbox(outbox, (target, message) => gateway!.send(target, message),
           () => onWarning("Messaging outbox retry remains pending."), "telegram");
         if (result.pending > 0) onWarning("Messaging outbox has pending outbound messages.");
+        retryWorker = startMessagingOutboxRetryWorker(outbox, {
+          platform: "telegram",
+          send: (target, message) => gateway!.send(target, message),
+          onFailure: () => onWarning("TELEGRAM background delivery retry remains pending."),
+        });
       },
-      stop: () => gateway!.stop(),
+      stop: async () => {
+        retryWorker?.stop();
+        retryWorker = undefined;
+        await gateway!.stop();
+      },
     };
   } catch (error) {
     // Report only the static validation message from our own constructors. Never log
