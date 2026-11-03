@@ -62,7 +62,7 @@ export class SqliteLearningTransactionStore {
     const db = new DatabaseSync(absolute);
     try {
       db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
-      db.exec("CREATE TABLE IF NOT EXISTS learning_experiences (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, receipt_id TEXT NOT NULL, experience_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, receipt_id), UNIQUE (tenant_id, principal_id, project_id, experience_id)); CREATE TABLE IF NOT EXISTS learning_candidates (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, candidate_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, candidate_id)); CREATE TABLE IF NOT EXISTS learning_evaluations (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, candidate_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, candidate_id)); CREATE TABLE IF NOT EXISTS learning_active_skills (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, skill_id TEXT NOT NULL, skill_name TEXT NOT NULL, policy_revision TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, skill_id)); CREATE INDEX IF NOT EXISTS learning_active_skill_name ON learning_active_skills(tenant_id, principal_id, project_id, skill_name, policy_revision);");
+      db.exec("CREATE TABLE IF NOT EXISTS learning_receipt_sequences (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, sequence INTEGER NOT NULL CHECK (sequence >= 1), receipt_id TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, sequence), UNIQUE (tenant_id, principal_id, project_id, receipt_id)); CREATE TABLE IF NOT EXISTS learning_experiences (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, receipt_id TEXT NOT NULL, experience_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, receipt_id), UNIQUE (tenant_id, principal_id, project_id, experience_id)); CREATE TABLE IF NOT EXISTS learning_candidates (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, candidate_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, candidate_id)); CREATE TABLE IF NOT EXISTS learning_evaluations (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, candidate_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, candidate_id)); CREATE TABLE IF NOT EXISTS learning_active_skills (tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL, skill_id TEXT NOT NULL, skill_name TEXT NOT NULL, policy_revision TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (tenant_id, principal_id, project_id, skill_id)); CREATE INDEX IF NOT EXISTS learning_active_skill_name ON learning_active_skills(tenant_id, principal_id, project_id, skill_name, policy_revision);");
       hardenSqliteFiles(absolute);
       return new SqliteLearningTransactionStore(db, absolute);
     } catch (error) { db.close(); throw error; }
@@ -88,6 +88,22 @@ export class SqliteLearningTransactionStore {
     const values = [scope.tenantId, scope.principalId, scope.projectId] as const;
     const db = this.db;
     const tx: LearningTransaction = {
+      bindReceiptSequence: async (requestedScope, sequence, receiptId) => {
+        assertSameScope(requestedScope, scope);
+        if (!Number.isSafeInteger(sequence) || sequence < 1 ||
+            typeof receiptId !== "string" || !receiptId.trim() || receiptId.length > 500) {
+          throw new Error("Invalid authoritative receipt sequence binding");
+        }
+        db.prepare("INSERT INTO learning_receipt_sequences (tenant_id, principal_id, project_id, sequence, receipt_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")
+          .run(...values, sequence, receiptId);
+        const bySequence = db.prepare("SELECT receipt_id FROM learning_receipt_sequences WHERE tenant_id=? AND principal_id=? AND project_id=? AND sequence=?")
+          .get(...values, sequence) as { receipt_id: string } | undefined;
+        const byReceipt = db.prepare("SELECT sequence FROM learning_receipt_sequences WHERE tenant_id=? AND principal_id=? AND project_id=? AND receipt_id=?")
+          .get(...values, receiptId) as { sequence: number } | undefined;
+        if (!bySequence || bySequence.receipt_id !== receiptId || !byReceipt || byReceipt.sequence !== sequence) {
+          throw new Error("Conflicting authoritative receipt identity for learning sequence");
+        }
+      },
       insertExperienceIfAbsent: async experience => {
         assertSameScope(experience.scope, scope);
         const result = db.prepare("INSERT INTO learning_experiences (tenant_id, principal_id, project_id, receipt_id, experience_id, payload) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING").run(...values, experience.receiptId, experience.id, encode(experience));
