@@ -48,7 +48,6 @@ export function createVoiceUtteranceController(options: VoiceUtteranceController
     const error = cause instanceof Error ? cause : new Error("Voice turn failed");
     try { options.onError?.(error); } catch { /* observer isolation */ }
   };
-  const isClosed = () => state === "closed";
   const waitForSessionIdle = async () => {
     const deadline = Date.now() + 30_000;
     while (!isClosed()) {
