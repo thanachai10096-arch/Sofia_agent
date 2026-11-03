@@ -310,6 +310,7 @@ export class VersionedSkillLifecycle {
    * is stale and risk stealing it from a live writer.
    */
   private withExclusiveLock<T>(operation: () => T): T {
+    mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const lockDirectory = this.file + ".lock";
     try {
       mkdirSync(lockDirectory, { mode: 0o700 });
