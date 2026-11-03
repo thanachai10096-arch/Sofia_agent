@@ -412,10 +412,10 @@ test("a non-cooperative tool result arriving after cancellation is never reporte
   const events: SecurityAuditEvent[] = [];
   let sideEffectOccurred = false;
   const registry = new MapToolRegistry([{
-    name: "custom.write",
+    name: "custom.read",
     description: "Simulate a tool implementation that ignores AbortSignal",
     inputSchema: { type: "object" },
-    effects: ["write"] as const,
+    effects: ["read"] as const,
     async execute() {
       announceStarted();
       const result = await pendingTool;
@@ -427,7 +427,7 @@ test("a non-cooperative tool result arriving after cancellation is never reporte
   }]);
   const gateway = new RegistryToolGateway(
     { runtime: runtime(), tools: registry },
-    { ...defaultPolicy, maxRisk: "critical" },
+    defaultPolicy,
     undefined,
     undefined,
     undefined,
@@ -435,7 +435,7 @@ test("a non-cooperative tool result arriving after cancellation is never reporte
   );
 
   const execution = gateway.execute(
-    { tool: "custom.write", input: {} },
+    { tool: "custom.read", input: {} },
     {
       runId: "late-tool-result-cancellation-test",
       signal: controller.signal,
