@@ -160,6 +160,56 @@ export class SqliteSessionStore {
     return created;
   }
 
+  /**
+   * Append turns while holding SQLite's write lock. Unlike read/modify/save,
+   * this preserves turns written by other Agent instances or processes.
+   */
+  appendMessages(id: string, appended: string[], maxMessages = 200): Session {
+    if (!id) throw new Error("Session id must not be empty.");
+    if (!Array.isArray(appended) || appended.some((message) => typeof message !== "string")) {
+      throw new TypeError("Session messages must be an array of strings.");
+    }
+    const boundedMaxMessages = boundedInteger(maxMessages, 200, 1, 1_000);
+    const updatedAt = Date.now();
+    let messages: string[] = [];
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        "INSERT INTO sessions(id, updated_at) VALUES (?, ?) ON CONFLICT(id) DO NOTHING",
+      ).run(id, updatedAt);
+      const existing = this.db.prepare(
+        "SELECT content FROM session_messages WHERE session_id = ? ORDER BY position ASC",
+      ).all(id) as Array<{ content: string }>;
+      messages = [...existing.map((message) => message.content), ...appended];
+      if (messages.length > boundedMaxMessages) {
+        messages = messages.slice(messages.length - boundedMaxMessages);
+      }
+
+      this.db.prepare("DELETE FROM session_messages WHERE session_id = ?").run(id);
+      if (this.ftsAvailable) {
+        this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
+      }
+      const insertMessage = this.db.prepare(
+        "INSERT INTO session_messages(session_id, position, content) VALUES (?, ?, ?)",
+      );
+      const insertFts = this.ftsAvailable
+        ? this.db.prepare("INSERT INTO session_messages_fts(session_id, content) VALUES (?, ?)")
+        : undefined;
+      messages.forEach((message, position) => {
+        insertMessage.run(id, position, message);
+        insertFts?.run(id, message);
+      });
+      this.db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(updatedAt, id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    restrictSqlitePermissions(this.filePath);
+    return { id, messages, updatedAt };
+  }
+
   save(session: Session): void {
     if (!session.id) throw new Error("Session id must not be empty.");
     if (!Array.isArray(session.messages) || session.messages.some((message) => typeof message !== "string")) {
