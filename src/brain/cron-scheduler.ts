@@ -219,7 +219,10 @@ export class CronScheduler {
     this.authorize = options.authorize ?? ((actor, _action, schedule) => !!actor && (!schedule || actor === schedule.ownerKeyId));
     this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
     this.maxSchedulesPerOwner = Math.max(1, Math.min(10_000, Math.floor(options.maxSchedulesPerOwner ?? 100)));
-    this.recoveryLeaseMs = Math.max(3_000, Math.min(300_000, Math.floor(options.recoveryLeaseMs ?? 30_000)));
+    const requestedRecoveryLeaseMs = options.recoveryLeaseMs ?? 30_000;
+    this.recoveryLeaseMs = Number.isFinite(requestedRecoveryLeaseMs)
+      ? Math.max(3_000, Math.min(300_000, Math.floor(requestedRecoveryLeaseMs)))
+      : 30_000;
     this.auditCallback = options.audit;
   }
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
@@ -528,19 +531,27 @@ export class CronScheduler {
     const onAbort = () => timeout.abort(controller.signal.reason ?? new Error("Recovered scheduled execution cancelled"));
     controller.signal.addEventListener("abort", onAbort, { once: true });
     let leaseLost = false;
+    let renewingLease = false;
     const renewLease = async (): Promise<void> => {
-      const renewed = await this.store.transact(state => {
-        const current = state.history.find(item => item.id === executionId);
-        if (!current || (current.status !== "claimed" && current.status !== "running") ||
-            current.recoveryLeaseOwnerToken !== leaseToken) return false;
-        const expiresAt = current.recoveryLeaseExpiresAt ? Date.parse(current.recoveryLeaseExpiresAt) : 0;
-        if (!Number.isFinite(expiresAt) || expiresAt <= this.now().getTime()) return false;
-        current.recoveryLeaseExpiresAt = new Date(this.now().getTime() + this.recoveryLeaseMs).toISOString();
-        return true;
-      });
-      if (!renewed) {
-        leaseLost = true;
-        timeout.abort(new Error("Recovered scheduler monitor lease was lost"));
+      // Do not queue overlapping heartbeats behind a slow transactional store.
+      if (renewingLease || leaseLost) return;
+      renewingLease = true;
+      try {
+        const renewed = await this.store.transact(state => {
+          const current = state.history.find(item => item.id === executionId);
+          if (!current || (current.status !== "claimed" && current.status !== "running") ||
+              current.recoveryLeaseOwnerToken !== leaseToken) return false;
+          const expiresAt = current.recoveryLeaseExpiresAt ? Date.parse(current.recoveryLeaseExpiresAt) : 0;
+          if (!Number.isFinite(expiresAt) || expiresAt <= this.now().getTime()) return false;
+          current.recoveryLeaseExpiresAt = new Date(this.now().getTime() + this.recoveryLeaseMs).toISOString();
+          return true;
+        });
+        if (!renewed) {
+          leaseLost = true;
+          timeout.abort(new Error("Recovered scheduler monitor lease was lost"));
+        }
+      } finally {
+        renewingLease = false;
       }
     };
     const heartbeat = setInterval(() => {
