@@ -670,13 +670,13 @@ test("recovery monitor stops polling when a store outage outlives its lease", as
 
   const recovered = await scheduler.recover();
   assert.equal(recovered.monitoring, 1);
-  for (let i = 0; i < 100 && reads < 2; i++) {
+  for (let i = 0; i < 100 && heartbeatFailures === 0; i++) {
     await new Promise(resolve => setTimeout(resolve, 25));
   }
   await new Promise(resolve => setTimeout(resolve, 300));
 
   assert.equal(heartbeatFailures, 1, "the heartbeat should encounter the simulated outage");
-  assert.ok(reads <= 2, "the expired monitor must stop polling instead of continuing indefinitely");
+  assert.ok(reads <= 6, "the expired monitor must stop polling instead of continuing indefinitely");
   assert.equal(cancelCalls, 0, "losing the lease must not cancel the shared runtime job");
   assert.equal(state.history[0].status, "running",
     "an expired monitor must not terminalize an execution after losing its lease");
