@@ -28,6 +28,7 @@ const names = [
   "SOFIA_MODEL_PROVIDER",
   "SOFIA_BASE_URL",
   "SOFIA_API_KEY",
+  "SOFIA_PROVIDER_API_KEY",
   "SOFIA_MODEL",
   "BASE_URL",
   "API_KEY",
@@ -110,11 +111,11 @@ test("explicit provider selection wins when multiple provider credentials are pr
   assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
 });
 
-test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL", () => {
+test("custom OpenAI-compatible endpoint supports a dedicated provider key", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "custom";
   process.env.SOFIA_BASE_URL = "https://llm.example.test/v1/";
-  process.env.SOFIA_API_KEY = "custom-provider-key";
+  process.env.SOFIA_PROVIDER_API_KEY = "custom-provider-key";
   process.env.SOFIA_MODEL = "vendor/model-default";
   process.env.SOFIA_CODING_MODEL = "vendor/model-code";
   const config = loadModelConfigFromEnv();
@@ -123,6 +124,21 @@ test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, 
   assert.equal(config.providers.fast?.model, "vendor/model-default");
   assert.equal(config.providers.coding?.model, "vendor/model-code");
   assert.equal(config.providers.reasoning?.model, "vendor/model-default");
+});
+
+test("Sofia API authentication key does not become the model-provider credential", () => {
+  clear();
+  process.env.SOFIA_API_KEY = "sofia-api-auth-only";
+  process.env.GEMINI_API_KEY = "gemini-provider-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "gemini-provider-key");
+  assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
+});
+
+test("Sofia API authentication key alone is not treated as a custom model configuration", () => {
+  clear();
+  process.env.SOFIA_API_KEY = "sofia-api-auth-only";
+  assert.throws(loadModelConfigFromEnv, /Configure SOFIA_BASE_URL, SOFIA_PROVIDER_API_KEY, and SOFIA_MODEL/);
 });
 
 test("generic BASE_URL, API_KEY, and MODEL aliases are supported", () => {
@@ -140,7 +156,7 @@ test("partial custom provider configuration fails instead of silently switching 
   clear();
   process.env.SOFIA_BASE_URL = "https://llm.example.test/v1";
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
-  assert.throws(loadModelConfigFromEnv, /requires SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL/);
+  assert.throws(loadModelConfigFromEnv, /requires SOFIA_BASE_URL, SOFIA_PROVIDER_API_KEY, and SOFIA_MODEL/);
 });
 
 test("fails with actionable guidance when no supported provider is configured", () => {
