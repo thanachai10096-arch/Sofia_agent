@@ -8,6 +8,17 @@ import type { UserMemoryEntry, UserMemoryStore } from "./user-memory.js";
 export interface MarkdownMemoryOptions {
   /** Private runtime directory. Defaults to Sofia's state directory. */
   root?: string;
+  /** Receives a scope-only diagnostic when the non-canonical Markdown snapshot cannot be updated. */
+  onProjectionError?: (scope: "user" | "project") => void;
+}
+
+function reportProjectionError(options: MarkdownMemoryOptions, scope: "user" | "project"): void {
+  try {
+    if (options.onProjectionError) options.onProjectionError(scope);
+    else console.warn("[Sofia] Markdown memory projection sync failed; canonical memory remains committed.");
+  } catch {
+    // Diagnostics must never turn a committed canonical mutation into a reported failure.
+  }
 }
 
 /** Render untrusted memory text as a fenced literal block, choosing a fence longer
@@ -143,7 +154,7 @@ export class MarkdownUserMemoryStore implements UserMemoryStore {
 
   constructor(
     private readonly store: UserMemoryStore,
-    options: MarkdownMemoryOptions = {},
+    private readonly options: MarkdownMemoryOptions = {},
   ) {
     this.root = path.resolve(options.root ?? sofiaStateDirectory("memory-markdown"));
   }
@@ -162,7 +173,7 @@ export class MarkdownUserMemoryStore implements UserMemoryStore {
   async save(userId: string, entry: UserMemoryEntry): Promise<void> {
     await withUserMarkdownSyncLock(this.root, userId, async () => {
       await this.store.save(userId, entry);
-      await this.sync(userId);
+      try { await this.sync(userId); } catch { reportProjectionError(this.options, "user"); }
     });
   }
 
@@ -177,7 +188,9 @@ export class MarkdownUserMemoryStore implements UserMemoryStore {
   async delete(userId: string, id: string): Promise<boolean> {
     return withUserMarkdownSyncLock(this.root, userId, async () => {
       const deleted = await this.store.delete(userId, id);
-      if (deleted) await this.sync(userId);
+      if (deleted) {
+        try { await this.sync(userId); } catch { reportProjectionError(this.options, "user"); }
+      }
       return deleted;
     });
   }
@@ -185,7 +198,7 @@ export class MarkdownUserMemoryStore implements UserMemoryStore {
   async clear(userId: string): Promise<void> {
     await withUserMarkdownSyncLock(this.root, userId, async () => {
       await this.store.clear(userId);
-      await fs.rm(this.fileFor(userId), { force: true });
+      try { await fs.rm(this.fileFor(userId), { force: true }); } catch { reportProjectionError(this.options, "user"); }
     });
   }
 }
@@ -196,7 +209,7 @@ export class MarkdownProjectMemoryStore implements ProjectMemoryStore {
 
   constructor(
     private readonly store: ProjectMemoryStore,
-    options: MarkdownMemoryOptions = {},
+    private readonly options: MarkdownMemoryOptions = {},
   ) {
     this.root = path.resolve(options.root ?? sofiaStateDirectory("memory-markdown"));
   }
@@ -219,7 +232,7 @@ export class MarkdownProjectMemoryStore implements ProjectMemoryStore {
 
   async save(entry: ProjectMemoryEntry): Promise<void> {
     await this.store.save(entry);
-    await this.sync();
+    try { await this.sync(); } catch { reportProjectionError(this.options, "project"); }
   }
 
   async list(): Promise<ProjectMemoryEntry[]> {
