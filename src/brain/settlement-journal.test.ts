@@ -86,6 +86,38 @@ test("settlement journal records only bounded accounting metadata", async () => 
   }
 });
 
+test("settlement rejects fabricated and duplicate attempt IDs", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-attempt-validation-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+    const claim = await journal.claimRun("attempt-validation-run");
+    const attempt = await journal.begin("attempt-validation-run", { inputTokens: 4, outputTokens: 8 }, claim);
+
+    await assert.rejects(
+      journal.settle("attempt-validation-run", { id: "not-started" }, { inputTokens: 1, outputTokens: 1 }, claim),
+      /exactly one pending Started event/,
+      "a caller must not be able to invent settlement evidence without a durable Started event",
+    );
+
+    await journal.settle("attempt-validation-run", attempt, { inputTokens: 2, outputTokens: 3 }, claim);
+    await assert.rejects(
+      journal.settle("attempt-validation-run", attempt, { inputTokens: 2, outputTokens: 3 }, claim),
+      /exactly one pending Started event/,
+      "a settlement must not be appended twice for the same provider attempt",
+    );
+
+    assert.equal(await journal.hasUnresolved("attempt-validation-run"), true,
+      "the known settlement must remain uncheckpointed, not be overwritten by duplicate evidence");
+    const inspection = await journal.inspectRun("attempt-validation-run");
+    assert.equal(inspection.startedAttempts, 1);
+    assert.equal(inspection.settledAttempts, 1);
+    assert.equal(inspection.journal, "unresolved");
+    await claim.release();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("settlement recovery inspection is read-only and reports active claims", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-inspect-"));
   try {
