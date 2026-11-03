@@ -120,6 +120,7 @@ export class OutboxDispatcher {
       }
     })() : Promise.resolve();
 
+    let sendFailed = false;
     let sendError: unknown;
     try {
       await this.send({
@@ -132,6 +133,7 @@ export class OutboxDispatcher {
         signal: controller.signal,
       });
     } catch (error) {
+      sendFailed = true;
       sendError = error;
     } finally {
       // Stop and join renewal before ACK/retry. This prevents a late heartbeat
@@ -145,7 +147,7 @@ export class OutboxDispatcher {
       report.leaseLost += 1;
       return;
     }
-    if (sendError === undefined) {
+    if (!sendFailed) {
       const acknowledged = await this.store.markDelivered(message.id, this.workerToken);
       if (acknowledged) report.delivered += 1;
       else report.leaseLost += 1;
