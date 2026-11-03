@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -132,6 +132,36 @@ test("model profile store refuses directory paths", async () => {
       model: "gemini-2.5-flash",
       apiKey: "alice-provider-secret-12345",
     }), /unavailable or corrupt/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("model profile store refuses malformed persisted profile records without overwriting them", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-model-profile-malformed-test-"));
+  const file = path.join(directory, "profiles.json");
+  const store = new EncryptedUserModelProfileStore(file, Buffer.alloc(32, 3).toString("base64"));
+  const malformed = JSON.stringify({
+    version: 1,
+    profiles: {
+      "not-a-valid-record": {
+        provider: "gemini",
+        model: "gemini-2.5-flash",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+        updatedAt: new Date(0).toISOString(),
+        encryptedKey: { iv: "aW52", ciphertext: "Y2lwaGVydGV4dA==", tag: 42 },
+      },
+    },
+  });
+  try {
+    await writeFile(file, malformed, { encoding: "utf8", mode: 0o600 });
+    await assert.rejects(() => store.get("alice"), /unavailable or corrupt/i);
+    await assert.rejects(() => store.set("alice", {
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      apiKey: "alice-provider-secret-12345",
+    }), /unavailable or corrupt/i);
+    assert.equal(await readFile(file, "utf8"), malformed);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
