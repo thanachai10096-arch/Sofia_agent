@@ -304,7 +304,7 @@ test("API job inspection, resume, and cancellation are isolated by authenticated
   const baseUrl = "http://127.0.0.1:" + address.port;
   const request = (key: string, path: string, init: RequestInit = {}) => fetch(baseUrl + path, {
     ...init,
-    headers: { authorization: "Bearer " + key, ...(init.headers ?? {}) },
+    headers: { authorization: "Bearer " + key },
   });
 
   try {
