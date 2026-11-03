@@ -190,13 +190,20 @@ if (discordConfigured) {
       notificationInFlight.add(job.id);
       const notificationToken = randomUUID();
       let claimed = false;
+      let notificationHeartbeat: ReturnType<typeof setInterval> | undefined;
       try {
         // The durable claim serializes recovery delivery across workers sharing
         // this local file store. A different-host shared store must provide its
         // own transactional implementation; this file store fails closed there.
         if (deps.jobRuntime.claimNotification) {
-          claimed = await deps.jobRuntime.claimNotification(job.id, notificationToken, 30_000);
+          claimed = await deps.jobRuntime.claimNotification(job.id, notificationToken, 60_000);
           if (!claimed) continue;
+          if (deps.jobRuntime.renewNotificationClaim) {
+            notificationHeartbeat = setInterval(() => {
+              void deps.jobRuntime?.renewNotificationClaim?.(job.id, notificationToken, 60_000).catch(() => false);
+            }, 15_000);
+            notificationHeartbeat.unref?.();
+          }
         } else {
           // Backward-compatible fallback for injected JobRuntime implementations
           // that have not adopted the optional claim contract yet.
@@ -213,6 +220,7 @@ if (discordConfigured) {
         // Keep the marker unset and release this worker's lease for a prompt retry.
         if (claimed) await deps.jobRuntime.releaseNotificationClaim?.(job.id, notificationToken).catch(() => undefined);
       } finally {
+        if (notificationHeartbeat) clearInterval(notificationHeartbeat);
         notificationInFlight.delete(job.id);
       }
     }
