@@ -1056,6 +1056,8 @@ test("DurableJobRuntime atomically claims and fences recovery notification deliv
     second.claimNotification(submitted.id, "worker-b", 30_000),
   ]);
   assert.equal(claims.filter(Boolean).length, 1, "only one worker may own the notification lease");
+  assert.equal((await first.get(submitted.id))?.notificationLeaseOwnerToken, undefined,
+    "public job reads must not expose the notification lease token");
   const winner = claims[0] ? "worker-a" : "worker-b";
   const loser = winner === "worker-a" ? "worker-b" : "worker-a";
 
@@ -1097,13 +1099,13 @@ test("DurableJobRuntime renews notification leases and allows takeover after exp
   }
   assert.equal(completed?.status, "completed");
 
-  assert.equal(await first.claimNotification(submitted.id, "worker-a", 200), true);
-  await new Promise<void>((resolve) => setTimeout(resolve, 80));
-  assert.equal(await first.renewNotificationClaim(submitted.id, "worker-a", 250), true);
-  await new Promise<void>((resolve) => setTimeout(resolve, 120));
+  assert.equal(await first.claimNotification(submitted.id, "worker-a", 1_000), true);
+  await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  assert.equal(await first.renewNotificationClaim(submitted.id, "worker-a", 1_500), true);
+  await new Promise<void>((resolve) => setTimeout(resolve, 500));
   assert.equal(await second.claimNotification(submitted.id, "worker-b", 30_000), false,
     "renewal must prevent takeover while the owning worker is still active");
-  await new Promise<void>((resolve) => setTimeout(resolve, 180));
+  await new Promise<void>((resolve) => setTimeout(resolve, 1_100));
   assert.equal(await second.claimNotification(submitted.id, "worker-b", 30_000), true,
     "another worker may recover the notification after the renewed lease expires");
 });
