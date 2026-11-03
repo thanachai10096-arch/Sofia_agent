@@ -105,6 +105,9 @@ export class RegistryToolGateway implements ToolGateway {
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
         }
+      }catch(error){
+        const message=String(redactSecrets(error instanceof Error?error.message:String(error)));
+        return{ok:false,data:null,evidenceId,error:{category:"tool_error",message}};
       }finally{context.notifyApproval(false);}
     }
     try{
