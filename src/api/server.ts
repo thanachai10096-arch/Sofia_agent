@@ -704,26 +704,38 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const jobId = jobMatch[1];
         const action = jobMatch[2];
         if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
-        const job = await deps.jobRuntime.get(jobId);
-        if (!job || job.ownerKeyId !== auth.keyId) {
+        const job = deps.jobRuntime.getForOwner
+          ? await deps.jobRuntime.getForOwner(jobId, auth.keyId)
+          : await deps.jobRuntime.get(jobId).then((record) => record?.ownerKeyId === auth.keyId ? record : undefined);
+        if (!job) {
           return json(res, 404, { error: "job_not_found" }, origin, config);
         }
         if (req.method === "GET" && !action) {
           return json(res, 200, job, origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
-          catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
+          try {
+            const resumed = deps.jobRuntime.resumeForOwner
+              ? await deps.jobRuntime.resumeForOwner(jobId, auth.keyId)
+              : await deps.jobRuntime.resume(jobId);
+            return json(res, 202, resumed, origin, config);
+          } catch (error) {
+            return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config);
+          }
         }
         if (req.method === "POST" && action === "cancel") {
-          const cancelled = await deps.jobRuntime.cancel(jobId);
+          const cancelled = deps.jobRuntime.cancelForOwner
+            ? await deps.jobRuntime.cancelForOwner(jobId, auth.keyId)
+            : await deps.jobRuntime.cancel(jobId);
           return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
         }
       }
 
       if (req.method === "GET" && req.url === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
-        const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
+        const jobs = deps.jobRuntime.listForOwner
+          ? await deps.jobRuntime.listForOwner(auth.keyId, 100)
+          : (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId).slice(0, 100);
         return json(res, 200, { jobs }, origin, config);
       }
 
