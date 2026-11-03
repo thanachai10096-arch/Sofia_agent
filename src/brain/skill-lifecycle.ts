@@ -79,6 +79,13 @@ export class VersionedSkillLifecycle {
   }
 
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
+    return this.withExclusiveLock(() => {
+      this.load();
+      return this.proposeLocked(skillPackage, provenance);
+    });
+  }
+
+  private proposeLocked(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
     const safePackage = validatePackage(skillPackage);
     if (!isRecord(provenance) || typeof provenance.source !== "string" || !provenance.source.trim() || provenance.source.length > 200 ||
         !Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length === 0 ||
@@ -120,12 +127,14 @@ export class VersionedSkillLifecycle {
     // rejected, or otherwise transitioned this candidate while evaluation was
     // in flight. Re-check the state after the await so a stale evaluation cannot
     // overwrite an active lifecycle record or resurrect a terminal candidate.
-    const before = clone(this.snapshot);
-    const record = this.requireRecord(candidateId);
-    if (record.status !== "candidate") {
-      throw new Error("Skill candidate changed state during evaluation");
-    }
-    record.evaluation = {
+    return this.withExclusiveLock(() => {
+      this.load();
+      const before = clone(this.snapshot);
+      const record = this.requireRecord(candidateId);
+      if (record.status !== "candidate") {
+        throw new Error("Skill candidate changed state during evaluation");
+      }
+      record.evaluation = {
       passed: result.passed === true && result.checks.every((check) => check.passed === true),
       checks: result.checks.map((check) => ({
         name: check.name.slice(0, 200),
@@ -136,12 +145,20 @@ export class VersionedSkillLifecycle {
     };
     record.status = record.evaluation.passed ? "verified" : "rejected";
     record.updatedAt = new Date().toISOString();
-    try { this.persist(); }
-    catch (error) { this.snapshot = before; throw error; }
-    return clone(record);
+      try { this.persist(); }
+      catch (error) { this.snapshot = before; throw error; }
+      return clone(record);
+    });
   }
 
   promote(candidateId: string): SkillLifecycleRecord {
+    return this.withExclusiveLock(() => {
+      this.load();
+      return this.promoteLocked(candidateId);
+    });
+  }
+
+  private promoteLocked(candidateId: string): SkillLifecycleRecord {
     const candidate = this.requireRecord(candidateId);
     if (candidate.status !== "verified" || candidate.evaluation?.passed !== true) throw new Error("Only successfully evaluated candidates can be promoted");
     if (candidate.provenance.confidence < this.minimumConfidence) throw new Error("Skill candidate confidence is below the promotion threshold");
@@ -178,6 +195,13 @@ export class VersionedSkillLifecycle {
   }
 
   rollback(skillId: string): SkillLifecycleRecord {
+    return this.withExclusiveLock(() => {
+      this.load();
+      return this.rollbackLocked(skillId);
+    });
+  }
+
+  private rollbackLocked(skillId: string): SkillLifecycleRecord {
     const activeId = this.snapshot.activeBySkill[skillId];
     if (!activeId) throw new Error("No managed active skill to roll back: " + skillId);
     const active = this.requireRecord(activeId);
@@ -223,6 +247,9 @@ export class VersionedSkillLifecycle {
     return item;
   }
   private load(): void {
+    // Always refresh under the writer lock. A long-lived instance must never
+    // persist a snapshot loaded before another process committed its update.
+    this.snapshot = { schemaVersion: 1, records: [], activeBySkill: {} };
     if (!existsSync(this.file)) return;
     if (lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
     const parsed: unknown = JSON.parse(readFileSync(this.file, "utf8"));
@@ -275,6 +302,30 @@ export class VersionedSkillLifecycle {
     }
     this.snapshot = { schemaVersion: 1, records, activeBySkill };
   }
+  /**
+   * Cross-process exclusive writer lock. The lock is deliberately fail-fast:
+   * concurrent writers cannot silently overwrite one another. If a process is
+   * terminated while holding the lock, an operator must inspect and remove the
+   * stale .lock directory before writes can resume; we never guess that a lock
+   * is stale and risk stealing it from a live writer.
+   */
+  private withExclusiveLock<T>(operation: () => T): T {
+    const lockDirectory = this.file + ".lock";
+    try {
+      mkdirSync(lockDirectory, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error("Skill lifecycle is locked by another writer; retry after it completes");
+      }
+      throw error;
+    }
+    try {
+      return operation();
+    } finally {
+      rmSync(lockDirectory, { recursive: true, force: true });
+    }
+  }
+
   private persist(): void {
     const directory = path.dirname(this.file);
     mkdirSync(directory, { recursive: true, mode: 0o700 });
