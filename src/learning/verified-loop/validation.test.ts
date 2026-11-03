@@ -36,6 +36,11 @@ test("fails closed for malformed persisted receipt and evidence objects", () => 
   assert.equal(validEvidence({ ...evidence, scope: undefined } as unknown as RunEvidence, receipt), false);
 });
 
+test("receipt evidence references must be unique", () => {
+  assert.equal(validReceipt({ ...receipt, evidenceIds: ["evidence-1", "evidence-1"] }, scope), false);
+  assert.equal(validReceipt({ ...receipt, evidenceIds: [" "] }, scope), false);
+});
+
 test("evidence must be trusted, successful, same-run and explicitly referenced", () => {
   const evidence: RunEvidence = {
     id: "evidence-1", runId: "run-1", scope, kind: "verification", trusted: true,
@@ -45,4 +50,7 @@ test("evidence must be trusted, successful, same-run and explicitly referenced",
   assert.equal(validEvidence({ ...evidence, trusted: false }, receipt), false);
   assert.equal(validEvidence({ ...evidence, runId: "other-run" }, receipt), false);
   assert.equal(validEvidence({ ...evidence, id: "unreferenced" }, receipt), false);
+  assert.equal(validEvidence({ ...evidence, content: " " }, receipt), false);
+  assert.equal(validEvidence({ ...evidence, createdAt: "not-a-date" }, receipt), false);
+  assert.equal(validEvidence({ ...evidence, kind: "model-output" as RunEvidence["kind"] }, receipt), false);
 });
