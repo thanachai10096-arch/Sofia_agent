@@ -26,7 +26,7 @@ Set these only in Vercel Project Settings → Environment Variables. Never commi
 - `DISCORD_ALLOWED_CHANNEL_IDS` — comma-separated Discord channel IDs allowed to start runs. No wildcard support.
 - `SOFIA_API_BASE_URL` — root HTTPS base URL of the separately hosted Sofia API, without credentials/query/fragment.
 - `SOFIA_API_KEY` — a narrowly scoped server-side primary API key. The bridge selects a mapped key per Discord sender.
-- `DISCORD_USER_API_KEYS` — required for multiple allowed users. JSON object mapping every allowlisted numeric Discord user ID to a distinct Sofia API key. Keys must be unique, at least 24 characters, and the mapping must match `DISCORD_ALLOWED_USER_IDS` exactly. Configure the same mapping on the Sofia API service so `src/api/entrypoint.ts` registers each key as a separate principal. Keep values in server-side secrets only.
+- `DISCORD_USER_API_KEYS` — required for multiple allowed users. JSON object mapping every allowlisted numeric Discord user ID to a distinct Sofia API key. Keys must be unique, non-empty, contain no surrounding whitespace or control characters, and the mapping must match `DISCORD_ALLOWED_USER_IDS` exactly. On the Sofia API service, mapped keys must also differ from the primary `SOFIA_API_KEY` and all Telegram user keys so two identities cannot collapse into one API principal. Configure the same mapping on the Sofia API service so `src/api/entrypoint.ts` registers each key as a separate principal. Keep values in server-side secrets only.
 - Optional `DISCORD_COMMAND_NAME` — defaults to `run`.
 
 Do not configure Production variables until Preview has passed the acceptance checklist. The actual deployment URL must come from Vercel after a deployment; do not guess it.
