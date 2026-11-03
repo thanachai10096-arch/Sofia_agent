@@ -56,7 +56,7 @@ test("new journal directory-sync failure keeps evidence and does not release its
       new FileSettlementJournal("workspace", root).claimRun("journal-sync-failure"),
       /already claimed/,
       "the caller's claim remains held until explicit reconciliation");
-    await assert.rejects(claim.release(), /injected directory sync failure/).catch(() => undefined);
+    await claim.release();
   } finally {
     await rm(root, { recursive: true, force: true });
   }
