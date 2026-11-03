@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { createUserMemoryEntry, FileUserMemoryStore } from "../src/brain/user-memory.js";
 import type { UserMemoryStore } from "../src/brain/user-memory.js";
 import { MarkdownProjectMemoryStore, MarkdownUserMemoryStore } from "../src/brain/markdown-memory.js";
+import { FileProjectMemoryStore } from "../src/brain/project-memory.js";
 import type { ProjectMemoryEntry, ProjectMemoryStore } from "../src/brain/project-memory.js";
 
 test("Markdown user memory mirrors explicit entries into private per-user files", async () => {
@@ -213,6 +214,63 @@ test("projection diagnostics cannot make a committed canonical mutation fail", a
     const entry = createUserMemoryEntry("fact", "Preserve canonical write");
     await assert.doesNotReject(store.save("principal-diagnostic", entry));
     assert.equal((await canonical.list("principal-diagnostic")).length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("canonical user and project memories survive store reconstruction after restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-memory-restart-"));
+  try {
+    const canonicalRoot = join(root, "canonical");
+    const projectionRoot = join(root, "projections");
+    const userId = "restart-principal";
+    const userEntry = createUserMemoryEntry("preference", "Prefers restart-safe memory");
+    const projectEntry: ProjectMemoryEntry = {
+      id: "restart-project-decision",
+      project: "/workspace/restart",
+      kind: "decision",
+      content: "Keep canonical project memory durable",
+      confidence: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      uses: 0,
+    };
+
+    const firstUserStore = new MarkdownUserMemoryStore(
+      new FileUserMemoryStore(join(canonicalRoot, "users")),
+      { root: projectionRoot },
+    );
+    const firstProjectStore = new MarkdownProjectMemoryStore(
+      new FileProjectMemoryStore(projectEntry.project, join(canonicalRoot, "projects")),
+      { root: projectionRoot },
+    );
+    await firstUserStore.save(userId, userEntry);
+    await firstProjectStore.save(projectEntry);
+
+    // Recreate every store/decorator as a new process would after restart.
+    const restartedUserStore = new MarkdownUserMemoryStore(
+      new FileUserMemoryStore(join(canonicalRoot, "users")),
+      { root: projectionRoot },
+    );
+    const restartedProjectStore = new MarkdownProjectMemoryStore(
+      new FileProjectMemoryStore(projectEntry.project, join(canonicalRoot, "projects")),
+      { root: projectionRoot },
+    );
+
+    assert.equal((await restartedUserStore.list(userId)).some((entry) => entry.id === userEntry.id), true);
+    assert.equal((await restartedUserStore.find(userId, "restart-safe memory")).some((entry) => entry.id === userEntry.id), true);
+    assert.equal((await restartedProjectStore.list()).some((entry) => entry.id === projectEntry.id), true);
+    assert.equal((await restartedProjectStore.find("canonical project memory")).some((entry) => entry.id === projectEntry.id), true);
+    assert.match(
+      await readFile(join(projectionRoot, "users", createHash("sha256").update(userId).digest("hex"), "USER.md"), "utf8"),
+      /Prefers restart-safe memory/,
+    );
+    assert.match(
+      await readFile(join(projectionRoot, "projects", createHash("sha256").update(projectEntry.project).digest("hex"), "MEMORY.md"), "utf8"),
+      /Keep canonical project memory durable/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
