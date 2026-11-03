@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createLearningRepairAuthorizationFromRecovery, inspectLearningRecovery } from "./recovery-coordinator.js";
+import { planLearningReconciliationRepair } from "./reconciliation-repair.js";
+import { executeLearningRepairPlan } from "./reconciliation-repair-executor.js";
 import type { ActiveLearningSkill, LearningScope } from "./ports.js";
 import type { RuntimeLearningSkill } from "./reconciliation.js";
 
@@ -199,4 +201,62 @@ test("coordinator rejects approval receipts bound to another actor, scope, or po
     assert.equal(result.assessments[0]?.disposition, "blocked-approval");
     assert.match(result.assessments[0]?.reason ?? "", /different actor, skill, scope, or policy revision/);
   }
+});
+
+
+test("approval receipt flows from read-only recovery through planner into journaled executor", async () => {
+  const h = host();
+  let runtimeActive = false;
+  const inspection = await inspectLearningRecovery(scope, h.adapter);
+  const authorization = createLearningRepairAuthorizationFromRecovery(inspection, "end-to-end-repair");
+  assert.ok(authorization);
+  const plan = planLearningReconciliationRepair(inspection.report, authorization);
+  assert.equal(plan.eligibleForExecutor, true);
+  assert.equal(plan.actions[0]?.approvalId, "receipt-1");
+
+  const entries = new Map<string, {
+    key: string; scope: LearningScope; skillId: string; policyRevision: string;
+    state: "running" | "succeeded" | "failed"; attempts: number; updatedAt: string;
+    claimed?: boolean; claimToken?: string;
+  }>();
+  const events: string[] = [];
+  const journal = {
+    async get(key: string) { return entries.get(key); },
+    async begin(entry: typeof entries extends Map<string, infer V> ? V : never) {
+      const prior = entries.get(entry.key);
+      if (prior?.state === "running" || prior?.state === "succeeded") return { ...prior, claimed: false };
+      const claimed = { ...entry, state: "running" as const, attempts: (prior?.attempts ?? 0) + 1, claimed: true, claimToken: "e2e-claim" };
+      entries.set(entry.key, claimed);
+      return claimed;
+    },
+    async finish(key: string, _scope: LearningScope, state: "running" | "succeeded" | "failed", result?: string, claimToken?: string) {
+      const prior = entries.get(key);
+      if (!prior || prior.claimToken !== claimToken) throw new Error("claim lost");
+      entries.set(key, { ...prior, state, ...(result ? { result } : {}), claimToken: undefined });
+    },
+    async heartbeat(key: string, _scope: LearningScope, claimToken: string) {
+      return entries.get(key)?.claimToken === claimToken;
+    },
+    async audit(event: { event: string }) { events.push(event.event); },
+  };
+  const execution = await executeLearningRepairPlan(plan, journal, {
+    async revalidate(action) {
+      const binding = h.state.approvalBinding;
+      return {
+        scope, exists: runtimeActive, active: runtimeActive,
+        policyRevision: h.state.policy, explicitlyApproved: h.state.approved,
+        trustedEvidenceValid: h.state.evidence,
+        approvalBinding: binding && { ...binding, skillId: action.skillId },
+      };
+    },
+    async registerThroughLifecycle(action) {
+      assert.equal(action.approvalId, "receipt-1");
+      runtimeActive = true;
+    },
+    now: () => new Date("2026-11-03T00:00:00.000Z"),
+  });
+  assert.equal(execution[0]?.state, "succeeded");
+  assert.equal(runtimeActive, true);
+  assert.equal(entries.get(plan.actions[0]!.idempotencyKey)?.state, "succeeded");
+  assert.deepEqual(events, ["repair_started", "repair_revalidated", "repair_registered", "repair_succeeded"]);
 });
