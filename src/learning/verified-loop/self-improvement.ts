@@ -38,7 +38,8 @@ export class ScopedSelfImprovement {
 
   onVerifiedExecution(notification: VerifiedExecutionNotification): Promise<void> {
     if (!Number.isSafeInteger(notification.sequence) || notification.sequence < 1 ||
-        typeof notification.receiptId !== "string" || !notification.receiptId.trim()) {
+        typeof notification.receiptId !== "string" || !notification.receiptId.trim() ||
+        typeof notification.summary !== "string") {
       return Promise.reject(new Error("Invalid verified execution notification"));
     }
     const safe = { ...notification, summary: this.options.redact(notification.summary).slice(0, 1200) };
@@ -59,6 +60,15 @@ export class ScopedSelfImprovement {
         throw new Error("Invalid self-improvement checkpoint");
       }
       const pending = new Map(state.pending.map(item => [item.sequence, item]));
+      const existingAtSequence = pending.get(notification.sequence);
+      if (existingAtSequence && existingAtSequence.receiptId !== notification.receiptId) {
+        throw new Error("Conflicting receipt IDs for the same pending sequence");
+      }
+      const existingSequenceForReceipt = [...pending.values()].find(item =>
+        item.receiptId === notification.receiptId && item.sequence !== notification.sequence);
+      if (existingSequenceForReceipt) {
+        throw new Error("Receipt ID is already assigned to a different pending sequence");
+      }
       if (notification.sequence <= state.lastSequence) return;
       pending.set(notification.sequence, notification);
       let cursor = state.lastSequence;
