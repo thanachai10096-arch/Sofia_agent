@@ -41,6 +41,14 @@ import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
 
+function ownerStorageNamespace(workspace: string, ownerKeyId?: string): string {
+  // Preserve the pre-existing local/single-user namespace. Authenticated owners
+  // receive an opaque, deterministic namespace derived only from server identity.
+  if (ownerKeyId === undefined) return workspace;
+  const ownerHash = createHash("sha256").update(ownerKeyId).digest("hex");
+  return `${workspace}:owner:${ownerHash}`;
+}
+
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
@@ -54,8 +62,6 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     onSkillCandidate: ReturnType<typeof createManagedSkillLearningHandler>;
   }>();
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
-  const runStore=new FileRunStore(workspace);
-  const settlementJournal = new FileSettlementJournal(workspace);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent,budgetSnapshot})=>{
     // Resolve all learning state only after the authenticated principal is known.
     // This prevents a shared workspace from becoming a cross-user memory boundary.
@@ -92,6 +98,9 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       ownerLearningStores.set(ownerNamespace, learningStores);
     }
     const { projectMemory, skillLedger, onSkillCandidate } = learningStores;
+    const scopedStorageNamespace = ownerStorageNamespace(workspace, principalId);
+    const runStore = new FileRunStore(scopedStorageNamespace);
+    const settlementJournal = new FileSettlementJournal(scopedStorageNamespace);
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
     if (requestedRouteId && !requestedRoute) throw new Error("Unknown model route: " + requestedRouteId);
@@ -152,8 +161,12 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
-  const retentionJournal = new FileSettlementJournal(workspace);
-  const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace,(runId)=>retentionJournal.deleteRun(runId));
+  const jobRuntime=new DurableJobRuntime(
+    brainFactory,
+    (ownerKeyId) => new FileRunStore(ownerStorageNamespace(workspace, ownerKeyId)),
+    workspace,
+    (runId, ownerKeyId) => new FileSettlementJournal(ownerStorageNamespace(workspace, ownerKeyId)).deleteRun(runId),
+  );
   const userMemoryStore = new FileUserMemoryStore();
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
 }
