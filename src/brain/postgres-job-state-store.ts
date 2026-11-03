@@ -213,7 +213,7 @@ export class PostgresJobStateStore implements JobStateStore, OwnedJobStateStore 
         RETURNING id
       )
       SELECT id FROM updated`,
-      [record.id,record.status,crypto.randomUUID(),record.updatedAt,record.task,
+      [record.id,record.status,randomUUID(),record.updatedAt,record.task,
        record.modelRouteId??null,record.ownerKeyId??null,record.notificationChannelId??null,
        record.sessionKey??null,record.sessionTask??null,record.notificationDelivered??false,
        record.leaseOwnerToken??null,record.leaseExpiresAt??null,record.heartbeatAt??null,
