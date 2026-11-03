@@ -121,6 +121,18 @@ test("explicit provider selection wins when multiple provider credentials are pr
   assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
 });
 
+test("openai-compatible is accepted as an explicit provider alias", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
+  process.env.SOFIA_BASE_URL = "https://llm.example.test/v1";
+  process.env.SOFIA_MODEL_API_KEY = "provider-key";
+  process.env.SOFIA_MODEL = "vendor/model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://llm.example.test/v1");
+  assert.equal(config.providers.fast?.apiKey, "provider-key");
+  assert.equal(config.providers.fast?.model, "vendor/model");
+});
+
 test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "custom";
