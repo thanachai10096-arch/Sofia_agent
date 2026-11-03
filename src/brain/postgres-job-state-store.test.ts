@@ -84,3 +84,61 @@ test("PostgresJobStateStore rejects corrupt persisted JSON instead of treating i
   const store = new PostgresJobStateStore(db);
   await assert.rejects(() => store.get("00000000-0000-4000-8000-000000000001"), SyntaxError);
 });
+
+
+test("terminal persistence atomically updates the job and inserts an owner-scoped outbox event", async () => {
+  let capturedSql = "";
+  let capturedValues: unknown[] = [];
+  const db: PostgresExecutor = {
+    async query(sql, values = []) {
+      capturedSql = sql;
+      capturedValues = values;
+      return { rows: [{ id: "00000000-0000-4000-8000-000000000001" }], rowCount: 1 };
+    },
+  };
+  const store = new PostgresJobStateStore(db);
+  const record = {
+    id: "00000000-0000-4000-8000-000000000001",
+    status: "completed" as const,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    task: "private task",
+    ownerKeyId: "principal-a",
+    notificationChannelId: "discord-channel-a",
+    leaseOwnerToken: "00000000-0000-4000-8000-000000000002",
+    leaseExpiresAt: new Date(Date.now() + 10000).toISOString(),
+    result: { completed: true, text: "done" },
+  };
+  assert.equal(await store.saveTerminalWithOutbox(record, "job.completed", {
+    jobId: record.id, status: "completed",
+  }), true);
+  assert.match(capturedSql, /WITH updated AS/);
+  assert.match(capturedSql, /UPDATE sofia_agent_jobs/);
+  assert.match(capturedSql, /INSERT INTO sofia_agent_outbox/);
+  assert.match(capturedSql, /FROM updated u/);
+  assert.match(capturedSql, /lease_owner_token IS NOT DISTINCT FROM \$12::uuid/);
+  assert.match(capturedSql, /lease_expires_at > now\(\)/);
+  assert.match(capturedSql, /ON CONFLICT \(job_id,event_type,destination\) DO NOTHING/);
+  assert.equal(capturedValues[6], "principal-a");
+  assert.equal(capturedValues[7], "discord-channel-a");
+  assert.equal(capturedValues[17], "job.completed");
+  assert.deepEqual(JSON.parse(String(capturedValues[18])), {
+    jobId: record.id, status: "completed",
+  });
+});
+
+test("terminal outbox persistence rejects non-terminal records before querying", async () => {
+  let queried = false;
+  const db: PostgresExecutor = {
+    async query() { queried = true; return { rows: [], rowCount: 0 }; },
+  };
+  const store = new PostgresJobStateStore(db);
+  await assert.rejects(() => store.saveTerminalWithOutbox({
+    id: "00000000-0000-4000-8000-000000000001",
+    status: "running",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    task: "test",
+  }, "job.running", {}), /terminal job status/);
+  assert.equal(queried, false);
+});
