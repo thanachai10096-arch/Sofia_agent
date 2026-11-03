@@ -88,7 +88,7 @@ function isStoredProfile(value: unknown): value is StoredProfile {
     typeof profile.updatedAt === "string" && profile.updatedAt.length > 0 &&
     !!encryptedKey && typeof encryptedKey === "object" &&
     typeof encryptedKey.iv === "string" && encryptedKey.iv.length > 0 &&
-    typeof encryptedKey.ciphertext === "string" &&
+    typeof encryptedKey.ciphertext === "string" && encryptedKey.ciphertext.length > 0 &&
     typeof encryptedKey.tag === "string" && encryptedKey.tag.length > 0;
 }
 
