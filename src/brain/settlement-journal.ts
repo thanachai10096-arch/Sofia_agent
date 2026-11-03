@@ -199,15 +199,19 @@ export class FileSettlementJournal {
   private async append(runId: string, event: JournalEvent): Promise<void> {
     await this.ensureDirectory();
     const file = this.file(runId);
+    let existingInfo: Awaited<ReturnType<typeof fs.lstat>> | undefined;
     try {
-      const existing = await fs.lstat(file);
-      if (existing.isSymbolicLink() || !existing.isFile()) {
+      existingInfo = await fs.lstat(file);
+      if (existingInfo.isSymbolicLink() || !existingInfo.isFile()) {
         throw new Error("Settlement journal record must be a regular file, not a symbolic link");
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    // O_NOFOLLOW closes the lstat/open race on platforms that expose it.
+    // O_NOFOLLOW closes the symlink lstat/open race on platforms that expose
+    // it. If a record already existed, also require the opened descriptor to
+    // identify that same inode; otherwise a concurrent path replacement could
+    // redirect an append to a different regular file.
     // The lstat check above still rejects pre-existing symlinks elsewhere.
     const noFollow = fsConstants.O_NOFOLLOW ?? 0;
     const handle = await fs.open(
@@ -217,8 +221,9 @@ export class FileSettlementJournal {
     );
     try {
       const info = await handle.stat();
-      if (!info.isFile()) {
-        throw new Error("Settlement journal record must be a regular file");
+      if (!info.isFile() || (existingInfo &&
+          (info.dev !== existingInfo.dev || info.ino !== existingInfo.ino))) {
+        throw new Error("Settlement journal record changed during validation");
       }
       // chmod the opened inode rather than resolving the path a second time.
       await handle.chmod(0o600);
