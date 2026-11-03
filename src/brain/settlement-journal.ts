@@ -21,6 +21,17 @@ export class SettlementRunClaimedError extends Error {
   }
 }
 
+export interface SettlementRunInspection {
+  claim: "absent" | "active" | "invalid";
+  owner?: { pid: number; hostname: string; createdAt: string };
+  journal: "missing" | "resolved" | "unresolved" | "corrupt";
+  startedAttempts: number;
+  settledAttempts: number;
+  unknownUsageAttempts: number;
+  checkpoints: number;
+  unresolved: boolean;
+}
+
 export interface SettlementRunClaim {
   assertRun(runId: string): void;
   release(): Promise<void>;
@@ -214,6 +225,136 @@ export class FileSettlementJournal {
       usageKnown,
       ...(usageKnown ? { usage } : {}),
     });
+  }
+
+  /**
+   * Read-only recovery diagnostics. This never acquires, releases, or removes
+   * a claim and never changes journal evidence. The lock token is deliberately
+   * omitted from the returned owner metadata.
+   */
+  async inspectRun(runId: string): Promise<SettlementRunInspection> {
+    if (!runId) throw new Error("Invalid settlement journal inspection");
+    const journalFile = this.file(runId);
+    const lockFile = journalFile + ".lock";
+    let claim: SettlementRunInspection["claim"] = "absent";
+    let owner: SettlementRunInspection["owner"];
+
+    try {
+      const lockInfo = await fs.lstat(lockFile);
+      if (lockInfo.isSymbolicLink() || !lockInfo.isFile()) {
+        claim = "invalid";
+      } else {
+        const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+        const handle = await fs.open(lockFile, fsConstants.O_RDONLY | noFollow);
+        try {
+          const opened = await handle.stat();
+          if (!opened.isFile() || opened.dev !== lockInfo.dev || opened.ino !== lockInfo.ino) {
+            claim = "invalid";
+          } else {
+            const raw: unknown = JSON.parse(await handle.readFile("utf8"));
+            if (!raw || typeof raw !== "object") {
+              claim = "invalid";
+            } else {
+              const record = raw as Record<string, unknown>;
+              const valid = record.version === 1 &&
+                typeof record.token === "string" && record.token.length > 0 &&
+                Number.isSafeInteger(record.pid) && (record.pid as number) > 0 &&
+                typeof record.hostname === "string" && record.hostname.length > 0 &&
+                typeof record.createdAt === "string" && Number.isFinite(Date.parse(record.createdAt));
+              if (!valid) {
+                claim = "invalid";
+              } else {
+                claim = "active";
+                owner = {
+                  pid: record.pid as number,
+                  hostname: record.hostname as string,
+                  createdAt: record.createdAt as string,
+                };
+              }
+            }
+          }
+        } finally {
+          await handle.close();
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        if ((error as NodeJS.ErrnoException).code === "ELOOP") claim = "invalid";
+        else throw error;
+      }
+    }
+
+    let source: string;
+    try {
+      const info = await fs.lstat(journalFile);
+      if (info.isSymbolicLink() || !info.isFile()) {
+        return { claim, ...(owner ? { owner } : {}), journal: "corrupt", startedAttempts: 0, settledAttempts: 0, unknownUsageAttempts: 0, checkpoints: 0, unresolved: true };
+      }
+      const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+      const handle = await fs.open(journalFile, fsConstants.O_RDONLY | noFollow);
+      try {
+        const opened = await handle.stat();
+        if (!opened.isFile() || opened.dev !== info.dev || opened.ino !== info.ino) {
+          return { claim, ...(owner ? { owner } : {}), journal: "corrupt", startedAttempts: 0, settledAttempts: 0, unknownUsageAttempts: 0, checkpoints: 0, unresolved: true };
+        }
+        source = await handle.readFile("utf8");
+      } finally {
+        await handle.close();
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { claim, ...(owner ? { owner } : {}), journal: "missing", startedAttempts: 0, settledAttempts: 0, unknownUsageAttempts: 0, checkpoints: 0, unresolved: false };
+      }
+      if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+        return { claim: "invalid", journal: "corrupt", startedAttempts: 0, settledAttempts: 0, unknownUsageAttempts: 0, checkpoints: 0, unresolved: true };
+      }
+      throw error;
+    }
+
+    let startedAttempts = 0;
+    let settledAttempts = 0;
+    let unknownUsageAttempts = 0;
+    let checkpoints = 0;
+    let corrupt = false;
+    for (const line of source.split("\n")) {
+      if (!line) continue;
+      let raw: unknown;
+      try { raw = JSON.parse(line) as unknown; } catch { corrupt = true; break; }
+      if (!raw || typeof raw !== "object") { corrupt = true; break; }
+      const event = raw as Record<string, unknown>;
+      if (event.version !== 1 || typeof event.at !== "string" || !Number.isFinite(Date.parse(event.at))) {
+        corrupt = true;
+        break;
+      }
+      if (event.type === "started" &&
+          typeof event.attemptId === "string" && event.attemptId.length > 0 &&
+          Number.isSafeInteger(event.maxInputTokens) && (event.maxInputTokens as number) >= 0 &&
+          Number.isSafeInteger(event.maxOutputTokens) && (event.maxOutputTokens as number) >= 0) {
+        startedAttempts += 1;
+      } else if (event.type === "settled" &&
+          typeof event.attemptId === "string" && event.attemptId.length > 0 &&
+          typeof event.usageKnown === "boolean") {
+        settledAttempts += 1;
+        if (!event.usageKnown) unknownUsageAttempts += 1;
+      } else if (event.type === "checkpoint") {
+        checkpoints += 1;
+      } else {
+        corrupt = true;
+        break;
+      }
+    }
+
+    const unresolved = corrupt || await this.hasUnresolved(runId);
+    return {
+      claim,
+      ...(owner ? { owner } : {}),
+      journal: corrupt ? "corrupt" : unresolved ? "unresolved" : "resolved",
+      startedAttempts,
+      settledAttempts,
+      unknownUsageAttempts,
+      checkpoints,
+      unresolved,
+    };
   }
 
   async hasUnresolved(runId: string): Promise<boolean> {
