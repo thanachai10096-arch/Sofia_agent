@@ -140,7 +140,7 @@ test("Telegram-style API keys isolate Memory and do not inherit privileged core 
     assert.match(JSON.stringify(await readOne.json()), /private memory one/);
     assert.doesNotMatch(JSON.stringify(await request("telegram-user-one", "/v1/memory").then((r) => r.json())), /private memory two/);
     assert.match(JSON.stringify(await readTwo.json()), /private memory two/);
-    const privileged = await request("telegram-user-one", "/v1/cron/schedules");
+    const privileged = await request("telegram-user-one", "/v1/security/status");
     assert.equal(privileged.status, 403);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
