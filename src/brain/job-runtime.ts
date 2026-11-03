@@ -647,10 +647,15 @@ export class DurableJobRuntime implements JobRuntime {
     if (!ownedStore.cancelForOwner && !(this.state instanceof FileJobStateStore)) {
       throw new Error("Owner-scoped job cancellation is required for shared storage");
     }
-    const persisted = ownedStore.cancelForOwner
-      ? await ownedStore.cancelForOwner(id, ownerKeyId)
-      : await this.state.get(id).then(async (record) =>
-          record?.ownerKeyId === ownerKeyId ? await this.state.cancel(id) : undefined);
+    const atomicCancelStore = this.state as JobStateStore & {
+      cancelWithOutbox?: (id: string, ownerKeyId?: string) => Promise<JobRecord | undefined>;
+    };
+    const persisted = atomicCancelStore.cancelWithOutbox
+      ? await atomicCancelStore.cancelWithOutbox(id, ownerKeyId)
+      : ownedStore.cancelForOwner
+        ? await ownedStore.cancelForOwner(id, ownerKeyId)
+        : await this.state.get(id).then(async (record) =>
+            record?.ownerKeyId === ownerKeyId ? await this.state.cancel(id) : undefined);
     if (!persisted || persisted.ownerKeyId !== ownerKeyId || persisted.status !== "cancelled") return false;
     const record = this.jobs.get(id);
     if (record) Object.assign(record, persisted);
@@ -745,7 +750,12 @@ export class DurableJobRuntime implements JobRuntime {
 
   async cancel(id: string): Promise<boolean> {
     const controller = this.controllers.get(id);
-    const persisted = await this.state.cancel(id);
+    const atomicCancelStore = this.state as JobStateStore & {
+      cancelWithOutbox?: (id: string) => Promise<JobRecord | undefined>;
+    };
+    const persisted = atomicCancelStore.cancelWithOutbox
+      ? await atomicCancelStore.cancelWithOutbox(id)
+      : await this.state.cancel(id);
     if (!persisted || persisted.status !== "cancelled") return false;
     const record = this.jobs.get(id);
     if (record) Object.assign(record, persisted);
