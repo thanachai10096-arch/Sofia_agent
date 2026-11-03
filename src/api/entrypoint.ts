@@ -141,7 +141,7 @@ if (discordConfigured) {
         channelId: message.channelId,
         conversationId: message.channelId,
       });
-      const sessionContext = await buildDiscordSessionContext(deps.jobRuntime, sessionKey);
+      const sessionContext = await buildDiscordSessionContext(deps.jobRuntime, sessionKey, 5, principalId);
       const taskWithMemory = sessionContext
         ? task + "\n\n" + sessionContext
         : task;
