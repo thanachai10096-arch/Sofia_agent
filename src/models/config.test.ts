@@ -17,6 +17,13 @@ const names = [
   "GEMINI_CODING_MODEL",
   "GEMINI_REASONING_MODEL",
   "GEMINI_VISION_MODEL",
+  "DEEPSEEK_API_KEY",
+  "DEEPSEEK_BASE_URL",
+  "DEEPSEEK_MODEL",
+  "DEEPSEEK_FAST_MODEL",
+  "DEEPSEEK_CODING_MODEL",
+  "DEEPSEEK_REASONING_MODEL",
+  "DEEPSEEK_VISION_MODEL",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_MODEL",
@@ -28,6 +35,7 @@ const names = [
   "SOFIA_MODEL_PROVIDER",
   "SOFIA_BASE_URL",
   "SOFIA_API_KEY",
+  "SOFIA_MODEL_API_KEY",
   "SOFIA_MODEL",
   "BASE_URL",
   "API_KEY",
@@ -125,6 +133,27 @@ test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, 
   assert.equal(config.providers.reasoning?.model, "vendor/model-default");
 });
 
+test("custom provider prefers SOFIA_MODEL_API_KEY over Sofia API authentication", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_BASE_URL = "https://api.deepseek.com";
+  process.env.SOFIA_API_KEY = "sofia-server-auth-key";
+  process.env.SOFIA_MODEL_API_KEY = "deepseek-provider-key";
+  process.env.SOFIA_MODEL = "deepseek-chat";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "deepseek-provider-key");
+});
+
+test("custom provider retains SOFIA_API_KEY as a legacy provider-key fallback", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_BASE_URL = "https://llm.example.test/v1";
+  process.env.SOFIA_API_KEY = "legacy-provider-key";
+  process.env.SOFIA_MODEL = "vendor/model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "legacy-provider-key");
+});
+
 test("generic BASE_URL, API_KEY, and MODEL aliases are supported", () => {
   clear();
   process.env.BASE_URL = "http://127.0.0.1:1234/v1";
@@ -140,14 +169,14 @@ test("partial custom provider configuration fails instead of silently switching 
   clear();
   process.env.SOFIA_BASE_URL = "https://llm.example.test/v1";
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
-  assert.throws(loadModelConfigFromEnv, /requires SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL/);
+  assert.throws(loadModelConfigFromEnv, /requires SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL/);
 });
 
 test("fails with actionable guidance when no supported provider is configured", () => {
   clear();
   process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
   process.env.AI_GATEWAY_API_KEY = "legacy-test-key";
-  assert.throws(loadModelConfigFromEnv, /Configure SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL/);
+  assert.throws(loadModelConfigFromEnv, /Configure SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL/);
 });
 
 test("rejects malformed or credential-bearing custom base URLs", () => {
@@ -192,4 +221,28 @@ test("custom endpoints can opt into the Anthropic Messages protocol", () => {
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.protocol, "anthropic-messages");
   assert.equal(config.providers.fast?.baseUrl, "https://anthropic-proxy.example.test/v1");
+});
+
+
+test("DeepSeek provider uses the official OpenAI-compatible endpoint and supports route model overrides", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.DEEPSEEK_CODING_MODEL = "deepseek-v4-pro";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.providers.fast?.apiKey, "deepseek-test-key");
+  assert.equal(config.providers.fast?.model, "deepseek-flash");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
+  assert.equal(config.providers.coding?.model, "deepseek-v4-pro");
+  assert.equal(config.providers.reasoning?.model, "deepseek-flash");
+});
+
+test("DeepSeek can be auto-selected when it is the only configured built-in provider", () => {
+  clear();
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.DEEPSEEK_MODEL = "deepseek-v4-pro";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.providers.fast?.model, "deepseek-v4-pro");
 });

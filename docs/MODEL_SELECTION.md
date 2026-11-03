@@ -32,7 +32,7 @@ An explicitly selected route is not silently replaced by another route. If the r
 
 - SOFIA_MODEL_PROVIDER=openrouter selects OpenRouter.
 - SOFIA_MODEL_PROVIDER=gemini selects Gemini.
-- SOFIA_MODEL_PROVIDER=custom uses SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL for an OpenAI Chat Completions-compatible endpoint.
+- SOFIA_MODEL_PROVIDER=custom uses SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL for an OpenAI Chat Completions-compatible endpoint. `SOFIA_API_KEY` remains a backward-compatible provider-key fallback for older local configurations; hosted Sofia API authentication should use it independently from `SOFIA_MODEL_API_KEY`.
 - When no provider is explicitly selected, configure only one built-in provider credential. If both OpenRouter and Gemini credentials exist, Sofia requires explicit selection rather than silently redirecting requests.
 - Route-specific environment variables can assign different model IDs to fast, coding, reasoning, and vision routes.
 
