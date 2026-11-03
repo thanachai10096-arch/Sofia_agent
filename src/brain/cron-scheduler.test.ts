@@ -206,6 +206,45 @@ test("recovery reconciles persisted jobs and suppresses indeterminate resubmissi
 });
 
 
+test("recovery does not terminalize executions while another monitor holds a live lease", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      return id === "finished-under-lease"
+        ? { id, status: "completed", task: "already finished" } as JobRecord
+        : undefined;
+    },
+    async cancel() { return true; }, async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const schedule = await scheduler.create({
+    name: "leased-recovery", task: "task", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  const lease = {
+    recoveryLeaseOwnerToken: "another-live-monitor",
+    recoveryLeaseExpiresAt: "2026-10-17T00:00:30.000Z",
+  };
+  state.history.push(
+    { id: "terminal-under-lease", scheduleId: schedule.id, scheduledFor: now.toISOString(),
+      startedAt: now.toISOString(), status: "running", jobId: "finished-under-lease", attempt: 1, ...lease },
+    { id: "missing-under-lease", scheduleId: schedule.id, scheduledFor: now.toISOString(),
+      startedAt: now.toISOString(), status: "running", jobId: "not-visible-yet", attempt: 1, ...lease },
+  );
+
+  const result = await scheduler.recover();
+
+  assert.deepEqual(result, { reconciled: 0, monitoring: 0, indeterminate: 0 });
+  assert.equal(state.history[0].status, "running", "terminal runtime observation must not bypass a live lease");
+  assert.equal(state.history[1].status, "running", "a temporarily missing runtime record must not bypass a live lease");
+  assert.equal(state.history[0].recoveryLeaseOwnerToken, "another-live-monitor");
+  assert.equal(state.history[1].recoveryLeaseOwnerToken, "another-live-monitor");
+  assert.equal(state.audit.some((event: any) => event.action === "schedule.recovery.reconciled"), false);
+  assert.equal(state.audit.some((event: any) => event.action === "schedule.recovery.job_missing"), false);
+});
+
 test("file cron store serializes concurrent processes without losing updates", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "sofia-cron-lock-test-"));
   const moduleUrl = pathToFileURL(path.join(process.cwd(), "src", "brain", "cron-scheduler.ts")).href;
