@@ -319,7 +319,7 @@ export class SofiaModelGateway implements ModelProvider {
         messages: converted.messages,
         ...(tools ? {
           tools: tools.map((tool) => ({
-            name: tool.function.name,
+            name: anthropicWireNames.get(tool.function.name)!,
             description: tool.function.description,
             input_schema: tool.function.parameters,
           })),
