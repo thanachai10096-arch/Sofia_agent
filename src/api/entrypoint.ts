@@ -25,10 +25,11 @@ const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
 const rawDiscordUserIds = process.env.DISCORD_ALLOWED_USER_IDS;
 const rawDiscordChannelIds = process.env.DISCORD_ALLOWED_CHANNEL_IDS;
 const discordRequested = Boolean(discordPublicKey || discordBotToken || rawDiscordUserIds?.trim() || rawDiscordChannelIds?.trim());
-// Keep the API available when optional Discord configuration is incomplete. Discord remains
-// disabled unless every required credential and both explicit allowlists are configured.
+const discordGatewayRequested = process.env.DISCORD_GATEWAY_ENABLED === "true";
+// Interaction commands and Gateway natural chat have separate enablement requirements.
 const discordConfigured = Boolean(discordPublicKey && discordBotToken && rawDiscordUserIds?.trim() && rawDiscordChannelIds?.trim());
-if (discordRequested && !discordConfigured) {
+const discordGatewayConfigured = Boolean(discordGatewayRequested && discordBotToken && rawDiscordUserIds?.trim() && rawDiscordChannelIds?.trim());
+if (discordRequested && !discordConfigured && !discordGatewayConfigured) {
   console.error("Discord integration disabled: required configuration is incomplete; API will continue without Discord.");
 }
 let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
@@ -181,7 +182,7 @@ if (discordConfigured) {
 
 
 /** Optional natural-chat Gateway; shares the existing per-user durable job runtime. */
-if (process.env.DISCORD_GATEWAY_ENABLED === "true") {
+if (discordGatewayRequested) {
   const botToken = discordBotToken;
   try {
     if (!botToken || !rawDiscordUserIds?.trim() || !rawDiscordChannelIds?.trim()) {
