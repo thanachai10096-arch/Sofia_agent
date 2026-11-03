@@ -349,8 +349,10 @@ export class FileSettlementJournal {
       }
       if (event.type === "started") {
         if (typeof event.attemptId !== "string" || !event.attemptId ||
-            !Number.isSafeInteger(event.maxInputTokens) || (event.maxInputTokens as number) < 0 ||
-            !Number.isSafeInteger(event.maxOutputTokens) || (event.maxOutputTokens as number) < 0) {
+            !isValidJournalUsage({
+              inputTokens: event.maxInputTokens,
+              outputTokens: event.maxOutputTokens,
+            })) {
           throw new Error("Cannot settle an attempt from a corrupt journal");
         }
         if (seenAttemptIds.has(event.attemptId)) {
@@ -612,8 +614,10 @@ export class FileSettlementJournal {
 
       if (event.type === "started") {
         if (typeof event.attemptId !== "string" || !event.attemptId ||
-            !Number.isSafeInteger(event.maxInputTokens) || (event.maxInputTokens as number) < 0 ||
-            !Number.isSafeInteger(event.maxOutputTokens) || (event.maxOutputTokens as number) < 0 ||
+            !isValidJournalUsage({
+              inputTokens: event.maxInputTokens,
+              outputTokens: event.maxOutputTokens,
+            }) ||
             seenAttemptIds.has(event.attemptId)) {
           ambiguousEvidence = true;
           continue;
@@ -693,8 +697,10 @@ export class FileSettlementJournal {
       if (event.type === "checkpoint") continue;
       if (event.type === "started") {
         if (typeof event.attemptId !== "string" || !event.attemptId ||
-            !Number.isSafeInteger(event.maxInputTokens) || (event.maxInputTokens as number) < 0 ||
-            !Number.isSafeInteger(event.maxOutputTokens) || (event.maxOutputTokens as number) < 0 ||
+            !isValidJournalUsage({
+              inputTokens: event.maxInputTokens,
+              outputTokens: event.maxOutputTokens,
+            }) ||
             seenAttemptIds.has(event.attemptId)) {
           throw new Error("Cannot checkpoint corrupt or ambiguous settlement evidence");
         }
