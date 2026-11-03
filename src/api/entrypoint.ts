@@ -7,7 +7,11 @@ import { createDiscordInteractionTransport } from "../integrations/messaging/dis
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
-import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import {
+  createTelegramMessagingRuntime,
+  parseTelegramUserAllowlist,
+  parseTelegramUserApiKeys,
+} from "../integrations/messaging/telegram-runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -209,8 +213,24 @@ if (discordConfigured) {
   discordRecoveryTimer.unref?.();
 }
 
+// Register optional Telegram per-user credentials with the API auth layer as well
+// as the messaging runtime. Invalid optional Telegram mapping is ignored here;
+// createTelegramMessagingRuntime emits the sanitized configuration warning.
+const apiKeys: Record<string, string[]> = { [apiKey]: scopes };
+const telegramUserIds = process.env.TELEGRAM_ALLOWED_USER_IDS?.trim();
+const telegramUserApiKeys = process.env.TELEGRAM_USER_API_KEYS?.trim();
+if (telegramUserIds && telegramUserApiKeys) {
+  try {
+    const allowedTelegramUsers = parseTelegramUserAllowlist(telegramUserIds);
+    const perUserKeys = parseTelegramUserApiKeys(telegramUserApiKeys, allowedTelegramUsers);
+    for (const key of perUserKeys.values()) apiKeys[key] = scopes;
+  } catch {
+    // Fail closed for Telegram; do not stop the core API for optional bridge config.
+  }
+}
+
 const server = createSofiaApi(deps, {
-  apiKeys: { [apiKey]: scopes },
+  apiKeys,
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(path.join(workspace, ".sofia", "api-runs")),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
