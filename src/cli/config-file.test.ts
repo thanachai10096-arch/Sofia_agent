@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { applySafeLocalConfigEnvironment, assertNoLegacyPlaintextApiKey, writeSafeLocalConfig } from "./config-file.js";
+import { applySafeLocalConfigEnvironment, assertNoLegacyPlaintextApiKey, readSafeLocalConfig, writeSafeLocalConfig } from "./config-file.js";
 import { resolveCliInvocation } from "./commands.js";
 
 test("local config stores only non-secret metadata with private permissions", async () => {
