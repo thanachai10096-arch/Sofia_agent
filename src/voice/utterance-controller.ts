@@ -41,6 +41,7 @@ export function createVoiceUtteranceController(options: VoiceUtteranceController
   let state: "listening" | "capturing" | "processing" | "closed" = "listening";
   let activeTurn: Promise<unknown> | undefined;
   let pending = false;
+  const isClosed = () => state === "closed";
 
   const report = (cause: unknown) => {
     const error = cause instanceof Error ? cause : new Error("Voice turn failed");
@@ -58,7 +59,7 @@ export function createVoiceUtteranceController(options: VoiceUtteranceController
     void (async () => {
       try {
         if (activeTurn) await activeTurn.catch(() => undefined);
-        if (state === "closed") return;
+        if (isClosed()) return;
         const total = completed.reduce((sum, item) => sum + item.bytes.byteLength, 0);
         const audio = new Uint8Array(total);
         let offset = 0;
@@ -68,23 +69,23 @@ export function createVoiceUtteranceController(options: VoiceUtteranceController
         const result = await turn;
         try { await options.onTurnResult?.(result); } catch (error) { report(error); }
       } catch (error) {
-        if (state !== "closed") report(error);
+        if (!isClosed()) report(error);
       } finally {
         pending = false;
         activeTurn = undefined;
-        if (state !== "closed") state = "listening";
+        if (!isClosed()) state = "listening";
       }
     })();
   };
 
   return {
     pushFrame(frame, probability) {
-      if (state === "closed") throw new Error("Voice utterance controller is closed");
+      if (isClosed()) throw new Error("Voice utterance controller is closed");
       if (!frame || !(frame.bytes instanceof Uint8Array) || frame.bytes.byteLength === 0) throw new Error("Voice frame must contain non-empty audio bytes");
       if (!Number.isSafeInteger(frame.durationMs) || frame.durationMs !== frameDurationMs) throw new Error("Voice frame duration must match the configured VAD frame duration");
-      if (frames) append(frames, frame);
-      else preRoll.push(frame);
       try {
+        if (frames) append(frames, frame);
+        else preRoll.push(frame);
         for (const event of vad.push(probability)) {
           if (event.type === "started") {
             frames = preRoll.take();
@@ -103,13 +104,13 @@ export function createVoiceUtteranceController(options: VoiceUtteranceController
         }
       } catch (error) {
         frames = undefined; bytes = 0; preRoll.clear(); vad.reset();
-        if (state !== "closed") state = "listening";
+        if (!isClosed()) state = "listening";
         throw error;
       }
     },
     snapshot() { return { state, bufferedBytes: bytes + preRoll.snapshot().bytes }; },
     close(reason = "Voice utterance controller closed") {
-      if (state === "closed") return;
+      if (isClosed()) return;
       state = "closed"; frames = undefined; bytes = 0; preRoll.clear(); vad.reset();
       options.session.close(reason);
     },
