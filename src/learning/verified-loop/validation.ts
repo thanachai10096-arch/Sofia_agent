@@ -33,6 +33,8 @@ export function validEvidence(evidence: RunEvidence, receipt: VerificationReceip
       typeof evidence.runId !== "string" || !evidence.runId.trim() ||
       typeof evidence.content !== "string" || !evidence.content.trim() ||
       typeof evidence.createdAt !== "string" || !Number.isFinite(Date.parse(evidence.createdAt)) ||
+      !Number.isFinite(Date.parse(receipt.completedAt)) ||
+      Date.parse(evidence.createdAt) > Date.parse(receipt.completedAt) ||
       !["tool-result", "verification", "regression"].includes(evidence.kind)) return false;
   return evidence.trusted === true && evidence.success === true &&
     evidence.runId === receipt.runId && sameScope(evidence.scope, receipt.scope) &&
