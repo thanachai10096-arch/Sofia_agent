@@ -63,7 +63,7 @@ function parsePayload(data: unknown): GatewayPayload | undefined {
     return undefined;
   }
 }
-function timestampMillis(value?: string): number {
+function isDiscordGatewayUrl(value: string): boolean {\n  try {\n    const url = new URL(value);\n    return url.protocol === "wss:" && (url.hostname === "discord.gg" || url.hostname.endsWith(".discord.gg")) && !url.username && !url.password;\n  } catch { return false; }\n}\nfunction timestampMillis(value?: string): number {
   if (!value) return Date.now();
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : Date.now();
@@ -86,7 +86,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
   const allowedChannels = new Set(options.allowedChannelIds);
   const fetchImpl = options.fetchImpl ?? fetch;
   const random = options.random ?? Math.random;
-  const baseUrl = options.gatewayUrl ?? "wss://gateway.discord.gg/";
+  const baseUrl = options.gatewayUrl ?? "wss://gateway.discord.gg/";\n  if (!isDiscordGatewayUrl(baseUrl)) throw new Error("Discord Gateway URL must use the official wss://discord.gg host.");
   let active = false;
   let parentSignal: AbortSignal | undefined;
   let socket: DiscordGatewaySocket | undefined;
@@ -186,7 +186,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
       if (payload.t === "READY" && payload.d && typeof payload.d === "object") {
         const ready = payload.d as GatewayReady;
         if (typeof ready.session_id === "string" && ready.session_id.length <= 256 &&
-            typeof ready.resume_gateway_url === "string" && ready.resume_gateway_url.startsWith("wss://")) {
+            typeof ready.resume_gateway_url === "string" && isDiscordGatewayUrl(ready.resume_gateway_url)) {
           sessionId = ready.session_id;
           resumeUrl = ready.resume_gateway_url;
           reconnectAttempt = 0;
