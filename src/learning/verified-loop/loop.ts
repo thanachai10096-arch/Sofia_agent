@@ -145,23 +145,34 @@ export class VerifiedLearningLoop {
       const regressionEvidence = evaluation.regressionEvidenceIds.length > 0
         ? await this.host.verification.getEvidence(scope, evaluation.regressionEvidenceIds)
         : [];
-      // Verification adapters are external boundaries: malformed persisted evidence
-      // must fail closed rather than throwing while fields are inspected.
-      if (!Array.isArray(regressionEvidence) || regressionEvidence.some(item =>
-        !item || typeof item !== "object" || typeof item.id !== "string" ||
-        typeof item.runId !== "string" || !item.scope || typeof item.scope !== "object" ||
-        typeof item.trusted !== "boolean" || typeof item.success !== "boolean" ||
-        typeof item.kind !== "string")) {
+      // Treat the regression evidence adapter as an untrusted persistence boundary.
+      // Require an exact one-to-one match: no missing rows, duplicates, or unrelated extras.
+      const requestedRegressionIds = evaluation.regressionEvidenceIds;
+      if (!Array.isArray(regressionEvidence) ||
+          regressionEvidence.length !== requestedRegressionIds.length ||
+          new Set(requestedRegressionIds).size !== requestedRegressionIds.length) {
         return { recorded: true, experienceId: prepared.experienceId };
       }
-      const verifiedRegressionIds = new Set(regressionEvidence.filter(item =>
-        item.trusted === true && item.success === true && item.kind === "regression" &&
-        item.runId === evaluation.regressionRunId && sameScope(item.scope, scope) &&
-        evaluation.regressionEvidenceIds.includes(item.id)
-      ).map(item => item.id));
-      const regressionPassed = Boolean(evaluation.regressionRunId) &&
-        evaluation.regressionEvidenceIds.length > 0 &&
-        evaluation.regressionEvidenceIds.every(id => verifiedRegressionIds.has(id));
+      const verifiedRegressionIds = new Set<string>();
+      for (const item of regressionEvidence) {
+        if (!item || typeof item !== "object" ||
+            typeof item.id !== "string" || !item.id.trim() || item.id.length > 500 ||
+            typeof item.runId !== "string" || !item.runId.trim() ||
+            !sameScope(item.scope, scope) ||
+            item.trusted !== true || item.success !== true ||
+            item.kind !== "regression" ||
+            typeof item.content !== "string" || !item.content.trim() ||
+            typeof item.createdAt !== "string" || !Number.isFinite(Date.parse(item.createdAt)) ||
+            item.runId !== evaluation.regressionRunId ||
+            !requestedRegressionIds.includes(item.id) ||
+            verifiedRegressionIds.has(item.id)) {
+          return { recorded: true, experienceId: prepared.experienceId };
+        }
+        verifiedRegressionIds.add(item.id);
+      }
+      const regressionPassed = Boolean(evaluation.regressionRunId?.trim()) &&
+        requestedRegressionIds.length > 0 &&
+        requestedRegressionIds.every(id => verifiedRegressionIds.has(id));
       const recordedEvaluation = { ...evaluation, passed: evaluation.passed && regressionPassed };
       await this.host.transaction(scope, tx => tx.recordEvaluation(scope, candidate.id, recordedEvaluation));
       if (!evaluation.passed || !regressionPassed || evaluation.checks.length === 0 ||
