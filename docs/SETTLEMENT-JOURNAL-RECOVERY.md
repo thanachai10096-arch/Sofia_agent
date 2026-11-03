@@ -44,3 +44,7 @@ Do not mount this file journal as a shared multi-host coordination mechanism and
 ## Incident evidence
 
 Never put prompts, user task text, credentials, provider replies, or API keys into lock files or journal events. Retain the original journal and provider billing evidence under the deployment's normal restricted-access and retention policy.
+
+## Journal path integrity
+
+Journal inspection and unresolved-state checks reject symbolic links and non-regular journal records. Reads use `O_NOFOLLOW` where supported and verify that the opened file descriptor still refers to the inode observed by `lstat`. A symlinked or replaced record is treated as corrupt/unresolved evidence; it is never interpreted as an empty, resolved journal. This is a local filesystem hardening measure, not a substitute for a transactional shared store on multi-host deployments.
