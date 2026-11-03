@@ -193,3 +193,14 @@ const deps = createSofiaAgentDependencies(workspace, approval, {
 ```
 
 This keeps the local file stores as defaults. The shared PostgreSQL migration creates the snapshot table. A live DB test, payload-size/retention policy, and production host injection remain required before cloud rollout.
+
+
+## Transactional outbox adapter
+
+Added `PostgresOutboxStore` for the existing `sofia_agent_outbox` migration table. It provides:
+- Idempotent enqueue using the unique `(job_id,event_type,destination)` key.
+- Bounded batch claims with `FOR UPDATE SKIP LOCKED`, expiring leases, and attempt increments.
+- Lease-token-fenced acknowledgement and retry/failure transitions.
+- Bounded batch size, lease duration, retry delay, maximum attempts, and stored error length.
+
+Delivery semantics are **at-least-once**, not exactly-once: a worker may deliver successfully and crash before acknowledgement, so the destination adapter must deduplicate by outbox message ID where supported. The adapter deliberately does not send Discord/Telegram messages itself and is not yet wired to job completion; a dispatcher, destination-specific delivery adapters, and end-to-end duplicate/restart tests are still release gates. Do not put provider credentials or unnecessary personal data in payloads.
