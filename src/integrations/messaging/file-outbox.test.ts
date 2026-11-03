@@ -326,3 +326,18 @@ test("retry worker contains a throwing failure callback when a flush itself fail
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("outbox lease rejects invalid timestamps before creating a lock", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-lease-time-"));
+  try {
+    const outbox = new FileMessagingOutbox(root);
+    const id = await outbox.enqueue("line", { conversationId: "line-chat", text: "timestamp validation" });
+    await assert.rejects(outbox.claim(id, 5_000, Number.NaN), /Invalid messaging outbox lease/);
+    await assert.rejects(outbox.claim(id, 5_000, -1), /Invalid messaging outbox lease/);
+    await assert.rejects(outbox.claim(id, 5_000, Number.MAX_SAFE_INTEGER), /Invalid messaging outbox lease/);
+    assert.ok(await outbox.claim(id, 5_000, 1_000), "invalid timestamps must not leave a lock behind");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
