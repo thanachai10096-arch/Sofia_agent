@@ -6,8 +6,14 @@ export interface SofiaModelConfig {
 }
 
 function numberEnv(name: string, fallback: number) {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) ? value : fallback;
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return fallback;
+  if (value < 0) {
+    throw new Error(`${name} must be a finite non-negative number.`);
+  }
+  return value;
 }
 
 type ProviderPreset = {
