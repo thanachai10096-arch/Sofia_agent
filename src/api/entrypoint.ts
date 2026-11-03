@@ -33,8 +33,8 @@ if (process.env.DISCORD_USER_API_KEYS?.trim()) {
   try {
     const candidateKeys = parseDiscordUserApiKeys(process.env.DISCORD_USER_API_KEYS.trim());
     const allowedUsers = parseDiscordIdAllowlist(process.env.DISCORD_ALLOWED_USER_IDS, "DISCORD_ALLOWED_USER_IDS");
-    if (matchDiscordUserApiKeys(candidateKeys, allowedUsers)) discordUserApiKeys = candidateKeys;
-    else console.error("Discord per-user API key mapping disabled: mapping must match the user allowlist exactly.");
+    if (matchDiscordUserApiKeys(candidateKeys, allowedUsers, [apiKey, ...telegramUserApiKeys.values()])) discordUserApiKeys = candidateKeys;
+    else console.error("Discord per-user API key mapping disabled: mapping must match the user allowlist and use keys distinct from other API principals.");
   } catch {
     console.error("Discord per-user API key mapping disabled: configuration is invalid.");
   }
