@@ -9,6 +9,8 @@ import type { InboundMessage } from "./types.js";
 export interface SofiaMessagingHandlerOptions {
   /** Existing Sofia SDK/API client; credentials remain server-side. */
   client: ChatRunStarter;
+  /** Optional trusted per-message client resolver; when supplied, undefined denies dispatch. */
+  clientForMessage?: (message: InboundMessage) => ChatRunStarter | undefined;
   /** Existing access policy and atomic deduplicator from chat-adapter.ts. */
   accessPolicy: ChatAccessPolicy;
   deduplicator: ChatMessageDeduplicator;
@@ -51,13 +53,6 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
     throw new Error("commandPrefix must be a non-empty single-line command.");
   }
   const naturalLanguageEnabled = options.naturalLanguageEnabled ?? true;
-  const handleCommand = createChatCommandHandler({
-    client: options.client,
-    accessPolicy: options.accessPolicy,
-    deduplicator: options.deduplicator,
-    maxTaskCharacters: options.maxTaskCharacters,
-  });
-
   return async function onMessage(message: InboundMessage): Promise<string | void> {
     const text = message.text.trim();
     const isRunCommand = text === prefix || text.startsWith(prefix + " ") || text.startsWith(prefix + "\t");
@@ -70,6 +65,19 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
     if (!text) return;
 
     const task = isRunCommand ? text.slice(prefix.length).trim() : text;
+    // Resolve credentials only from the immutable sender ID supplied by the
+    // verified platform adapter. If a resolver is configured, never fall back
+    // to the shared client when that sender has no dedicated credential.
+    const client = options.clientForMessage
+      ? options.clientForMessage(message)
+      : options.client;
+    if (!client) return "Access denied.";
+    const handleCommand = createChatCommandHandler({
+      client,
+      accessPolicy: options.accessPolicy,
+      deduplicator: options.deduplicator,
+      maxTaskCharacters: options.maxTaskCharacters,
+    });
     const result = await handleCommand({
       platform: message.platform,
       messageId: message.messageId,
