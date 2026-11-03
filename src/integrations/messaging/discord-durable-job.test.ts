@@ -41,16 +41,17 @@ test("Discord tasks are submitted with an isolated principal and return the dura
   assert.equal(result.summary, "Repository inspected");
 });
 
-test("Discord durable job adapter returns failed job details without throwing away the job ID", async () => {
+test("Discord durable job adapter hides internal failure details without throwing away the job ID", async () => {
   const records: JobRecord[] = [];
   const runtime = runtimeFor(records);
   const promise = runDiscordTaskAsDurableJob(runtime, "inspect repository", "discord:123", { pollIntervalMs: 0 });
   await new Promise<void>((resolve) => setImmediate(resolve));
   records[0]!.status = "failed";
-  records[0]!.error = "Verification failed";
+  records[0]!.error = "provider_http_402_insufficient_credits";
   const result = await promise;
   assert.equal(result.status, "failed");
-  assert.equal(result.summary, "Verification failed");
+  assert.match(result.summary, /could not complete this job/i);
+  assert.doesNotMatch(result.summary, /provider_http_402|insufficient_credits/);
   assert.equal(result.id, "discord-job-12345678");
 });
 
