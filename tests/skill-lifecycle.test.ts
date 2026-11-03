@@ -180,6 +180,40 @@ test("skill lifecycle preserves prior version and can roll back", async () => {
 });
 
 
+test("promotion and rollback are idempotency guarded across stale lifecycle instances", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "idempotent.json");
+    const platform = new InMemorySkillsPlatform();
+    const writer = new VersionedSkillLifecycle(platform, passing, { file });
+    const staleWriter = new VersionedSkillLifecycle(platform, passing, { file });
+
+    const first = writer.propose(pkg("1.0.0"), {
+      source: "idempotency", evidenceIds: ["v1-evidence"], confidence: 0.95,
+    });
+    await writer.evaluate(first.id);
+    writer.promote(first.id);
+    assert.throws(() => staleWriter.promote(first.id), /Only successfully evaluated candidates/);
+    assert.equal(platform.get("repair-skill")?.version, "1.0.0");
+
+    const second = writer.propose(pkg("2.0.0"), {
+      source: "idempotency", evidenceIds: ["v2-evidence"], confidence: 0.95,
+    });
+    await writer.evaluate(second.id);
+    writer.promote(second.id);
+    assert.equal(platform.get("repair-skill")?.version, "2.0.0");
+
+    writer.rollback("repair-skill");
+    assert.equal(platform.get("repair-skill")?.version, "1.0.0");
+    assert.throws(() => staleWriter.rollback("repair-skill"), /No previous version is available/);
+    assert.equal(platform.get("repair-skill")?.version, "1.0.0");
+
+    const reloaded = new VersionedSkillLifecycle(platform, passing, { file });
+    assert.equal(reloaded.active("repair-skill")?.package.version, "1.0.0");
+    assert.equal(reloaded.list().filter(item => item.status === "active").length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill lifecycle refuses to overwrite an unmanaged platform skill", async () => {
   const root = dir();
   try {
