@@ -131,7 +131,7 @@ test("OpenAI-compatible adapter serializes assistant tool calls and tool results
   globalThis.fetch = async (_input, init) => {
     requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify({
-      choices: [{ finish_reason: "stop", message: { role: "assistant", content: "The file contains a title." } }],
+      choices: [{ finish_reason: "stop", message: { role: "assistant", content: "The file contains a title.", tool_calls: [{ id: "call_next", function: { name: "workspace_read_file", arguments: JSON.stringify({ path: "src/index.ts" }) } }] } }],
       usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
@@ -173,12 +173,25 @@ test("OpenAI-compatible adapter serializes assistant tool calls and tool results
         tool_calls: [{
           id: "call_read_1",
           type: "function",
-          function: { name: "workspace.read_file", arguments: JSON.stringify({ path: "README.md" }) },
+          function: { name: "workspace_read_file", arguments: JSON.stringify({ path: "README.md" }) },
         }],
       },
       { role: "tool", tool_call_id: "call_read_1", content: "# Sofia Agent" },
     ]);
+    assert.deepEqual(requestedBody.tools, [{
+      type: "function",
+      function: {
+        name: "workspace_read_file",
+        description: "Read a workspace file.",
+        parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      },
+    }]);
     assert.equal(result.text, "The file contains a title.");
+    assert.deepEqual(result.toolCalls, [{
+      id: "call_next",
+      name: "workspace.read_file",
+      input: { path: "src/index.ts" },
+    }]);
     assert.deepEqual(result.usage, { inputTokens: 20, outputTokens: 8 });
   } finally {
     globalThis.fetch = originalFetch;
