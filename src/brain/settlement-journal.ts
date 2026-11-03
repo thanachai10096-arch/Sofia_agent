@@ -298,8 +298,10 @@ export class FileSettlementJournal {
           }
           if (historical.type === "started") {
             if (typeof historical.attemptId !== "string" || !historical.attemptId ||
-                !Number.isSafeInteger(historical.maxInputTokens) || (historical.maxInputTokens as number) < 0 ||
-                !Number.isSafeInteger(historical.maxOutputTokens) || (historical.maxOutputTokens as number) < 0 ||
+                !isValidJournalUsage({
+                  inputTokens: historical.maxInputTokens,
+                  outputTokens: historical.maxOutputTokens,
+                }) ||
                 seenAttemptIds.has(historical.attemptId)) {
               throw new Error("Cannot append to a corrupt settlement journal record");
             }
