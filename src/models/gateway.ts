@@ -61,7 +61,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boolean): {
+function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boolean, toolNames: ReadonlyMap<string, string>): {
   system: string;
   messages: Array<{ role: "user" | "assistant"; content: string | Array<Record<string, unknown>> }>;
 } {
@@ -106,7 +106,9 @@ function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boole
         }
         const recordInput = asRecord(input);
         if (!recordInput) throw new Error("Anthropic tool-call input must be a JSON object.");
-        blocks.push({ type: "tool_use", id: call.id, name: call.name, input: recordInput });
+        const wireName = toolNames.get(call.name);
+        if (!wireName) throw new Error("Anthropic assistant tool call does not match the declared tool set.");
+        blocks.push({ type: "tool_use", id: call.id, name: wireName, input: recordInput });
       }
       append("assistant", blocks);
       return;
@@ -118,7 +120,7 @@ function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boole
   return { system, messages: result };
 }
 
-function normalizeAnthropicResponse(value: unknown): ChatResponse {
+function normalizeAnthropicResponse(value: unknown, originalToolNames: ReadonlyMap<string, string>): ChatResponse {
   const raw = asRecord(value) as AnthropicResponse | undefined;
   if (!raw || !Array.isArray(raw.content)) throw new Error("Anthropic Messages API returned an invalid response.");
   const textParts: string[] = [];
@@ -130,9 +132,11 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
       const name = typeof block.name === "string" ? block.name : "";
       const id = typeof block.id === "string" ? block.id : "";
       if (!name || !id) throw new Error("Anthropic Messages API returned an invalid tool-use block.");
+      const originalName = originalToolNames.get(name);
+      if (!originalName) throw new Error("Anthropic Messages API returned an unknown tool name.");
       toolCalls.push({
         id,
-        function: { name, arguments: JSON.stringify(block.input ?? {}) },
+        function: { name: originalName, arguments: JSON.stringify(block.input ?? {}) },
       });
     }
   }
@@ -266,6 +270,14 @@ export class SofiaModelGateway implements ModelProvider {
     const tools: ToolDefinition[] | undefined = request.tools?.length
       ? request.tools
       : undefined;
+    // Anthropic tool names allow only ASCII letters, digits, underscores, and
+    // hyphens. Keep Sofia's registry names intact by assigning request-local wire names.
+    const anthropicWireNames = new Map(
+      (tools ?? []).map((tool, index) => [tool.function.name, `sofia_tool_${index}`] as const),
+    );
+    const anthropicOriginalNames = new Map(
+      [...anthropicWireNames].map(([original, wire]) => [wire, original] as const),
+    );
 
     // Brain route adapter supplies a JSON context envelope and expects a
     // machine-readable object. OpenAI-compatible endpoints receive JSON mode;
@@ -292,7 +304,7 @@ export class SofiaModelGateway implements ModelProvider {
     let requestHeaders: Record<string, string>;
     let body: Record<string, unknown>;
     if (protocol === "anthropic-messages") {
-      const converted = anthropicMessages(messages, brainStructuredOutput);
+      const converted = anthropicMessages(messages, brainStructuredOutput, anthropicWireNames);
       endpoint = config.baseUrl.replace(/\/+$/, "") + "/messages";
       requestHeaders = {
         ...config.headers,
@@ -428,7 +440,7 @@ export class SofiaModelGateway implements ModelProvider {
     try {
       const raw: unknown = await response.json();
       data = protocol === "anthropic-messages"
-        ? normalizeAnthropicResponse(raw)
+        ? normalizeAnthropicResponse(raw, anthropicOriginalNames)
         : raw as ChatResponse;
     } catch {
       return failResponse("Model gateway returned invalid JSON or an unsupported provider response.");
