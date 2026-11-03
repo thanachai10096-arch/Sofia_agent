@@ -56,9 +56,12 @@ function normalizeBaseUrl(value: string): string {
 function selectProvider(): ProviderSelection {
   const requested = process.env.SOFIA_MODEL_PROVIDER?.trim().toLowerCase();
   const customBaseUrl = firstEnv("SOFIA_BASE_URL", "BASE_URL");
-  const customApiKey = firstEnv("SOFIA_MODEL_API_KEY", "SOFIA_PROVIDER_API_KEY", "API_KEY", "SOFIA_API_KEY");
+  const dedicatedCustomApiKey = firstEnv("SOFIA_MODEL_API_KEY", "SOFIA_PROVIDER_API_KEY", "API_KEY");
   const customModel = firstEnv("SOFIA_MODEL", "MODEL");
-  const hasCustomConfig = Boolean(customBaseUrl || customApiKey || customModel);
+  // SOFIA_API_KEY authenticates clients to Sofia's own API in server deployments.
+  // Treat it as a legacy provider key only when a custom endpoint/model is explicitly configured.
+  const customApiKey = dedicatedCustomApiKey || ((customBaseUrl || customModel) ? firstEnv("SOFIA_API_KEY") : "");
+  const hasCustomConfig = Boolean(customBaseUrl || dedicatedCustomApiKey || customModel);
 
   const openRouterKey = process.env.OPENROUTER_API_KEY?.trim() ?? "";
   const geminiKey = firstEnv("GEMINI_API_KEY", "Gemini_API_Key");
