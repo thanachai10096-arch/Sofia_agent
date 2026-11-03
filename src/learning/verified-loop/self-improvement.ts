@@ -74,7 +74,7 @@ export class ScopedSelfImprovement {
       let cursor = state.lastSequence;
       while (pending.has(cursor + 1)) {
         const next = pending.get(cursor + 1)!;
-        await loop.recordVerifiedCompletion(scope, next.receiptId, next.summary);
+        await loop.recordVerifiedCompletion(scope, next.receiptId, next.summary, next.sequence);
         pending.delete(cursor + 1);
         cursor += 1;
       }
