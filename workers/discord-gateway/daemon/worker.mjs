@@ -250,6 +250,7 @@ async function main() {
           errorDestination,
           "ขออภัยครับ Sofia ประมวลผลข้อความนี้ไม่สำเร็จ ลองส่งใหม่อีกครั้งได้ครับ",
           replyMode === "dm" ? undefined : message.id,
+          message.id,
         );
       } catch {
         console.error("discord_error_reply_failed");
