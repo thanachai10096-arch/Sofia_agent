@@ -494,6 +494,40 @@ test("journal cleanup refuses to erase corrupt settlement evidence", async () =>
   }
 });
 
+test("journal never records unsafe aggregate token usage as known", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-overflow-write-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+    const runId = "overflow-write-run";
+    const claim = await journal.claimRun(runId);
+    await assert.rejects(
+      journal.begin(runId, {
+        inputTokens: Number.MAX_SAFE_INTEGER,
+        outputTokens: Number.MAX_SAFE_INTEGER,
+      }, claim),
+      /Invalid settlement journal attempt/,
+    );
+
+    const attempt = await journal.begin(runId, { inputTokens: 10, outputTokens: 10 }, claim);
+    await journal.settle(runId, {
+      id: attempt.id,
+    }, {
+      inputTokens: Number.MAX_SAFE_INTEGER,
+      outputTokens: Number.MAX_SAFE_INTEGER,
+    }, claim);
+    await claim.release();
+
+    assert.equal(await journal.hasUnresolved(runId), true,
+      "unsafe aggregate usage must remain unresolved and block replay");
+    const inspection = await journal.inspectRun(runId);
+    assert.equal(inspection.unknownUsageAttempts, 1,
+      "unsafe aggregate usage must be recorded as unknown, never known");
+    assert.equal(inspection.journal, "unresolved");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("journal rejects known usage whose combined token count is unsafe", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-overflow-history-"));
   try {
