@@ -27,6 +27,9 @@ export interface JobRecord {
   leaseOwnerToken?: string;
   leaseExpiresAt?: string;
   heartbeatAt?: string;
+  /** Short-lived atomic reservation preventing concurrent owner resume requests. */
+  resumeReservationToken?: string;
+  resumeReservationExpiresAt?: string;
   snapshot?: BrainRunSnapshot;
   result?: Awaited<ReturnType<SofiaBrain["run"]>>;
   error?: string;
@@ -70,6 +73,7 @@ function publicJobRecord(record: JobRecord): JobRecord {
   // Lease ownership is an internal concurrency capability and must never be returned
   // to API/Discord clients, even though it remains in the durable store.
   delete safe.leaseOwnerToken;
+  delete safe.resumeReservationToken;
   return safe;
 }
 
@@ -136,6 +140,8 @@ export interface OwnedJobStateStore {
   getForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined>;
   listForOwner(ownerKeyId: string, limit: number): Promise<JobRecord[]>;
   cancelForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined>;
+  /** Atomically validates owner/state/snapshot and reserves one resume attempt. */
+  reserveResumeForOwner(id: string, ownerKeyId: string, reservationToken: string, reservationMs: number): Promise<JobRecord | undefined>;
 }
 
 class FileJobStateStore implements JobStateStore {
@@ -343,6 +349,8 @@ class FileJobStateStore implements JobStateStore {
       const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
       if (record.status === "running" && Number.isFinite(expires) && expires > now) return undefined;
       record.status = "running";
+      record.resumeReservationToken = undefined;
+      record.resumeReservationExpiresAt = undefined;
       record.leaseOwnerToken = ownerToken;
       record.heartbeatAt = new Date(now).toISOString();
       record.leaseExpiresAt = new Date(now + leaseMs).toISOString();
@@ -474,6 +482,26 @@ class FileJobStateStore implements JobStateStore {
       record.status = "cancelled";
       record.error ??= "Job cancelled by caller.";
       record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return { ...record };
+    });
+  }
+
+  async reserveResumeForOwner(id: string, ownerKeyId: string, reservationToken: string, reservationMs: number): Promise<JobRecord | undefined> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id && item.ownerKeyId === ownerKeyId);
+      if (!record || record.status === "completed" || record.status === "cancelled" || !record.snapshot) return undefined;
+      if (record.status === "running") {
+        const leaseExpiry = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
+        if (Number.isFinite(leaseExpiry) && leaseExpiry > Date.now()) return undefined;
+      }
+      const reservationExpiry = record.resumeReservationExpiresAt ? Date.parse(record.resumeReservationExpiresAt) : 0;
+      if (record.resumeReservationToken && Number.isFinite(reservationExpiry) && reservationExpiry > Date.now()) return undefined;
+      const now = Date.now();
+      record.resumeReservationToken = reservationToken;
+      record.resumeReservationExpiresAt = new Date(now + reservationMs).toISOString();
+      record.updatedAt = new Date(now).toISOString();
       await this.write(records);
       return { ...record };
     });
@@ -616,11 +644,35 @@ export class DurableJobRuntime implements JobRuntime {
   }
 
   async resumeForOwner(id: string, ownerKeyId: string, signal?: AbortSignal): Promise<JobRecord> {
-    const record = await this.getForOwner(id, ownerKeyId);
-    if (!record) throw new Error("Unknown job");
-    // Owner identity is immutable for a job. Shared stores must enforce the same
-    // owner predicate in getForOwner and keep ownership immutable after creation.
-    return this.resume(id, signal);
+    const ownedStore = this.state as JobStateStore & Partial<OwnedJobStateStore>;
+    if (!ownedStore.reserveResumeForOwner) {
+      if (!(this.state instanceof FileJobStateStore)) {
+        throw new Error("Atomic owner-scoped resume reservation is required for shared storage");
+      }
+    }
+    const reservationToken = randomUUID();
+    const reserved = ownedStore.reserveResumeForOwner
+      ? await ownedStore.reserveResumeForOwner(id, ownerKeyId, reservationToken, 30_000)
+      : await (this.state as FileJobStateStore).reserveResumeForOwner(id, ownerKeyId, reservationToken, 30_000);
+    if (!reserved) throw new Error("Job is unavailable, already running, or already being resumed");
+    const loadedSnapshot = reserved.snapshot?.runId && this.runStore
+      ? await this.runStore.load(reserved.snapshot.runId)
+      : undefined;
+    const snapshot = loadedSnapshot ? redactSecrets(loadedSnapshot) as BrainRunSnapshot : reserved.snapshot;
+    if (!snapshot) throw new Error("Job has no resumable snapshot");
+    const record: JobRecord = { ...reserved, ...(snapshot ? { snapshot } : {}) };
+    this.jobs.set(id, record);
+    try {
+      await this.execute(record, {
+        task: record.task,
+        ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}),
+        acceptanceCriteria: snapshot.acceptanceCriteria,
+      }, signal, snapshot);
+      return publicJobRecord(record);
+    } catch (error) {
+      // Reservation expiry allows recovery if execution could not be started.
+      throw error;
+    }
   }
 
   async markNotificationDelivered(id: string): Promise<void> {
