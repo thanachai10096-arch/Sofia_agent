@@ -69,6 +69,36 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
   let reconnectAttempt = 0;
   let callback: ((message: VerifiedDiscordMessage) => Promise<void>) | undefined;
 
+  // Gateway message events can arrive faster than Sofia can accept jobs. Keep
+  // each user's conversation ordered without blocking unrelated users/channels.
+  const messageQueues = new Map<string, Promise<void>>();
+  const queuedMessageCounts = new Map<string, number>();
+  const MAX_QUEUED_MESSAGES_PER_SESSION = 32;
+
+  function enqueueMessage(raw: GatewayMessage): void {
+    const userId = raw.author?.id;
+    const channelId = raw.channel_id;
+    if (!userId || !channelId || !/^\\d{1,24}$/.test(userId) || !/^\\d{1,24}$/.test(channelId)) return;
+    const key = JSON.stringify([userId, channelId]);
+    const queued = queuedMessageCounts.get(key) ?? 0;
+    if (queued >= MAX_QUEUED_MESSAGES_PER_SESSION) {
+      notify("message_handler_failed");
+      return;
+    }
+    queuedMessageCounts.set(key, queued + 1);
+    const previous = messageQueues.get(key) ?? Promise.resolve();
+    let next!: Promise<void>;
+    next = previous.catch(() => undefined).then(() => handleMessage(raw)).catch(() => {
+      notify("message_handler_failed");
+    }).finally(() => {
+      const remaining = (queuedMessageCounts.get(key) ?? 1) - 1;
+      if (remaining > 0) queuedMessageCounts.set(key, remaining);
+      else queuedMessageCounts.delete(key);
+      if (messageQueues.get(key) === next) messageQueues.delete(key);
+    });
+    messageQueues.set(key, next);
+  }
+
   function notify(event: "gateway_connect_failed" | "gateway_disconnected" | "message_handler_failed" | "message_delivery_failed", status?: number): void {
     try { options.onError?.(event, status); } catch { /* diagnostics must not alter transport behavior */ }
   }
@@ -219,7 +249,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
         if (ready?.user?.id) botId = ready.user.id;
         reconnectAttempt = 0;
       } else if (payload.t === "MESSAGE_CREATE" && payload.d && typeof payload.d === "object") {
-        void handleMessage(payload.d as GatewayMessage);
+        enqueueMessage(payload.d as GatewayMessage);
       }
     });
     socket.addEventListener("error", () => {
