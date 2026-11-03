@@ -1,4 +1,3 @@
-import type { ChatPlatform } from "../chat-adapter.js";
 import type { MessagingOutboxRecord } from "./file-outbox.js";
 
 const MAX_RECORD_BYTES = 128_000;
@@ -50,6 +49,3 @@ export function isValidMessagingOutboxRecord(
   return true;
 }
 
-export function isMessagingOutboxPlatform(value: string): value is ChatPlatform {
-  return SAFE_PLATFORM.test(value);
-}
