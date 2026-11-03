@@ -55,13 +55,10 @@ export async function reportTelegramRunCompletion(input: {
       (output ? "\n\n" + output : "\n\nThe run completed but returned no text output.");
   } else {
     const status = ["failed", "cancelled", "queued", "running"].includes(run.status) ? run.status : "unknown";
-    const safeError = typeof run.error === "string"
-      ? String(redactSecrets(run.error)).replace(/[\r\n\t]+/g, " ").slice(0, 240).trim()
-      : "";
-    text = "Sofia task " + status + ".\nRun ID: " + input.runId +
-      (status === "failed"
-        ? (safeError ? "\nReason: " + safeError : "\nNo safe error detail was returned by the API.")
-        : "");
+    // Provider/runtime errors can reveal internal topology, billing state, or identifiers.
+    // Keep diagnostics in server-side logs; chat receives only a stable public status.
+    text = "Sofia task " + status + ".\\nRun ID: " + input.runId +
+      (status === "failed" ? "\\nSofia could not complete this task. Check the run status in the Sofia dashboard." : "");
   }
 
   try {
