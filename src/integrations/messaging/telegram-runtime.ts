@@ -106,7 +106,8 @@ export interface TelegramMessagingEnvironment {
 /**
  * Build the optional Telegram bridge using the existing Sofia API and command
  * dispatcher. Missing/invalid optional configuration disables Telegram without
- * taking the core API offline. Only /run commands can start agent work.
+ * taking the core API offline. Ordinary text and /run commands can start agent work
+ * through the shared handler; authorization and deduplication still apply.
  */
 export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
