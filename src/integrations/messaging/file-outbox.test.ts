@@ -301,3 +301,28 @@ test("manual requeue cannot rewrite retry metadata while another worker holds th
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("retry worker contains a throwing failure callback when a flush itself fails", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-worker-callback-"));
+  try {
+    const outbox = new FileMessagingOutbox(root);
+    outbox.pending = async () => { throw new Error("spool unavailable"); };
+    let notifications = 0;
+    const worker = startMessagingOutboxRetryWorker(outbox, {
+      platform: "line",
+      intervalMs: 1_000,
+      send: async () => true,
+      onFailure: () => {
+        notifications++;
+        throw new Error("metrics backend unavailable");
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    await worker.stop();
+    assert.equal(notifications, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
