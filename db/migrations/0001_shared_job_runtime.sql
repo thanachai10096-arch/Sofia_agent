@@ -25,10 +25,6 @@ CREATE TABLE IF NOT EXISTS sofia_agent_jobs (
     (status = 'running' AND lease_owner_token IS NOT NULL AND lease_expires_at IS NOT NULL)
     OR status <> 'running'
   ),
-  CONSTRAINT sofia_agent_jobs_terminal_lease CHECK (
-    status NOT IN ('completed', 'failed', 'cancelled')
-    OR lease_owner_token IS NULL
-  )
 );
 
 -- Owner-scoped history and efficient queue/expired-lease scans.
