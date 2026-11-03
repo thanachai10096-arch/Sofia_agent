@@ -100,7 +100,10 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const { projectMemory, skillLedger, onSkillCandidate } = learningStores;
     const scopedStorageNamespace = ownerStorageNamespace(workspace, principalId);
     const runStore = new FileRunStore(scopedStorageNamespace);
-    const settlementJournal = new FileSettlementJournal(scopedStorageNamespace);
+    // Keep the accounting journal in its legacy namespace for now: old unresolved
+    // provider attempts have no owner metadata, so moving it per-owner could hide
+    // ambiguous billing evidence and permit an unsafe duplicate inference.
+    const settlementJournal = new FileSettlementJournal(workspace);
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
     if (requestedRouteId && !requestedRoute) throw new Error("Unknown model route: " + requestedRouteId);
@@ -165,7 +168,7 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
     brainFactory,
     (ownerKeyId) => new FileRunStore(ownerStorageNamespace(workspace, ownerKeyId)),
     workspace,
-    (runId, ownerKeyId) => new FileSettlementJournal(ownerStorageNamespace(workspace, ownerKeyId)).deleteRun(runId),
+    (runId) => new FileSettlementJournal(workspace).deleteRun(runId),
   );
   const userMemoryStore = new FileUserMemoryStore();
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
