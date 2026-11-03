@@ -41,7 +41,7 @@ function makeHost() {
       },
     },
     async currentPolicyRevision() { return "policy-1"; },
-    async withCurrentPolicyRevision(_scope, expectedRevision, operation) {
+    async withCurrentPolicyRevision<T>(_scope: LearningScope, expectedRevision: string, operation: () => Promise<T>): Promise<{ matched: boolean; value?: T }> {
       if (expectedRevision !== "policy-1") return { matched: false };
       return { matched: true, value: await operation() };
     },
