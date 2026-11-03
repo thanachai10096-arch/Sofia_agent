@@ -177,3 +177,19 @@ The host must supply a configured PostgreSQL Pool, apply `db/migrations/0001_sha
 The adapter uses conditional single-statement updates for claim, heartbeat, lease expiry recovery, cancellation, save fencing, and owner-scoped resume reservation. It implements owner-filtered get/list/cancel queries. SQL contract tests assert the critical predicates without requiring a live database.
 
 **Not yet production-ready:** this repository still has no PostgreSQL driver, migration runner, live PostgreSQL integration test, connection lifecycle/pool configuration, or Vercel environment wiring. The Vercel adapter continues to use local temporary storage until the deployment host injects a real Pool and the migration/integration gates pass. The local tests are not a substitute for two-connection PostgreSQL race tests.
+
+
+## Shared Brain run snapshots
+
+Job metadata alone is insufficient for cross-instance resume: the existing `BrainRunSnapshot` is loaded through `RunStore`. Added `PostgresRunStore` backed by `sofia_agent_run_snapshots`, and the dependency factory now accepts the same injected `runStore` for both Brain checkpoint writes and DurableJobRuntime resume reads.
+
+Host wiring can now pass both adapters:
+
+```ts
+const deps = createSofiaAgentDependencies(workspace, approval, {
+  jobStateStore: new PostgresJobStateStore(pool),
+  runStore: new PostgresRunStore(pool),
+});
+```
+
+This keeps the local file stores as defaults. The shared PostgreSQL migration creates the snapshot table. A live DB test, payload-size/retention policy, and production host injection remain required before cloud rollout.
