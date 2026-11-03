@@ -11,8 +11,10 @@ import { createTelegramMessagingRuntime } from "../integrations/messaging/telegr
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
-const apiKey = process.env.SOFIA_API_KEY?.trim();
-if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
+// Keep the server authentication secret separate from model-provider credentials.
+// SOFIA_API_KEY remains a legacy fallback for existing deployments.
+const apiKey = (process.env.SOFIA_SERVER_API_KEY ?? process.env.SOFIA_API_KEY)?.trim();
+if (!apiKey) throw new Error("SOFIA_SERVER_API_KEY is required (SOFIA_API_KEY is accepted as a legacy fallback).");
 const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
 const deps = createSofiaAgentDependencies(workspace);
