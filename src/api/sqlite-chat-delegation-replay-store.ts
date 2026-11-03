@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
-import type { ChatDelegationPlatform, ChatDelegationReplayStore } from "./chat-delegation.js";
+import type { DelegatedChatPlatform, ChatDelegationReplayStore } from "./chat-delegation.js";
 
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
-const PLATFORM_VALUES = new Set<ChatDelegationPlatform>(["telegram", "discord", "slack"]);
+const PLATFORM_VALUES = new Set<DelegatedChatPlatform>(["telegram", "discord", "slack"]);
 
 function ensurePrivateRegularFile(filePath: string): void {
   if (process.platform === "win32") return;
@@ -102,7 +102,7 @@ export class SqliteChatDelegationReplayStore implements ChatDelegationReplayStor
 
   async claim(input: {
     tenantId: string;
-    platform: ChatDelegationPlatform;
+    platform: DelegatedChatPlatform;
     nonce: string;
     expiresAt: number;
   }): Promise<boolean> {
