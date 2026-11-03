@@ -65,7 +65,7 @@ function selectProvider(): ProviderSelection {
   const anthropicKey = firstEnv("ANTHROPIC_API_KEY");
 
   if (requested && !["openrouter", "gemini", "anthropic", "custom", "openai-compatible"].includes(requested)) {
-    throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, anthropic, or custom.");
+    throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, anthropic, custom, or openai-compatible.");
   }
 
   const chooseCustom = (): ProviderSelection => {

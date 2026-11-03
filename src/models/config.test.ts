@@ -193,3 +193,22 @@ test("custom endpoints can opt into the Anthropic Messages protocol", () => {
   assert.equal(config.providers.fast?.protocol, "anthropic-messages");
   assert.equal(config.providers.fast?.baseUrl, "https://anthropic-proxy.example.test/v1");
 });
+
+
+test("openai-compatible provider alias is accepted and uses the custom endpoint tuple", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai-compatible";
+  process.env.SOFIA_BASE_URL = "https://compatible.example.test/v1";
+  process.env.SOFIA_API_KEY = "compatible-test-key";
+  process.env.SOFIA_MODEL = "vendor/compatible-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://compatible.example.test/v1");
+  assert.equal(config.providers.fast?.apiKey, "compatible-test-key");
+  assert.equal(config.providers.fast?.model, "vendor/compatible-model");
+});
+
+test("invalid provider selection lists every accepted provider value", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "unsupported";
+  assert.throws(loadModelConfigFromEnv, /openrouter, gemini, anthropic, custom, or openai-compatible/);
+});
