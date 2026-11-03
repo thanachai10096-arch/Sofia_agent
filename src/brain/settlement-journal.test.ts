@@ -520,10 +520,10 @@ test("journal rejects known usage whose combined token count is unsafe", async (
         journal.settle(runId, { id: "attempt-2" }, { inputTokens: 1, outputTokens: 1 }, claim),
         /invalid usage evidence/,
       );
-      await assert.rejects(journal.acknowledgeCheckpoint(runId), /corrupt or ambiguous|pending or ambiguous/);
     } finally {
       await claim.release();
     }
+    await assert.rejects(journal.acknowledgeCheckpoint(runId), /corrupt or ambiguous|pending or ambiguous/);
     assert.equal(await readFile(journalFile, "utf8"), source,
       "invalid historical usage must remain unchanged for reconciliation");
   } finally {
