@@ -464,6 +464,48 @@ test("concurrent recovery monitors emit one terminal audit for a shared executio
   assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 1);
 });
 
+test("expired recovery lease can be taken over and stale monitor is fenced", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  let reads = 0;
+  let cancelCalls = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      return { id, status: reads <= 3 ? "queued" : "completed", task: "lease takeover" } as JobRecord;
+    },
+    async cancel() { cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const first = new CronScheduler(runtime, { store, now: () => now, recoveryLeaseMs: 3_000 });
+  const second = new CronScheduler(runtime, { store, now: () => now, recoveryLeaseMs: 3_000 });
+  const schedule = await first.create({
+    name: "lease-takeover", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "lease-takeover-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "lease-takeover-job", attempt: 1,
+  });
+
+  const initial = await first.recover();
+  assert.equal(initial.monitoring, 1);
+  now = new Date(now.getTime() + 4_000);
+  const takeover = await second.recover();
+  assert.equal(takeover.monitoring, 1, "an expired lease may be claimed by a replacement scheduler");
+
+  for (let i = 0; i < 100 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(state.history[0].status, "completed");
+  assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 1);
+  assert.equal(cancelCalls, 0, "the fenced-out monitor must not cancel the runtime job");
+});
+
 test("recovery terminalizes orphaned executions whose schedule record is missing", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
