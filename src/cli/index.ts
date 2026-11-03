@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -25,6 +25,10 @@ type LocalConfig = {
 
 async function loadLocalConfig(): Promise<LocalConfig> {
   try {
+    const configStat = await lstat(configPath);
+    if (!configStat.isFile() || configStat.isSymbolicLink()) {
+      throw new Error("Sofia config must be a regular file, not a symbolic link.");
+    }
     const parsed: unknown = JSON.parse(await readFile(configPath, "utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     const config = parsed as LocalConfig;
@@ -112,6 +116,10 @@ async function setup() {
     if (provider !== "ollama" && !process.env[requiredKeyEnv]?.trim()) {
       let legacyKeyFound = false;
       try {
+        const configStat = await lstat(configPath);
+        if (!configStat.isFile() || configStat.isSymbolicLink()) {
+          throw new Error("Sofia config must be a regular file, not a symbolic link.");
+        }
         const existing: unknown = JSON.parse(await readFile(configPath, "utf8"));
         legacyKeyFound = !!existing && typeof existing === "object" && !Array.isArray(existing) &&
           typeof (existing as { apiKey?: unknown }).apiKey === "string" &&
