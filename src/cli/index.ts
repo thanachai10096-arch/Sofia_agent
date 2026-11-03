@@ -86,22 +86,36 @@ async function setup() {
     const baseUrl = provider === "openai-compatible"
       ? (await rl.question("API base URL (HTTPS; loopback HTTP is allowed for local servers): ")).trim()
       : presetBaseUrls[provider!];
-    const apiKey = (await rl.question(provider === "ollama"
-      ? "API key (usually blank for local Ollama): "
-      : "API key (stored locally with owner-only permissions): ")).trim();
     const defaultModel = provider === "gemini" ? "gemini-2.5-flash"
       : provider === "openai" ? "gpt-4.1-mini"
       : provider === "openrouter" ? "openai/gpt-4.1-mini"
       : provider === "ollama" ? "llama3.2" : "";
     const model = (await rl.question(`Model ID${defaultModel ? ` (default ${defaultModel})` : ""}: `)).trim() || defaultModel;
-    if ((provider !== "ollama" && !apiKey) || !model || !baseUrl) {
-      throw new Error("Provider base URL, required API key, and model are required.");
+    if (!model || !baseUrl) {
+      throw new Error("Provider base URL and model are required.");
+    }
+    const keyEnv: Partial<Record<NonNullable<LocalConfig["provider"]>, string>> = {
+      gemini: "GEMINI_API_KEY",
+      openai: "OPENAI_API_KEY",
+      openrouter: "OPENROUTER_API_KEY",
+      xai: "XAI_API_KEY",
+      mistral: "MISTRAL_API_KEY",
+      groq: "GROQ_API_KEY",
+      deepseek: "DEEPSEEK_API_KEY",
+      together: "TOGETHER_API_KEY",
+      fireworks: "FIREWORKS_API_KEY",
+      cerebras: "CEREBRAS_API_KEY",
+      perplexity: "PERPLEXITY_API_KEY",
+    };
+    const requiredKeyEnv = keyEnv[provider] ?? "SOFIA_MODEL_API_KEY";
+    if (provider !== "ollama" && !process.env[requiredKeyEnv]?.trim()) {
+      console.log(`\nSet ${requiredKeyEnv} in your shell environment before starting Sofia. The setup wizard never asks for or writes API keys.`);
     }
     await mkdir(configDir, { recursive: true, mode: 0o700 });
-    const config: LocalConfig = { provider, baseUrl, apiKey, model };
+    const config: LocalConfig = { provider, baseUrl, model };
     await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
     await chmod(configPath, 0o600);
-    console.log("Saved local provider configuration to ~/.sofia/config.json (owner-only permissions).");
+    console.log("Saved provider, endpoint, and model configuration to ~/.sofia/config.json (owner-only permissions).");
   } finally {
     rl.close();
   }
