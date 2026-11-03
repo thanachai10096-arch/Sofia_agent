@@ -113,6 +113,37 @@ test("stale concurrent evaluation cannot overwrite a promoted active candidate",
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("separate lifecycle instances reject an evaluation made stale by another writer promotion", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "shared-concurrent.json");
+    const platform = new InMemorySkillsPlatform();
+    const pending: Array<(value: { passed: boolean; checks: Array<{ name: string; passed: boolean }> }) => void> = [];
+    const firstWriter = new VersionedSkillLifecycle(
+      platform,
+      async () => new Promise(resolve => pending.push(resolve)),
+      { file },
+    );
+    const secondWriter = new VersionedSkillLifecycle(platform, passing, { file });
+    const candidate = firstWriter.propose(pkg("1.0.0"), {
+      source: "cross-instance", evidenceIds: ["cross-instance-evidence"], confidence: 0.95,
+    });
+
+    const staleEvaluation = firstWriter.evaluate(candidate.id);
+    assert.equal(pending.length, 1);
+    const freshEvaluation = await secondWriter.evaluate(candidate.id);
+    assert.equal(freshEvaluation.status, "verified");
+    secondWriter.promote(candidate.id);
+    assert.equal(platform.get("repair-skill")?.version, "1.0.0");
+
+    pending[0]!({ passed: true, checks: [{ name: "regression", passed: true }] });
+    await assert.rejects(staleEvaluation, /changed state during evaluation/i);
+    const refreshed = new VersionedSkillLifecycle(platform, passing, { file });
+    assert.equal(refreshed.active("repair-skill")?.status, "active");
+    assert.equal(refreshed.list().filter(item => item.status === "active").length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill lifecycle rejects failed evaluations and low-confidence promotion", async () => {
   const root = dir();
   try {
