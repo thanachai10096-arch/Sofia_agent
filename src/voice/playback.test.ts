@@ -21,7 +21,7 @@ test("interrupt aborts active playback and waits for host stop", async () => {
   await started;
   await controller.interrupt();
   assert.equal(receivedSignal.aborted, true);
-  assert.equal(stopped, 2);
+  assert.equal(stopped, 1);
   assert.equal(await playing, false);
   assert.equal(controller.snapshot().state, "idle");
   await controller.close();
@@ -65,7 +65,7 @@ test("close stops output and rejects later playback", async () => {
   await started;
   await controller.close();
   assert.equal(await playing, false);
-  assert.equal(stopped, 2);
+  assert.equal(stopped, 1);
   assert.equal(controller.snapshot().state, "closed");
   await assert.rejects(controller.play(audio), /closed/);
 });
@@ -98,4 +98,18 @@ test("non-cancellation adapter failures remain visible to the caller", async () 
   await assert.rejects(controller.play(audio), (error) => error === failure);
   assert.equal(controller.snapshot().state, "idle");
   await controller.close();
+});
+
+
+test("idle interruption does not call the host stop adapter", async () => {
+  let stopped = 0;
+  const controller = createVoicePlaybackController({
+    async play() {},
+    stop() { stopped++; },
+  });
+  await controller.interrupt();
+  assert.equal(stopped, 0);
+  assert.equal(controller.snapshot().state, "idle");
+  await controller.close();
+  assert.equal(stopped, 0);
 });
