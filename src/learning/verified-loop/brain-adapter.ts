@@ -89,10 +89,10 @@ export function createVerifiedCompletionHandler(options: {
     const ordered = [...receipts];
     let previous = checkpoint.lastSequence;
     for (const receipt of ordered) {
-      if (!receipt || !Number.isSafeInteger(receipt.sequence) || receipt.sequence <= previous ||
+      if (!receipt || !Number.isSafeInteger(receipt.sequence) || receipt.sequence !== previous + 1 ||
           typeof receipt.receiptId !== "string" || !receipt.receiptId.trim() || receipt.receiptId.length > 500 ||
           typeof receipt.summary !== "string" || !receipt.summary.trim()) {
-        throw new Error("Receipt recovery adapter returned malformed or duplicate sequence data");
+        throw new Error("Receipt recovery adapter returned malformed, duplicate, or non-contiguous sequence data");
       }
       previous = receipt.sequence;
     }
