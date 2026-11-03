@@ -51,6 +51,35 @@ test("skill lifecycle requires evaluation and confidence before promotion", asyn
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("stale concurrent evaluation cannot overwrite a promoted active candidate", async () => {
+  const root = dir();
+  try {
+    const pending: Array<(value: { passed: boolean; checks: Array<{ name: string; passed: boolean }> }) => void> = [];
+    const lifecycle = new VersionedSkillLifecycle(
+      new InMemorySkillsPlatform(),
+      async () => new Promise(resolve => pending.push(resolve)),
+      { file: path.join(root, "concurrent.json") },
+    );
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["concurrent-evidence"], confidence: 0.95,
+    });
+
+    const firstEvaluation = lifecycle.evaluate(candidate.id);
+    const staleEvaluation = lifecycle.evaluate(candidate.id);
+    assert.equal(pending.length, 2, "both evaluations should be in flight");
+
+    pending[0]!({ passed: true, checks: [{ name: "regression", passed: true }] });
+    await firstEvaluation;
+    lifecycle.promote(candidate.id);
+    assert.equal(lifecycle.active("repair-skill")?.status, "active");
+
+    pending[1]!({ passed: true, checks: [{ name: "regression", passed: true }] });
+    await assert.rejects(staleEvaluation, /changed state during evaluation/i);
+    assert.equal(lifecycle.active("repair-skill")?.status, "active");
+    assert.equal(lifecycle.get(candidate.id)?.status, "active");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill lifecycle rejects failed evaluations and low-confidence promotion", async () => {
   const root = dir();
   try {
