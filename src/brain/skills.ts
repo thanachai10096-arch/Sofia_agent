@@ -1,3 +1,4 @@
+import { fenceUntrustedOutput } from "../security/untrusted.js";
 import type { FailureCategory, Strategy } from "./types.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 
@@ -121,8 +122,13 @@ export function compactSkillContext(skills: readonly SofiaSkill[]): unknown[] {
   return skills.map((skill) => ({
     id: skill.id,
     strategy: skill.strategy,
-    procedure: skill.procedure,
-    verification: skill.verification,
+    // Built-in and learned procedures are guidance, never executable authority.
+    // Fence every step so instruction-like text cannot escape into the model prompt.
+    trust: "untrusted_reference_data" as const,
+    procedure: skill.procedure.map((step) =>
+      fenceUntrustedOutput("matched_skill_procedure", step, { maxChars: 2_000 }).text,
+    ),
+    verification: [...skill.verification],
   }));
 }
 
