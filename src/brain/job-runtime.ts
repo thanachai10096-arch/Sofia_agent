@@ -357,6 +357,9 @@ class FileJobStateStore {
   }
 
   async renewNotificationClaim(id: string, ownerToken: string, leaseMs: number): Promise<boolean> {
+    if (!ownerToken || !Number.isSafeInteger(leaseMs) || leaseMs <= 0) {
+      throw new Error("A notification lease renewal requires an owner token and a positive safe-integer lease duration");
+    }
     return this.withFileLock(async () => {
       const records = await this.read();
       const record = records.find((item) => item.id === id);
