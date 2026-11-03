@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { inspectLearningRecovery } from "./recovery-coordinator.js";
+import { createLearningRepairAuthorizationFromRecovery, inspectLearningRecovery } from "./recovery-coordinator.js";
 import type { ActiveLearningSkill, LearningScope } from "./ports.js";
 import type { RuntimeLearningSkill } from "./reconciliation.js";
 
@@ -128,6 +128,44 @@ test("coordinator blocks boolean-only approval when receipt resolver is unavaila
   const result = await inspectLearningRecovery(scope, adapter);
   assert.equal(result.assessments[0]?.disposition, "blocked-approval");
   assert.match(result.assessments[0]?.reason ?? "", /persisted receipt/);
+});
+
+
+test("recovery inspection maps persisted approval receipts into planner authorization", async () => {
+  const h = host();
+  const inspection = await inspectLearningRecovery(scope, h.adapter);
+  const authorization = createLearningRepairAuthorizationFromRecovery(inspection, "repair-plan-1");
+  assert.ok(authorization);
+  assert.equal(authorization.actorId, "operator-a");
+  assert.deepEqual(authorization.approvedSkillIds, ["skill-1"]);
+  assert.equal(authorization.approvalIds["skill-1"], "receipt-1");
+  assert.equal(authorization.learningPolicyRevisions["skill-1"], "policy-1");
+  assert.equal(authorization.currentPolicyRevisions["skill-1"], "policy-1");
+  assert.deepEqual(authorization.trustedEvidenceSkillIds, ["skill-1"]);
+  assert.deepEqual(authorization.scope, scope);
+});
+
+test("recovery inspection cannot create planner authorization without an eligible receipt", async () => {
+  const h = host({ approved: false });
+  const inspection = await inspectLearningRecovery(scope, h.adapter);
+  assert.equal(createLearningRepairAuthorizationFromRecovery(inspection, "repair-plan-2"), undefined);
+});
+
+test("recovery authorization bridge rejects forged or mixed approval bindings", async () => {
+  const h = host();
+  const inspection = await inspectLearningRecovery(scope, h.adapter);
+  const assessment = inspection.assessments[0]!;
+  const forged = {
+    ...inspection,
+    assessments: [{
+      ...assessment,
+      approvalBinding: { ...assessment.approvalBinding!, actorId: "other-operator" },
+    }],
+  };
+  assert.throws(
+    () => createLearningRepairAuthorizationFromRecovery(forged, "repair-plan-3"),
+    /invalid approval binding/,
+  );
 });
 
 test("coordinator rejects approval receipts bound to another actor, scope, or policy", async () => {
