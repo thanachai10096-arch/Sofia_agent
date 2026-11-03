@@ -11,6 +11,7 @@ import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import { containsPromptInjection } from "../security/guard.js";
 
 interface ActiveRun {
   id: string;
@@ -320,12 +321,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               typeof input.content !== "string" || input.content.trim().length < 3 || input.content.length > 1200) {
             return json(res, 400, { error: "invalid_memory_entry" }, origin, config);
           }
-          let entry: ReturnType<typeof createUserMemoryEntry>;
-          try {
-            entry = createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
-          } catch {
+          // Reject unsafe content before persistence so validation errors remain 400s.
+          // Store failures below are reserved for actual persistence/read-back faults.
+          if (containsPromptInjection(input.content)) {
             return json(res, 400, { error: "memory_entry_rejected" }, origin, config);
           }
+          const entry: ReturnType<typeof createUserMemoryEntry> =
+            createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
           try {
             await deps.userMemoryStore.save(auth.keyId, entry);
             const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
