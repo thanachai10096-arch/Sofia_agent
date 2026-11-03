@@ -13,17 +13,21 @@ function validScope(scope: LearningScope): boolean {
     typeof scope.projectId === "string" && scope.projectId.trim());
 }
 function validateState(state: CheckpointState): void {
-  if (!state || !Number.isSafeInteger(state.lastSequence) || state.lastSequence < 0 || !Array.isArray(state.pending)) {
+  if (!state || !Number.isSafeInteger(state.lastSequence) || state.lastSequence < 0 ||
+      (state.revision !== undefined && (!Number.isSafeInteger(state.revision) || state.revision < 0)) ||
+      !Array.isArray(state.pending)) {
     throw new Error("Invalid self-improvement checkpoint state");
   }
   const seen = new Set<number>();
+  const seenReceiptIds = new Set<string>();
   for (const item of state.pending) {
     if (!item || !Number.isSafeInteger(item.sequence) || item.sequence <= state.lastSequence ||
       item.sequence < 1 || typeof item.receiptId !== "string" || !item.receiptId.trim() ||
-      typeof item.summary !== "string" || seen.has(item.sequence)) {
+      typeof item.summary !== "string" || seen.has(item.sequence) || seenReceiptIds.has(item.receiptId)) {
       throw new Error("Invalid pending self-improvement notification");
     }
     seen.add(item.sequence);
+    seenReceiptIds.add(item.receiptId);
   }
 }
 function secureRegularFile(filePath: string): void {
@@ -102,9 +106,9 @@ export class SqliteSelfImprovementCheckpointStore implements SelfImprovementChec
     let pending: unknown;
     try { pending = JSON.parse(row.pending_json); }
     catch { throw new Error("Corrupt self-improvement checkpoint JSON"); }
-    const state = { lastSequence: row.last_sequence, pending } as CheckpointState;
+    const state = { lastSequence: row.last_sequence, pending, revision: row.revision } as CheckpointState;
     validateState(state);
-    return { lastSequence: state.lastSequence, pending: state.pending.map(item => ({ ...item })), revision: row.revision };
+    return { lastSequence: state.lastSequence, pending: state.pending.map(item => ({ ...item })), revision: state.revision };
   }
 
   async write(scope: LearningScope, state: CheckpointState): Promise<void> {
