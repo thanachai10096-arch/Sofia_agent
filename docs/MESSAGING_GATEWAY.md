@@ -63,6 +63,8 @@ The code outline above is not a claim that the repository's API server is alread
 - [ ] Discord deferred response is edited and all follow-up chunks are delivered within the interaction token lifetime.
 - [ ] Unauthorized users/channels cannot invoke runs; policy errors fail closed.
 - [ ] Standalone Discord deployment has explicit, non-empty user and channel allowlists; startup rejects missing, malformed, or duplicate IDs.
+- [ ] With `DISCORD_REPLY_MODE=dm`, both successful results and error notices are sent only to the requesting user's DM; DM creation/send failure never posts any content to the originating channel.
+- [ ] With `DISCORD_REPLY_MODE=channel` (or unset), legacy channel replies remain unchanged; invalid mode values fail startup.
 - [ ] API keys and bot tokens never appear in logs, client assets, test snapshots, or error messages.
 - [ ] Graceful shutdown stops polling and rejects new dispatches.
 - [ ] Enable `discordInteractionRoute` only when a Discord transport is configured; expose it over HTTPS and keep the raw-body size limit enabled.
