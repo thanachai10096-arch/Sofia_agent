@@ -68,7 +68,9 @@ if (discordConfigured) {
           );
           return;
         }
-        const job = await deps.jobRuntime.get(argument);
+        const job = deps.jobRuntime.getForOwner
+          ? await deps.jobRuntime.getForOwner(argument, principalId)
+          : undefined;
         if (!job || job.ownerKeyId !== principalId) {
           await discordTransport?.sendMessage(message.channelId, "Job not found or not accessible to this Discord user.", undefined, message.id);
           return;
@@ -93,7 +95,8 @@ if (discordConfigured) {
             return;
           }
           await discordTransport?.sendMessage(message.channelId, "Resume requested for job " + job.id + ".", undefined, message.id);
-          void deps.jobRuntime.resume(job.id).then(async (resumed) => {
+          if (!deps.jobRuntime.resumeForOwner) throw new Error("Owner-scoped Discord job resume is required.");
+          void deps.jobRuntime.resumeForOwner(job.id, principalId).then(async (resumed) => {
             const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
             await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
@@ -105,7 +108,8 @@ if (discordConfigured) {
           });
           return;
         }
-        const cancelled = await deps.jobRuntime.cancel(job.id);
+        if (!deps.jobRuntime.cancelForOwner) throw new Error("Owner-scoped Discord job cancellation is required.");
+        const cancelled = await deps.jobRuntime.cancelForOwner(job.id, principalId);
         await discordTransport?.sendMessage(
           message.channelId,
           cancelled ? "Cancellation requested for job " + job.id + "." : "Job " + job.id + " is already terminal or cannot be cancelled.",
@@ -126,7 +130,7 @@ if (discordConfigured) {
         channelId: message.channelId,
         conversationId: message.channelId,
       });
-      const sessionContext = await buildDiscordSessionContext(deps.jobRuntime, sessionKey);
+      const sessionContext = await buildDiscordSessionContext(deps.jobRuntime, principalId, sessionKey);
       const taskWithMemory = sessionContext
         ? task + "\n\n" + sessionContext
         : task;
@@ -181,7 +185,10 @@ if (discordConfigured) {
   const notificationInFlight = new Set<string>();
   const notifyRecoveredJobs = async (): Promise<void> => {
     if (!deps.jobRuntime || !discordTransport || discordAbort.signal.aborted) return;
-    const recoveredJobs = await deps.jobRuntime.list();
+    if (!deps.jobRuntime.listForOwner) throw new Error("Owner-scoped Discord job listing is required.");
+    const recoveredJobs = (await Promise.all([...discordUserIds].map((userId) =>
+      deps.jobRuntime!.listForOwner!("discord:" + userId, 200),
+    ))).flat();
     for (const job of recoveredJobs) {
       if (!job.ownerKeyId?.startsWith("discord:") || !job.notificationChannelId ||
           job.notificationDelivered || job.status === "queued" || job.status === "running" ||
