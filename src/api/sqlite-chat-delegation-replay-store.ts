@@ -59,7 +59,7 @@ export class SqliteChatDelegationReplayStore implements ChatDelegationReplayStor
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolutePath);
     try {
-      db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;");
+      db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
       ensurePrivateSqliteFiles(absolutePath);
       const store = new SqliteChatDelegationReplayStore(db, absolutePath);
       store.migrate();
@@ -72,24 +72,31 @@ export class SqliteChatDelegationReplayStore implements ChatDelegationReplayStor
   }
 
   private migrate(): void {
-    const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
-    if (version > 1) {
-      throw new Error(`Chat delegation replay database schema version ${version} is newer than this Sofia Agent supports.`);
-    }
-    if (version === 0) {
-      this.db.exec(`
-        BEGIN IMMEDIATE;
-        CREATE TABLE chat_delegation_nonces (
-          tenant_id TEXT NOT NULL,
-          platform TEXT NOT NULL CHECK (platform IN ('telegram', 'discord', 'slack')),
-          nonce TEXT NOT NULL,
-          expires_at INTEGER NOT NULL CHECK (expires_at > 0),
-          PRIMARY KEY (tenant_id, platform, nonce)
-        ) WITHOUT ROWID;
-        CREATE INDEX chat_delegation_nonces_expiry_idx ON chat_delegation_nonces(expires_at);
-        PRAGMA user_version = 1;
-        COMMIT;
-      `);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      // Re-read the version after taking the write lock to make concurrent
+      // first-start migrations safe across multiple API processes.
+      const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
+      if (version > 1) {
+        throw new Error(`Chat delegation replay database schema version ${version} is newer than this Sofia Agent supports.`);
+      }
+      if (version === 0) {
+        this.db.exec(`
+          CREATE TABLE chat_delegation_nonces (
+            tenant_id TEXT NOT NULL,
+            platform TEXT NOT NULL CHECK (platform IN ('telegram', 'discord', 'slack')),
+            nonce TEXT NOT NULL,
+            expires_at INTEGER NOT NULL CHECK (expires_at > 0),
+            PRIMARY KEY (tenant_id, platform, nonce)
+          ) WITHOUT ROWID;
+          CREATE INDEX chat_delegation_nonces_expiry_idx ON chat_delegation_nonces(expires_at);
+          PRAGMA user_version = 1;
+        `);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
     }
   }
 
@@ -109,6 +116,7 @@ export class SqliteChatDelegationReplayStore implements ChatDelegationReplayStor
 
     const now = Date.now();
     this.db.exec("BEGIN IMMEDIATE");
+    let claimed = false;
     try {
       // Remove expired claims inside the same write transaction as the insert.
       this.db.prepare("DELETE FROM chat_delegation_nonces WHERE expires_at <= ?").run(now);
@@ -116,13 +124,14 @@ export class SqliteChatDelegationReplayStore implements ChatDelegationReplayStor
         INSERT OR IGNORE INTO chat_delegation_nonces(tenant_id, platform, nonce, expires_at)
         VALUES (?, ?, ?, ?)
       `).run(input.tenantId, input.platform, input.nonce, input.expiresAt);
+      claimed = Number(result.changes) === 1;
       this.db.exec("COMMIT");
-      ensurePrivateSqliteFiles(this.filePath);
-      return Number(result.changes) === 1;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
+    ensurePrivateSqliteFiles(this.filePath);
+    return claimed;
   }
 
   close(): void {
