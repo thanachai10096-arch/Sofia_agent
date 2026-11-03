@@ -55,6 +55,18 @@ interface AnthropicResponse {
   usage?: { input_tokens?: number; output_tokens?: number };
 }
 
+function safeProviderErrorDiagnostic(body: string): string {
+  try {
+    const root = asRecord(JSON.parse(body));
+    const error = asRecord(root?.error) ?? root;
+    const parts: string[] = [];
+    for (const key of ["type", "code"] as const) {
+      const value = error?.[key];
+      if (typeof value === "string" && /^[a-zA-Z0-9_.-]{1,80}$/.test(value)) parts.push(`${key}=${value}`);
+    }
+    return parts.join(" ").slice(0, 300);
+  } catch { return ""; }
+}
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -378,7 +390,8 @@ export class SofiaModelGateway implements ModelProvider {
           const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
           retryableFailure = retryable;
           const detail = await response.text();
-          lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
+          const diagnostic = safeProviderErrorDiagnostic(detail);
+          lastError = new Error(`Model gateway request failed (${response.status})${diagnostic ? `: ${diagnostic}` : ""}`);
           if (!retryable || attempt === maxAttempts || options.signal?.aborted) throw lastError;
           const retryAfter = Number(response.headers.get("retry-after") ?? "");
           const delay = Number.isFinite(retryAfter) && retryAfter > 0
@@ -415,9 +428,8 @@ export class SofiaModelGateway implements ModelProvider {
 
     if (!response.ok) {
       const detail = await response.text();
-      throw new Error(
-        `Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`,
-      );
+      const diagnostic = safeProviderErrorDiagnostic(detail);
+      throw new Error(`Model gateway request failed (${response.status})${diagnostic ? `: ${diagnostic}` : ""}`);
     }
 
     const failResponse = (message: string): never => {
