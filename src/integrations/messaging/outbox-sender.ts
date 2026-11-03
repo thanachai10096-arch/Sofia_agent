@@ -63,8 +63,8 @@ export function createMessagingOutboxSender(
     const receipt = await adapter.send(message);
     if (receipt.state !== "sent") {
       // "unknown" is intentionally retried: the receiver may have accepted the
-      // message before the transport lost its acknowledgement. Consumers should
-      // deduplicate using delivery.messageId where their provider supports it.
+      // message before the transport lost its acknowledgement. Delivery is
+      // therefore at-least-once and can produce duplicates.
       throw new Error(`${platform} notification delivery was ${receipt.state}.`);
     }
   };
