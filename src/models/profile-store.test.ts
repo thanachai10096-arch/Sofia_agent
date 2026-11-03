@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -68,6 +68,34 @@ test("independent profile-store instances preserve concurrent account updates", 
     assert.equal(onDisk.includes("alice-provider-key-12345"), false);
     assert.equal(onDisk.includes("bob-provider-key-12345"), false);
     assert.equal(onDisk.includes("carol-provider-key-12345"), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("model profile store refuses symlinked credential files", { skip: process.platform === "win32" }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-model-profile-symlink-test-"));
+  const target = path.join(directory, "target-profiles.json");
+  const alias = path.join(directory, "profiles.json");
+  const secret = Buffer.alloc(32, 6).toString("base64");
+  const ownerStore = new EncryptedUserModelProfileStore(target, secret);
+  const aliasStore = new EncryptedUserModelProfileStore(alias, secret);
+  try {
+    await ownerStore.set("alice", {
+      provider: "openrouter",
+      model: "openrouter/auto",
+      apiKey: "alice-provider-secret-12345",
+    });
+    await symlink(target, alias);
+    await assert.rejects(() => aliasStore.get("alice"), /unavailable or corrupt/i);
+    await assert.rejects(() => aliasStore.set("bob", {
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      apiKey: "bob-provider-secret-12345",
+    }), /unavailable or corrupt/i);
+    assert.equal((await ownerStore.get("alice"))?.apiKey, "alice-provider-secret-12345");
+    assert.equal(await ownerStore.get("bob"), undefined);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
