@@ -567,6 +567,7 @@ export class CronScheduler {
     const onAbort = () => timeout.abort(controller.signal.reason ?? new Error("Recovered scheduled execution cancelled"));
     controller.signal.addEventListener("abort", onAbort, { once: true });
     let leaseLost = false;
+    let deferRecovery = false;
     let renewingLease = false;
     // Keep the last confirmed deadline locally. If the store is unavailable
     // beyond it, stop polling even though we cannot confirm a takeover yet.
@@ -613,13 +614,20 @@ export class CronScheduler {
     }, Math.max(1_000, Math.floor(this.recoveryLeaseMs / 3)));
     heartbeat.unref?.();
     try {
-      const job = await this.waitForJob(jobId, timeout.signal);
+      const job = await this.waitForRecoveredJob(jobId, timeout.signal);
       status = job.status === "completed" ? "completed" : job.status === "cancelled" ? "cancelled" : "failed";
       errorText = status === "failed" ? job.error ?? "Recovered runtime job failed" : undefined;
     } catch (error) {
       // A lost lease means another scheduler may now own monitoring. Do not cancel
       // the shared runtime job merely because this monitor was fenced out.
-      if (!leaseLost) await this.runtime.cancel(jobId).catch(() => false);
+      // A recovery monitor cannot safely infer that a job is gone from a
+      // temporarily missing runtime record. On its own observation timeout,
+      // release the lease and let a later recovery pass inspect the job again.
+      if (!leaseLost && !controller.signal.aborted && timeout.signal.aborted) {
+        deferRecovery = true;
+      } else if (!leaseLost && controller.signal.aborted) {
+        await this.runtime.cancel(jobId).catch(() => false);
+      }
       status = controller.signal.aborted && !leaseLost ? "cancelled" : "failed";
       errorText = error instanceof Error ? error.message : String(error);
     } finally {
@@ -633,7 +641,14 @@ export class CronScheduler {
       const stillActive = !!execution && (execution.status === "claimed" || execution.status === "running");
       const ownsLiveLease = stillActive && execution.recoveryLeaseOwnerToken === leaseToken &&
         !!execution.recoveryLeaseExpiresAt && Date.parse(execution.recoveryLeaseExpiresAt) > this.now().getTime();
-      if (ownsLiveLease) {
+      if (ownsLiveLease && deferRecovery) {
+        execution.recoveryLeaseOwnerToken = undefined;
+        execution.recoveryLeaseExpiresAt = undefined;
+        await this.recordAudit(state, {
+          at: this.now().toISOString(), actor: "scheduler", action: "schedule.recovery.deferred",
+          scheduleId: schedule.id, detail: errorText,
+        });
+      } else if (ownsLiveLease) {
         execution.status = status;
         execution.finishedAt = this.now().toISOString();
         if (errorText) execution.error = errorText;
@@ -646,7 +661,7 @@ export class CronScheduler {
       }
       // Multiple scheduler instances may observe the same recovered job. Only
       // the instance that wins the active -> terminal transition owns this audit.
-      if (ownsLiveLease) {
+      if (ownsLiveLease && !deferRecovery) {
         execution!.recoveryLeaseOwnerToken = undefined;
         execution!.recoveryLeaseExpiresAt = undefined;
         await this.recordAudit(state, {
@@ -762,6 +777,28 @@ export class CronScheduler {
     }).catch(() => undefined);
     this.active.delete(schedule.id);
   }
+  private async waitForRecoveredJob(id: string, signal: AbortSignal): Promise<JobRecord> {
+    while (!signal.aborted) {
+      const record = await this.runtime.get(id);
+      // Runtime stores may briefly hide a persisted job during restart or
+      // replication. Keep the lease monitor alive and retry until timeout.
+      if (record && (record.status === "completed" || record.status === "failed" || record.status === "cancelled")) {
+        return record;
+      }
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => signal.removeEventListener("abort", abort);
+        const timer = setTimeout(() => { cleanup(); resolve(); }, 250);
+        const abort = () => {
+          clearTimeout(timer);
+          cleanup();
+          reject(signal.reason ?? new Error("Recovered scheduled job wait aborted"));
+        };
+        signal.addEventListener("abort", abort, { once: true });
+      });
+    }
+    throw signal.reason ?? new Error("Recovered scheduled job wait aborted");
+  }
+
   private async waitForJob(id: string, signal: AbortSignal): Promise<JobRecord> {
     while (!signal.aborted) {
       const record = await this.runtime.get(id);
