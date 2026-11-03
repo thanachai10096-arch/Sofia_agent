@@ -9,7 +9,9 @@ const names = [
   "OPENROUTER_FAST_MODEL", "OPENROUTER_CODING_MODEL", "OPENROUTER_REASONING_MODEL", "OPENROUTER_VISION_MODEL",
   "GEMINI_API_KEY", "Gemini_API_Key", "GEMINI_MODEL",
   "GEMINI_FAST_MODEL", "GEMINI_CODING_MODEL", "GEMINI_REASONING_MODEL", "GEMINI_VISION_MODEL",
-  "SOFIA_FAST_COST", "SOFIA_FAST_LATENCY", "SOFIA_FAST_QUALITY",
+  ...["FAST", "CODING", "REASONING", "VISION"].flatMap((route) => [
+    `SOFIA_${route}_COST`, `SOFIA_${route}_LATENCY`, `SOFIA_${route}_QUALITY`,
+  ]),
 ];
 
 const original = new Map(names.map((name) => [name, process.env[name]]));
@@ -143,4 +145,37 @@ test("missing required credentials fail with actionable configuration errors", (
   process.env.SOFIA_MODEL_BASE_URL = "https://api.example.test/v1";
   process.env.SOFIA_MODEL_NAME = "model";
   assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_API_KEY/);
+});
+
+
+test("model routing weights accept zero and reject negative values", () => {
+  const weightNames = [
+    "SOFIA_FAST_COST",
+    "SOFIA_FAST_LATENCY",
+    "SOFIA_FAST_QUALITY",
+    "SOFIA_CODING_COST",
+    "SOFIA_REASONING_LATENCY",
+    "SOFIA_VISION_QUALITY",
+  ];
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "ollama";
+  process.env.SOFIA_FAST_COST = "0";
+  assert.equal(loadModelConfigFromEnv().routes[0]?.costWeight, 0);
+
+  for (const name of weightNames) {
+    clear();
+    process.env.SOFIA_MODEL_PROVIDER = "ollama";
+    process.env[name] = "-0.01";
+    assert.throws(loadModelConfigFromEnv, new RegExp(`${name} must be a finite non-negative number`));
+  }
+});
+
+test("blank or non-finite model routing weights use their defaults", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "ollama";
+  process.env.SOFIA_FAST_COST = "";
+  process.env.SOFIA_FAST_LATENCY = "Infinity";
+  const routes = loadModelConfigFromEnv().routes;
+  assert.equal(routes[0]?.costWeight, 1);
+  assert.equal(routes[0]?.latencyWeight, 1);
 });
