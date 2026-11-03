@@ -28,6 +28,8 @@ const names = [
   "SOFIA_MODEL_PROVIDER",
   "SOFIA_BASE_URL",
   "SOFIA_API_KEY",
+  "SOFIA_MODEL_API_KEY",
+  "SOFIA_PROVIDER_API_KEY",
   "SOFIA_MODEL",
   "BASE_URL",
   "API_KEY",
@@ -123,6 +125,17 @@ test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, 
   assert.equal(config.providers.fast?.model, "vendor/model-default");
   assert.equal(config.providers.coding?.model, "vendor/model-code");
   assert.equal(config.providers.reasoning?.model, "vendor/model-default");
+});
+
+test("dedicated model provider key takes precedence over Sofia API key", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_BASE_URL = "https://llm.example.test/v1";
+  process.env.SOFIA_API_KEY = "sofia-client-api-key";
+  process.env.SOFIA_MODEL_API_KEY = "external-provider-key";
+  process.env.SOFIA_MODEL = "vendor/model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "external-provider-key");
 });
 
 test("generic BASE_URL, API_KEY, and MODEL aliases are supported", () => {
