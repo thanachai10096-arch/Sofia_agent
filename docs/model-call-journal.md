@@ -1,6 +1,6 @@
 # Durable Model Call Settlement Journal
 
-`SqliteModelCallJournal` is an additive persistence primitive for recording provider-call dispatch and settlement evidence. It is not yet wired into `TokenAwareGateway`, `TokenBudget`, or `DurableJobRuntime`; the existing in-memory budget remains unchanged until integration can preserve its current limits and error behavior.
+`SqliteModelCallJournal` is an additive persistence primitive for recording provider-call dispatch and settlement evidence. Opening this optional journal requires Node.js 22.5 or newer because it uses the built-in `node:sqlite` module; Sofia core still advertises Node.js `>=20`, but the journal feature is unavailable on Node 20 and older Node 22 releases. The API reports this requirement explicitly if the built-in module is unavailable. It is not yet wired into `TokenAwareGateway`, `TokenBudget`, or `DurableJobRuntime`; the existing in-memory budget remains unchanged until integration can preserve its current limits and error behavior.
 
 ## State model
 
