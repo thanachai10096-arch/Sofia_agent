@@ -161,3 +161,6 @@ export type { VoiceActivityOptions, VoiceActivityEvent, VoiceActivityEndReason }
 
 export { createVoicePreRollBuffer } from "./voice/pre-roll.js";
 export type { VoicePreRollFrame, VoicePreRollOptions } from "./voice/pre-roll.js";
+
+export { createVoiceUtteranceController } from "./voice/utterance-controller.js";
+export type { VoiceUtteranceController, VoiceUtteranceControllerOptions } from "./voice/utterance-controller.js";
