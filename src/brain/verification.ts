@@ -32,6 +32,9 @@ export async function runVerification(
   const results: VerificationResult[] = [];
 
   const snapshot = await gateway.snapshot(signal);
+  if (typeof snapshot.revision !== "string" || !snapshot.revision.trim()) {
+    throw new Error("Verification snapshot returned no workspace revision.");
+  }
 
   for (const criterion of criteria) {
     signal.throwIfAborted();
@@ -52,6 +55,20 @@ export async function runVerification(
         passed: false,
         detail: "Verification tool returned no evidence ID.",
         evidenceIds: [],
+        workspaceRevision: snapshot.revision,
+      });
+      break;
+    }
+
+    // Bind the verification result to an unchanged workspace revision. A concurrent
+    // writer must not make a passing probe certify a different workspace state.
+    const afterProbe = await gateway.snapshot(signal);
+    if (typeof afterProbe.revision !== "string" || afterProbe.revision !== snapshot.revision) {
+      results.push({
+        criterionId: criterion.id,
+        passed: false,
+        detail: "Workspace revision changed during verification.",
+        evidenceIds: [result.evidenceId],
         workspaceRevision: snapshot.revision,
       });
       break;
