@@ -108,7 +108,9 @@ export function createInternalRoute(
           return {
             value: parseStructured(response.text),
             usage: response.usage,
-            finishReason: "complete",
+            finishReason: response.finishReason === "length" || response.finishReason === "max_tokens"
+              ? "length"
+              : "complete",
           };
         },
       };
