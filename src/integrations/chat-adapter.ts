@@ -101,7 +101,7 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
         context: [
           `Origin: ${command.platform} chat integration. Conversation ID: ${command.conversationId}.`,
           command.context?.trim(),
-        ].filter(Boolean).join("\\n\\n"),
+        ].filter(Boolean).join("\n\n"),
       }, undefined, { idempotencyKey });
       return { status: "accepted", runId: run.id, runStatus: run.status };
     } catch (error) {
