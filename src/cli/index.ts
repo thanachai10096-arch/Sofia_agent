@@ -19,7 +19,6 @@ const sessionPath = path.join(configDir, "sessions.sqlite");
 type LocalConfig = {
   provider?: "openai-compatible" | "gemini" | "openrouter" | "openai" | "xai" | "mistral" | "groq" | "deepseek" | "together" | "fireworks" | "cerebras" | "perplexity" | "ollama";
   baseUrl?: string;
-  apiKey?: string;
   model?: string;
 };
 
@@ -34,10 +33,7 @@ async function loadLocalConfig(): Promise<LocalConfig> {
     const config = parsed as LocalConfig;
     if (!process.env.SOFIA_MODEL_PROVIDER && config.provider) process.env.SOFIA_MODEL_PROVIDER = config.provider;
     if (!process.env.SOFIA_MODEL_BASE_URL && config.baseUrl) process.env.SOFIA_MODEL_BASE_URL = config.baseUrl;
-    if (!process.env.SOFIA_MODEL_API_KEY && config.apiKey && config.provider !== "gemini" && config.provider !== "openrouter") process.env.SOFIA_MODEL_API_KEY = config.apiKey;
     if (!process.env.SOFIA_MODEL_NAME && config.model) process.env.SOFIA_MODEL_NAME = config.model;
-    if (config.provider === "gemini" && !process.env.GEMINI_API_KEY && config.apiKey) process.env.GEMINI_API_KEY = config.apiKey;
-    if (config.provider === "openrouter" && !process.env.OPENROUTER_API_KEY && config.apiKey) process.env.OPENROUTER_API_KEY = config.apiKey;
     return config;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
