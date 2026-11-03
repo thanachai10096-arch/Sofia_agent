@@ -338,12 +338,15 @@ class FileJobStateStore {
   }
 
   async claimNotification(id: string, ownerToken: string, leaseMs: number): Promise<boolean> {
+    if (!ownerToken || !Number.isSafeInteger(leaseMs) || leaseMs <= 0) {
+      throw new Error("A notification claim requires an owner token and a positive safe-integer lease duration");
+    }
     return this.withFileLock(async () => {
       const records = await this.read();
       const record = records.find((item) => item.id === id);
       if (!record || record.notificationDelivered || record.status === "queued" || record.status === "running") return false;
       const expires = record.notificationLeaseExpiresAt ? Date.parse(record.notificationLeaseExpiresAt) : 0;
-      if (record.notificationLeaseOwnerToken && Number.isFinite(expires) && expires > Date.now()) return false;
+      if (record.notificationLeaseOwnerToken && (!Number.isFinite(expires) || expires > Date.now())) return false;
       const now = Date.now();
       record.notificationLeaseOwnerToken = ownerToken;
       record.notificationLeaseExpiresAt = new Date(now + leaseMs).toISOString();
@@ -383,8 +386,16 @@ class FileJobStateStore {
     return this.withFileLock(async () => {
       const records = await this.read();
       const record = records.find((item) => item.id === id);
-      if (!record || record.notificationDelivered) return Boolean(record?.notificationDelivered);
-      if (ownerToken && record.notificationLeaseOwnerToken !== ownerToken) return false;
+      if (!record) return false;
+      if (record.notificationDelivered) return true;
+      if (record.notificationLeaseOwnerToken) {
+        if (!ownerToken || record.notificationLeaseOwnerToken !== ownerToken) return false;
+        const expires = record.notificationLeaseExpiresAt ? Date.parse(record.notificationLeaseExpiresAt) : 0;
+        if (!Number.isFinite(expires) || expires <= Date.now()) return false;
+      } else if (ownerToken) {
+        // A worker whose lease was released or replaced must not finalize delivery.
+        return false;
+      }
       record.notificationDelivered = true;
       delete record.notificationLeaseOwnerToken;
       delete record.notificationLeaseExpiresAt;
