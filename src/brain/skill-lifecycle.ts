@@ -165,10 +165,15 @@ export class VersionedSkillLifecycle {
     const before = clone(this.snapshot);
     const previousPackage = this.platform.get(candidate.skillId);
     const previousId = this.snapshot.activeBySkill[candidate.skillId];
-    // Do not overwrite a skill this lifecycle does not own: there is no
-    // managed prior version to restore if promotion or rollback later fails.
+    const previousRecord = previousId ? this.requireRecord(previousId) : undefined;
+    // Do not overwrite an unmanaged or stale platform entry. The platform
+    // must agree with the latest persisted active record before promotion.
     if (!previousId && previousPackage) {
       throw new Error("Cannot promote over an unmanaged skill; adopt it explicitly first");
+    }
+    if (previousId && (!previousRecord || !previousPackage ||
+        JSON.stringify(previousPackage) !== JSON.stringify(previousRecord.package))) {
+      throw new Error("Platform skill does not match the latest persisted lifecycle version");
     }
     const now = new Date().toISOString();
     if (previousId) {
@@ -211,6 +216,9 @@ export class VersionedSkillLifecycle {
     if (!previous) throw new Error("No previous version is available for rollback: " + skillId);
     const before = clone(this.snapshot);
     const platformCurrent = this.platform.get(skillId);
+    if (!platformCurrent || JSON.stringify(platformCurrent) !== JSON.stringify(active.package)) {
+      throw new Error("Platform skill does not match the latest persisted active version");
+    }
     const now = new Date().toISOString();
     active.status = "rolled_back";
     active.updatedAt = now;
