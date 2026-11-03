@@ -39,3 +39,12 @@ test("plan and replan prompts contain the ExecutionPlan parser contract", async 
     assert.match(prompt, /fix-implementation/);
   }
 });
+
+test("subagent prompt contains the explicit untrusted proposal shape", async () => {
+  const prompt = await promptFor("subagent");
+  for (const field of ["tool", "input", "reason"]) {
+    assert.match(prompt, new RegExp(`"${field}"`));
+  }
+  assert.match(prompt, /untrusted proposal/);
+  assert.match(prompt, /parent Brain must validate permissions/);
+});
