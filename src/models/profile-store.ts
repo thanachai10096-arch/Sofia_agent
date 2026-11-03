@@ -78,6 +78,20 @@ function profileBaseUrl(input: UserModelProfileInput, allowedHosts: ReadonlySet<
   return parsed.toString();
 }
 
+function isStoredProfile(value: unknown): value is StoredProfile {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const profile = value as Partial<StoredProfile>;
+  const encryptedKey = profile.encryptedKey;
+  return (profile.provider === "openai-compatible" || profile.provider === "gemini" || profile.provider === "openrouter") &&
+    typeof profile.model === "string" && profile.model.length > 0 &&
+    typeof profile.baseUrl === "string" && profile.baseUrl.length > 0 &&
+    typeof profile.updatedAt === "string" && profile.updatedAt.length > 0 &&
+    !!encryptedKey && typeof encryptedKey === "object" &&
+    typeof encryptedKey.iv === "string" && encryptedKey.iv.length > 0 &&
+    typeof encryptedKey.ciphertext === "string" &&
+    typeof encryptedKey.tag === "string" && encryptedKey.tag.length > 0;
+}
+
 function metadata(profile: StoredProfile): UserModelProfileMetadata {
   return { provider: profile.provider, model: profile.model, baseUrl: profile.baseUrl, updatedAt: profile.updatedAt };
 }
@@ -242,8 +256,9 @@ export class EncryptedUserModelProfileStore implements UserModelProfileStore {
         await handle.close();
       }
       const parsed = JSON.parse(contents) as Partial<ProfileState>;
-      if (parsed.version !== 1 || !parsed.profiles || typeof parsed.profiles !== "object" || Array.isArray(parsed.profiles)) {
-        throw new Error("unsupported profile store format");
+      if (parsed.version !== 1 || !parsed.profiles || typeof parsed.profiles !== "object" || Array.isArray(parsed.profiles) ||
+          !Object.values(parsed.profiles).every(isStoredProfile)) {
+        throw new Error("unsupported or invalid profile store format");
       }
       return parsed as ProfileState;
     } catch (error) {
