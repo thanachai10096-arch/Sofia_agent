@@ -451,8 +451,21 @@ export class SofiaModelGateway implements ModelProvider {
       return failResponse("Model gateway returned no message.");
     }
 
+    const seenToolCallIds = new Set<string>();
     const calls = (message.tool_calls ?? []).map((call, index) => {
       const name = call.function?.name ?? "";
+      const suppliedId = call.id;
+      // Tool-call IDs are the correlation keys used when returning tool results.
+      // Reject empty or duplicate provider IDs rather than attaching a result to
+      // the wrong call on the next model turn. Generate an ID only when omitted.
+      if (suppliedId !== undefined && (typeof suppliedId !== "string" || !suppliedId.trim())) {
+        return failResponse(`invalid tool-call id for ${name || index}.`);
+      }
+      const id = suppliedId ?? `sofia_call_${request.step}_${index}`;
+      if (seenToolCallIds.has(id)) {
+        return failResponse(`duplicate tool-call id for ${name || index}.`);
+      }
+      seenToolCallIds.add(id);
       let parsed: unknown;
       try {
         parsed = JSON.parse(call.function?.arguments ?? "{}") as unknown;
@@ -462,11 +475,7 @@ export class SofiaModelGateway implements ModelProvider {
       if (!name.trim() || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         return failResponse(`invalid arguments for tool call ${name || index}.`);
       }
-      return {
-        id: call.id ?? `call-${request.step}-${index}`,
-        name,
-        input: parsed as Record<string, unknown>,
-      };
+      return { id, name, input: parsed as Record<string, unknown> };
     });
 
     // Gemini's OpenAI-compatible endpoint can return content as typed parts,
