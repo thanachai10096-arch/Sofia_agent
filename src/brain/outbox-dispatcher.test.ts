@@ -18,9 +18,15 @@ const message: OutboxMessage = {
 
 function fakeStore(overrides: Partial<OutboxStore> = {}) {
   const calls: Array<{ kind: string; args: unknown[] }> = [];
+  let claimed = false;
   const store: OutboxStore = {
     async enqueue() { return true; },
-    async claimBatch(...args) { calls.push({ kind: "claim", args }); return [message]; },
+    async claimBatch(...args) {
+      calls.push({ kind: "claim", args });
+      if (claimed) return [];
+      claimed = true;
+      return [message];
+    },
     async markDelivered(...args) { calls.push({ kind: "ack", args }); return true; },
     async retry(...args) { calls.push({ kind: "retry", args }); return true; },
     ...overrides,
@@ -61,8 +67,13 @@ test("dispatcher retries a failed send with bounded exponential delay", async ()
 
 test("dispatcher marks exhausted attempts failed through the store retry contract", async () => {
   const exhausted = { ...message, attempts: 8 };
+  let claimed = false;
   const { store, calls } = fakeStore({
-    async claimBatch() { return [exhausted]; },
+    async claimBatch() {
+      if (claimed) return [];
+      claimed = true;
+      return [exhausted];
+    },
   });
   const dispatcher = new OutboxDispatcher(store, async () => { throw new Error("send failed"); }, {
     workerToken: "worker-token", maxAttempts: 8,
@@ -79,4 +90,37 @@ test("dispatcher reports a lost lease rather than claiming delivery", async () =
   const report = await dispatcher.dispatchOnce();
   assert.equal(report.delivered, 0);
   assert.equal(report.leaseLost, 1);
+});
+
+
+test("dispatcher renews a lease while a long-running sender is active", async () => {
+  let renewals = 0;
+  let release!: () => void;
+  const sendBlocked = new Promise<void>((resolve) => { release = resolve; });
+  const { store } = fakeStore({
+    async renewLease() { renewals += 1; return true; },
+  });
+  const dispatcher = new OutboxDispatcher(store, async () => { await sendBlocked; }, {
+    workerToken: "worker-token", leaseMs: 1000,
+  });
+  const dispatch = dispatcher.dispatchOnce();
+  await new Promise((resolve) => setTimeout(resolve, 550));
+  release();
+  const report = await dispatch;
+  assert.ok(renewals >= 1);
+  assert.equal(report.delivered, 1);
+});
+
+test("dispatcher aborts sender and reports lease loss when renewal is fenced out", async () => {
+  const { store } = fakeStore({
+    async renewLease() { return false; },
+  });
+  const dispatcher = new OutboxDispatcher(store, async ({ signal }) => {
+    await new Promise<void>((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+  }, { workerToken: "worker-token", leaseMs: 1000 });
+  const report = await dispatcher.dispatchOnce();
+  assert.equal(report.leaseLost, 1);
+  assert.equal(report.delivered, 0);
 });
