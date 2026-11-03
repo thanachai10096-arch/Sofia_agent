@@ -37,6 +37,10 @@ CREATE INDEX IF NOT EXISTS sofia_agent_jobs_claim_idx
   ON sofia_agent_jobs (lease_expires_at, created_at)
   WHERE status IN ('queued', 'running');
 
+CREATE INDEX IF NOT EXISTS sofia_agent_jobs_resume_reservation_idx
+  ON sofia_agent_jobs (resume_reservation_expires_at)
+  WHERE resume_reservation_token IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS sofia_agent_jobs_session_idx
   ON sofia_agent_jobs (owner_key_id, session_key, created_at DESC)
   WHERE session_key IS NOT NULL;
