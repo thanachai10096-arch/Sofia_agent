@@ -403,6 +403,59 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
   }
 });
 
+test("a non-cooperative tool result arriving after cancellation is never reported as completed", async () => {
+  const controller = new AbortController();
+  let announceStarted!: () => void;
+  const started = new Promise<void>((resolve) => { announceStarted = resolve; });
+  let releaseTool!: (value: unknown) => void;
+  const pendingTool = new Promise<unknown>((resolve) => { releaseTool = resolve; });
+  const events: SecurityAuditEvent[] = [];
+  let sideEffectOccurred = false;
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Simulate a tool implementation that ignores AbortSignal",
+    inputSchema: { type: "object" },
+    effects: ["write"] as const,
+    async execute() {
+      announceStarted();
+      const result = await pendingTool;
+      // The fixture deliberately simulates an irreversible side effect that
+      // finishes even though the caller has already cancelled.
+      sideEffectOccurred = true;
+      return result;
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, maxRisk: "critical" },
+    undefined,
+    undefined,
+    undefined,
+    { record(event) { events.push(event); } },
+  );
+
+  const execution = gateway.execute(
+    { tool: "custom.write", input: {} },
+    {
+      runId: "late-tool-result-cancellation-test",
+      signal: controller.signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+
+  await started;
+  controller.abort(new Error("caller cancelled while tool was running"));
+  releaseTool({ wrote: true });
+  const result = await execution;
+
+  assert.equal(sideEffectOccurred, true, "non-cooperative tools may finish an already-started side effect");
+  assert.equal(result.ok, false, "late results must not be reported as successful");
+  assert.match(result.error?.message ?? "", /caller cancelled while tool was running/i);
+  assert.equal(events.some((event) => event.decision === "completed"), false);
+  assert.equal(events.some((event) => event.decision === "failed"), true);
+});
+
 test("caller cancellation ends a pending approval wait and never starts the approved tool later", async () => {
   const controller = new AbortController();
   let approvalReached!: () => void;
