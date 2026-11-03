@@ -124,3 +124,29 @@ test("dispatcher aborts sender and reports lease loss when renewal is fenced out
   assert.equal(report.leaseLost, 1);
   assert.equal(report.delivered, 0);
 });
+
+
+test("dispatcher claims each message only when ready to send it", async () => {
+  const second = { ...message, id: "00000000-0000-4000-8000-000000000003" };
+  const queued = [message, second];
+  const claimLimits: number[] = [];
+  const sent: string[] = [];
+  const store: OutboxStore = {
+    async enqueue() { return true; },
+    async claimBatch(_worker, limit) {
+      claimLimits.push(limit);
+      const next = queued.shift();
+      return next ? [next] : [];
+    },
+    async markDelivered() { return true; },
+    async retry() { return true; },
+  };
+  const dispatcher = new OutboxDispatcher(store, async (item) => { sent.push(item.messageId); }, {
+    workerToken: "worker-token", batchSize: 5,
+  });
+  const report = await dispatcher.dispatchOnce();
+  assert.deepEqual(claimLimits, [1, 1, 1]);
+  assert.deepEqual(sent, [message.id, second.id]);
+  assert.equal(report.claimed, 2);
+  assert.equal(report.delivered, 2);
+});
