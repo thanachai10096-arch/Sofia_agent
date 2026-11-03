@@ -461,6 +461,52 @@ test("journal cleanup refuses to erase corrupt settlement evidence", async () =>
   }
 });
 
+test("reused attempt IDs make settlement evidence corrupt and block checkpoint acknowledgement", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-reused-attempt-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+    const runId = "reused-attempt-run";
+    const claim = await journal.claimRun(runId);
+    const attempt = await journal.begin(runId, { inputTokens: 10, outputTokens: 10 }, claim);
+    await journal.settle(runId, attempt, { inputTokens: 3, outputTokens: 2 }, claim);
+    await claim.release();
+
+    const directory = path.join(root, createHash("sha256").update("workspace").digest("hex"));
+    const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    const original = await readFile(journalFile, "utf8");
+    const duplicateStart = JSON.stringify({
+      version: 1,
+      type: "started",
+      attemptId: attempt.id,
+      at: new Date().toISOString(),
+      maxInputTokens: 10,
+      maxOutputTokens: 10,
+    });
+    await writeFile(journalFile, original + duplicateStart + "\n", { mode: 0o600 });
+
+    assert.equal(await journal.hasUnresolved(runId), true,
+      "reusing a previously settled attempt ID must be treated as ambiguous evidence");
+    await assert.rejects(
+      journal.acknowledgeCheckpoint(runId),
+      /reused attempt IDs|corrupt or ambiguous/,
+      "checkpoint acknowledgement must reject reused attempt IDs",
+    );
+    await assert.rejects(
+      journal.claimRun(runId).then(async (nextClaim) => {
+        try {
+          await journal.settle(runId, attempt, { inputTokens: 3, outputTokens: 2 }, nextClaim);
+        } finally {
+          await nextClaim.release();
+        }
+      }),
+      /reused attempt IDs|exactly one pending Started/,
+      "settlement validation must reject reused attempt IDs",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("checkpoint cannot clear an unsettled or unknown-usage provider attempt", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-ambiguous-checkpoint-"));
   try {
