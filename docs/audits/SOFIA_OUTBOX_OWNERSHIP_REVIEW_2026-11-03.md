@@ -59,3 +59,20 @@ Added source-level SQL contract tests that explicitly assert:
 - A stale worker's ACK and retry both fail when the store reports no affected row, with each mutation requiring processing status, matching worker token, and a still-live lease.
 
 These tests have not been executed. They prove the intended SQL predicates are present, not actual PostgreSQL locking behavior or transaction isolation.
+
+## Discord Gateway async-run idempotency correction
+
+A source review of `workers/discord-gateway/daemon/worker.mjs` and `src/api/server.ts` found that the gateway sent an `Idempotency-Key` header but omitted `async: true`. The API only evaluates the idempotency key in its async-run branch; the synchronous branch ignored it. Consequently, the gateway's apparent retry protection did not protect synchronous requests.
+
+Updated the gateway to:
+- Submit Discord tasks with `async: true`, retaining the deterministic `discord_<message.id>` idempotency key.
+- Validate the returned run ID and status.
+- Poll the owner-authenticated `GET /api/v1/agent/runs/:id` endpoint while the run is queued/running.
+- Send the final completed result, or a bounded failure/cancellation explanation, rather than prematurely treating the queued acknowledgement as the final answer.
+- Reuse the same idempotency key when Discord redelivers a message, so a replay can attach to the existing async run where the API's idempotency store is shared.
+
+Changed file: `workers/discord-gateway/daemon/worker.mjs`.
+
+Important remaining limitation: the API's idempotency index is process-local and is rehydrated from `RunRecordStore`; the Vercel adapter currently uses `FileRunRecordStore` under `os.tmpdir()`. This is not a cross-instance transactional idempotency guarantee. Concurrent requests reaching different Vercel instances, ephemeral filesystem loss, or a crash before the initial run record is durably saved can still permit duplicate work. A shared database-backed run/idempotency reservation is required before claiming restart-safe, multi-instance deduplication.
+
+Validation: inspected the changed source and API route contract. No Node syntax check, unit test, build, typecheck, live Vercel test, or multi-instance test was executed in this environment. No migration, deployment, merge, or production change was performed.
