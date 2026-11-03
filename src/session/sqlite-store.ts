@@ -234,6 +234,50 @@ export class SqliteSessionStore {
     if (this.ftsAvailable) this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
   }
 
+
+  /**
+   * Create a consistent SQLite snapshot, including committed WAL content, without
+   * closing this live store. The destination must not already exist. This uses
+   * SQLite's VACUUM INTO rather than copying the database file and sidecars.
+   */
+  createConsistentSnapshot(destinationPath: string): string {
+    if (this.filePath === ":memory:") {
+      throw new Error("Cannot snapshot an in-memory session database by file path.");
+    }
+    const destination = path.resolve(destinationPath);
+    if (destination === this.filePath) {
+      throw new Error("Snapshot destination must differ from the live database path.");
+    }
+    const parent = path.dirname(destination);
+    const parentStat = fs.lstatSync(parent);
+    if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+      throw new Error("Snapshot destination parent must be a real directory.");
+    }
+
+    let createdByThisCall = false;
+    try {
+      const fd = fs.openSync(destination, "wx", 0o600);
+      fs.closeSync(fd);
+      createdByThisCall = true;
+      // VACUUM INTO writes a transactionally consistent standalone database,
+      // incorporating committed WAL changes. Escape SQL string literal quotes.
+      const sqlPath = destination.replace(/'/gu, "''");
+      this.db.exec(`VACUUM INTO '${sqlPath}'`);
+      restrictFilePermissions(destination);
+      return destination;
+    } catch (error) {
+      if (createdByThisCall) {
+        try {
+          const stat = fs.lstatSync(destination);
+          if (stat.isFile() && !stat.isSymbolicLink()) fs.unlinkSync(destination);
+        } catch {
+          // Preserve the original failure; cleanup is best-effort only.
+        }
+      }
+      throw error;
+    }
+  }
+
   close(): void { this.db.close(); }
 }
 
