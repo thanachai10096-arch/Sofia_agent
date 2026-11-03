@@ -18,8 +18,14 @@ const route: ModelRoute = {
 
 test("API sessions are persisted and scoped to the authenticated API key", async () => {
   const sessions = new MemorySessionStore();
+  const modelContexts: Array<{ task: string; context: string }> = [];
   const server = createSofiaApi({
-    provider: { generate: async () => ({ text: "Task completed." }) },
+    provider: {
+      generate: async (request) => {
+        modelContexts.push({ task: request.task, context: request.context ?? "" });
+        return { text: "Task completed." };
+      },
+    },
     router: { select: () => route, markUnhealthy: () => undefined },
     reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
     sessionStore: sessions,
@@ -61,6 +67,7 @@ test("API sessions are persisted and scoped to the authenticated API key", async
   try {
     const firstRunId = await startAndWait("key-one", "first user's task");
     const secondRunId = await startAndWait("key-two", "second user's task");
+    const followupRunId = await startAndWait("key-one", "continue my first task");
 
     // A different authenticated principal cannot inspect or cancel another user's run.
     const crossUserRead = await fetch(`${baseUrl}/v1/agent/runs/${firstRunId}`, {
@@ -77,6 +84,10 @@ test("API sessions are persisted and scoped to the authenticated API key", async
       headers: { authorization: "Bearer key-one" },
     });
     assert.equal(firstOwnerRead.status, 200);
+    const followupOwnerRead = await fetch(`${baseUrl}/v1/agent/runs/${followupRunId}`, {
+      headers: { authorization: "Bearer key-one" },
+    });
+    assert.equal(followupOwnerRead.status, 200);
     const secondOwnerRead = await fetch(`${baseUrl}/v1/agent/runs/${secondRunId}`, {
       headers: { authorization: "Bearer key-two" },
     });
@@ -86,7 +97,12 @@ test("API sessions are persisted and scoped to the authenticated API key", async
     assert.deepEqual(sessions.get(`${idFor("key-one")}:shared-client-session`)?.messages, [
       "user: first user's task",
       "assistant: Task completed.",
+      "user: continue my first task",
+      "assistant: Task completed.",
     ]);
+    assert.match(modelContexts[2]?.context ?? "", /first user's task/);
+    assert.doesNotMatch(modelContexts[2]?.context ?? "", /continue my first task/);
+    assert.doesNotMatch(modelContexts[1]?.context ?? "", /first user's task/);
     assert.deepEqual(sessions.get(`${idFor("key-two")}:shared-client-session`)?.messages, [
       "user: second user's task",
       "assistant: Task completed.",
