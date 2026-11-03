@@ -29,6 +29,7 @@ const names = [
   "SOFIA_BASE_URL",
   "SOFIA_API_KEY",
   "SOFIA_MODEL_API_KEY",
+  "SOFIA_ALLOW_LEGACY_MODEL_KEY_ALIAS",
   "SOFIA_MODEL",
   "BASE_URL",
   "API_KEY",
@@ -111,9 +112,10 @@ test("explicit provider selection wins when multiple provider credentials are pr
   assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
 });
 
-test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL", () => {
+test("legacy SOFIA_API_KEY model alias works only with explicit compatibility opt-in", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_ALLOW_LEGACY_MODEL_KEY_ALIAS = "true";
   process.env.SOFIA_BASE_URL = "https://llm.example.test/v1/";
   process.env.SOFIA_API_KEY = "custom-provider-key";
   process.env.SOFIA_MODEL = "vendor/model-default";
@@ -124,6 +126,15 @@ test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, 
   assert.equal(config.providers.fast?.model, "vendor/model-default");
   assert.equal(config.providers.coding?.model, "vendor/model-code");
   assert.equal(config.providers.reasoning?.model, "vendor/model-default");
+});
+
+test("Sofia API authentication key is not accepted as a custom model credential by default", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_BASE_URL = "https://api.deepseek.com";
+  process.env.SOFIA_API_KEY = "sofia-api-auth-secret";
+  process.env.SOFIA_MODEL = "deepseek-chat";
+  assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_API_KEY/);
 });
 
 test("DeepSeek custom provider uses a dedicated model key without reusing Sofia API authentication", () => {
