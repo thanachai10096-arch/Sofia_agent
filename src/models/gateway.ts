@@ -55,6 +55,26 @@ interface AnthropicResponse {
   usage?: { input_tokens?: number; output_tokens?: number };
 }
 
+function openAICompatibleMessages(messages: ChatMessage[]): Array<Record<string, unknown>> {
+  return messages.map((message) => {
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      return {
+        role: "assistant",
+        content: message.content || null,
+        tool_calls: message.toolCalls.map((call) => ({
+          id: call.id,
+          type: "function",
+          function: { name: call.name, arguments: call.arguments },
+        })),
+      };
+    }
+    if (message.role === "tool") {
+      if (!message.toolCallId) throw new Error("OpenAI-compatible tool messages require a toolCallId.");
+      return { role: "tool", tool_call_id: message.toolCallId, content: message.content };
+    }
+    return { role: message.role, content: message.content };
+  });
+}
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -323,7 +343,7 @@ export class SofiaModelGateway implements ModelProvider {
       };
       body = {
         model: config.model,
-        messages,
+        messages: openAICompatibleMessages(messages),
         ...(tools ? { tools, tool_choice: "auto" } : {}),
         ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" as const } } : {}),
         ...(options.maxOutputTokens
