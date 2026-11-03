@@ -40,3 +40,35 @@ test("rejects invalid sequence numbers", async () => {
   const worker = new ScopedSelfImprovement({ scope, loop: makeLoop([]), checkpoints: makeStore(), redact: value => value });
   await assert.rejects(worker.onVerifiedExecution({ sequence: 0, receiptId: "r", summary: "x" }), /Invalid verified execution notification/);
 });
+
+test("rejects a different receipt ID for an already-pending sequence without replacing it", async () => {
+  const calls: string[] = [];
+  const checkpoints = makeStore();
+  const worker = new ScopedSelfImprovement({ scope, loop: makeLoop(calls), checkpoints, redact: value => value });
+  await worker.onVerifiedExecution({ sequence: 2, receiptId: "r2-original", summary: "original" });
+  await assert.rejects(
+    worker.onVerifiedExecution({ sequence: 2, receiptId: "r2-conflict", summary: "conflict" }),
+    /Conflicting receipt IDs for the same pending sequence/,
+  );
+  assert.deepEqual(await checkpoints.read(scope), {
+    lastSequence: 0,
+    pending: [{ sequence: 2, receiptId: "r2-original", summary: "original" }],
+  });
+  assert.deepEqual(calls, []);
+});
+
+test("rejects reuse of a pending receipt ID at a different sequence", async () => {
+  const calls: string[] = [];
+  const checkpoints = makeStore();
+  const worker = new ScopedSelfImprovement({ scope, loop: makeLoop(calls), checkpoints, redact: value => value });
+  await worker.onVerifiedExecution({ sequence: 2, receiptId: "same-receipt", summary: "buffered" });
+  await assert.rejects(
+    worker.onVerifiedExecution({ sequence: 3, receiptId: "same-receipt", summary: "duplicate identity" }),
+    /Receipt ID is already assigned to a different pending sequence/,
+  );
+  assert.deepEqual(await checkpoints.read(scope), {
+    lastSequence: 0,
+    pending: [{ sequence: 2, receiptId: "same-receipt", summary: "buffered" }],
+  });
+  assert.deepEqual(calls, []);
+});
