@@ -95,3 +95,5 @@ Before appending a new settlement, the journal validates every prior settled eve
 ## Refusing appends after a damaged tail
 
 Before appending to an existing JSONL record, the journal opens the record once with no-follow semantics, verifies the opened inode against the inspected path, and reads the existing bytes through that same descriptor. An empty record, a record without its final newline, or a line that is not valid JSON blocks the append. This applies to new `started` events as well as settlements and checkpoints. The original bytes are left unchanged so an interrupted write remains available for operator reconciliation; the journal does not truncate, repair, or silently continue after damaged evidence.
+
+Recovery inspection applies the same aggregate token-count validation as settlement admission and checkpoint validation. Both reservation bounds and known usage must have safe-integer components whose sum is also a safe integer. If a Started reservation violates that rule, inspection classifies the journal as corrupt and does not count that event or any settlement that cannot validly match it.
