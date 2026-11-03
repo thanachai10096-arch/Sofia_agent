@@ -163,7 +163,7 @@ test("fails with actionable guidance when no supported provider is configured", 
   clear();
   process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
   process.env.AI_GATEWAY_API_KEY = "legacy-test-key";
-  assert.throws(loadModelConfigFromEnv, /Configure SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL/);
+  assert.throws(loadModelConfigFromEnv, /Configure SOFIA_BASE_URL, SOFIA_PROVIDER_API_KEY, and SOFIA_MODEL/);
 });
 
 test("rejects malformed or credential-bearing custom base URLs", () => {
