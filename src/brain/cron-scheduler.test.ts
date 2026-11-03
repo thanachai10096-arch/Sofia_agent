@@ -631,3 +631,55 @@ test("recovery heartbeat retries a transient store outage without fencing a live
   assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 1);
 });
 
+test("recovery monitor stops polling when a store outage outlives its lease", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  let heartbeatFailures = 0;
+  const store: CronStore = {
+    async transact(fn) {
+      if (state.history.some((item: any) => item.recoveryLeaseOwnerToken) && heartbeatFailures === 0) {
+        heartbeatFailures++;
+        now = new Date(now.getTime() + 4_000);
+        throw new Error("cron store unavailable beyond lease expiry");
+      }
+      return fn(state);
+    },
+  };
+  let reads = 0;
+  let cancelCalls = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      return { id, status: "queued", task: "lease expiry outage" } as JobRecord;
+    },
+    async cancel() { cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, now: () => now, recoveryLeaseMs: 3_000 });
+  const schedule = await scheduler.create({
+    name: "lease-expiry-store-outage", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "lease-expiry-outage-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "lease-expiry-outage-job", attempt: 1,
+  });
+
+  const recovered = await scheduler.recover();
+  assert.equal(recovered.monitoring, 1);
+  for (let i = 0; i < 100 && reads < 2; i++) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  assert.equal(heartbeatFailures, 1, "the heartbeat should encounter the simulated outage");
+  assert.ok(reads <= 2, "the expired monitor must stop polling instead of continuing indefinitely");
+  assert.equal(cancelCalls, 0, "losing the lease must not cancel the shared runtime job");
+  assert.equal(state.history[0].status, "running",
+    "an expired monitor must not terminalize an execution after losing its lease");
+  assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 0);
+});
+
