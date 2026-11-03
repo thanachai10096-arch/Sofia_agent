@@ -44,3 +44,17 @@ test("outbox acknowledgement and retry are fenced by the active worker lease",as
  assert.match(calls[1]!.sql,/attempts >= \$5/);
  assert.match(calls[1]!.sql,/lease_owner_token=\$2::uuid/);
 });
+
+
+test("outbox lease renewal extends only a live lease owned by the worker",async()=>{
+ let captured="";
+ let values:unknown[]=[];
+ const db:PostgresExecutor={async query(sql,params=[]){captured=sql;values=params;return {rows:[],rowCount:1};}};
+ const store=new PostgresOutboxStore(db);
+ assert.equal(await store.renewLease(uuidA,uuidB,60000),true);
+ assert.match(captured,/lease_expires_at=now\(\)/);
+ assert.match(captured,/status='processing'/);
+ assert.match(captured,/lease_owner_token=\$2::uuid/);
+ assert.match(captured,/lease_expires_at>now\(\)/);
+ assert.deepEqual(values,[uuidA,uuidB,60000]);
+});
