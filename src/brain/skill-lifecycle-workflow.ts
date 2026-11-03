@@ -33,8 +33,22 @@ export async function runSkillLifecycleWorkflow(
     return { candidate: evaluated, activated: false, reason: "evaluation_rejected" };
   }
 
-  if (!(await options.approvePromotion(evaluated))) {
+  // Approval callbacks are an external boundary. Give the approver an isolated
+  // copy and bind the decision to the exact evaluated record; never let callback
+  // mutation alter what is subsequently promoted.
+  const approvedSnapshot = JSON.stringify(evaluated);
+  const approvalCandidate = JSON.parse(approvedSnapshot) as SkillLifecycleRecord;
+  const approved = await options.approvePromotion(approvalCandidate);
+  if (!approved) {
     return { candidate: evaluated, activated: false, reason: "approval_declined" };
+  }
+  if (JSON.stringify(approvalCandidate) !== approvedSnapshot) {
+    throw new Error("Approval candidate was modified before promotion");
+  }
+  const current = lifecycle.get(evaluated.id);
+  if (!current || current.status !== "verified" || current.evaluation?.passed !== true ||
+      JSON.stringify(current) !== approvedSnapshot) {
+    throw new Error("Skill candidate changed after approval; promotion denied");
   }
 
   const promoted = lifecycle.promote(evaluated.id);
