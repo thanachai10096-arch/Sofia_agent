@@ -179,7 +179,7 @@ test("rejects malformed or credential-bearing custom base URLs", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "custom";
   process.env.SOFIA_BASE_URL = "https://user:password@llm.example.test/v1";
-  process.env.SOFIA_API_KEY = "custom-provider-key";
+  process.env.SOFIA_MODEL_API_KEY = "custom-provider-key";
   process.env.SOFIA_MODEL = "vendor/model";
   assert.throws(loadModelConfigFromEnv, /must not contain credentials/);
 });
@@ -212,7 +212,7 @@ test("custom endpoints can opt into the Anthropic Messages protocol", () => {
   process.env.SOFIA_MODEL_PROVIDER = "custom";
   process.env.SOFIA_MODEL_PROTOCOL = "anthropic-messages";
   process.env.SOFIA_BASE_URL = "https://anthropic-proxy.example.test/v1";
-  process.env.SOFIA_API_KEY = "proxy-key";
+  process.env.SOFIA_MODEL_API_KEY = "proxy-key";
   process.env.SOFIA_MODEL = "claude-proxy-model";
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.protocol, "anthropic-messages");
