@@ -494,6 +494,9 @@ export class FileSettlementJournal {
     let settledAttempts = 0;
     let unknownUsageAttempts = 0;
     let checkpoints = 0;
+    const seenAttemptIds = new Set<string>();
+    const pendingAttemptIds = new Set<string>();
+    let ambiguousUsage = false;
     // Every append is a newline-terminated JSONL record. A valid JSON object
     // without its final delimiter may be a process-crash partial write and is
     // therefore ambiguous accounting evidence, not a complete event.
@@ -512,18 +515,32 @@ export class FileSettlementJournal {
           typeof event.attemptId === "string" && event.attemptId.length > 0 &&
           Number.isSafeInteger(event.maxInputTokens) && (event.maxInputTokens as number) >= 0 &&
           Number.isSafeInteger(event.maxOutputTokens) && (event.maxOutputTokens as number) >= 0) {
+        if (seenAttemptIds.has(event.attemptId)) {
+          corrupt = true;
+          break;
+        }
+        seenAttemptIds.add(event.attemptId);
+        pendingAttemptIds.add(event.attemptId);
         startedAttempts += 1;
       } else if (event.type === "settled" &&
           typeof event.attemptId === "string" && event.attemptId.length > 0 &&
-          typeof event.usageKnown === "boolean") {
+          typeof event.usageKnown === "boolean" && pendingAttemptIds.has(event.attemptId)) {
         if ((event.usageKnown && !isValidJournalUsage(event.usage)) ||
             (!event.usageKnown && event.usage !== undefined)) {
           corrupt = true;
           break;
         }
+        pendingAttemptIds.delete(event.attemptId);
         settledAttempts += 1;
-        if (!event.usageKnown) unknownUsageAttempts += 1;
+        if (!event.usageKnown) {
+          unknownUsageAttempts += 1;
+          ambiguousUsage = true;
+        }
       } else if (event.type === "checkpoint") {
+        if (pendingAttemptIds.size > 0 || ambiguousUsage) {
+          corrupt = true;
+          break;
+        }
         checkpoints += 1;
       } else {
         corrupt = true;
