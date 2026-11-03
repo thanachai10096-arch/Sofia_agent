@@ -32,13 +32,14 @@ export async function assertNoLegacyPlaintextApiKey(filePath: string, environmen
   } catch {
     throw new Error("Existing Sofia config is not valid JSON; refusing to overwrite it. Back it up and repair it before rerunning setup.");
   }
-  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-    const apiKey = (parsed as { apiKey?: unknown }).apiKey;
-    if (typeof apiKey === "string" && apiKey.length > 0) {
-      throw new Error(
-        `An older plaintext API key exists in ~/.sofia/config.json. Move it to the ${environmentVariable} environment variable, verify Sofia can read it, then securely remove the old apiKey field before rerunning setup. The existing config was left unchanged.`,
-      );
-    }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Existing Sofia config must contain a JSON object; refusing to overwrite it.");
+  }
+  const apiKey = (parsed as { apiKey?: unknown }).apiKey;
+  if (typeof apiKey === "string" && apiKey.length > 0) {
+    throw new Error(
+      `An older plaintext API key exists in ~/.sofia/config.json. Move it to the ${environmentVariable} environment variable, verify Sofia can read it, then securely remove the old apiKey field before rerunning setup. The existing config was left unchanged.`,
+    );
   }
 }
 
