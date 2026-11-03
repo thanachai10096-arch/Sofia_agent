@@ -438,3 +438,15 @@ Limitations:
 - Discord nonce enforcement is provider-side duplicate suppression, not a replacement for a durable receiver-side idempotency ledger; its protection window/provider semantics must not be treated as permanent exactly-once delivery.
 - Outbox delivery remains at-least-once, especially for Telegram and after provider deduplication windows expire.
 - No tests, typecheck, or build have been executed in this environment. No live PostgreSQL integration, deployment, or production change was performed.
+
+
+## Follow-up: Discord outbox retry deduplication (2026-11-03)
+
+Verified the current adapter bridge already forwards the stable outbox `messageId` as `OutboundMessage.deliveryId`. Hardened the Discord adapter contract and added regression coverage:
+- Discord derives a deterministic 25-character hexadecimal nonce from the durable delivery ID and chunk index.
+- Each chunk receives a distinct nonce; retries of the same delivery/chunk derive the same nonce.
+- Ordinary messages without a durable delivery ID retain the existing behavior and omit the nonce.
+- The transport contract now explicitly requires mapping a supplied nonce to Discord's `nonce` field with `enforce_nonce=true`; without that provider flag, the nonce alone does not guarantee duplicate suppression.
+- Added three adapter tests for stable nonce, per-chunk uniqueness, and ordinary-message compatibility. The sender test now asserts that the durable outbox ID reaches the adapter.
+
+Important limitation: Discord nonce enforcement is a bounded recent-message deduplication mechanism, not an indefinite exactly-once guarantee. Retries outside the provider's deduplication window, or transports that do not honor `enforce_nonce=true`, may still duplicate. Telegram Bot API has no equivalent general send-message idempotency key in this adapter contract; its delivery remains at-least-once.
