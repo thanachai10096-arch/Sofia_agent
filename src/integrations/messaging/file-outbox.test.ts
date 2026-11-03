@@ -276,3 +276,28 @@ test("retry worker stop waits for an in-flight delivery before shutdown complete
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("manual requeue cannot rewrite retry metadata while another worker holds the lease", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-requeue-lease-"));
+  try {
+    const deliveryWorker = new FileMessagingOutbox(root);
+    const operatorWorker = new FileMessagingOutbox(root);
+    const id = await deliveryWorker.enqueue("line", { conversationId: "line-chat", text: "leased for delivery" });
+    const lease = await deliveryWorker.claim(id);
+    assert.ok(lease);
+
+    assert.equal(await operatorWorker.requeue(id), false);
+    const unchanged = (await operatorWorker.pending()).find((record) => record.id === id);
+    assert.equal(unchanged?.attemptCount, undefined);
+    assert.equal(unchanged?.state, undefined);
+
+    await deliveryWorker.releaseClaim(id, lease!);
+    assert.equal(await operatorWorker.requeue(id), true);
+    const requeued = (await operatorWorker.pending()).find((record) => record.id === id);
+    assert.equal(requeued?.state, "pending");
+    assert.equal(requeued?.attemptCount, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
