@@ -6,6 +6,27 @@
 
 A claim is intentionally fail-closed. If a worker exits unexpectedly, the lock file remains. Sofia must not remove it automatically based only on age, PID absence, or timeout: the provider may have accepted and billed the request even if Sofia did not receive the response.
 
+## Read-only recovery inspection
+
+The journal exposes `inspectRun(runId)` for diagnostics before an operator takes action. It does not acquire or release a claim, append a checkpoint, delete evidence, or reveal the claim token.
+
+The returned summary includes:
+- `claim`: `absent`, `active`, or `invalid`. An active claim includes only PID, hostname, and creation time; this is diagnostic metadata, not proof that the owner is dead.
+- `journal`: `missing`, `resolved`, `unresolved`, or `corrupt`.
+- Counts of started attempts, settled attempts, unknown-usage settlements, and checkpoints.
+- `unresolved`: the conservative replay-blocking result.
+
+Example:
+
+```ts
+const inspection = await settlementJournal.inspectRun(runId);
+if (inspection.claim !== "absent" || inspection.unresolved) {
+  // Stop. Preserve evidence and follow the operator reconciliation procedure.
+}
+```
+
+A missing claim does not make an unresolved journal safe to replay. A valid-looking PID/hostname/timestamp does not establish that a process is dead. An invalid claim or corrupt journal must be treated as an incident and escalated; inspection is intentionally read-only.
+
 ## Operator recovery procedure
 
 1. Stop or isolate every Sofia worker that can access the affected settlement directory. Do not attempt recovery while another worker may still own or acquire the run.
