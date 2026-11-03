@@ -65,3 +65,10 @@ Claim release also validates the lock path with `lstat`, opens with `O_NOFOLLOW`
 The decision helper also validates its input summary defensively: counters must be non-negative safe integers, settled attempts cannot exceed started attempts, unknown-usage settlements cannot exceed settled attempts, and a missing journal must have zero event counts. Any inconsistent summary or reported unknown usage requires operator reconciliation even if a caller supplies an otherwise-clean status flag. This guards callers that construct or transform inspection objects; it does not replace validation of the on-disk journal.
 
 A summary marked `resolved` must also have equal started and settled attempt counts. A caller-supplied `resolved` label with an unmatched attempt is treated as inconsistent and requires operator reconciliation.
+
+
+## Directory-entry durability boundary
+
+On POSIX platforms, creating a claim or a new journal record now follows this order: write the file, call `FileHandle.sync()` for file contents, close the file, then open the settlement namespace directory and call `sync()` to persist the directory entry before proceeding. Claim release and journal retention deletion also sync the directory after unlink. If a directory sync fails, the operation reports failure and does not claim durable success; a claim created before the failure is deliberately left fail-closed. A claim that reappears after a crash is an availability issue, not permission to replay a provider request.
+
+Node.js does not provide a portable directory-fsync guarantee through this implementation on Windows. On Windows the directory sync step is skipped, so this implementation does **not** claim equivalent power-loss durability there. Filesystem, mount, controller-cache, and hardware behavior can further affect durability even on POSIX. Unit tests and successful `FileHandle.sync()` calls are not proof against every power-loss scenario; validate the actual deployment filesystem and retain provider-side reconciliation for ambiguous outcomes.
