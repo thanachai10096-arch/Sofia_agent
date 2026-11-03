@@ -224,7 +224,10 @@ if (telegramUserIds && telegramUserApiKeys) {
   try {
     const allowedTelegramUsers = parseTelegramUserAllowlist(telegramUserIds);
     const perUserKeys = parseTelegramUserApiKeys(telegramUserApiKeys, allowedTelegramUsers);
-    for (const key of perUserKeys.values()) apiKeys[key] = scopes;
+    // Telegram identities receive only the capabilities needed for chat tasks
+    // and private Memory; never inherit privileged core/server scopes.
+    const telegramScopes = ["agent:run", "memory:read", "memory:write"];
+    for (const key of perUserKeys.values()) apiKeys[key] = telegramScopes;
   } catch {
     // Fail closed for Telegram; do not stop the core API for optional bridge config.
   }
