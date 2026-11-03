@@ -24,6 +24,9 @@ export interface JobRecord {
   /** Original user task before historical session context is appended. */
   sessionTask?: string;
   notificationDelivered?: boolean;
+  /** Fencing lease for one worker delivering a post-restart notification. */
+  notificationLeaseOwnerToken?: string;
+  notificationLeaseExpiresAt?: string;
   leaseOwnerToken?: string;
   leaseExpiresAt?: string;
   heartbeatAt?: string;
@@ -80,7 +83,9 @@ export interface JobRuntime {
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
-  markNotificationDelivered?(id: string): Promise<void>;
+  claimNotification?(id: string, ownerToken: string, leaseMs?: number): Promise<boolean>;
+  releaseNotificationClaim?(id: string, ownerToken: string): Promise<void>;
+  markNotificationDelivered?(id: string, ownerToken?: string): Promise<void>;
 }
 
 async function isExclusiveFileCollision(error: unknown, file: string): Promise<boolean> {
@@ -320,6 +325,49 @@ class FileJobStateStore {
     });
   }
 
+  async claimNotification(id: string, ownerToken: string, leaseMs: number): Promise<boolean> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.notificationDelivered || record.status === "queued" || record.status === "running") return false;
+      const expires = record.notificationLeaseExpiresAt ? Date.parse(record.notificationLeaseExpiresAt) : 0;
+      if (record.notificationLeaseOwnerToken && Number.isFinite(expires) && expires > Date.now()) return false;
+      const now = Date.now();
+      record.notificationLeaseOwnerToken = ownerToken;
+      record.notificationLeaseExpiresAt = new Date(now + leaseMs).toISOString();
+      record.updatedAt = new Date(now).toISOString();
+      await this.write(records);
+      return true;
+    });
+  }
+
+  async releaseNotificationClaim(id: string, ownerToken: string): Promise<void> {
+    await this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.notificationLeaseOwnerToken !== ownerToken || record.notificationDelivered) return;
+      delete record.notificationLeaseOwnerToken;
+      delete record.notificationLeaseExpiresAt;
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+    });
+  }
+
+  async markNotificationDelivered(id: string, ownerToken?: string): Promise<boolean> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.notificationDelivered) return Boolean(record?.notificationDelivered);
+      if (ownerToken && record.notificationLeaseOwnerToken !== ownerToken) return false;
+      record.notificationDelivered = true;
+      delete record.notificationLeaseOwnerToken;
+      delete record.notificationLeaseExpiresAt;
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return true;
+    });
+  }
+
   async heartbeat(id: string, ownerToken: string, leaseMs: number): Promise<boolean> {
     return this.withFileLock(async () => {
       const records = await this.read();
@@ -390,6 +438,12 @@ class FileJobStateStore {
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
         records[index] = {
           ...record,
+          ...(current.notificationLeaseOwnerToken && record.notificationLeaseOwnerToken === undefined
+            ? {
+                notificationLeaseOwnerToken: current.notificationLeaseOwnerToken,
+                notificationLeaseExpiresAt: current.notificationLeaseExpiresAt,
+              }
+            : {}),
           ...(record.status === "running" && current.status === "running"
             ? { leaseExpiresAt: current.leaseExpiresAt, heartbeatAt: current.heartbeatAt }
             : {}),
@@ -482,13 +536,23 @@ export class DurableJobRuntime implements JobRuntime {
     return publicJobRecord(hydrated);
   }
 
-  async markNotificationDelivered(id: string): Promise<void> {
-    const record = this.jobs.get(id) ?? await this.get(id);
-    if (!record) return;
-    const canonical = this.jobs.get(id) ?? record;
-    canonical.notificationDelivered = true;
-    canonical.updatedAt = new Date().toISOString();
-    await this.state.save(canonical);
+  async claimNotification(id: string, ownerToken: string, leaseMs = 30_000): Promise<boolean> {
+    return this.state.claimNotification(id, ownerToken, leaseMs);
+  }
+
+  async releaseNotificationClaim(id: string, ownerToken: string): Promise<void> {
+    await this.state.releaseNotificationClaim(id, ownerToken);
+  }
+
+  async markNotificationDelivered(id: string, ownerToken?: string): Promise<void> {
+    await this.state.markNotificationDelivered(id, ownerToken);
+    const canonical = this.jobs.get(id);
+    if (canonical && (!ownerToken || canonical.notificationLeaseOwnerToken === ownerToken)) {
+      canonical.notificationDelivered = true;
+      delete canonical.notificationLeaseOwnerToken;
+      delete canonical.notificationLeaseExpiresAt;
+      canonical.updatedAt = new Date().toISOString();
+    }
   }
 
   async list(): Promise<JobRecord[]> {
