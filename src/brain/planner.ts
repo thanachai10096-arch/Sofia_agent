@@ -15,58 +15,59 @@ const STRATEGIES = new Set<Strategy>([
   "alternative-tool",
 ]);
 
-export function object(value: unknown): Record<string, unknown> {
+function receivedType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+export function object(value: unknown, field = "value"): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Expected an object");
+    throw new Error(`Invalid field "${field}": expected object; received type ${receivedType(value)}.`);
   }
   return value as Record<string, unknown>;
 }
 
-function text(value: unknown): string {
+function text(value: unknown, field = "value"): string {
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error("Expected a non-empty string");
+    throw new Error(`Invalid field "${field}": expected non-empty string; received type ${receivedType(value)}.`);
   }
   return value;
 }
 
-function texts(value: unknown): string[] {
+function texts(value: unknown, field = "value"): string[] {
   if (!Array.isArray(value)) {
-    throw new Error("Expected a string array");
+    throw new Error(`Invalid field "${field}": expected string array; received type ${receivedType(value)}.`);
   }
-  return value.map(text);
+  return value.map((item, index) => text(item, `${field}[${index}]`));
 }
 
 export function parseUnderstanding(value: unknown): TaskUnderstanding {
-  const input = object(value);
+  const input = object(value, "understanding");
 
   if (input.risk !== "low" && input.risk !== "medium" && input.risk !== "high") {
-    const receivedType = input.risk === null
-      ? "null"
-      : Array.isArray(input.risk)
-        ? "array"
-        : typeof input.risk;
     throw new Error(
-      `Invalid field "risk": expected "low" | "medium" | "high"; received type ${receivedType}.`,
+      `Invalid field "risk": expected "low" | "medium" | "high"; received type ${receivedType(input.risk)}.`,
     );
   }
 
   return {
-    objective: text(input.objective),
-    constraints: texts(input.constraints),
-    assumptions: texts(input.assumptions),
-    requiredCapabilities: texts(input.requiredCapabilities),
-    requiredTools: texts(input.requiredTools),
+    objective: text(input.objective, "objective"),
+    constraints: texts(input.constraints, "constraints"),
+    assumptions: texts(input.assumptions, "assumptions"),
+    requiredCapabilities: texts(input.requiredCapabilities, "requiredCapabilities"),
+    requiredTools: texts(input.requiredTools, "requiredTools"),
     risk: input.risk,
-    successCriteria: texts(input.successCriteria),
-    ambiguities: texts(input.ambiguities),
+    successCriteria: texts(input.successCriteria, "successCriteria"),
+    ambiguities: texts(input.ambiguities, "ambiguities"),
   };
 }
 
 export function parsePlan(value: unknown, maxSteps: number): ExecutionPlan {
-  const input = object(value);
+  const input = object(value, "plan");
 
   if (!STRATEGIES.has(input.strategy as Strategy)) {
-    throw new Error("Invalid recovery strategy");
+    throw new Error(`Invalid field "strategy": expected a supported strategy; received type ${receivedType(input.strategy)}.`);
   }
 
   if (
@@ -74,27 +75,27 @@ export function parsePlan(value: unknown, maxSteps: number): ExecutionPlan {
     input.steps.length === 0 ||
     input.steps.length > maxSteps
   ) {
-    throw new Error("Invalid plan size");
+    throw new Error(`Invalid field "steps": expected an array with 1 to ${maxSteps} entries; received type ${receivedType(input.steps)}.`);
   }
 
   const steps: PlanStep[] = input.steps.map((raw) => {
-    const step = object(raw);
-    const call = object(step.call);
+    const step = object(raw, "steps[]");
+    const call = object(step.call, "steps[].call");
 
     return {
-      id: text(step.id),
-      objective: text(step.objective),
-      dependencies: texts(step.dependencies),
+      id: text(step.id, "steps[].id"),
+      objective: text(step.objective, "steps[].objective"),
+      dependencies: texts(step.dependencies, "steps[].dependencies"),
       call: {
-        tool: text(call.tool),
-        input: object(call.input),
+        tool: text(call.tool, "steps[].call.tool"),
+        input: object(call.input, "steps[].call.input"),
       },
     };
   });
 
   const plan: ExecutionPlan = {
     strategy: input.strategy as Strategy,
-    reason: text(input.reason),
+    reason: text(input.reason, "reason"),
     steps,
   };
 
