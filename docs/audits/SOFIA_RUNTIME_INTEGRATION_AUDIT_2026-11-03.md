@@ -254,3 +254,27 @@ The test file contains coverage for process restart recovery, checkpoint resume,
 ### Scope decision
 
 No change to `job-runtime.ts` was made in this follow-up. The inspected local implementation already has substantial lease and recovery protections; replacing it or adding another runtime would increase risk. The next implementation unit should be the shared storage adapter and its contract tests, not a rewrite of the existing executor.
+
+
+## Follow-up: shared-storage schema and owner-scope review
+
+Added `db/migrations/0001_shared_job_runtime.sql` as an additive PostgreSQL schema candidate. It defines shared job rows, checkpoint history, owner-scoped idempotency keys, and a notification outbox, with indexes for owner history, lease claims, and outbox dispatch.
+
+The schema is deliberately not wired into runtime. The repository currently has no PostgreSQL driver or migration runner in `package.json`, and no database connection configuration was verified. Adding a database dependency or changing deployment configuration without a tested adapter would be premature.
+
+Additional API boundary review:
+- `GET /v1/jobs/:id` fetches the job and compares `ownerKeyId` with the authenticated API key identity before returning it.
+- `GET /v1/jobs` filters the returned list by `ownerKeyId`.
+- Resume/cancel routes perform the same ownership check before mutation.
+- The current JobStateStore interface itself remains unscoped: `get(id)` and `list()` return records before API-layer filtering. The PostgreSQL adapter should expose owner-scoped operations (or require a trusted owner scope in its query context) so one tenant's rows are not unnecessarily loaded into another request's process memory.
+
+Schema compatibility note:
+- The current runtime can retain lease metadata on terminal records (for example, cancellation can persist while the old worker still holds its fencing token; completion also does not consistently clear lease fields).
+- The migration therefore does not impose a terminal-state constraint requiring lease fields to be null. The adapter must still reject heartbeat/claim for terminal states and fence stale writes by token and status.
+- The migration has not been applied to a database, parsed by PostgreSQL, or integration-tested. Treat it as a reviewed schema draft only.
+
+Next safe implementation step:
+1. Define a principal-scoped cloud store port without weakening the existing local adapter contract.
+2. Add a PostgreSQL client and migration runner only after choosing the deployment database and supported connection model.
+3. Implement atomic SQL claim/heartbeat/cancel/save and checkpoint/outbox transactions.
+4. Run real PostgreSQL migration, contract, concurrency, owner-isolation, and restart tests before enabling it in Vercel Preview.
