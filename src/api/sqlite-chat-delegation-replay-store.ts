@@ -31,6 +31,13 @@ function ensurePrivateRegularFile(filePath: string): void {
  * both claim the same (tenant, platform, nonce). For multi-host deployments,
  * use a shared transactional database rather than per-host local disk.
  */
+function ensurePrivateSqliteFiles(filePath: string): void {
+  if (filePath === ":memory:" || process.platform === "win32") return;
+  ensurePrivateRegularFile(filePath);
+  ensurePrivateRegularFile(`${filePath}-wal`);
+  ensurePrivateRegularFile(`${filePath}-shm`);
+}
+
 export class SqliteChatDelegationReplayStore implements ChatDelegationReplayStore {
   private constructor(private readonly db: SqliteDatabase, private readonly filePath: string) {}
 
@@ -46,17 +53,17 @@ export class SqliteChatDelegationReplayStore implements ChatDelegationReplayStor
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       }
-      ensurePrivateRegularFile(absolutePath);
+      ensurePrivateSqliteFiles(absolutePath);
     }
 
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolutePath);
     try {
       db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;");
-      ensurePrivateRegularFile(absolutePath);
+      ensurePrivateSqliteFiles(absolutePath);
       const store = new SqliteChatDelegationReplayStore(db, absolutePath);
       store.migrate();
-      ensurePrivateRegularFile(absolutePath);
+      ensurePrivateSqliteFiles(absolutePath);
       return store;
     } catch (error) {
       db.close();
@@ -110,7 +117,7 @@ export class SqliteChatDelegationReplayStore implements ChatDelegationReplayStor
         VALUES (?, ?, ?, ?)
       `).run(input.tenantId, input.platform, input.nonce, input.expiresAt);
       this.db.exec("COMMIT");
-      ensurePrivateRegularFile(this.filePath);
+      ensurePrivateSqliteFiles(this.filePath);
       return Number(result.changes) === 1;
     } catch (error) {
       this.db.exec("ROLLBACK");
