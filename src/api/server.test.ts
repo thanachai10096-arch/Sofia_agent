@@ -263,3 +263,63 @@ test("API personal memory is isolated by distinct authenticated per-user API key
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API job inspection, resume, and cancellation are isolated by authenticated owner", async () => {
+  const ownerKey = "job-owner-key";
+  const otherKey = "job-other-key";
+  const ownerKeyId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
+  const job = {
+    id: "11111111-2222-4333-8444-555555555555",
+    status: "failed" as const,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    task: "private owner job",
+    ownerKeyId,
+  };
+  let resumeCalls = 0;
+  let cancelCalls = 0;
+  const jobRuntime = {
+    submit: async () => { throw new Error("not used"); },
+    get: async (id: string) => id === job.id ? job : undefined,
+    resume: async () => { resumeCalls += 1; return job; },
+    cancel: async () => { cancelCalls += 1; return true; },
+    list: async () => [job],
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    jobRuntime,
+  }, {
+    apiKeys: {
+      [ownerKey]: ["agent:run", "agent:read"],
+      [otherKey]: ["agent:run", "agent:read"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const request = (key: string, path: string, init: RequestInit = {}) => fetch(baseUrl + path, {
+    ...init,
+    headers: { authorization: "Bearer " + key, ...(init.headers ?? {}) },
+  });
+
+  try {
+    assert.equal((await request(otherKey, "/v1/jobs/" + job.id)).status, 404);
+    assert.equal((await request(otherKey, "/v1/jobs/" + job.id + "/cancel", { method: "POST" })).status, 404);
+    assert.equal((await request(otherKey, "/v1/jobs/" + job.id + "/resume", { method: "POST" })).status, 404);
+    assert.equal(cancelCalls, 0);
+    assert.equal(resumeCalls, 0);
+
+    assert.equal((await request(ownerKey, "/v1/jobs/" + job.id)).status, 200);
+    assert.equal((await request(ownerKey, "/v1/jobs/" + job.id + "/cancel", { method: "POST" })).status, 202);
+    assert.equal((await request(ownerKey, "/v1/jobs/" + job.id + "/resume", { method: "POST" })).status, 202);
+    assert.equal(cancelCalls, 1);
+    assert.equal(resumeCalls, 1);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
