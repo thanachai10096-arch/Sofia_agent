@@ -176,6 +176,52 @@ export class SqliteSessionStore {
     restrictSqlitePermissions(this.filePath);
   }
 
+  /**
+   * Append transcript turns against the latest committed snapshot.
+   * BEGIN IMMEDIATE serializes writers across SQLite connections/processes so
+   * a stale reader cannot replace messages written by another worker.
+   */
+  appendMessages(id: string, appended: string[], maxMessages = 200): Session {
+    if (!id) throw new Error("Session id must not be empty.");
+    if (!Array.isArray(appended) || appended.some((message) => typeof message !== "string")) {
+      throw new TypeError("Appended session messages must be an array of strings.");
+    }
+    const boundedMax = boundedInteger(maxMessages, 200, 1, 1_000);
+    const updatedAt = Date.now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        "INSERT INTO sessions(id, updated_at) VALUES (?, ?) ON CONFLICT(id) DO NOTHING",
+      ).run(id, updatedAt);
+      const existing = this.db.prepare(
+        "SELECT content FROM session_messages WHERE session_id = ? ORDER BY position ASC",
+      ).all(id) as Array<{ content: string }>;
+      const messages = [...existing.map((row) => row.content), ...appended].slice(-boundedMax);
+
+      this.db.prepare("DELETE FROM session_messages WHERE session_id = ?").run(id);
+      if (this.ftsAvailable) {
+        this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
+      }
+      const insertMessage = this.db.prepare(
+        "INSERT INTO session_messages(session_id, position, content) VALUES (?, ?, ?)",
+      );
+      const insertFts = this.ftsAvailable
+        ? this.db.prepare("INSERT INTO session_messages_fts(session_id, content) VALUES (?, ?)")
+        : undefined;
+      messages.forEach((message, position) => {
+        insertMessage.run(id, position, message);
+        insertFts?.run(id, message);
+      });
+      this.db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(updatedAt, id);
+      this.db.exec("COMMIT");
+      restrictSqlitePermissions(this.filePath);
+      return { id, messages, updatedAt };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   listMessages(id: string, options: { limit?: number; offset?: number } = {}): string[] {
     const limit = boundedInteger(options.limit, 50, 1, 500);
     const offset = boundedInteger(options.offset, 0, 0, Number.MAX_SAFE_INTEGER);
