@@ -332,6 +332,7 @@ export class FileSettlementJournal {
     let settled = 0;
     const seenAttemptIds = new Set<string>();
     const pendingAttemptIds = new Set<string>();
+    let ambiguousUsage = false;
     for (const line of source.split("\n")) {
       if (!line) continue;
       let raw: unknown;
@@ -377,8 +378,13 @@ export class FileSettlementJournal {
           throw new Error("Cannot settle an attempt from a journal with inconsistent unknown usage evidence");
         }
         pendingAttemptIds.delete(event.attemptId);
+        if (!event.usageKnown) ambiguousUsage = true;
         if (event.attemptId === attemptId) settled += 1;
-      } else if (event.type !== "checkpoint") {
+      } else if (event.type === "checkpoint") {
+        if (pendingAttemptIds.size > 0 || ambiguousUsage) {
+          throw new Error("Cannot settle an attempt from a journal with an invalid checkpoint sequence");
+        }
+      } else {
         throw new Error("Cannot settle an attempt from a corrupt journal");
       }
     }
@@ -608,6 +614,11 @@ export class FileSettlementJournal {
         // unknown-usage settlement. Those require operator reconciliation.
         if (pendingAttempts.size === 0 && !ambiguousEvidence) {
           uncheckpointedKnownSettlement = false;
+        } else {
+          // A checkpoint in the middle of an attempt or after ambiguous
+          // evidence is itself invalid and can never be repaired by a later
+          // checkpoint.
+          ambiguousEvidence = true;
         }
         continue;
       }
@@ -694,7 +705,12 @@ export class FileSettlementJournal {
       if (event.version !== 1 || typeof event.at !== "string" || !Number.isFinite(Date.parse(event.at))) {
         throw new Error("Cannot checkpoint corrupt settlement evidence");
       }
-      if (event.type === "checkpoint") continue;
+      if (event.type === "checkpoint") {
+        if (pending.size > 0 || ambiguous) {
+          throw new Error("Cannot checkpoint corrupt or ambiguous settlement evidence");
+        }
+        continue;
+      }
       if (event.type === "started") {
         if (typeof event.attemptId !== "string" || !event.attemptId ||
             !isValidJournalUsage({
