@@ -435,8 +435,19 @@ class FileJobStateStore implements JobStateStore {
           if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return false;
         }
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
+        const reservationExpiry = current.resumeReservationExpiresAt ? Date.parse(current.resumeReservationExpiresAt) : 0;
+        const keepResumeReservation = Boolean(
+          current.resumeReservationToken &&
+          Number.isFinite(reservationExpiry) &&
+          reservationExpiry > Date.now() &&
+          record.resumeReservationToken !== current.resumeReservationToken
+        );
         records[index] = {
           ...record,
+          ...(keepResumeReservation ? {
+            resumeReservationToken: current.resumeReservationToken,
+            resumeReservationExpiresAt: current.resumeReservationExpiresAt,
+          } : {}),
           ...(record.status === "running" && current.status === "running"
             ? { leaseExpiresAt: current.leaseExpiresAt, heartbeatAt: current.heartbeatAt }
             : {}),
