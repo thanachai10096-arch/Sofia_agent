@@ -1061,7 +1061,49 @@ test("DurableJobRuntime atomically claims and fences recovery notification deliv
 
   await first.markNotificationDelivered(submitted.id, loser);
   assert.equal((await first.get(submitted.id))?.notificationDelivered, false, "a stale worker cannot mark delivery");
-  await first.markNotificationDelivered(submitted.id, winner);
-  assert.equal((await second.get(submitted.id))?.notificationDelivered, true);
-  assert.equal(await second.claimNotification(submitted.id, "worker-c", 30_000), false, "delivered notices cannot be claimed again");
+
+  // Simulate an old in-memory job snapshot captured while the lease existed.
+  const stateStore = (first as unknown as {
+    state: {
+      get(id: string): Promise<import("./job-runtime.js").JobRecord | undefined>;
+      save(record: import("./job-runtime.js").JobRecord): Promise<boolean>;
+    };
+  }).state;
+  const staleSnapshot = await stateStore.get(submitted.id);
+  assert.ok(staleSnapshot?.notificationLeaseOwnerToken === winner);
+  await first.releaseNotificationClaim(submitted.id, winner);
+  assert.equal(await stateStore.save(staleSnapshot), true);
+  assert.equal(await second.claimNotification(submitted.id, "worker-c", 30_000), true,
+    "saving a stale snapshot must not resurrect a released notification lease");
+
+  await second.markNotificationDelivered(submitted.id, "worker-c");
+  assert.equal((await first.get(submitted.id))?.notificationDelivered, true);
+  assert.equal(await first.claimNotification(submitted.id, "worker-d", 30_000), false, "delivered notices cannot be claimed again");
+});
+
+test("DurableJobRuntime renews notification leases and allows takeover after expiry", async () => {
+  const namespace = "job-runtime-notification-renewal-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "done" }),
+  } as unknown as SofiaBrain;
+  const first = new DurableJobRuntime(() => brain, undefined, namespace);
+  const second = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await first.submit({ task: "notification lease renewal test" });
+
+  let completed = await first.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && completed?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    completed = await first.get(submitted.id);
+  }
+  assert.equal(completed?.status, "completed");
+
+  assert.equal(await first.claimNotification(submitted.id, "worker-a", 200), true);
+  await new Promise<void>((resolve) => setTimeout(resolve, 80));
+  assert.equal(await first.renewNotificationClaim(submitted.id, "worker-a", 250), true);
+  await new Promise<void>((resolve) => setTimeout(resolve, 120));
+  assert.equal(await second.claimNotification(submitted.id, "worker-b", 30_000), false,
+    "renewal must prevent takeover while the owning worker is still active");
+  await new Promise<void>((resolve) => setTimeout(resolve, 180));
+  assert.equal(await second.claimNotification(submitted.id, "worker-b", 30_000), true,
+    "another worker may recover the notification after the renewed lease expires");
 });
