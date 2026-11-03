@@ -584,9 +584,9 @@ test("recovery heartbeat retries a transient store outage without fencing a live
   const store: CronStore = {
     async transact(fn) {
       transactions++;
-      // recover() uses three transactions before starting the monitor:
-      // pending snapshot, schedule lookup, and durable lease acquisition.
-      if (transactions === 4 && heartbeatFailures === 0) {
+      // Fail the first transaction after the durable recovery lease is visible.
+      // This targets the heartbeat, independent of transactions used by create/recover.
+      if (state.history.some((item: any) => item.recoveryLeaseOwnerToken) && heartbeatFailures === 0) {
         heartbeatFailures++;
         throw new Error("temporary cron store outage during heartbeat");
       }
