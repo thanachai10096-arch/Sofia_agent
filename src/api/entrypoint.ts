@@ -193,6 +193,8 @@ if (discordGatewayRequested) {
     if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable");
     discordGatewayTransport = createDiscordGatewayTransport({
       botToken,
+      allowedUserIds: [...allowedUsers],
+      allowedChannelIds: [...allowedChannels],
       onError: (event, status) => console.error("Discord Gateway:", event, status ?? ""),
     });
     const seenMessageIds = new Set<string>();
