@@ -59,6 +59,7 @@ export function createMessagingOutboxSender(
     const message: OutboundMessage = {
       conversationId,
       text: notificationText(delivery.payload),
+      deliveryId: delivery.messageId,
     };
     const receipt = await adapter.send(message);
     if (receipt.state !== "sent") {
