@@ -111,8 +111,15 @@ export class VersionedSkillLifecycle {
   }
 
   async evaluate(candidateId: string): Promise<SkillLifecycleRecord> {
-    const candidate = this.requireRecord(candidateId);
-    if (candidate.status !== "candidate") throw new Error("Only candidate skills can be evaluated");
+    // Refresh the candidate under the cross-process lock before starting the
+    // external evaluator. Long-lived instances may have been created before
+    // another writer proposed this candidate.
+    const candidate = this.withExclusiveLock(() => {
+      this.load();
+      const current = this.requireRecord(candidateId);
+      if (current.status !== "candidate") throw new Error("Only candidate skills can be evaluated");
+      return clone(current);
+    });
     let result: SkillEvaluationResult;
     try {
       result = await this.evaluator(clone(candidate.package));
@@ -131,7 +138,8 @@ export class VersionedSkillLifecycle {
       this.load();
       const before = clone(this.snapshot);
       const record = this.requireRecord(candidateId);
-      if (record.status !== "candidate") {
+      if (record.status !== "candidate" || JSON.stringify(record.package) !== JSON.stringify(candidate.package) ||
+          JSON.stringify(record.provenance) !== JSON.stringify(candidate.provenance)) {
         throw new Error("Skill candidate changed state during evaluation");
       }
       record.evaluation = {
