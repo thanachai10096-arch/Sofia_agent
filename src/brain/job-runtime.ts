@@ -753,6 +753,22 @@ export class DurableJobRuntime implements JobRuntime {
     return true;
   }
 
+  private async persistTerminalRecord(record: JobRecord): Promise<boolean> {
+    const atomicStore = this.state as JobStateStore & {
+      saveTerminalWithOutbox?: (record: JobRecord, eventType: string, payload: unknown) => Promise<boolean>;
+    };
+    if (atomicStore.saveTerminalWithOutbox) {
+      const payload = redactSecrets({
+        jobId: record.id,
+        status: record.status,
+        ...(record.result !== undefined ? { result: record.result } : {}),
+        ...(record.error ? { error: record.error } : {}),
+      });
+      return atomicStore.saveTerminalWithOutbox(record, `job.${record.status}`, payload);
+    }
+    return this.state.save(record);
+  }
+
   private async execute(
     record: JobRecord,
     input: Omit<BrainRunInput, "signal" | "resume">,
@@ -847,14 +863,15 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = result.completed ? "completed" : "failed";
       }
       record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
+      const persisted = await this.persistTerminalRecord(record);
+      if (!persisted) controller.abort(new Error("Job terminal transition lost its lease or was cancelled"));
     } catch (error) {
       if (record.status !== "cancelled") {
         record.error = error instanceof Error ? error.message : String(error);
         record.status = controller.signal.aborted ? "cancelled" : "failed";
         record.updatedAt = new Date().toISOString();
       }
-      await this.state.save(record);
+      await this.persistTerminalRecord(record);
     } finally {
       clearInterval(heartbeat);
       if (externalSignal && onExternalAbort) {
