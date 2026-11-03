@@ -143,3 +143,19 @@ test("Telegram per-user credentials fail closed when an allowlisted user has no 
   assert.equal(warnings.length, 1);
   assert.doesNotMatch(warnings[0] ?? "", /user-one-key|123|456/);
 });
+
+
+test("Telegram per-user credentials reject keys for users outside the allowlist", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    TELEGRAM_USER_API_KEYS: '{"123":"user-one-key","999":"unlisted-user-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0] ?? "", /user-one-key|unlisted-user-key|123|999/);
+});
