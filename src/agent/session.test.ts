@@ -34,6 +34,34 @@ test("SofiaAgent records user and assistant turns when a session store is config
   ]);
 });
 
+test("SofiaAgent includes bounded prior session messages in model context", async () => {
+  const sessions = new MemorySessionStore();
+  sessions.save({
+    id: "conversation-history",
+    messages: ["user: My project uses TypeScript.", "assistant: I will use TypeScript examples."],
+    updatedAt: Date.now(),
+  });
+  let modelContext = "";
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async (request) => {
+        modelContext = request.context ?? "";
+        return { text: "Continuing with the project." };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await agent.run({ task: "Continue the project", sessionId: "conversation-history" });
+
+  assert.match(modelContext, /Prior conversation history/);
+  assert.match(modelContext, /My project uses TypeScript/);
+  assert.match(modelContext, /session_history/);
+  assert.doesNotMatch(modelContext, /user: Continue the project/);
+});
+
 test("SofiaAgent does not create a session unless sessionId is provided", async () => {
   const sessions = new MemorySessionStore();
   const agent = new SofiaAgent({
