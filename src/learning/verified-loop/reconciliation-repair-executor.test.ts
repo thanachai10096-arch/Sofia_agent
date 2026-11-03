@@ -363,3 +363,31 @@ test("checks lease ownership immediately before lifecycle mutation", async () =>
   assert.equal(registrations, 0);
   assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
 });
+
+
+test("revalidates approval after audit I/O and blocks mutation if receipt is revoked", async () => {
+  const journal = new MemoryJournal();
+  let revoked = false;
+  let registrations = 0;
+  const audit = journal.audit.bind(journal);
+  journal.audit = async (event) => {
+    await audit(event);
+    if (event.event === "repair_revalidated") revoked = true;
+  };
+  const host = hostWith(() => snapshot({
+    explicitlyApproved: !revoked,
+    approvalBinding: {
+      id: action.approvalId,
+      actorId: action.actorId,
+      skillId: action.skillId,
+      scope,
+      policyRevision: action.expectedPolicyRevision,
+      status: revoked ? "revoked" as const : "approved" as const,
+    },
+  }), async () => { registrations++; });
+  const result = await executeLearningRepairPlan(plan, journal, host);
+  assert.equal(result[0]?.state, "failed");
+  assert.match(result[0]?.reason ?? "", /Pre-mutation authoritative revalidation failed/);
+  assert.equal(registrations, 0);
+  assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
+});
