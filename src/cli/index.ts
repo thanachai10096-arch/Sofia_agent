@@ -8,7 +8,7 @@ import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createCliSessionId } from "./session-id.js";
 import { resolveCliInvocation } from "./commands.js";
-import { applySafeLocalConfigEnvironment, assertNoLegacyPlaintextApiKey, writeSafeLocalConfig } from "./config-file.js";
+import { applySafeLocalConfigEnvironment, assertNoLegacyPlaintextApiKey, readSafeLocalConfig, writeSafeLocalConfig } from "./config-file.js";
 
 const invocation = resolveCliInvocation(process.argv.slice(2));
 const command = invocation.command;
@@ -24,9 +24,7 @@ type LocalConfig = {
 
 async function loadLocalConfig(): Promise<LocalConfig> {
   const config = await readSafeLocalConfig(configPath);
-  if (!process.env.SOFIA_MODEL_PROVIDER && config.provider) process.env.SOFIA_MODEL_PROVIDER = config.provider;
-  if (!process.env.SOFIA_MODEL_BASE_URL && config.baseUrl) process.env.SOFIA_MODEL_BASE_URL = config.baseUrl;
-  if (!process.env.SOFIA_MODEL_NAME && config.model) process.env.SOFIA_MODEL_NAME = config.model;
+  applySafeLocalConfigEnvironment(config, process.env);
   return config as LocalConfig;
 }
 
