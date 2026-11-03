@@ -359,6 +359,30 @@ test("fails closed when regression evidence adapter returns unrelated extra rows
   assert.equal(state.active.length, 0);
 });
 
+test("fails closed when regression evidence is future-dated", async () => {
+  const state = makeHost();
+  const runRegression = state.host.verification.runRegression;
+  state.host.verification.runRegression = async (requestedScope, candidate) => {
+    const result = await runRegression(requestedScope, candidate);
+    for (const id of result.regressionEvidenceIds) {
+      const row = state.evidence.get(id);
+      if (row) state.evidence.set(id, { ...row, createdAt: new Date(Date.now() + 60_000).toISOString() });
+    }
+    return result;
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "future-regression-1", "run1");
+  addReceipt(state, "future-regression-2", "run2");
+  addReceipt(state, "future-regression-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "future-regression-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "future-regression-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "future-regression-3", "Fix TypeScript build");
+
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
 test("fails closed when regression evidence adapter returns malformed rows", async () => {
   const state = makeHost();
   const getEvidence = state.host.verification.getEvidence;
