@@ -62,46 +62,6 @@ test("SQLite checkpoint store rejects one receipt ID assigned to multiple pendin
   }
 });
 
-test("SQLite checkpoint store rejects a corrupt persisted duplicate receipt identity", async () => {
-  const store = await SqliteSelfImprovementCheckpointStore.open(":memory:");
-  try {
-    const { DatabaseSync } = await import("node:sqlite");
-    const db = new DatabaseSync(":memory:");
-    db.exec(`
-      CREATE TABLE verified_learning_checkpoints (
-        tenant_id TEXT NOT NULL, principal_id TEXT NOT NULL, project_id TEXT NOT NULL,
-        last_sequence INTEGER NOT NULL, pending_json TEXT NOT NULL, updated_at INTEGER NOT NULL,
-        revision INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (tenant_id, principal_id, project_id)
-      );
-    `);
-    db.prepare("INSERT INTO verified_learning_checkpoints VALUES (?, ?, ?, ?, ?, ?, ?)").run(
-      scope.tenantId, scope.principalId, scope.projectId, 0,
-      JSON.stringify([
-        { sequence: 1, receiptId: "duplicate", summary: "first" },
-        { sequence: 2, receiptId: "duplicate", summary: "second" },
-      ]),
-      Date.now(), 1,
-    );
-    // Use a separate in-memory store fixture because the production store owns its DB connection.
-    db.close();
-    const fileStore = await SqliteSelfImprovementCheckpointStore.open(":memory:");
-    try {
-      await assert.rejects(fileStore.write(scope, {
-        lastSequence: 0,
-        pending: [
-          { sequence: 1, receiptId: "duplicate", summary: "first" },
-          { sequence: 2, receiptId: "duplicate", summary: "second" },
-        ],
-      }), /Invalid pending self-improvement notification/);
-    } finally {
-      fileStore.close();
-    }
-  } finally {
-    store.close();
-  }
-});
-
 test("SQLite checkpoint store rejects invalid or duplicate pending sequence numbers", async () => {
   const store = await SqliteSelfImprovementCheckpointStore.open(":memory:");
   try {
