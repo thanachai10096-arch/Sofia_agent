@@ -163,6 +163,7 @@ export class VerifiedLearningLoop {
             item.kind !== "regression" ||
             typeof item.content !== "string" || !item.content.trim() ||
             typeof item.createdAt !== "string" || !Number.isFinite(Date.parse(item.createdAt)) ||
+            Date.parse(item.createdAt) > Date.now() ||
             item.runId !== evaluation.regressionRunId ||
             !requestedRegressionIds.includes(item.id) ||
             verifiedRegressionIds.has(item.id)) {
