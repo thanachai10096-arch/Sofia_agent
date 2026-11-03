@@ -147,3 +147,69 @@ test("API rejects unknown model routes before starting a run", async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API personal memory is isolated by distinct authenticated per-user API keys", async () => {
+  const byPrincipal = new Map<string, Array<{ id: string; kind: string; content: string }>>();
+  const memoryStore = {
+    async save(principal: string, entry: { id: string; kind: string; content: string }) {
+      const entries = byPrincipal.get(principal) ?? [];
+      entries.push(entry);
+      byPrincipal.set(principal, entries);
+    },
+    async list(principal: string) { return byPrincipal.get(principal) ?? []; },
+    async find(principal: string, query: string) {
+      return (byPrincipal.get(principal) ?? []).filter((entry) => entry.content.includes(query));
+    },
+    async delete(principal: string, id: string) {
+      const entries = byPrincipal.get(principal) ?? [];
+      const next = entries.filter((entry) => entry.id !== id);
+      byPrincipal.set(principal, next);
+      return next.length !== entries.length;
+    },
+    async clear(principal: string) { byPrincipal.delete(principal); },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: memoryStore,
+  }, {
+    apiKeys: {
+      "telegram-user-one-key": ["memory:read", "memory:write"],
+      "telegram-user-two-key": ["memory:read", "memory:write"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const request = (key: string, init: RequestInit = {}) => fetch(baseUrl + "/v1/memory", {
+    ...init,
+    headers: {
+      authorization: "Bearer " + key,
+      ...(init.body ? { "content-type": "application/json" } : {}),
+      ...(init.headers ?? {}),
+    },
+  });
+
+  try {
+    const saved = await request("telegram-user-one-key", {
+      method: "POST",
+      body: JSON.stringify({ kind: "preference", content: "I prefer private project summaries." }),
+    });
+    assert.equal(saved.status, 201);
+
+    const ownerRead = await request("telegram-user-one-key");
+    const ownerPayload = await ownerRead.json() as { memories: Array<{ content: string }> };
+    assert.equal(ownerPayload.memories.length, 1);
+    assert.match(ownerPayload.memories[0]?.content ?? "", /private project summaries/);
+
+    const otherRead = await request("telegram-user-two-key");
+    const otherPayload = await otherRead.json() as { memories: Array<{ content: string }> };
+    assert.deepEqual(otherPayload.memories, []);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
