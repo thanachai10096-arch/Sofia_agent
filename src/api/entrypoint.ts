@@ -148,8 +148,35 @@ if (discordConfigured) {
         const prefix = result.status === "completed" ? "Sofia completed the task." : "Sofia job " + result.status + ".";
         const response = prefix + "\nJob ID: " + result.id + "\n" + result.summary;
         const safeResponse = response.length > 1700 ? response.slice(0, 1690) + "… (truncated)" : response;
-        await discordTransport?.sendMessage(message.channelId, safeResponse);
-        await deps.jobRuntime?.markNotificationDelivered?.(result.id);
+        // Live completion and post-restart recovery must share one durable
+        // notification lease. Otherwise a second API worker can observe the
+        // terminal job and send a recovery notice while this worker sends the
+        // full result, producing two messages for the same attempt.
+        const notificationToken = randomUUID();
+        let claimed = false;
+        let notificationHeartbeat: ReturnType<typeof setInterval> | undefined;
+        try {
+          if (deps.jobRuntime?.claimNotification) {
+            claimed = await deps.jobRuntime.claimNotification(result.id, notificationToken, 60_000);
+            if (!claimed) return;
+            if (deps.jobRuntime.renewNotificationClaim) {
+              notificationHeartbeat = setInterval(() => {
+                void deps.jobRuntime?.renewNotificationClaim?.(result.id, notificationToken, 60_000).catch(() => false);
+              }, 15_000);
+              notificationHeartbeat.unref?.();
+            }
+          } else {
+            // Compatibility for alternate JobRuntime implementations without leases.
+            claimed = true;
+          }
+          await discordTransport?.sendMessage(message.channelId, safeResponse);
+          await deps.jobRuntime?.markNotificationDelivered?.(result.id, notificationToken);
+        } catch (error) {
+          if (claimed) await deps.jobRuntime?.releaseNotificationClaim?.(result.id, notificationToken).catch(() => undefined);
+          throw error;
+        } finally {
+          if (notificationHeartbeat) clearInterval(notificationHeartbeat);
+        }
       }).catch(async () => {
         try {
           await discordTransport?.sendMessage(
