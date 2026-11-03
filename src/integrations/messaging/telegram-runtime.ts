@@ -106,7 +106,8 @@ export interface TelegramMessagingEnvironment {
 /**
  * Build the optional Telegram bridge using the existing Sofia API and command
  * dispatcher. Missing/invalid optional configuration disables Telegram without
- * taking the core API offline. Only /run commands can start agent work.
+ * taking the core API offline. A single shared API key is permitted only when
+ * exactly one Telegram user is allowlisted, because API-key identity owns Memory.
  */
 export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
@@ -132,6 +133,13 @@ export function createTelegramMessagingRuntime(
   try {
     const allowedUsers = parseTelegramUserAllowlist(rawUsers);
     const allowedChats = parseTelegramChatAllowlist(rawChats);
+    // The API scopes persistent Memory by API-key identity, not Telegram sender ID.
+    // Until per-sender API credentials are supported, fail closed rather than let
+    // multiple Telegram users silently share one private-memory owner.
+    if (allowedUsers.size !== 1) {
+      onWarning("Telegram integration disabled: one shared Sofia API key cannot safely serve multiple Telegram users; configure a single allowed user.");
+      return undefined;
+    }
     const client = new SofiaClient({ apiKey, baseUrl });
     const accessPolicy = {
       isAllowed(input: { platform: "telegram" | "discord" | "slack"; senderId: string; conversationId: string }) {
