@@ -93,8 +93,17 @@ export function planLearningReconciliationRepair(
       blocked.push({ skillId, reason: skillIssues.some(issue => issue.kind === "missing-runtime-registration") ? "conflicting-issues" : "unsupported-issue" });
       continue;
     }
-    if (!authorization.approvedSkillIds.includes(skillId) || !validText(authorization.approvalIds[skillId], 200)) {
+    const hasOwn = (record: Record<string, string>, key: string): boolean =>
+      Object.prototype.hasOwnProperty.call(record, key);
+    if (!authorization.approvedSkillIds.includes(skillId) ||
+        !hasOwn(authorization.approvalIds, skillId) ||
+        !validText(authorization.approvalIds[skillId], 200)) {
       blocked.push({ skillId, reason: "not-explicitly-approved" });
+      continue;
+    }
+    if (!hasOwn(authorization.currentPolicyRevisions, skillId) ||
+        !hasOwn(authorization.learningPolicyRevisions, skillId)) {
+      blocked.push({ skillId, reason: "policy-revision-stale" });
       continue;
     }
     const expectedPolicyRevision = authorization.currentPolicyRevisions[skillId];
