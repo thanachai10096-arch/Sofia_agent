@@ -36,7 +36,7 @@ test("a newer playback supersedes a pending older request", async () => {
       started.push(String(item.bytes[0]));
       if (item.bytes[0] === 1) {
         firstStart();
-        await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
       }
     },
     stop() {},
