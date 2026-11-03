@@ -222,3 +222,17 @@ test("gateway classifies unknown provider errors without exposing their messages
     return true;
   });
 });
+
+test("gateway preserves bounded allowlisted provider type/code diagnostics only", async () => {
+  const budget = makeBudget();
+  const gateway = new TokenAwareGateway(budget, [route(async () => {
+    throw new Error("Model gateway request failed (400): type=invalid_request_error code=json_mode_requires_json");
+  })]);
+  await assert.rejects(gateway.generate(request()), (error: unknown) => {
+    assert.ok(error instanceof GatewayError);
+    assert.equal(error.message, "model_call_failed: provider_http_400_bad_request_type=invalid_request_error_code=json_mode_requires_json");
+    assert.ok(error.message.length <= 300);
+    assert.doesNotMatch(error.message, /Authorization|api.?key|user message/i);
+    return true;
+  });
+});
