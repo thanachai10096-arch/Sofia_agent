@@ -390,7 +390,25 @@ export async function executeLearningRepairPlan(
       if (heartbeatLost) throw new Error("Repair lease heartbeat lost before lifecycle mutation; authoritative reconciliation required");
       await journal.audit({ key: action.idempotencyKey, scope: action.scope, actorId: action.actorId, skillId: action.skillId, event: "repair_revalidated", at: now(), detail: "approval=" + action.approvalId + "; policy=" + action.expectedPolicyRevision });
       if (heartbeatLost) throw new Error("Repair lease heartbeat lost after authoritative revalidation; lifecycle mutation blocked");
-      // Reconfirm after potentially slow audit I/O, directly before the side effect.
+      // Audit persistence can take time. Re-resolve every authoritative gate after
+      // that I/O and immediately before mutation so a revoked receipt, policy change,
+      // evidence withdrawal, or concurrent runtime change cannot ride on stale state.
+      const beforeMutation = await host.revalidate(action);
+      if (!beforeMutation || !validScope(beforeMutation.scope) || !sameScope(beforeMutation.scope, action.scope) ||
+          beforeMutation.exists !== false || beforeMutation.active !== false ||
+          beforeMutation.policyRevision !== action.expectedPolicyRevision ||
+          beforeMutation.explicitlyApproved !== true || beforeMutation.trustedEvidenceValid !== true ||
+          !beforeMutation.approvalBinding || beforeMutation.approvalBinding.id !== action.approvalId ||
+          beforeMutation.approvalBinding.actorId !== action.actorId ||
+          beforeMutation.approvalBinding.skillId !== action.skillId ||
+          !validScope(beforeMutation.approvalBinding.scope) ||
+          !sameScope(beforeMutation.approvalBinding.scope, action.scope) ||
+          beforeMutation.approvalBinding.policyRevision !== action.expectedPolicyRevision ||
+          beforeMutation.approvalBinding.status !== "approved") {
+        throw new Error("Pre-mutation authoritative revalidation failed; lifecycle mutation blocked");
+      }
+      if (heartbeatLost) throw new Error("Repair lease heartbeat lost after pre-mutation revalidation; lifecycle mutation blocked");
+      // Reconfirm lease ownership after the authoritative reads, directly before the side effect.
       const mutationHeartbeat = await journal.heartbeat(action.idempotencyKey, action.scope, entry.claimToken, now());
       if (!mutationHeartbeat || heartbeatLost) throw new Error("Repair lease heartbeat lost immediately before lifecycle mutation; lifecycle mutation blocked");
       await host.registerThroughLifecycle(action);
