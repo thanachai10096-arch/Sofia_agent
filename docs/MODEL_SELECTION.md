@@ -32,8 +32,9 @@ An explicitly selected route is not silently replaced by another route. If the r
 
 - SOFIA_MODEL_PROVIDER=openrouter selects OpenRouter.
 - SOFIA_MODEL_PROVIDER=gemini selects Gemini.
+- SOFIA_MODEL_PROVIDER=deepseek selects DeepSeek using `https://api.deepseek.com` and `DEEPSEEK_API_KEY`; the default model is `deepseek-flash` (override with `DEEPSEEK_MODEL`).
 - SOFIA_MODEL_PROVIDER=custom uses SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL for an OpenAI Chat Completions-compatible endpoint.
-- When no provider is explicitly selected, configure only one built-in provider credential. If both OpenRouter and Gemini credentials exist, Sofia requires explicit selection rather than silently redirecting requests.
+- When no provider is explicitly selected, configure only one built-in provider credential. If credentials for multiple built-in providers exist, Sofia requires explicit selection rather than silently redirecting requests.
 - Route-specific environment variables can assign different model IDs to fast, coding, reasoning, and vision routes.
 
-Custom endpoints use the OpenAI Chat Completions-compatible protocol by default. Set `SOFIA_MODEL_PROTOCOL=anthropic-messages` only when the configured custom endpoint implements the Anthropic Messages API. Built-in OpenRouter and Gemini use OpenAI-compatible requests; Anthropic uses its native Messages request/response format. Other native protocols still need a dedicated adapter; Sofia does not claim every model API is protocol-identical.
+Custom endpoints use the OpenAI Chat Completions-compatible protocol by default. Set `SOFIA_MODEL_PROTOCOL=anthropic-messages` only when the configured custom endpoint implements the Anthropic Messages API. Built-in OpenRouter, Gemini, and DeepSeek use OpenAI-compatible requests; Anthropic uses its native Messages request/response format. Other native protocols still need a dedicated adapter; Sofia does not claim every model API is protocol-identical.

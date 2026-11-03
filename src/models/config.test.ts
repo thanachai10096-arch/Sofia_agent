@@ -17,6 +17,13 @@ const names = [
   "GEMINI_CODING_MODEL",
   "GEMINI_REASONING_MODEL",
   "GEMINI_VISION_MODEL",
+  "DEEPSEEK_API_KEY",
+  "DEEPSEEK_BASE_URL",
+  "DEEPSEEK_MODEL",
+  "DEEPSEEK_FAST_MODEL",
+  "DEEPSEEK_CODING_MODEL",
+  "DEEPSEEK_REASONING_MODEL",
+  "DEEPSEEK_VISION_MODEL",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_MODEL",
@@ -192,4 +199,39 @@ test("custom endpoints can opt into the Anthropic Messages protocol", () => {
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.protocol, "anthropic-messages");
   assert.equal(config.providers.fast?.baseUrl, "https://anthropic-proxy.example.test/v1");
+});
+
+
+test("DeepSeek provider uses the official OpenAI-compatible endpoint and supports route model overrides", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.DEEPSEEK_CODING_MODEL = "deepseek-v4-pro";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.providers.fast?.apiKey, "deepseek-test-key");
+  assert.equal(config.providers.fast?.model, "deepseek-flash");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
+  assert.equal(config.providers.coding?.model, "deepseek-v4-pro");
+  assert.equal(config.providers.reasoning?.model, "deepseek-flash");
+});
+
+test("DeepSeek can be auto-selected when it is the only configured built-in provider", () => {
+  clear();
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.DEEPSEEK_MODEL = "deepseek-v4-pro";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.providers.fast?.model, "deepseek-v4-pro");
+});
+
+
+test("DeepSeek requires explicit selection when another built-in provider is also configured", () => {
+  clear();
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+  assert.throws(loadModelConfigFromEnv, /set SOFIA_MODEL_PROVIDER to choose explicitly/);
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "deepseek-test-key");
 });
