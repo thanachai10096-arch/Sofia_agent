@@ -73,6 +73,8 @@ function publicJobRecord(record: JobRecord): JobRecord {
   // Lease ownership is an internal concurrency capability and must never be returned
   // to API/Discord clients, even though it remains in the durable store.
   delete safe.leaseOwnerToken;
+  // Notification lease tokens are also internal concurrency capabilities.
+  delete safe.notificationLeaseOwnerToken;
   return safe;
 }
 
