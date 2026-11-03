@@ -110,7 +110,7 @@ test("web.fetch decodes HTML entities once and strips script tags with spaced cl
       { url: "https://example.com/" },
       { runtime: {} as ToolContext["runtime"] },
     ) as { text: string };
-    assert.equal(result.text, "&lt;safe&gt; visible text");
+    assert.equal(result.text, "&lt;safe&gt; visible text after style");
   } finally {
     globalThis.fetch = originalFetch;
     if (previousNetwork === undefined) delete process.env.SOFIA_ALLOW_NETWORK;
