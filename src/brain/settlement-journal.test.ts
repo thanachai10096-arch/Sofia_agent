@@ -724,6 +724,59 @@ test("checkpoint cannot clear an unsettled or unknown-usage provider attempt", a
   }
 });
 
+test("checkpoint inside a pending attempt permanently poisons recovery evidence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-mid-attempt-checkpoint-"));
+  try {
+    const namespace = "workspace";
+    const runId = "mid-attempt-checkpoint-run";
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    const at = new Date().toISOString();
+    const attemptId = "attempt-with-mid-checkpoint";
+    const source = [
+      JSON.stringify({
+        version: 1, type: "started", attemptId, at,
+        maxInputTokens: 10, maxOutputTokens: 10,
+      }),
+      JSON.stringify({ version: 1, type: "checkpoint", at }),
+      JSON.stringify({
+        version: 1, type: "settled", attemptId, at,
+        usageKnown: true, usage: { inputTokens: 2, outputTokens: 3 },
+      }),
+      JSON.stringify({ version: 1, type: "checkpoint", at }),
+    ].join("\n") + "\n";
+    await writeFile(journalFile, source, { mode: 0o600 });
+
+    const journal = new FileSettlementJournal(namespace, root);
+    assert.equal(await journal.hasUnresolved(runId), true,
+      "a later checkpoint must not clear a checkpoint written while an attempt was pending");
+    const inspection = await journal.inspectRun(runId);
+    assert.equal(inspection.journal, "corrupt");
+    assert.equal(inspection.unresolved, true);
+    await assert.rejects(
+      journal.acknowledgeCheckpoint(runId),
+      /corrupt or ambiguous|pending or ambiguous/,
+      "checkpoint admission must reject a journal containing an earlier mid-attempt checkpoint",
+    );
+
+    const claim = await journal.claimRun(runId);
+    try {
+      await assert.rejects(
+        journal.settle(runId, { id: attemptId }, { inputTokens: 2, outputTokens: 3 }, claim),
+        /invalid checkpoint sequence|corrupt journal/,
+        "settlement append must not extend a journal with an invalid checkpoint sequence",
+      );
+    } finally {
+      await claim.release();
+    }
+    assert.equal(await readFile(journalFile, "utf8"), source,
+      "invalid historical evidence must remain byte-for-byte unchanged");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("journal refuses a symlinked namespace directory and does not write through it", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-symlink-"));
   const outside = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-outside-"));
