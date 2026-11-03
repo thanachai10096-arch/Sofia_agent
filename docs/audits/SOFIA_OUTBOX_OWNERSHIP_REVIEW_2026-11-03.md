@@ -76,3 +76,19 @@ Changed file: `workers/discord-gateway/daemon/worker.mjs`.
 Important remaining limitation: the API's idempotency index is process-local and is rehydrated from `RunRecordStore`; the Vercel adapter currently uses `FileRunRecordStore` under `os.tmpdir()`. This is not a cross-instance transactional idempotency guarantee. Concurrent requests reaching different Vercel instances, ephemeral filesystem loss, or a crash before the initial run record is durably saved can still permit duplicate work. A shared database-backed run/idempotency reservation is required before claiming restart-safe, multi-instance deduplication.
 
 Validation: inspected the changed source and API route contract. No Node syntax check, unit test, build, typecheck, live Vercel test, or multi-instance test was executed in this environment. No migration, deployment, merge, or production change was performed.
+
+
+## Discord durable-job owner-scope hardening
+
+Follow-up source review found that the interaction entrypoint performed an owner check using an unscoped `get()`, then invoked unscoped `resume()` / `cancel()`. The Discord completion poller also used unscoped `get()`, and session context used global `list()` followed by in-memory session filtering. Although the current IDs/session keys are designed to be unique, these patterns weaken the tenant boundary and make future shared-store behavior dependent on global reads.
+
+Changes on the audit branch:
+- `/status`, `/resume`, and `/cancel` now require `getForOwner`, `resumeForOwner`, and `cancelForOwner`; missing owner-scoped capabilities fail closed.
+- Discord job polling carries the principal in its handle and reads through `getForOwner` only.
+- Discord session context requires `listForOwner`, then independently verifies the owner and session key before including completed summaries.
+- Recovery-notification scans enumerate the configured Discord user allowlist and call `listForOwner` per principal rather than scanning all tenants.
+- Added a regression fixture where a different Discord principal deliberately shares the same session key; their summary must not enter the current user's context.
+
+Changed files: `src/api/entrypoint.ts`, `src/integrations/messaging/discord-durable-job.ts`, `src/integrations/messaging/discord-durable-job.test.ts`.
+
+Validation status: changes were reviewed through GitHub source reads and commit/diff metadata. Tests, TypeScript typecheck, build, and runtime integration were not executed in this environment. This is not evidence of a passing build. The shared-channel visibility policy remains unresolved: owner-scoped storage prevents cross-user reads but does not make a shared Discord channel private. Use DMs or an explicitly consented shared-channel policy before general availability.
