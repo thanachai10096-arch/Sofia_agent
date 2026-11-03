@@ -41,6 +41,10 @@ function makeHost() {
       },
     },
     async currentPolicyRevision() { return "policy-1"; },
+    async withCurrentPolicyRevision(_scope, expectedRevision, operation) {
+      if (expectedRevision !== "policy-1") return { matched: false };
+      return { matched: true, value: await operation() };
+    },
     redact(value) { return value.replace(/secret/gi, "[redacted]"); },
     async assessCandidate(_scope, candidate) { return { allowed: true, confidence: Math.max(candidate.confidence, 0.9) }; },
     async promoteCandidate() { return true; },
@@ -368,6 +372,45 @@ test("rechecks policy inside the final activation transaction", async () => {
   await loop.recordVerifiedCompletion(scope, "activation-race-2", "Fix TypeScript build");
   const result = await loop.recordVerifiedCompletion(scope, "activation-race-3", "Fix TypeScript build");
 
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
+test("fails closed when the host cannot pin policy during activation persistence", async () => {
+  const state = makeHost();
+  delete state.host.withCurrentPolicyRevision;
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "no-atomic-policy-1", "run1");
+  addReceipt(state, "no-atomic-policy-2", "run2");
+  addReceipt(state, "no-atomic-policy-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "no-atomic-policy-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "no-atomic-policy-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "no-atomic-policy-3", "Fix TypeScript build");
+
+  assert.equal(result.recorded, true);
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
+test("does not persist activation when the authoritative policy guard reports a stale revision", async () => {
+  const state = makeHost();
+  let guardCalled = false;
+  state.host.withCurrentPolicyRevision = async (_scope, expectedRevision, operation) => {
+    guardCalled = true;
+    assert.equal(expectedRevision, "policy-1");
+    return { matched: false };
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "stale-guard-1", "run1");
+  addReceipt(state, "stale-guard-2", "run2");
+  addReceipt(state, "stale-guard-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "stale-guard-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "stale-guard-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "stale-guard-3", "Fix TypeScript build");
+
+  assert.equal(guardCalled, true);
   assert.equal(result.skillActivated, undefined);
   assert.equal(state.active.length, 0);
 });
