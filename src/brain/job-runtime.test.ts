@@ -79,10 +79,13 @@ test("DurableJobRuntime rejects a late worker save after its lease expires", asy
   // Finish before the next heartbeat: the expired lease must reject the final
   // save even though no replacement worker has claimed the job yet.
   finish();
-  let finalRecord = await runtime.get(submitted.id);
+  // Observe through a separate runtime instance so the local in-memory record
+  // cannot hide whether the expired persisted lease accepted the late save.
+  const observer = new DurableJobRuntime(() => brain, undefined, namespace);
+  let finalRecord = await observer.get(submitted.id);
   for (let attempt = 0; attempt < 100 && finalRecord?.status === "running"; attempt++) {
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
-    finalRecord = await runtime.get(submitted.id);
+    finalRecord = await observer.get(submitted.id);
   }
   assert.equal(finalRecord?.status, "failed");
   assert.match(finalRecord?.error ?? "", /lease expired/i);
