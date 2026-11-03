@@ -95,10 +95,16 @@ test("Discord session context is scoped to a session and only uses completed job
       id: "job-c", status: "running", createdAt: "2026-01-03T00:00:00.000Z", updatedAt: "2026-01-03T00:00:00.000Z",
       task: "unfinished task", ownerKeyId: "discord:123", sessionKey: "discord-session-a",
     },
+    {
+      id: "job-d", status: "completed", createdAt: "2026-01-04T00:00:00.000Z", updatedAt: "2026-01-04T00:00:00.000Z",
+      task: "another owner same session key", ownerKeyId: "discord:999", sessionKey: "discord-session-a",
+      result: { summary: "Private data from another Discord user", completed: true } as JobRecord["result"],
+    },
   ];
-  const context = await buildDiscordSessionContext(runtimeFor(records), "discord-session-a");
+  const context = await buildDiscordSessionContext(runtimeFor(records), "discord-session-a", 5, "discord:123");
   assert.match(context, /README uses MIT licensing/);
   assert.doesNotMatch(context, /Do not leak this/);
   assert.doesNotMatch(context, /unfinished task/);
+  assert.doesNotMatch(context, /Private data from another Discord user/);
   assert.match(context, /untrusted historical data/i);
 });
