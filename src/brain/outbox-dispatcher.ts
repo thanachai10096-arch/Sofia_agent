@@ -82,6 +82,23 @@ export class OutboxDispatcher {
   }
 
   private async dispatchMessage(message: OutboxMessage, report: OutboxDispatchReport): Promise<void> {
+    // A worker can die after claiming a row, before it gets a chance to call
+    // retry(). Each reclaim increments attempts. Once the count moves past the
+    // configured budget, terminalize the row instead of delivering it anyway.
+    // The store still fences this transition with the current, unexpired lease.
+    if (message.attempts > this.maxAttempts) {
+      const exhausted = await this.store.retry(
+        message.id,
+        this.workerToken,
+        "Maximum delivery attempts exceeded after repeated worker lease recovery.",
+        0,
+        this.maxAttempts,
+      );
+      if (exhausted) report.failed += 1;
+      else report.leaseLost += 1;
+      return;
+    }
+
     const controller = new AbortController();
     let stopRenewal = false;
     let renewalTimer: ReturnType<typeof setTimeout> | undefined;
