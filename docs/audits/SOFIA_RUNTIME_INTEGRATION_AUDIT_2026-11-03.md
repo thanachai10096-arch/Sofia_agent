@@ -320,3 +320,17 @@ Still unverified: TypeScript build/tests, live PostgreSQL compatibility and conc
 ## Follow-up: PostgreSQL transactional outbox adapter (2026-11-03)
 
 Added `PostgresOutboxStore` and query-contract tests. The adapter supports idempotent enqueue, concurrent batch claims using PostgreSQL row locks with `SKIP LOCKED`, expiring worker leases, lease-fenced acknowledgement, and bounded retry/failure transitions. This is an at-least-once delivery foundation only: no dispatcher or Discord/Telegram transport is connected yet, and no live PostgreSQL, worker-crash, or end-to-end delivery tests have run. The migration already defines the outbox table and dispatch index.
+
+
+## Follow-up: lease-aware outbox dispatcher (2026-11-03)
+
+Added `src/brain/outbox-dispatcher.ts` and unit tests. The dispatcher:
+- Claims bounded batches using a worker token and delegates delivery to an injected sender, so platform transports remain decoupled.
+- Acknowledges only after sender success and only through the store's lease-fenced acknowledgement.
+- Retries failed sends with bounded exponential backoff and a maximum-attempt threshold.
+- Redacts and bounds persisted error text.
+- Reports claimed, delivered, retried, failed, and lease-lost counts without exposing worker tokens.
+
+Added package exports and documented delivery constraints. Delivery is at-least-once: a crash after remote acceptance and before acknowledgement can cause duplicates, so receivers should deduplicate with the stable outbox message ID. The dispatcher is sequential and does not renew leases; sender timeouts must be shorter than the configured lease.
+
+Important remaining integration gap: `DurableJobRuntime` terminal job persistence is not transactionally coupled to outbox enqueue, and no Discord/Telegram sender is wired. A same-transaction terminal transition + outbox insert (or durable reconciliation) is required before claiming reliable terminal notifications. No database driver, live DB, migration execution, typecheck, test run, build, or deployment was performed for this change.
