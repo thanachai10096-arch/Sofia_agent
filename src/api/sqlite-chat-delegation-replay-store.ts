@@ -119,7 +119,7 @@ export class SqliteChatDelegationReplayStore implements ChatDelegationReplayStor
     let claimed = false;
     try {
       // Remove expired claims inside the same write transaction as the insert.
-      this.db.prepare("DELETE FROM chat_delegation_nonces WHERE expires_at <= ?").run(now);
+      this.db.prepare("DELETE FROM chat_delegation_nonces WHERE expires_at < ?").run(now);
       const result = this.db.prepare(`
         INSERT OR IGNORE INTO chat_delegation_nonces(tenant_id, platform, nonce, expires_at)
         VALUES (?, ?, ?, ?)
