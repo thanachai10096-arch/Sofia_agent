@@ -30,6 +30,7 @@ export { reviewCodeChange } from "./review/code-review.js";
 export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { PostgresJobStateStore } from "./brain/postgres-job-state-store.js";
+export { PostgresRunStore } from "./brain/postgres-run-store.js";
 export type { PostgresExecutor, PostgresQueryResult } from "./brain/postgres-job-state-store.js";
 export type { JobStateStore, JobRecord, JobStatus } from "./brain/job-runtime.js";
 export { BoundedSubagentCoordinator } from "./brain/subagent-coordinator.js";
