@@ -79,6 +79,22 @@ export class FileSettlementJournal {
   }
 
   /**
+   * Persist directory-entry changes on POSIX filesystems. Windows does not
+   * expose a portable directory-fsync contract through Node's FileHandle API;
+   * that platform limitation is documented rather than silently overstated.
+   */
+  private async syncDirectory(): Promise<void> {
+    if (process.platform === "win32") return;
+    const directoryOnly = fsConstants.O_DIRECTORY ?? 0;
+    const handle = await fs.open(this.directory, fsConstants.O_RDONLY | directoryOnly);
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  }
+
+  /**
    * Atomically claims one run on a cooperating local filesystem.
    *
    * The exclusive-create operation is the cross-process boundary: only one
@@ -129,6 +145,11 @@ export class FileSettlementJournal {
     } finally {
       await handle?.close();
     }
+
+    // The claim file's contents are synced above; persist its directory entry
+    // before any provider attempt can be admitted. If this fails, leave the
+    // claim in place and fail closed.
+    await this.syncDirectory();
 
     let released = false;
     let releaseInFlight: Promise<void> | undefined;
@@ -182,6 +203,9 @@ export class FileSettlementJournal {
               throw new Error("Settlement run claim changed before release; refusing to unlink it");
             }
             await fs.unlink(lockFile);
+            // If this fails, report the uncertainty. A resurrected claim after
+            // a crash is safe (fail-closed), whereas claiming release was durable is not.
+            await this.syncDirectory();
             released = true;
           })();
         }
@@ -231,6 +255,11 @@ export class FileSettlementJournal {
       await handle.sync();
     } finally {
       await handle.close();
+    }
+    if (!existingInfo) {
+      // A new journal record needs both durable contents and a durable name.
+      // On failure the run claim remains held and begin() rejects.
+      await this.syncDirectory();
     }
   }
 
@@ -516,6 +545,7 @@ export class FileSettlementJournal {
       }
       try {
         await fs.unlink(this.file(runId));
+        await this.syncDirectory();
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
