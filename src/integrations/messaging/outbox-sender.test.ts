@@ -45,6 +45,9 @@ test("outbox sender rejects unsupported event types and malformed destinations",
   await assert.rejects(sender({ ...delivery, eventType: "job.created" }), /Unsupported outbox notification event/);
   await assert.rejects(sender({ ...delivery, destination: "https://example.com" }), /Unsupported outbox messaging destination/);
   await assert.rejects(sender({ ...delivery, destination: "telegram:" }), /Unsupported outbox messaging destination/);
+  await assert.rejects(sender({ ...delivery, destination: "telegram:123/../../admin" }), /Unsupported outbox messaging destination/);
+  await assert.rejects(sender({ ...delivery, destination: "discord:123?x=1" }), /Unsupported outbox messaging destination/);
+  await assert.rejects(sender({ ...delivery, destination: "discord:https://example.com" }), /Unsupported outbox messaging destination/);
 });
 
 test("outbox sender rejects invalid or oversized payloads", async () => {
