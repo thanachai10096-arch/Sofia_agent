@@ -26,7 +26,7 @@ test("outbox sender routes a validated notification through the selected adapter
     adapter("telegram", async (message) => { sent = message; return { state: "sent" }; }),
   ]);
   await sender(delivery);
-  assert.deepEqual(sent, { conversationId: "123456", text: "Task completed" });
+  assert.deepEqual(sent, { conversationId: "123456", text: "Task completed", deliveryId: "outbox-message-id" });
 });
 
 test("outbox sender supports Discord destinations without accepting arbitrary schemes", async () => {
