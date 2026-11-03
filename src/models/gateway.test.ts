@@ -669,7 +669,7 @@ test("gateway preserves truncation status from OpenAI-compatible and Anthropic p
     globalThis.fetch = async () => new Response(JSON.stringify({
       choices: [{
         finish_reason: "length",
-        message: { role: "assistant", content: "{\\"partial\\":" },
+        message: { role: "assistant", content: "{\"partial\":" },
       }],
       usage: { prompt_tokens: 12, completion_tokens: 20 },
     }), { status: 200, headers: { "content-type": "application/json" } });
@@ -679,10 +679,10 @@ test("gateway preserves truncation status from OpenAI-compatible and Anthropic p
       { ...route, providerId: "coding", healthy: true },
     );
     assert.equal(openAI.finishReason, "length");
-    assert.equal(openAI.text, "{\\"partial\\":");
+    assert.equal(openAI.text, "{\"partial\":");
 
     globalThis.fetch = async () => new Response(JSON.stringify({
-      content: [{ type: "text", text: "{\\"partial\\":" }],
+      content: [{ type: "text", text: "{\"partial\":" }],
       stop_reason: "max_tokens",
       usage: { input_tokens: 12, output_tokens: 20 },
     }), { status: 200, headers: { "content-type": "application/json" } });
@@ -692,7 +692,7 @@ test("gateway preserves truncation status from OpenAI-compatible and Anthropic p
       { ...route, id: "anthropic", providerId: "anthropic", healthy: true },
     );
     assert.equal(anthropic.finishReason, "length");
-    assert.equal(anthropic.text, "{\\"partial\\":");
+    assert.equal(anthropic.text, "{\"partial\":");
   } finally {
     globalThis.fetch = originalFetch;
   }
