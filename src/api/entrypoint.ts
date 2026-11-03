@@ -5,6 +5,7 @@ import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
+import { matchDiscordUserApiKeys, parseDiscordUserApiKeys } from "../integrations/messaging/discord-user-api-keys.js";
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime, parseTelegramUserAllowlist, parseTelegramUserApiKeys } from "../integrations/messaging/telegram-runtime.js";
@@ -27,8 +28,20 @@ if (process.env.SOFIA_MESSAGING_ENABLED === "true" && process.env.TELEGRAM_USER_
     // createTelegramMessagingRuntime emits the operator-facing redacted warning.
   }
 }
+let discordUserApiKeys = new Map<string, string>();
+if (process.env.DISCORD_USER_API_KEYS?.trim()) {
+  try {
+    const candidateKeys = parseDiscordUserApiKeys(process.env.DISCORD_USER_API_KEYS.trim());
+    const allowedUsers = parseDiscordIdAllowlist(process.env.DISCORD_ALLOWED_USER_IDS, "DISCORD_ALLOWED_USER_IDS");
+    if (matchDiscordUserApiKeys(candidateKeys, allowedUsers)) discordUserApiKeys = candidateKeys;
+    else console.error("Discord per-user API key mapping disabled: mapping must match the user allowlist exactly.");
+  } catch {
+    console.error("Discord per-user API key mapping disabled: configuration is invalid.");
+  }
+}
 const apiKeys: Record<string, string[]> = { [apiKey]: scopes };
 for (const key of telegramUserApiKeys.values()) apiKeys[key] = scopes;
+for (const key of discordUserApiKeys.values()) apiKeys[key] = scopes;
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
 const deps = createSofiaAgentDependencies(workspace);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
