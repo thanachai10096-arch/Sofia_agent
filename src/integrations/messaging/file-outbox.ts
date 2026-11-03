@@ -286,3 +286,43 @@ export async function flushMessagingOutbox(
     activeFlushes.delete(key);
   }
 }
+
+
+export interface MessagingOutboxRetryWorkerOptions {
+  intervalMs?: number;
+  platform: ChatPlatform;
+  send: (platform: ChatPlatform, message: OutboundMessage) => Promise<boolean>;
+  onFailure?: (platform: ChatPlatform) => void;
+}
+
+/**
+ * Start a bounded polling worker for persisted outbound messages. The worker
+ * never re-runs Sofia tasks; it only retries already-redacted outbox records.
+ * Call stop() during runtime shutdown.
+ */
+export function startMessagingOutboxRetryWorker(
+  outbox: FileMessagingOutbox,
+  options: MessagingOutboxRetryWorkerOptions,
+): { stop(): void } {
+  const intervalMs = options.intervalMs ?? 30_000;
+  if (!Number.isSafeInteger(intervalMs) || intervalMs < 1_000 || intervalMs > 60 * 60_000) {
+    throw new Error("Invalid messaging outbox retry worker interval.");
+  }
+  let stopped = false;
+  let running = false;
+  const timer = setInterval(() => {
+    if (stopped || running) return;
+    running = true;
+    void flushMessagingOutbox(outbox, options.send, options.onFailure, options.platform)
+      .catch(() => options.onFailure?.(options.platform))
+      .finally(() => { running = false; });
+  }, intervalMs);
+  timer.unref?.();
+  return {
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+    },
+  };
+}
