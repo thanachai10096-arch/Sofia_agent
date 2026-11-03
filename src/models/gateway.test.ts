@@ -130,7 +130,7 @@ test("OpenAI-compatible structured Brain requests explicitly instruct JSON-only 
   let requestedBody: Record<string, unknown> = {};
   globalThis.fetch = async (_input, init) => {
     requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    return new Response(JSON.stringify({ choices: [{ message: { content: "{\\"ok\\":true}" } }], usage: { prompt_tokens: 5, completion_tokens: 3 } }), { status: 200 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 5, completion_tokens: 3 } }), { status: 200 });
   };
   try {
     const gateway = new SofiaModelGateway({
