@@ -372,3 +372,6 @@ Remaining limitations:
 - Lease renewal is not implemented; send timeouts must remain below the outbox lease duration.
 - At-least-once delivery and crash-after-send duplicate risk remain.
 - PostgreSQL SQL and migration have not been exercised against a live database. Added tests have not been run; no typecheck, build, or deployment was performed.
+ 
+
+```text
