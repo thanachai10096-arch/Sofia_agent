@@ -22,6 +22,26 @@ function markdownFile(root: string, scope: string, key: string, filename: string
   return path.join(root, scope, key, filename);
 }
 
+// Project projections share one directory across store instances. Serialize the
+// complete read-and-write cycle so an older snapshot cannot finish after a newer one.
+const PROJECT_MARKDOWN_SYNC = new Map<string, Promise<void>>();
+
+async function withProjectMarkdownSyncLock<T>(root: string, operation: () => Promise<T>): Promise<T> {
+  const key = path.resolve(root);
+  const previous = PROJECT_MARKDOWN_SYNC.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const tail = previous.then(() => gate);
+  PROJECT_MARKDOWN_SYNC.set(key, tail);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (PROJECT_MARKDOWN_SYNC.get(key) === tail) PROJECT_MARKDOWN_SYNC.delete(key);
+  }
+}
+
 async function atomicPrivateWrite(file: string, content: string): Promise<void> {
   const directory = path.dirname(file);
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
@@ -160,12 +180,14 @@ export class MarkdownProjectMemoryStore implements ProjectMemoryStore {
   }
 
   private async sync(): Promise<void> {
-    const entries = await this.store.list();
-    const projects = [...new Set(entries.map((entry) => entry.project))];
-    await Promise.all(projects.map(async (project) => {
-      const scoped = entries.filter((entry) => entry.project === project);
-      await atomicPrivateWrite(this.fileFor(project), projectMarkdown(scoped));
-    }));
+    await withProjectMarkdownSyncLock(this.root, async () => {
+      const entries = await this.store.list();
+      const projects = [...new Set(entries.map((entry) => entry.project))];
+      await Promise.all(projects.map(async (project) => {
+        const scoped = entries.filter((entry) => entry.project === project);
+        await atomicPrivateWrite(this.fileFor(project), projectMarkdown(scoped));
+      }));
+    });
   }
 
   async save(entry: ProjectMemoryEntry): Promise<void> {
