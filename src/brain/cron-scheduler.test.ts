@@ -461,6 +461,9 @@ test("concurrent recovery monitors emit one terminal audit for a shared executio
   assert.equal(state.history[0].status, "completed");
   assert.equal(state.history[0].recoveryLeaseOwnerToken, undefined, "terminal finalization releases the lease");
   assert.equal(state.history[0].recoveryLeaseExpiresAt, undefined);
+  const publicHistory = await first.history(schedule.id, "alice");
+  assert.equal("recoveryLeaseOwnerToken" in publicHistory[0]!, false, "lease owner tokens must not be exposed in API history");
+  assert.equal("recoveryLeaseExpiresAt" in publicHistory[0]!, false, "internal lease deadlines must not be exposed in API history");
   assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 1);
 });
 
