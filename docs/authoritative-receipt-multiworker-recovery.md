@@ -89,3 +89,32 @@ No production learning activation is permitted merely because receipt replay suc
 - CI and security checks run against the exact PR head being reviewed.
 
 Until all evidence exists, keep the recovery adapter unwired and automatic production learning disabled.
+
+## 9. Verified implementation boundary at PR review
+
+The following is an as-built review of the current PR head, not a target-state claim:
+
+- `SqliteSelfImprovementCheckpointStore` provides durable, scope-keyed SQLite reads and atomic single-row writes using `BEGIN IMMEDIATE`. Its current `write` operation is an unconditional upsert; it does not compare an expected checkpoint version or verify a fencing token.
+- `ScopedSelfImprovement` uses a promise tail, which serializes notifications only inside one JavaScript object/process. It is not a cross-process lock.
+- `createVerifiedCompletionHandler.recover` preflights the returned receipt array for contiguous ascending sequence numbers before replay. It then delegates to the same process-local worker and does not acquire a distributed scope lease.
+- The checkpoint schema currently has no lease owner, fencing token, lease expiry, or monotonic checkpoint version.
+- `src/api/entrypoint.ts` does not call `recover(scope)`; the inspected host does not currently compose an authoritative finalized-receipt listing adapter or authenticated tenant/project scope enumerator.
+- The learning transaction store enforces scoped receipt/experience uniqueness, which is useful for idempotent learning writes, but it does not make checkpoint read-modify-write atomic with the learning transaction or with another process.
+
+### Concrete race this leaves open
+
+Two independent workers can both read the same checkpoint and process overlapping notifications. Their learning writes may deduplicate by scoped receipt ID, but their later unconditional checkpoint upserts can race. A stale writer can replace newer pending-notification metadata, and there is no fencing token that prevents a worker whose lease should have expired from writing. Atomic SQLite upsert alone does not solve this read-modify-write race.
+
+Therefore the existing implementation is durable and restart-readable, but it is **not yet proven safe for concurrent multi-process recovery**. Do not describe it as multi-worker safe, do not wire it into production startup, and do not enable automatic production learning on the strength of these primitives alone.
+
+### Required next implementation increment
+
+1. Add a checkpoint revision/version that increments on every mutation, including pending-only writes.
+2. Add a SQLite compare-and-set operation that checks expected revision and the active fencing token in the same transaction as the checkpoint update.
+3. Add scope-bound lease claim/renew/release operations with store-clock expiry and fresh fencing tokens on takeover.
+4. Route both live finalized notifications and crash recovery through the same lease/CAS discipline; protecting recovery alone is insufficient if live notifications can race with it.
+5. On CAS conflict, reload and recompute from the new state; never retry a stale serialized snapshot blindly.
+6. Make receipt listing use a stable high-water mark or snapshot and prove all pages were consumed before any replay begins.
+7. Add deterministic two-connection and two-process tests that force stale-write interleavings, lease expiry/takeover, stale-token rejection, pending-event preservation, and crash points around learning and checkpoint commits.
+
+Until these changes and their tests exist, the safe action is to leave startup recovery unwired and report the multi-worker capability as pending.
