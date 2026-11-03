@@ -1172,3 +1172,67 @@ test("DurableJobRuntime fences duplicate checkpoint resumes across independent r
   assert.equal(results.filter((result) => result.status === "completed").length, 1);
   assert.equal((await creator.get(submitted.id))?.status, "completed");
 });
+
+test("DurableJobRuntime prefers the lease-fenced embedded checkpoint over a stale valid RunStore snapshot", async () => {
+  const namespace = "job-runtime-stale-runstore-" + randomUUID();
+  const runId = "stale-runstore-" + randomUUID();
+  const base = {
+    version: 1 as const,
+    runId,
+    task: "prefer the canonical embedded checkpoint",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  };
+  const staleSnapshot = {
+    ...base,
+    checkpointId: "stale-cache-checkpoint",
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const freshSnapshot = {
+    ...base,
+    checkpointId: "fresh-lease-fenced-checkpoint",
+    completedStepIds: ["fresh-step"],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  let receivedResume: import("./run-state.js").BrainRunSnapshot | undefined;
+  const runStore = {
+    async save() {
+      // Simulate a late stale worker/cache value remaining readable after the
+      // current worker has already persisted its newer embedded checkpoint.
+    },
+    async load() { return staleSnapshot; },
+    async delete() {},
+  };
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      if (input.resume) {
+        receivedResume = input.resume;
+        return { completed: true, state: "completed" };
+      }
+      await onRunSnapshot?.(freshSnapshot);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), runStore, namespace);
+
+  const submitted = await runtime.submit({ task: freshSnapshot.task });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "failed");
+  assert.equal(current?.snapshot?.checkpointId, freshSnapshot.checkpointId);
+  assert.deepEqual(current?.snapshot?.completedStepIds, ["fresh-step"]);
+  const resumed = await runtime.resume(submitted.id);
+  assert.equal(resumed.status, "completed");
+  assert.equal(receivedResume?.checkpointId, freshSnapshot.checkpointId);
+  assert.deepEqual(receivedResume?.completedStepIds, ["fresh-step"]);
+});
+
