@@ -88,3 +88,26 @@ test("ignores commands not intended for Sofia", async () => {
   assert.deepEqual(await h.handler(message({ command: "help" })), { status: "ignored" });
   assert.equal(h.started.length, 0);
 });
+
+
+test("resolves a distinct Sofia API client from the verified sender identity", async () => {
+  const started: string[] = [];
+  const handler = createChatCommandHandler({
+    client: { async start() { throw new Error("shared fallback must not be used"); } },
+    clientForCommand(command) {
+      const sender = command.senderId;
+      return {
+        async start() {
+          started.push(sender);
+          return { id: "run-" + sender, status: "queued" };
+        },
+      };
+    },
+    accessPolicy: { isAllowed: () => true },
+    deduplicator: { claim: () => true, release: () => undefined },
+  });
+
+  assert.equal((await handler(message({ senderId: "telegram-user-1" }))).status, "accepted");
+  assert.equal((await handler(message({ senderId: "telegram-user-2" }))).status, "accepted");
+  assert.deepEqual(started, ["telegram-user-1", "telegram-user-2"]);
+});
