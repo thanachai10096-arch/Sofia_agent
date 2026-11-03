@@ -29,7 +29,7 @@ test("Anthropic Messages adapter sends native tool schema and normalizes tool-us
       role: "assistant",
       content: [
         { type: "text", text: "I will read the file." },
-        { type: "tool_use", id: "toolu_1", name: "workspace.read_file", input: { path: "README.md" } },
+        { type: "tool_use", id: "toolu_1", name: "sofia_tool_0", input: { path: "README.md" } },
       ],
       stop_reason: "tool_use",
       usage: { input_tokens: 42, output_tokens: 12 },
@@ -73,7 +73,7 @@ test("Anthropic Messages adapter sends native tool schema and normalizes tool-us
     assert.equal(requestedBody.system, "You are Sofia.");
     assert.deepEqual(requestedBody.messages, [{ role: "user", content: "Read README.md" }]);
     assert.deepEqual(requestedBody.tools, [{
-      name: "workspace.read_file",
+      name: "sofia_tool_0",
       description: "Read a workspace file.",
       input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
     }]);
