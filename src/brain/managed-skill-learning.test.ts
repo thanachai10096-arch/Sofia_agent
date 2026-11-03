@@ -30,16 +30,20 @@ function fixture() {
 
 test("managed skill learning activates only after explicit approval", async () => {
   const f = fixture();
-  const approvalCalls: Array<{ toolName: string; risk: string }> = [];
+  const approvalCalls: Array<{ toolName: string; risk: string; input: Record<string, unknown> }> = [];
   try {
     const handler = createManagedSkillLearningHandler(f.lifecycle, async (request) => {
-      approvalCalls.push({ toolName: request.toolName, risk: request.risk });
+      approvalCalls.push({ toolName: request.toolName, risk: request.risk, input: request.input });
       return true;
     });
     assert.equal(await handler(candidate, "run-1", "operator-1"), true);
     assert.equal(approvalCalls.length, 1);
     assert.equal(approvalCalls[0]?.toolName, "skill.lifecycle.promote");
     assert.equal(approvalCalls[0]?.risk, "high");
+    assert.equal(approvalCalls[0]?.input.skillVersion, "1.0.0");
+    assert.match(String(approvalCalls[0]?.input.packageHash), /^[a-f0-9]{64}$/);
+    assert.match(String(approvalCalls[0]?.input.procedureHash), /^[a-f0-9]{64}$/);
+    assert.equal(approvalCalls[0]?.input.candidateId !== undefined, true);
     assert.equal(f.platform.get("learned:repair-type_error:type_error")?.source, "learned");
   } finally {
     rmSync(f.directory, { recursive: true, force: true });
