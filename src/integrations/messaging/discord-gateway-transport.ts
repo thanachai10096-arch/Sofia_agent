@@ -85,7 +85,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
     messageQueues.set(key, next);
   }
 
-  function notify(event: "gateway_connect_failed" | "gateway_disconnected" | "message_handler_failed" | "message_delivery_failed", status?: number): void {
+  function notify(event: "gateway_connect_failed" | "gateway_disconnected" | "message_handler_failed" | "message_delivery_failed" | "message_queue_full", status?: number): void {
     try { options.onError?.(event, status); } catch { /* diagnostics must not alter transport behavior */ }
   }
   function clearHeartbeat(): void {
