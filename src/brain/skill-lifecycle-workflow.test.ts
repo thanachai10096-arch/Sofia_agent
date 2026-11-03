@@ -64,6 +64,33 @@ test("skill workflow rejects approval when the approver mutates the reviewed can
   } finally { rmSync(f.directory, { recursive: true, force: true }); }
 });
 
+test("skill workflow refuses promotion when another writer changes the candidate after approval", async () => {
+  const f = fixture();
+  try {
+    const secondWriter = new VersionedSkillLifecycle(f.platform, async () => ({
+      passed: true, checks: [{ name: "policy-and-regression-tests", passed: true }],
+    }), { file: path.join(f.directory, "lifecycle.json") });
+    await assert.rejects(
+      runSkillLifecycleWorkflow(f.lifecycle, f.skillPackage, {
+        source: "test-suite", evidenceIds: ["approval-race"], confidence: 0.95,
+      }, {
+        approvePromotion: async candidate => {
+          // Simulate a second process promoting after the human approves the
+          // reviewed snapshot but before this workflow commits its promotion.
+          secondWriter.promote(candidate.id);
+          return true;
+        },
+      }),
+      /Only successfully evaluated candidates can be promoted/,
+    );
+    const refreshed = new VersionedSkillLifecycle(f.platform, async () => ({
+      passed: true, checks: [{ name: "unused", passed: true }],
+    }), { file: path.join(f.directory, "lifecycle.json") });
+    assert.equal(refreshed.active("workflow-test-skill")?.status, "active");
+    assert.equal(f.platform.get("workflow-test-skill")?.version, "1.0.0");
+  } finally { rmSync(f.directory, { recursive: true, force: true }); }
+});
+
 test("skill workflow never promotes when evaluation fails", async () => {
   const f = fixture(false);
   let approvalAsked = false;
