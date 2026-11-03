@@ -78,3 +78,7 @@ Node.js does not provide a portable directory-fsync guarantee through this imple
 `settle(runId, attempt, usage, claim)` now verifies the journal contains exactly one durable `started` event for the supplied attempt ID and no prior `settled` event before appending settlement evidence. Fabricated attempt IDs, duplicate settlement calls, and attempts against malformed journal records are rejected. The per-run claim serializes this validation with other cooperating journal writers. A rejected settlement does not append a second event or clear the existing unresolved evidence.
 
 This is an integrity check on the local append-only journal; it does not independently prove that provider-reported usage is truthful. Preserve provider-side billing/request evidence for reconciliation.
+
+## Checkpoint admission
+
+Checkpoint acknowledgement is serialized by the per-run claim and now validates the journal before appending. It refuses to append a checkpoint if any provider attempt is still pending, any settlement has unknown or invalid usage, or the journal contains malformed/unmatched evidence. Only fully matched settlements with validated known usage are eligible. This prevents the journal from accumulating misleading checkpoint markers during an unresolved billing incident; a durable execution snapshot alone cannot establish provider usage.
