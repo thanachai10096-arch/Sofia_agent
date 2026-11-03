@@ -151,6 +151,37 @@ test("incomplete JSONL tails remain corrupt and cannot be checkpointed or delete
   }
 });
 
+test("begin refuses to append after an incomplete JSONL tail and preserves the evidence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-append-partial-tail-"));
+  try {
+    const namespace = "workspace";
+    const runId = "append-partial-tail-run";
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    const partial = JSON.stringify({
+      version: 1, type: "started", attemptId: "interrupted-attempt",
+      at: new Date().toISOString(), maxInputTokens: 3, maxOutputTokens: 4,
+    });
+    await writeFile(journalFile, partial, { mode: 0o600 });
+
+    const journal = new FileSettlementJournal(namespace, root);
+    const claim = await journal.claimRun(runId);
+    try {
+      await assert.rejects(
+        journal.begin(runId, { inputTokens: 5, outputTokens: 6 }, claim),
+        /incomplete settlement journal record/,
+      );
+      assert.equal(await readFile(journalFile, "utf8"), partial,
+        "a rejected append must leave the original crash evidence byte-for-byte unchanged");
+    } finally {
+      await claim.release();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("settlement validates attempts across multiple JSONL events", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-multi-attempt-"));
   try {
