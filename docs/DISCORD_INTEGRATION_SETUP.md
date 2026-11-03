@@ -28,7 +28,7 @@ Completed jobs can contribute a short, redacted session context to later `/run` 
 
 Required for the API entrypoint:
 
-- `SOFIA_API_KEY`: a strong server-side API key.
+- `SOFIA_SERVER_API_KEY`: a strong server-side bearer key used to authenticate API requests. Keep it separate from model-provider credentials. `SOFIA_API_KEY` remains accepted as a legacy fallback.
 - `DISCORD_PUBLIC_KEY`: the Discord application's 32-byte public key as 64 hexadecimal characters.
 - `DISCORD_BOT_TOKEN`: bot token.
 - `DISCORD_ALLOWED_USER_IDS`: comma-separated Discord user IDs allowed to invoke Sofia.
@@ -37,7 +37,7 @@ Required for the API entrypoint:
 Example using placeholders only:
 
 ```dotenv
-SOFIA_API_KEY=replace-with-a-long-random-secret
+SOFIA_SERVER_API_KEY=replace-with-a-long-random-secret
 DISCORD_PUBLIC_KEY=replace-with-64-hex-characters
 DISCORD_BOT_TOKEN=replace-with-the-real-bot-token
 DISCORD_ALLOWED_USER_IDS=111111111111111111
