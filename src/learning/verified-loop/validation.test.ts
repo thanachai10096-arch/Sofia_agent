@@ -63,3 +63,15 @@ test("evidence must be trusted, successful, same-run and explicitly referenced",
   assert.equal(validEvidence({ ...evidence, createdAt: "not-a-date" }, receipt), false);
   assert.equal(validEvidence({ ...evidence, kind: "model-output" as unknown as RunEvidence["kind"] }, receipt), false);
 });
+
+
+test("rejects blank and oversized persisted receipt identity fields", () => {
+  assert.equal(validReceipt({ ...receipt, id: " " }, scope), false);
+  assert.equal(validReceipt({ ...receipt, runId: " " }, scope), false);
+  assert.equal(validReceipt({ ...receipt, verifier: " " }, scope), false);
+  assert.equal(validReceipt({ ...receipt, policyRevision: " " }, scope), false);
+  assert.equal(validReceipt({ ...receipt, id: "r".repeat(501) }, scope), false);
+  assert.equal(validReceipt({ ...receipt, runId: "r".repeat(501) }, scope), false);
+  assert.equal(validReceipt({ ...receipt, verifier: "v".repeat(201) }, scope), false);
+  assert.equal(validReceipt({ ...receipt, policyRevision: "p".repeat(501) }, scope), false);
+});
