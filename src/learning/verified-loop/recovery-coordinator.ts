@@ -40,6 +40,76 @@ export interface LearningRecoveryInspection {
   readOnly: true;
 }
 
+/**
+ * Converts only coordinator-approved assessments into the planner's authorization
+ * shape. This is a convenience bridge, not a new authorization source: the
+ * executor must still resolve the receipt and revalidate actor, scope, policy,
+ * evidence, and runtime state immediately before mutation.
+ *
+ * Returns undefined when no assessment passed every coordinator gate.
+ */
+export function createLearningRepairAuthorizationFromRecovery(
+  inspection: LearningRecoveryInspection,
+  idempotencyKey: string,
+): import("./reconciliation-repair.js").LearningRepairAuthorization | undefined {
+  if (!inspection || inspection.readOnly !== true ||
+      !inspection.report || !inspection.report.scope ||
+      !validRevision(inspection.currentPolicyRevision) ||
+      typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 200 ||
+      !Array.isArray(inspection.assessments)) {
+    throw new Error("Invalid learning recovery inspection");
+  }
+  const scope = inspection.report.scope;
+  if (![scope.tenantId, scope.principalId, scope.projectId].every(value =>
+    typeof value === "string" && value.trim().length > 0 && value.length <= 200)) {
+    throw new Error("Invalid learning recovery inspection scope");
+  }
+  const eligible = inspection.assessments.filter(item => item.disposition === "eligible-for-reviewed-repair");
+  if (eligible.length === 0) return undefined;
+
+  const actorId = eligible[0]?.approvalBinding?.actorId;
+  if (typeof actorId !== "string" || !actorId.trim() || actorId.length > 200) {
+    throw new Error("Eligible recovery assessment is missing an authenticated approval binding");
+  }
+  const approvedSkillIds: string[] = [];
+  const approvalIds: Record<string, string> = Object.create(null) as Record<string, string>;
+  const learningPolicyRevisions: Record<string, string> = Object.create(null) as Record<string, string>;
+  const currentPolicyRevisions: Record<string, string> = Object.create(null) as Record<string, string>;
+  const trustedEvidenceSkillIds: string[] = [];
+
+  for (const assessment of eligible) {
+    const binding = assessment.approvalBinding;
+    if (!binding || binding.status !== "approved" || binding.actorId !== actorId ||
+        binding.skillId !== assessment.skillId || !validRevision(binding.id) ||
+        binding.policyRevision !== inspection.currentPolicyRevision ||
+        assessment.currentPolicyRevision !== inspection.currentPolicyRevision ||
+        assessment.learningPolicyRevision !== inspection.currentPolicyRevision ||
+        !binding.scope || binding.scope.tenantId !== scope.tenantId ||
+        binding.scope.principalId !== scope.principalId || binding.scope.projectId !== scope.projectId) {
+      throw new Error("Eligible recovery assessment has an invalid approval binding");
+    }
+    if (Object.prototype.hasOwnProperty.call(approvalIds, assessment.skillId)) {
+      throw new Error("Duplicate eligible recovery skill");
+    }
+    approvedSkillIds.push(assessment.skillId);
+    approvalIds[assessment.skillId] = binding.id;
+    learningPolicyRevisions[assessment.skillId] = assessment.learningPolicyRevision;
+    currentPolicyRevisions[assessment.skillId] = assessment.currentPolicyRevision;
+    trustedEvidenceSkillIds.push(assessment.skillId);
+  }
+
+  return {
+    scope: { ...scope },
+    actorId,
+    idempotencyKey,
+    approvedSkillIds,
+    approvalIds,
+    learningPolicyRevisions,
+    currentPolicyRevisions,
+    trustedEvidenceSkillIds,
+  };
+}
+
 export interface LearningRecoveryCoordinatorHost {
   /** Must resolve the authenticated scope; do not accept a model-supplied scope. */
   listActiveLearningSkills(scope: LearningScope): Promise<ActiveLearningSkill[]>;
