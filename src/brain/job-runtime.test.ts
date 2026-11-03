@@ -1029,3 +1029,39 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime atomically claims and fences recovery notification delivery", async () => {
+  const namespace = "job-runtime-notification-claim-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "done" }),
+  } as unknown as SofiaBrain;
+  const first = new DurableJobRuntime(() => brain, undefined, namespace);
+  const second = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await first.submit({
+    task: "notification claim test",
+    ownerKeyId: "discord:test-user",
+    notificationChannelId: "test-channel",
+  });
+
+  let completed = await first.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && completed?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    completed = await first.get(submitted.id);
+  }
+  assert.equal(completed?.status, "completed");
+
+  const claims = await Promise.all([
+    first.claimNotification(submitted.id, "worker-a", 30_000),
+    second.claimNotification(submitted.id, "worker-b", 30_000),
+  ]);
+  assert.equal(claims.filter(Boolean).length, 1, "only one worker may own the notification lease");
+  const winner = claims[0] ? "worker-a" : "worker-b";
+  const loser = winner === "worker-a" ? "worker-b" : "worker-a";
+
+  await first.markNotificationDelivered(submitted.id, loser);
+  assert.equal((await first.get(submitted.id))?.notificationDelivered, false, "a stale worker cannot mark delivery");
+  await first.markNotificationDelivered(submitted.id, winner);
+  assert.equal((await second.get(submitted.id))?.notificationDelivered, true);
+  assert.equal(await second.claimNotification(submitted.id, "worker-c", 30_000), false, "delivered notices cannot be claimed again");
+});
