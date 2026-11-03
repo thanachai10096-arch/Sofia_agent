@@ -250,7 +250,7 @@ test("Brain adapter forwards truncated output status without parsing partial JSO
       async generate() {
         providerCalls += 1;
         return {
-          text: "{\\"partial\\":",
+          text: "{\"partial\":",
           usage: { inputTokens: 10, outputTokens: 15 },
           finishReason: "length" as const,
         };
