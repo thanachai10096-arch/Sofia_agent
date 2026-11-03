@@ -116,7 +116,7 @@ async function setup() {
     // Never replace a legacy config until its only stored credential has been moved safely.
     await assertNoLegacyPlaintextApiKey(configPath, requiredKeyEnv);
     if (provider !== "ollama" && !process.env[requiredKeyEnv]?.trim()) {
-      console.log(`\\nSet ${requiredKeyEnv} in your shell environment before starting Sofia. The setup wizard never asks for or writes API keys.`);
+      console.log(`\nSet ${requiredKeyEnv} in your shell environment before starting Sofia. The setup wizard never asks for or writes API keys.`);
     }
     await writeSafeLocalConfig(configPath, { provider, baseUrl, model });
     console.log("Saved provider, endpoint, and model configuration to ~/.sofia/config.json (owner-only permissions).");
