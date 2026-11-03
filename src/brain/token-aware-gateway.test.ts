@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { TokenBudget } from "./token-budget.js";
+import { createInternalRoute } from "./model-route-adapter.js";
 import {
   GatewayError,
   TokenAwareGateway,
@@ -221,4 +222,56 @@ test("gateway classifies unknown provider errors without exposing their messages
     assert.doesNotMatch(error.message, /private-token/);
     return true;
   });
+});
+
+
+test("Brain adapter forwards truncated output status without parsing partial JSON", async () => {
+  const budget = new TokenBudget(
+    {
+      maxTokens: 1_000,
+      maxCostNanoUsd: 1_000_000n,
+      maxCalls: 10,
+      maxInFlight: 1,
+    },
+    [{
+      key: "coding",
+      limit: {
+        maxTokens: 1_000,
+        maxCostNanoUsd: 1_000_000n,
+        maxCalls: 10,
+        maxInFlight: 1,
+      },
+      price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 1n },
+    }],
+  );
+  let providerCalls = 0;
+  const internalRoute = createInternalRoute({
+    modelProvider: {
+      async generate() {
+        providerCalls += 1;
+        return {
+          text: "{\\"partial\\":",
+          usage: { inputTokens: 10, outputTokens: 15 },
+          finishReason: "length" as const,
+        };
+      },
+    },
+    route: {
+      id: "coding",
+      capabilities: ["coding", "structured-output"],
+      costWeight: 1,
+      latencyWeight: 1,
+      qualityWeight: 1,
+      healthy: true,
+    },
+  });
+  const gateway = new TokenAwareGateway(budget, [internalRoute]);
+
+  await assert.rejects(
+    gateway.generate(request()),
+    (error: unknown) => error instanceof GatewayError && error.code === "incomplete_output",
+  );
+  assert.equal(providerCalls, 1);
+  assert.equal(budget.snapshot().chargedTokens, 25);
+  assert.equal(budget.snapshot().reservedTokens, 0);
 });
