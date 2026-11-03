@@ -150,3 +150,49 @@ test("dispatcher claims each message only when ready to send it", async () => {
   assert.equal(report.claimed, 2);
   assert.equal(report.delivered, 2);
 });
+
+
+test("dispatcher does not acknowledge after a lost renewal even if sender ignores abort", async () => {
+  const calls: string[] = [];
+  const { store } = fakeStore({
+    async renewLease() { calls.push("renew"); return false; },
+    async markDelivered() { calls.push("ack"); return true; },
+    async retry() { calls.push("retry"); return true; },
+  });
+  const dispatcher = new OutboxDispatcher(store, async () => {
+    await new Promise((resolve) => setTimeout(resolve, 650));
+  }, { workerToken: "worker-token", leaseMs: 1000 });
+  const report = await dispatcher.dispatchOnce();
+  assert.deepEqual(calls, ["renew"]);
+  assert.equal(report.leaseLost, 1);
+  assert.equal(report.delivered, 0);
+});
+
+test("dispatcher stops renewal before acknowledging a completed send", async () => {
+  let renewalStarted!: () => void;
+  let finishRenewal!: () => void;
+  const started = new Promise<void>((resolve) => { renewalStarted = resolve; });
+  const renewalBlocked = new Promise<void>((resolve) => { finishRenewal = resolve; });
+  const calls: string[] = [];
+  const { store } = fakeStore({
+    async renewLease() {
+      calls.push("renew-start");
+      renewalStarted();
+      await renewalBlocked;
+      calls.push("renew-finish");
+      return true;
+    },
+    async markDelivered() { calls.push("ack"); return true; },
+  });
+  const dispatcher = new OutboxDispatcher(store, async () => {
+    await started;
+  }, { workerToken: "worker-token", leaseMs: 1000 });
+  const dispatch = dispatcher.dispatchOnce();
+  await started;
+  // Let the sender finish while the renewal operation is still in flight.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  finishRenewal();
+  const report = await dispatch;
+  assert.deepEqual(calls, ["renew-start", "renew-finish", "ack"]);
+  assert.equal(report.delivered, 1);
+});
