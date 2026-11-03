@@ -57,7 +57,7 @@ test("close stops output and rejects later playback", async () => {
   const controller = createVoicePlaybackController({
     async play(_audio, signal) {
       start();
-      await new Promise<void>((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
     },
     stop() { stopped++; },
   });
