@@ -317,6 +317,8 @@ export class FileSettlementJournal {
 
     let started = 0;
     let settled = 0;
+    const seenAttemptIds = new Set<string>();
+    const pendingAttemptIds = new Set<string>();
     for (const line of source.split("\n")) {
       if (!line) continue;
       let raw: unknown;
@@ -338,12 +340,18 @@ export class FileSettlementJournal {
             !Number.isSafeInteger(event.maxOutputTokens) || (event.maxOutputTokens as number) < 0) {
           throw new Error("Cannot settle an attempt from a corrupt journal");
         }
+        if (seenAttemptIds.has(event.attemptId)) {
+          throw new Error("Cannot settle an attempt from a journal with reused attempt IDs");
+        }
+        seenAttemptIds.add(event.attemptId);
+        pendingAttemptIds.add(event.attemptId);
         if (event.attemptId === attemptId) started += 1;
       } else if (event.type === "settled") {
         if (typeof event.attemptId !== "string" || !event.attemptId ||
-            typeof event.usageKnown !== "boolean") {
-          throw new Error("Cannot settle an attempt from a corrupt journal");
+            typeof event.usageKnown !== "boolean" || !pendingAttemptIds.has(event.attemptId)) {
+          throw new Error("Cannot settle an attempt from a journal with unmatched settlement evidence");
         }
+        pendingAttemptIds.delete(event.attemptId);
         if (event.attemptId === attemptId) settled += 1;
       } else if (event.type !== "checkpoint") {
         throw new Error("Cannot settle an attempt from a corrupt journal");
@@ -530,6 +538,7 @@ export class FileSettlementJournal {
     // A checkpoint may acknowledge only known, matched settlements. It must
     // never erase an attempt whose provider outcome or usage is ambiguous.
     const pendingAttempts = new Set<string>();
+    const seenAttemptIds = new Set<string>();
     let uncheckpointedKnownSettlement = false;
     let ambiguousEvidence = false;
 
@@ -557,10 +566,11 @@ export class FileSettlementJournal {
         if (typeof event.attemptId !== "string" || !event.attemptId ||
             !Number.isSafeInteger(event.maxInputTokens) || (event.maxInputTokens as number) < 0 ||
             !Number.isSafeInteger(event.maxOutputTokens) || (event.maxOutputTokens as number) < 0 ||
-            pendingAttempts.has(event.attemptId)) {
+            seenAttemptIds.has(event.attemptId)) {
           ambiguousEvidence = true;
           continue;
         }
+        seenAttemptIds.add(event.attemptId);
         pendingAttempts.add(event.attemptId);
         continue;
       }
@@ -620,6 +630,7 @@ export class FileSettlementJournal {
     }
 
     const pending = new Set<string>();
+    const seenAttemptIds = new Set<string>();
     let ambiguous = false;
     for (const line of source.split("\n")) {
       if (!line) continue;
@@ -637,9 +648,10 @@ export class FileSettlementJournal {
         if (typeof event.attemptId !== "string" || !event.attemptId ||
             !Number.isSafeInteger(event.maxInputTokens) || (event.maxInputTokens as number) < 0 ||
             !Number.isSafeInteger(event.maxOutputTokens) || (event.maxOutputTokens as number) < 0 ||
-            pending.has(event.attemptId)) {
+            seenAttemptIds.has(event.attemptId)) {
           throw new Error("Cannot checkpoint corrupt or ambiguous settlement evidence");
         }
+        seenAttemptIds.add(event.attemptId);
         pending.add(event.attemptId);
         continue;
       }
