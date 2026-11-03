@@ -6,7 +6,7 @@ import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
+import { buildDiscordSessionContext, getDiscordOwnedJob, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 
@@ -199,7 +199,7 @@ if (process.env.DISCORD_GATEWAY_ENABLED === "true") {
       if (!allowedUsers.has(message.author.id) || !allowedChannels.has(message.channelId)) return;
       if (!message.directMessage && !message.addressedToBot) return;
       const rawText = message.content.trim();
-      if (!rawText || /^\/(status|cancel|resume)(\s|$)/.test(rawText)) return;
+      if (!rawText) return;
       if (seenMessageIds.has(message.id)) return;
       seenMessageIds.add(message.id);
       if (seenMessageIds.size > 10_000) {
@@ -208,12 +208,49 @@ if (process.env.DISCORD_GATEWAY_ENABLED === "true") {
       }
       try {
         deps.securityController?.assertRunning();
+        const principalId = "discord:" + message.author.id;
+        const commandMatch = rawText.match(/^\/(status|cancel|resume)(?:\s+(.+))?$/);
+        if (commandMatch) {
+          const command = commandMatch[1]!;
+          const jobId = (commandMatch[2] ?? "").replace(/^job_id:/i, "").trim();
+          const job = await getDiscordOwnedJob(deps.jobRuntime!, jobId, principalId);
+          if (!job) {
+            await discordGatewayTransport?.sendMessage(message.channelId, "Job not found or not accessible to this Discord user.", message.id);
+            return;
+          }
+          if (command === "status") {
+            await discordGatewayTransport?.sendMessage(message.channelId,
+              "Sofia job status: " + job.status + "\nJob ID: " + job.id, message.id);
+            return;
+          }
+          if (command === "cancel") {
+            const cancelled = await deps.jobRuntime!.cancel(job.id);
+            await discordGatewayTransport?.sendMessage(message.channelId,
+              cancelled ? "Cancellation requested for job " + job.id + "." : "Job " + job.id + " is already terminal or cannot be cancelled.", message.id);
+            return;
+          }
+          if (!job.snapshot || job.status === "completed" || job.status === "cancelled" || job.status === "running") {
+            await discordGatewayTransport?.sendMessage(message.channelId,
+              "This job cannot be resumed. It must have a saved checkpoint and not be running, completed, or cancelled.", message.id);
+            return;
+          }
+          await discordGatewayTransport?.sendMessage(message.channelId,
+            "Resume requested for job " + job.id + ".", message.id);
+          void deps.jobRuntime!.resume(job.id, discordAbort.signal).then(async (resumed) => {
+            await discordGatewayTransport?.sendMessage(message.channelId,
+              "Sofia resumed job. Status: " + resumed.status + "\nJob ID: " + resumed.id);
+            await deps.jobRuntime?.markNotificationDelivered?.(resumed.id);
+          }).catch(async () => {
+            try { await discordGatewayTransport?.sendMessage(message.channelId, "Sofia could not resume job " + job.id + ". Check the job status and server logs."); } catch { /* durable state remains */ }
+          });
+          return;
+        }
+        if (rawText.startsWith("/") && !rawText.startsWith("/run ")) return;
         const task = rawText === "/run" ? "" : rawText.startsWith("/run ") ? rawText.slice(5).trim() : rawText;
         if (!task) {
           await discordGatewayTransport?.sendMessage(message.channelId, "Please include a task after /run.", message.id);
           return;
         }
-        const principalId = "discord:" + message.author.id;
         const sessionKey = messagingSessionKey({ platform: "discord", userId: message.author.id, channelId: message.channelId, conversationId: message.channelId });
         const sessionContext = await buildDiscordSessionContext(deps.jobRuntime!, sessionKey);
         const taskWithMemory = sessionContext ? task + "\n\n" + sessionContext : task;
