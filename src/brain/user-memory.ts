@@ -104,9 +104,14 @@ export class FileUserMemoryStore implements UserMemoryStore {
   }
 
   private async read(userId: string): Promise<UserMemoryEntry[]> {
+    const file = this.fileFor(userId);
     let source: string;
     try {
-      source = await fs.readFile(this.fileFor(userId), "utf8");
+      const fileStat = await fs.lstat(file);
+      if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+        throw new Error("User memory storage must be a regular file, not a symbolic link or special file.");
+      }
+      source = await fs.readFile(file, "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
