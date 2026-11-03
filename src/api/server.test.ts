@@ -77,6 +77,76 @@ test("API sessions are persisted and scoped to the authenticated API key", async
 });
 
 
+test("Telegram-style API keys isolate Memory and do not inherit privileged core scopes", async () => {
+  const memory = new Map<string, Array<{
+    id: string; kind: "preference"; content: string; source: "explicit-user-request";
+    confidence: number; createdAt: string; updatedAt: string; uses: number;
+  }>>();
+  const userMemoryStore = {
+    async save(userId: string, entry: {
+      id: string; kind: "preference"; content: string; source: "explicit-user-request";
+      confidence: number; createdAt: string; updatedAt: string; uses: number;
+    }) {
+      memory.set(userId, [...(memory.get(userId) ?? []).filter((item) => item.id !== entry.id), entry]);
+    },
+    async list(userId: string) { return memory.get(userId) ?? []; },
+    async find(userId: string, query: string, limit = 10) {
+      return (memory.get(userId) ?? []).filter((entry) => entry.content.includes(query)).slice(0, limit);
+    },
+    async delete(userId: string, id: string) {
+      const current = memory.get(userId) ?? [];
+      const next = current.filter((entry) => entry.id !== id);
+      memory.set(userId, next);
+      return next.length !== current.length;
+    },
+    async clear(userId: string) { memory.delete(userId); },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore,
+  }, {
+    apiKeys: {
+      "core-key": ["agent:run", "agent:read", "memory:read", "memory:write", "cron:manage"],
+      "telegram-user-one": ["agent:run", "memory:read", "memory:write"],
+      "telegram-user-two": ["agent:run", "memory:read", "memory:write"],
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const entry = (id: string, content: string) => ({
+    id, kind: "preference", content, source: "explicit-user-request",
+    confidence: 1, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), uses: 0,
+  });
+  const request = (key: string, path: string, init: RequestInit = {}) =>
+    fetch(baseUrl + path, {
+      ...init,
+      headers: { authorization: `Bearer ${key}`, ...(init.headers ?? {}) },
+    });
+  try {
+    const saveOne = await request("telegram-user-one", "/v1/memory", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(entry("one", "private memory one")),
+    });
+    assert.equal(saveOne.status, 201);
+    const saveTwo = await request("telegram-user-two", "/v1/memory", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(entry("two", "private memory two")),
+    });
+    assert.equal(saveTwo.status, 201);
+    const readOne = await request("telegram-user-one", "/v1/memory");
+    const readTwo = await request("telegram-user-two", "/v1/memory");
+    assert.match(JSON.stringify(await readOne.json()), /private memory one/);
+    assert.doesNotMatch(JSON.stringify(await request("telegram-user-one", "/v1/memory").then((r) => r.json())), /private memory two/);
+    assert.match(JSON.stringify(await readTwo.json()), /private memory two/);
+    const privileged = await request("telegram-user-one", "/v1/cron/schedules");
+    assert.equal(privileged.status, 403);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("API lists configured models and honors an explicit model route", async () => {
   const routes: ModelRoute[] = [
     { id: "fast", model: "vendor/fast-model", capabilities: ["fast"], costWeight: 1, latencyWeight: 1, qualityWeight: 5, healthy: true },
