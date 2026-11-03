@@ -25,3 +25,11 @@ test("PostgresRunStore saves, loads, and deletes snapshots using parameterized q
   assert.match(calls[1]!.sql, /WHERE run_id=\$1/);
   assert.match(calls[2]!.sql, /WHERE run_id=\$1/);
 });
+
+test("PostgresRunStore fails closed when a stored snapshot is corrupt", async () => {
+  const db: PostgresExecutor = {
+    async query() { return { rows: [{ snapshot: "{not-json" } as never], rowCount: 1 }; },
+  };
+  const store = new PostgresRunStore(db);
+  await assert.rejects(() => store.load("run-corrupt"), SyntaxError);
+});
