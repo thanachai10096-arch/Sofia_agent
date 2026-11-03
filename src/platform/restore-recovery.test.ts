@@ -222,3 +222,70 @@ test("startup recovery refuses to run without the caller's exclusive lock", asyn
     withExclusiveLock: undefined as never,
   }), /exclusive lock/i);
 });
+
+
+test("startup recovery resumes a partial rollback without repeating completed targets", async () => {
+  const transactionId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+  const initial = createRestoreJournalRecord({
+    transactionId,
+    createdAt: "2026-11-03T00:00:00.000Z",
+    manifestSha256: "e".repeat(64),
+    targets: [
+      { name: "first", paths: ["first.json"], rollbackSnapshotRef: "snapshots/first", rollbackSnapshotSha256: "1".repeat(64) },
+      { name: "second", paths: ["second.json"], rollbackSnapshotRef: "snapshots/second", rollbackSnapshotSha256: "2".repeat(64) },
+    ],
+  });
+  const applying = advanceRestoreJournal(initial, {
+    phase: "applying",
+    updatedAt: "2026-11-03T00:00:01.000Z",
+    targets: initial.targets.map((target) => ({ ...target, phase: "applied" })),
+  });
+  const rollbackRequired = advanceRestoreJournal(applying, {
+    phase: "rollback_required",
+    updatedAt: "2026-11-03T00:00:02.000Z",
+    targets: applying.targets.map((target) => ({ ...target, phase: "rollback_pending" })),
+  });
+  const rolling = advanceRestoreJournal(rollbackRequired, {
+    phase: "rolling_back",
+    updatedAt: "2026-11-03T00:00:03.000Z",
+    targets: rollbackRequired.targets.map((target, index) => ({
+      ...target,
+      phase: index === 0 ? "rolled_back" : "rollback_pending",
+    })),
+  });
+  let current = rolling;
+  const journal: RestoreJournalStore = {
+    async create() { throw new Error("not used"); },
+    async append(next, expectedRevision) {
+      assert.equal(current.revision, expectedRevision);
+      current = next;
+    },
+    async read() { return current; },
+    async list() { return [current]; },
+  };
+  const reads: string[] = [];
+  const mutations: string[] = [];
+  const snapshotStore = {
+    async write() { throw new Error("not used"); },
+    async read(ref: string) {
+      reads.push(ref);
+      return new Uint8Array([1]);
+    },
+  };
+
+  const recovered = await recoverInterruptedRestoreTransaction({
+    transactionId,
+    journal,
+    snapshotStore,
+    adapters: [
+      { name: "first", paths: ["first.json"], async rollbackFromSnapshotBytes() { mutations.push("first"); } },
+      { name: "second", paths: ["second.json"], async rollbackFromSnapshotBytes() { mutations.push("second"); } },
+    ],
+    async withExclusiveLock(_id, operation) { return operation(); },
+  });
+
+  assert.equal(recovered.phase, "rolled_back");
+  assert.deepEqual(mutations, ["second"]);
+  assert.deepEqual(reads, ["snapshots/second"]);
+  assert.deepEqual(recovered.targets.map((target) => target.phase), ["rolled_back", "rolled_back"]);
+});
