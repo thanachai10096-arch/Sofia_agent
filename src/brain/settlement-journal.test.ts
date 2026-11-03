@@ -151,6 +151,39 @@ test("incomplete JSONL tails remain corrupt and cannot be checkpointed or delete
   }
 });
 
+test("begin refuses to extend semantically corrupt but syntactically valid journal history", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-append-invalid-history-"));
+  try {
+    const namespace = "workspace";
+    const runId = "append-invalid-history-run";
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    const at = new Date().toISOString();
+    const started = JSON.stringify({
+      version: 1, type: "started", attemptId: "attempt-reused",
+      at, maxInputTokens: 3, maxOutputTokens: 4,
+    });
+    const corruptHistory = started + "\n" + started + "\n";
+    await writeFile(journalFile, corruptHistory, { mode: 0o600 });
+
+    const journal = new FileSettlementJournal(namespace, root);
+    const claim = await journal.claimRun(runId);
+    try {
+      await assert.rejects(
+        journal.begin(runId, { inputTokens: 5, outputTokens: 6 }, claim),
+        /corrupt settlement journal record/,
+      );
+      assert.equal(await readFile(journalFile, "utf8"), corruptHistory,
+        "append must preserve semantically corrupt history byte-for-byte");
+    } finally {
+      await claim.release();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("begin refuses to append after an incomplete JSONL tail and preserves the evidence", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-append-partial-tail-"));
   try {
