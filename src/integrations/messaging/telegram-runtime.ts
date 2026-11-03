@@ -54,6 +54,7 @@ export async function reportTelegramRunCompletion(input: {
     : "";
   let text: string;
   if (run.status === "completed") {
+    try { await input.onCompleted?.(output); } catch { input.onWarning?.("telegram_session_persist_failed"); }
     text = "✅ Sofia completed the task.\nRun ID: " + input.runId +
       (output ? "\n\n" + output : "\n\nThe run completed but returned no text output.");
   } else {
