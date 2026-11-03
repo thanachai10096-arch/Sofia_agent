@@ -525,6 +525,7 @@ test("Brain retrieves project memory using the current task and avoids listing u
   const brain = createSofiaBrain({
     dependencies: {
       reasoner: makeReasoner(), tools: makeTools(), allowShell: false, allowNetwork: false,
+      projectContext: { root: "/workspace/project", files: [], summary: "" },
       projectMemory: {
         async save() {},
         async list() { listCalls += 1; return []; },
