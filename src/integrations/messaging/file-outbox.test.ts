@@ -215,3 +215,27 @@ test("retry worker rejects unsafe polling intervals", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("provider and observability failures record only one delivery attempt", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-single-attempt-"));
+  try {
+    const outbox = new FileMessagingOutbox(root);
+    const id = await outbox.enqueue("line", { conversationId: "line-chat", text: "single attempt" });
+    const result = await flushMessagingOutbox(
+      outbox,
+      async () => { throw new Error("provider timeout"); },
+      () => { throw new Error("metrics backend unavailable"); },
+      undefined,
+      () => 10_000,
+    );
+    assert.deepEqual(result, { sent: 0, pending: 1 });
+    const record = (await outbox.pending()).find((item) => item.id === id);
+    assert.equal(record?.attemptCount, 1);
+    assert.equal(record?.attemptHistory?.length, 1);
+    assert.equal(record?.lastErrorCode, "provider_unavailable");
+    assert.equal(await outbox.claim(id, 5_000, 10_001) !== undefined, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
