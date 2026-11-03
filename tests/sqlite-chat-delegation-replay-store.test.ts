@@ -38,6 +38,27 @@ test("SQLite replay store persists nonce claims across reopen", { skip: !sqliteA
   }
 });
 
+test("SQLite replay store restores owner-only permissions before reopening", { skip: !sqliteAvailable || process.platform === "win32" }, async () => {
+  const temp = tempDatabase();
+  let store: SqliteChatDelegationReplayStore | undefined;
+  try {
+    store = await SqliteChatDelegationReplayStore.open(temp.filePath);
+    store.close();
+    store = undefined;
+
+    fs.chmodSync(temp.directory, 0o755);
+    fs.chmodSync(temp.filePath, 0o400);
+
+    store = await SqliteChatDelegationReplayStore.open(temp.filePath);
+    assert.equal(fs.statSync(temp.directory).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(temp.filePath).mode & 0o777, 0o600);
+    assert.equal(await store.claim({ ...claim, nonce: "zyxwvutsrqponmlkjihgfedc" }), true);
+  } finally {
+    store?.close();
+    fs.rmSync(temp.directory, { recursive: true, force: true });
+  }
+});
+
 test("SQLite replay store does not allow a second connection to reclaim the same nonce", { skip: !sqliteAvailable }, async () => {
   const temp = tempDatabase();
   const first = await SqliteChatDelegationReplayStore.open(temp.filePath);
