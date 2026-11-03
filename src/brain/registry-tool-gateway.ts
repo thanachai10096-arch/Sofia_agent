@@ -120,6 +120,10 @@ export class RegistryToolGateway implements ToolGateway {
       let data:unknown;
       try {
         data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
+        // A tool may ignore AbortSignal and resolve after its caller was cancelled.
+        // Never report that late result as a successful Brain tool completion.
+        context.signal.throwIfAborted();
+        boundSignal.signal.throwIfAborted();
       } finally {
         boundSignal.dispose();
       }
