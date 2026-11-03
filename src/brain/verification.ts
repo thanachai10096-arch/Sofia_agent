@@ -44,6 +44,19 @@ export async function runVerification(
       },
     });
 
+    // A successful-looking payload is not sufficient: every verification result
+    // must carry a durable evidence reference before it can satisfy acceptance.
+    if (typeof result.evidenceId !== "string" || !result.evidenceId.trim()) {
+      results.push({
+        criterionId: criterion.id,
+        passed: false,
+        detail: "Verification tool returned no evidence ID.",
+        evidenceIds: [],
+        workspaceRevision: snapshot.revision,
+      });
+      break;
+    }
+
     const evaluated = criterion.evaluate(result.data);
     results.push({
       criterionId: criterion.id,
