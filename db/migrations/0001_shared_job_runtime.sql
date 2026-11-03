@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS sofia_agent_jobs (
   CONSTRAINT sofia_agent_jobs_lease_shape CHECK (
     (status = 'running' AND lease_owner_token IS NOT NULL AND lease_expires_at IS NOT NULL)
     OR status <> 'running'
-  ),
+  )
 );
 
 -- Owner-scoped history and efficient queue/expired-lease scans.
