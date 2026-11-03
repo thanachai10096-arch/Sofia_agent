@@ -30,7 +30,7 @@ function iso(value: Date | string | null): string | undefined {
 function jsonValue<T>(value: T | string | null): T | undefined {
   if (value === null) return undefined;
   if (typeof value !== "string") return value;
-  try { return JSON.parse(value) as T; } catch { return undefined; }
+  return JSON.parse(value) as T;
 }
 function fromRow(row: JobRow): JobRecord {
   return {
