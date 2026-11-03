@@ -35,7 +35,8 @@ function storeWith(records: RestoreJournalRecord[]): RestoreJournalStore {
 
 test("recovery scanner classifies terminal and interrupted intents without mutation", async () => {
   const prepared = makeRecord("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-  const applying = advanceRestoreJournal(prepared, {
+  const applyingInitial = makeRecord("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+  const applying = advanceRestoreJournal(applyingInitial, {
     phase: "applying",
     updatedAt: "2026-11-03T00:00:01.000Z",
     targets: prepared.targets.map((target, index) => ({ ...target, phase: index === 0 ? "applied" : "applying" })),
