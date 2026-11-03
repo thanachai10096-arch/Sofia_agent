@@ -32,7 +32,9 @@ function quarantineInvalidRecord(directory: string, filename: string, fullPath: 
  try {
   const quarantineDirectory = path.join(directory, "quarantine");
   mkdirSync(quarantineDirectory, { recursive: true, mode: 0o700 });
-  const quarantineStat = lstatSync(quarantineDirectory);\n  if (quarantineStat.isSymbolicLink() || !quarantineStat.isDirectory()) return;\n  try { chmodSync(quarantineDirectory, 0o700); } catch {}
+  const quarantineStat = lstatSync(quarantineDirectory);
+  if (quarantineStat.isSymbolicLink() || !quarantineStat.isDirectory()) return;
+  try { chmodSync(quarantineDirectory, 0o700); } catch {}
   const destination = path.join(quarantineDirectory, filename + "." + Date.now() + "." + randomUUID() + ".invalid");
   renameSync(fullPath, destination);
   if (!isSymlink) { try { chmodSync(destination, 0o600); } catch {} }
@@ -80,8 +82,14 @@ export class FileRunRecordStore implements RunRecordStore {
  loadAllSync():RunRecord[]{
   const out:RunRecord[]=[];let names:string[];try{names=readdirSync(this.directory);}catch{return out;}
   for(const name of names){const full=path.join(this.directory,name);if(!name.endsWith(".json")){if(name.endsWith(".tmp"))try{if(Date.now()-statSync(full).mtimeMs>24*60*60*1000)unlinkSync(full);}catch{};continue;}
-   try{const parsed:unknown=JSON.parse(readFileSync(full,"utf8"));if(validRecord(parsed,name))out.push(parsed);else quarantineInvalidRecord(this.directory,name,full);}
-   catch{quarantineInvalidRecord(this.directory,name,full);}
+   try {
+    const fileStat = lstatSync(full);
+    if (fileStat.isSymbolicLink()) { quarantineInvalidRecord(this.directory, name, full, true); continue; }
+    if (!fileStat.isFile()) { quarantineInvalidRecord(this.directory, name, full); continue; }
+    const parsed: unknown = JSON.parse(readFileSync(full, "utf8"));
+    if (validRecord(parsed, name)) out.push(parsed);
+    else quarantineInvalidRecord(this.directory, name, full);
+   } catch { quarantineInvalidRecord(this.directory, name, full); }
   }return out;
  }
 }
