@@ -51,6 +51,13 @@ test("gateway persists known settlement before completing the inference", async 
     assert.equal(await journal.hasUnresolved("run-1"), true);
     await journal.acknowledgeCheckpoint("run-1");
     assert.equal(await journal.hasUnresolved("run-1"), false);
+    const inspection = await journal.inspectRun("run-1");
+    assert.equal(inspection.journal, "resolved");
+    assert.equal(inspection.startedAttempts, 1);
+    assert.equal(inspection.settledAttempts, 1);
+    assert.equal(inspection.checkpoints, 1);
+    assert.equal(inspection.unknownUsageAttempts, 0,
+      "checkpoint acknowledgement must preserve known usage and settlement evidence");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
