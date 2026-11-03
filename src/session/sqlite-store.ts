@@ -268,9 +268,20 @@ export class SqliteSessionStore {
     `).all(pattern, limit, offset) as Array<{ id: string }>).map((row) => row.id);
   }
 
+  /** Atomically erase a transcript and its search index entries. */
   delete(id: string): void {
-    this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-    if (this.ftsAvailable) this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (this.ftsAvailable) {
+        this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
+      }
+      this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    restrictSqlitePermissions(this.filePath);
   }
 
   close(): void { this.db.close(); }
