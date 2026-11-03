@@ -153,14 +153,14 @@ test("partial custom provider configuration fails instead of silently switching 
   clear();
   process.env.SOFIA_BASE_URL = "https://llm.example.test/v1";
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
-  assert.throws(loadModelConfigFromEnv, /requires SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL/);
+  assert.throws(loadModelConfigFromEnv, /requires SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL/);
 });
 
 test("fails with actionable guidance when no supported provider is configured", () => {
   clear();
   process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
   process.env.AI_GATEWAY_API_KEY = "legacy-test-key";
-  assert.throws(loadModelConfigFromEnv, /Configure SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL/);
+  assert.throws(loadModelConfigFromEnv, /Configure SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL/);
 });
 
 test("rejects malformed or credential-bearing custom base URLs", () => {
