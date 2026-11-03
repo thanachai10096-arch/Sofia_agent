@@ -299,3 +299,12 @@ Verification status:
 The runtime now adds a short-lived `resumeReservationToken` / expiry and a storage capability `reserveResumeForOwner`. The local file store performs owner, checkpoint, state, active-lease, and reservation checks plus reservation write under the same file lock. `DurableJobRuntime.resumeForOwner` requires this capability for shared stores, reserves before dispatch, and relies on the normal lease claim to atomically transition to running and clear the reservation. Public job serialization removes the reservation token.
 
 A concurrent-resume regression test was added using two independent runtime instances against the same local store. The PostgreSQL schema draft now includes reservation columns, and the store contract requires a single conditional database mutation and a two-connection race test. This remains a contract/schema change only: no PostgreSQL adapter exists, and tests/build have not yet been run. The Vercel adapter therefore still uses its Preview-only local file store and is not production durable.
+
+
+## Follow-up: PostgreSQL JobStateStore adapter scaffold (2026-11-03)
+
+Added `src/brain/postgres-job-state-store.ts`, a driver-neutral adapter implementing the existing `JobStateStore` and `OwnedJobStateStore` contracts. It provides conditional SQL for worker claim/lease fencing, heartbeat, expired-lease recovery, owner-scoped get/list/cancel, atomic resume reservation, and save conflict fencing. It accepts a node-postgres-compatible `query(sql, values)` executor and adds no package dependency.
+
+The factory now accepts an optional third argument `{ jobStateStore }`, allowing a host to inject a shared store without replacing the Brain/Executor architecture. Added SQL-contract unit tests and a partial index for active resume reservations. The contract document includes the host wiring example and explicitly keeps Vercel on local temp storage until a server-side Pool and migration are supplied.
+
+Remaining release gates: no PostgreSQL driver/pool or migration runner is selected; no live PostgreSQL test has run; no two-connection integration race has been executed; Vercel adapter is not wired to a shared database; all code/tests/build remain unverified in this environment. Do not promote this adapter scaffold to production based only on SQL-string unit tests.
