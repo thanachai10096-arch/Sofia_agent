@@ -13,6 +13,10 @@ test("outbox enqueue is idempotent on job, event type, and destination",async()=
  assert.equal(await store.enqueue({id:uuidA,jobId:uuidB,eventType:"job.completed",destination:"discord:channel",payload:{text:"done"},ownerKeyId:"owner"}),false);
  assert.match(calls[0]!.sql,/ON CONFLICT \(job_id,event_type,destination\) DO NOTHING/);
  assert.equal(calls[0]!.values[1],"owner");
+ assert.match(calls[0]!.sql,/FROM sofia_agent_jobs AS j/);
+ assert.match(calls[0]!.sql,/j.owner_key_id IS NOT DISTINCT FROM \\$2::text/);
+ assert.match(calls[0]!.sql,/j.notification_channel_id=\\$4/);
+ assert.match(calls[0]!.sql,/SELECT \\$1::uuid,j.owner_key_id,j.id/);
 });
 
 test("outbox claim uses SKIP LOCKED and returns normalized leased messages",async()=>{
