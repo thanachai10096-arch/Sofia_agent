@@ -113,3 +113,19 @@ test("config persistence refuses a symlinked config directory", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("legacy apiKey fields are never copied into the process environment", () => {
+  const environment: NodeJS.ProcessEnv = {};
+  const legacyConfig = {
+    provider: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4.1-mini",
+    apiKey: "legacy-plaintext-secret",
+  };
+  applySafeLocalConfigEnvironment(legacyConfig, environment);
+  assert.equal(environment.SOFIA_MODEL_PROVIDER, "openai");
+  assert.equal(environment.SOFIA_MODEL_BASE_URL, "https://api.openai.com/v1");
+  assert.equal(environment.SOFIA_MODEL_NAME, "gpt-4.1-mini");
+  assert.equal(environment.SOFIA_MODEL_API_KEY, undefined);
+  assert.equal(environment.OPENAI_API_KEY, undefined);
+});
