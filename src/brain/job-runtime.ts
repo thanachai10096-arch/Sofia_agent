@@ -52,6 +52,31 @@ async function renameStateFile(source: string, destination: string): Promise<voi
 
 function isJobCancelled(record: JobRecord): boolean { return record.status === "cancelled"; }
 
+function isValidSnapshotForRun(value: unknown, expectedRunId: string): value is BrainRunSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const snapshot = value as Partial<BrainRunSnapshot>;
+  const usage = snapshot.usage;
+  const isCounter = (item: unknown): item is number =>
+    typeof item === "number" && Number.isSafeInteger(item) && item >= 0;
+  return snapshot.version === 1
+    && typeof expectedRunId === "string" && expectedRunId.length > 0
+    && snapshot.runId === expectedRunId
+    && typeof snapshot.task === "string"
+    && typeof snapshot.checkpointId === "string" && snapshot.checkpointId.length > 0
+    && !!snapshot.understanding && typeof snapshot.understanding === "object" && !Array.isArray(snapshot.understanding)
+    && !!snapshot.plan && typeof snapshot.plan === "object" && !Array.isArray(snapshot.plan)
+    && Array.isArray(snapshot.acceptanceCriteria)
+    && Array.isArray(snapshot.completedStepIds) && snapshot.completedStepIds.every((id) => typeof id === "string")
+    && !!usage && isCounter(usage.steps) && isCounter(usage.toolCalls)
+    && isCounter(usage.modelCalls) && isCounter(usage.reservedOrUsedTokens)
+    && isCounter(usage.replans)
+    && Array.isArray(snapshot.observations)
+    && Array.isArray(snapshot.diagnoses)
+    && Array.isArray(snapshot.decisions)
+    && isCounter(snapshot.recoveryRounds)
+    && Array.isArray(snapshot.trace);
+}
+
 function redactJobRecord(record: JobRecord): JobRecord {
   return {
     ...record,
@@ -470,13 +495,20 @@ export class DurableJobRuntime implements JobRuntime {
 
     const stored = await this.state.get(id);
     if (!stored) return existing ? publicJobRecord(existing) : undefined;
-    const loadedSnapshot = stored.snapshot?.runId && this.runStore
-      ? await this.runStore.load(stored.snapshot.runId)
+    const expectedRunId = stored.snapshot?.runId;
+    const loadedSnapshot = expectedRunId && this.runStore
+      ? await this.runStore.load(expectedRunId)
       : undefined;
+    // Never trust a RunStore payload merely because it was returned for a key:
+    // validate its identity and minimum checkpoint structure before hydration.
+    const loadedIsValid = expectedRunId && isValidSnapshotForRun(loadedSnapshot, expectedRunId);
+    const embeddedIsValid = expectedRunId && isValidSnapshotForRun(stored.snapshot, expectedRunId);
+    const candidate = loadedIsValid ? loadedSnapshot : embeddedIsValid ? stored.snapshot : undefined;
     // Older versions may have persisted snapshots before job-level redaction was
     // added. Sanitize on read too, before returning or resuming historical state.
-    const snapshot = loadedSnapshot ? redactSecrets(loadedSnapshot) as BrainRunSnapshot : undefined;
-    const hydrated = { ...stored, ...(snapshot ? { snapshot } : {}) };
+    const snapshot = candidate ? redactSecrets(candidate) as BrainRunSnapshot : undefined;
+    const { snapshot: _untrustedSnapshot, ...storedWithoutSnapshot } = stored;
+    const hydrated = { ...storedWithoutSnapshot, ...(snapshot ? { snapshot } : {}) };
     await this.recoverInterrupted(hydrated);
     this.jobs.set(id, hydrated);
     return publicJobRecord(hydrated);
@@ -495,12 +527,17 @@ export class DurableJobRuntime implements JobRuntime {
     const stored = await this.state.list();
     for (const persisted of stored) {
       if (this.controllers.has(persisted.id) || this.starting.has(persisted.id)) continue;
-      const loadedSnapshot = persisted.snapshot?.runId && this.runStore
-        ? await this.runStore.load(persisted.snapshot.runId)
+      const expectedRunId = persisted.snapshot?.runId;
+      const loadedSnapshot = expectedRunId && this.runStore
+        ? await this.runStore.load(expectedRunId)
         : undefined;
-      // Keep legacy snapshots from bypassing redaction when listing persisted jobs.
-      const snapshot = loadedSnapshot ? redactSecrets(loadedSnapshot) as BrainRunSnapshot : undefined;
-      const hydrated = { ...persisted, ...(snapshot ? { snapshot } : {}) };
+      // Listing and resume share the same checkpoint identity/shape validation.
+      const loadedIsValid = expectedRunId && isValidSnapshotForRun(loadedSnapshot, expectedRunId);
+      const embeddedIsValid = expectedRunId && isValidSnapshotForRun(persisted.snapshot, expectedRunId);
+      const candidate = loadedIsValid ? loadedSnapshot : embeddedIsValid ? persisted.snapshot : undefined;
+      const snapshot = candidate ? redactSecrets(candidate) as BrainRunSnapshot : undefined;
+      const { snapshot: _untrustedSnapshot, ...persistedWithoutSnapshot } = persisted;
+      const hydrated = { ...persistedWithoutSnapshot, ...(snapshot ? { snapshot } : {}) };
       await this.recoverInterrupted(hydrated);
       this.jobs.set(hydrated.id, hydrated);
     }
