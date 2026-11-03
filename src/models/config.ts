@@ -164,8 +164,9 @@ function selectProvider(): ProviderSelection {
 
 /**
  * Configure one provider explicitly, then optionally assign different models
- * to Sofia's fast, coding, reasoning, and vision routes. Custom endpoints must
- * implement the OpenAI Chat Completions-compatible API.
+ * to Sofia's fast, coding, reasoning, and vision routes. Custom endpoints use
+ * OpenAI Chat Completions compatibility by default; Anthropic Messages is an
+ * explicit alternative via SOFIA_MODEL_PROTOCOL.
  */
 export function loadModelConfigFromEnv(): SofiaModelConfig {
   const selected = selectProvider();
