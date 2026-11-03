@@ -185,16 +185,24 @@ export class VerifiedLearningLoop {
         ...assessedCandidate, status: "active", activatedAt: new Date().toISOString(),
         policyRevision: latestPolicy,
       };
-      const activated = await this.host.transaction(scope, async tx => {
-        // Close the gap between the post-promotion policy read and acquiring
-        // the activation transaction. The revision must still match at the
-        // final persistence boundary before an active row is written.
-        if (await this.host.currentPolicyRevision(scope) !== currentPolicy) return false;
-        const activeSkills = await tx.listActiveSkills(scope);
-        if (activeSkills.some(skill => skill.name === active.name && skill.policyRevision === latestPolicy)) return false;
-        await tx.activateSkill(active);
-        return true;
-      });
+      // A point-in-time policy read cannot close the race with a policy write
+      // in another store. Require the authoritative policy adapter to pin the
+      // revision while the learning-store activation transaction commits.
+      // Missing capability is deliberately fail-closed for legacy hosts.
+      if (!this.host.withCurrentPolicyRevision) {
+        return { recorded: true, experienceId: prepared.experienceId };
+      }
+      const guardedActivation = await this.host.withCurrentPolicyRevision(
+        scope,
+        currentPolicy,
+        async () => this.host.transaction(scope, async tx => {
+          const activeSkills = await tx.listActiveSkills(scope);
+          if (activeSkills.some(skill => skill.name === active.name && skill.policyRevision === latestPolicy)) return false;
+          await tx.activateSkill(active);
+          return true;
+        }),
+      );
+      const activated = guardedActivation.matched && guardedActivation.value === true;
       return { recorded: true, experienceId: prepared.experienceId, ...(activated ? { skillActivated: active.id } : {}) };
     } catch (error) {
       throw safeError(this.host, error);
