@@ -61,7 +61,21 @@ export class FileSettlementJournal {
     if (info.isSymbolicLink() || !info.isDirectory()) {
       throw new Error("Settlement journal directory must be a real directory, not a symbolic link");
     }
-    await fs.chmod(this.directory, 0o700);
+    // Do not chmod through a path that could be replaced after lstat. Open the
+    // directory itself without following symlinks, verify its inode, then
+    // tighten permissions through the descriptor.
+    const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+    const directoryOnly = fsConstants.O_DIRECTORY ?? 0;
+    const handle = await fs.open(this.directory, fsConstants.O_RDONLY | directoryOnly | noFollow);
+    try {
+      const opened = await handle.stat();
+      if (!opened.isDirectory() || opened.dev !== info.dev || opened.ino !== info.ino) {
+        throw new Error("Settlement journal directory changed during validation");
+      }
+      await handle.chmod(0o700);
+    } finally {
+      await handle.close();
+    }
   }
 
   /**
