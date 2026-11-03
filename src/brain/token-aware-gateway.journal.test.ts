@@ -230,3 +230,58 @@ test("independent gateways sharing a journal cannot invoke the same run concurre
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("gateway never replays after provider success when durable settlement recording fails", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-gateway-settlement-write-failure-"));
+  try {
+    class FailingSettlementJournal extends FileSettlementJournal {
+      override async settle(
+        _runId: string,
+        _attempt: { id: string },
+        _usage: { inputTokens: number; outputTokens: number } | undefined,
+        _claim: import("./settlement-journal.js").SettlementRunClaim,
+      ): Promise<void> {
+        throw new Error("injected durable settlement write failure");
+      }
+    }
+
+    const failingJournal = new FailingSettlementJournal("workspace", root);
+    let providerCalls = 0;
+    const firstGateway = new TokenAwareGateway(createBudget(), [createRoute(async () => {
+      providerCalls += 1;
+      return {
+        value: { accepted: true },
+        usage: { inputTokens: 5, outputTokens: 2 },
+        finishReason: "complete",
+      };
+    })], 45_000, failingJournal);
+
+    await assert.rejects(
+      firstGateway.generateMetered(request, undefined, "settlement-write-failure"),
+      /injected durable settlement write failure/,
+    );
+    assert.equal(providerCalls, 1);
+    assert.equal(await failingJournal.hasUnresolved("settlement-write-failure"), true,
+      "the durable started event must remain unresolved when settlement persistence fails");
+
+    const restartedJournal = new FileSettlementJournal("workspace", root);
+    const restartedGateway = new TokenAwareGateway(createBudget(), [createRoute(async () => {
+      providerCalls += 1;
+      return {
+        value: { duplicate: true },
+        usage: { inputTokens: 5, outputTokens: 2 },
+        finishReason: "complete",
+      };
+    })], 45_000, restartedJournal);
+
+    await assert.rejects(
+      restartedGateway.generateMetered(request, undefined, "settlement-write-failure"),
+      (error: unknown) => error instanceof GatewayError &&
+        error.message.includes("unresolved_provider_settlement"),
+    );
+    assert.equal(providerCalls, 1,
+      "a restarted worker must not repeat a provider call whose response could not be durably settled");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
