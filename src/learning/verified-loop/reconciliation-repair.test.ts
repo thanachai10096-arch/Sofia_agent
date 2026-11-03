@@ -31,6 +31,23 @@ test("blocks repair without an authoritative approval receipt ID", () => {
   assert.equal(missingReceipt.eligibleForExecutor, false);
 });
 
+test("does not accept inherited approval receipt or policy revision fields", () => {
+  const inheritedApprovalIds = Object.create({ "skill-1": "inherited-receipt" }) as Record<string, string>;
+  const inheritedLearningRevisions = Object.create({ "skill-1": "policy-7" }) as Record<string, string>;
+  const inheritedCurrentRevisions = Object.create({ "skill-1": "policy-7" }) as Record<string, string>;
+  const result = planLearningReconciliationRepair(
+    report([{ kind: "missing-runtime-registration", skillId: "skill-1" }]),
+    auth({
+      approvalIds: inheritedApprovalIds,
+      learningPolicyRevisions: inheritedLearningRevisions,
+      currentPolicyRevisions: inheritedCurrentRevisions,
+    }),
+  );
+  assert.deepEqual(result.actions, []);
+  assert.deepEqual(result.blocked, [{ skillId: "skill-1", reason: "not-explicitly-approved" }]);
+  assert.equal(result.eligibleForExecutor, false);
+});
+
 test("blocks repair without explicit approval or trusted evidence", () => {
   const noApproval = planLearningReconciliationRepair(report([{ kind: "missing-runtime-registration", skillId: "skill-1" }]), auth({ approvedSkillIds: [] }));
   assert.deepEqual(noApproval.blocked, [{ skillId: "skill-1", reason: "not-explicitly-approved" }]);
