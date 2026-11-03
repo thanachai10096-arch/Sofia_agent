@@ -98,6 +98,7 @@ export interface TelegramMessagingEnvironment {
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
+  SOFIA_SERVER_API_KEY?: string;
   SOFIA_API_KEY?: string;
   SOFIA_API_BASE_URL?: string;
   RAILWAY_PUBLIC_DOMAIN?: string;
@@ -119,7 +120,8 @@ export function createTelegramMessagingRuntime(
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
   const rawUsers = env.TELEGRAM_ALLOWED_USER_IDS?.trim();
   const rawChats = env.TELEGRAM_ALLOWED_CHAT_IDS?.trim();
-  const apiKey = env.SOFIA_API_KEY?.trim();
+  // Prefer the dedicated server auth key; retain SOFIA_API_KEY for older deployments.
+  const apiKey = (env.SOFIA_SERVER_API_KEY ?? env.SOFIA_API_KEY)?.trim();
   const railwayDomain = env.RAILWAY_PUBLIC_DOMAIN?.trim();
   const baseUrl = env.SOFIA_API_BASE_URL?.trim() ||
     (railwayDomain ? "https://" + railwayDomain.replace(/^https?:\/\//i, "").replace(/\/$/, "") : "");
