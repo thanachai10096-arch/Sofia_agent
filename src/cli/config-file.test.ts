@@ -129,3 +129,33 @@ test("legacy apiKey fields are never copied into the process environment", () =>
   assert.equal(environment.SOFIA_MODEL_API_KEY, undefined);
   assert.equal(environment.OPENAI_API_KEY, undefined);
 });
+
+test("explicit environment settings take precedence over local metadata", () => {
+  const environment: NodeJS.ProcessEnv = {
+    SOFIA_MODEL_PROVIDER: "custom-provider",
+    SOFIA_MODEL_BASE_URL: "https://custom.example/v1",
+    SOFIA_MODEL_NAME: "custom-model",
+    SOFIA_MODEL_API_KEY: "environment-secret",
+  };
+  applySafeLocalConfigEnvironment({
+    provider: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4.1-mini",
+  }, environment);
+  assert.equal(environment.SOFIA_MODEL_PROVIDER, "custom-provider");
+  assert.equal(environment.SOFIA_MODEL_BASE_URL, "https://custom.example/v1");
+  assert.equal(environment.SOFIA_MODEL_NAME, "custom-model");
+  assert.equal(environment.SOFIA_MODEL_API_KEY, "environment-secret");
+});
+
+test("empty local metadata does not erase existing environment configuration", () => {
+  const environment: NodeJS.ProcessEnv = {
+    SOFIA_MODEL_PROVIDER: "openrouter",
+    SOFIA_MODEL_BASE_URL: "https://openrouter.ai/api/v1",
+    SOFIA_MODEL_NAME: "provider/model",
+  };
+  applySafeLocalConfigEnvironment({ provider: "", baseUrl: "", model: "" }, environment);
+  assert.equal(environment.SOFIA_MODEL_PROVIDER, "openrouter");
+  assert.equal(environment.SOFIA_MODEL_BASE_URL, "https://openrouter.ai/api/v1");
+  assert.equal(environment.SOFIA_MODEL_NAME, "provider/model");
+});
