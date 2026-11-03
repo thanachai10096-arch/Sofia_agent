@@ -32,22 +32,22 @@ test("gateway returns a validated assistant response and token usage", async () 
   }
 });
 
-test("gateway retries transient provider status and then succeeds", async () => {
+test("gateway does not replay a billable inference request after a transient provider status", async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => {
     calls++;
-    return calls === 1
-      ? new Response("temporarily unavailable", { status: 503 })
-      : okResponse();
+    return new Response("temporarily unavailable", { status: 503 });
   };
   try {
     const gateway = new SofiaModelGateway({
       "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model" },
     });
-    const result = await gateway.generate(request, makeRoute());
-    assert.equal(result.text, "hello back");
-    assert.equal(calls, 2);
+    await assert.rejects(
+      gateway.generate(request, makeRoute()),
+      /Model gateway request failed \(503\)/,
+    );
+    assert.equal(calls, 1, "a provider response must not cause a second billable POST");
   } finally {
     globalThis.fetch = originalFetch;
   }
