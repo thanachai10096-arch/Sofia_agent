@@ -25,7 +25,8 @@ Set these only in Vercel Project Settings → Environment Variables. Never commi
 - `DISCORD_ALLOWED_USER_IDS` — comma-separated Discord user IDs allowed to start runs. No wildcard support.
 - `DISCORD_ALLOWED_CHANNEL_IDS` — comma-separated Discord channel IDs allowed to start runs. No wildcard support.
 - `SOFIA_API_BASE_URL` — root HTTPS base URL of the separately hosted Sofia API, without credentials/query/fragment.
-- `SOFIA_API_KEY` — a narrowly scoped server-side API key allowed to start runs.
+- `SOFIA_API_KEY` — a narrowly scoped server-side primary API key. The bridge selects a mapped key per Discord sender.
+- `DISCORD_USER_API_KEYS` — required for multiple allowed users. JSON object mapping every allowlisted numeric Discord user ID to a distinct Sofia API key. Keys must be unique, at least 24 characters, and the mapping must match `DISCORD_ALLOWED_USER_IDS` exactly. Configure the same mapping on the Sofia API service so `src/api/entrypoint.ts` registers each key as a separate principal. Keep values in server-side secrets only.
 - Optional `DISCORD_COMMAND_NAME` — defaults to `run`.
 
 Do not configure Production variables until Preview has passed the acceptance checklist. The actual deployment URL must come from Vercel after a deployment; do not guess it.
@@ -36,7 +37,7 @@ Do not configure Production variables until Preview has passed the acceptance ch
 2. **Sofia API must already be hosted separately.** This function does not run the Sofia agent runtime inside Vercel; it calls the configured HTTPS API.
 3. **The Sofia API currently documents process-local idempotency.** The stable key helps retry safety, but cross-instance atomic deduplication and durable run-state storage remain production requirements.
 4. **Access policy is an explicit static allowlist.** Keep both lists restrictive. If you need dynamic policy, wire a reviewed server-side policy/store before broadening access.
-5. **Personal-memory isolation is not implemented for this Vercel bridge yet.** Every allowed Discord user currently calls the Sofia API with the same `SOFIA_API_KEY`, so the API sees one owner principal for runs and `/v1/memory`. The Discord user ID included in request context is descriptive metadata, not an authenticated identity. Do not enable this bridge for multiple users when private personal memory or owner-scoped sessions are enabled. A reviewed per-Discord-user API-key mapping (registered by the Sofia API and matched exactly to `DISCORD_ALLOWED_USER_IDS`) is required before multi-user use.
+5. **Per-user identity is enforced through API credentials, not Discord metadata.** With `DISCORD_USER_API_KEYS`, the function selects a distinct Sofia API key using the signature-verified Discord sender ID, rejects mappings that do not exactly match the allowlist, and the Sofia API entrypoint registers those keys as separate principals. Without the mapping, the bridge permits only a single allowlisted Discord user using `SOFIA_API_KEY`; multi-user requests fail closed. The Discord user ID in request context remains descriptive metadata and is never treated as authentication.
 5. **Discord command registration is a separate setup step.** Register `/run` with one required string option named `task` using the correct application ID and test guild. Do not publish the endpoint until the Preview URL is confirmed.
 6. The serverless function must not be composed with Sofia's local workspace/terminal runtime. Execution capability boundaries belong in the separately hosted Sofia API and must be reviewed there.
 
@@ -48,6 +49,8 @@ Do not configure Production variables until Preview has passed the acceptance ch
 - [ ] Discord PING succeeds; invalid and stale signatures fail.
 - [ ] Oversized body, malformed JSON, non-POST methods, and missing configuration fail closed.
 - [ ] Unallowlisted users and channels cannot start runs.
+- [ ] For multiple allowed users, `DISCORD_USER_API_KEYS` exactly matches the allowlist, each user has a distinct key, and the Sofia API registers those same keys; test cross-user `/v1/memory` and run ownership isolation.
+- [ ] Without `DISCORD_USER_API_KEYS`, verify a multi-user allowlist is rejected; a shared key is permitted only for a single allowlisted user.
 - [ ] A valid `/run task` starts exactly one Sofia run and returns the run ID before Discord's deadline.
 - [ ] Retry/replay behavior is verified under concurrent requests and API timeout cases.
 - [ ] Replace process-local idempotency with a shared atomic durable store before relying on duplicate suppression across API instances or restarts.
