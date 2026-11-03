@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { writeSafeLocalConfig } from "./config-file.js";
+import { assertNoLegacyPlaintextApiKey, writeSafeLocalConfig } from "./config-file.js";
 
 test("local config stores only non-secret metadata with private permissions", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-config-test-"));
@@ -30,8 +30,49 @@ test("local config stores only non-secret metadata with private permissions", as
   }
 });
 
-test("config persistence replaces a symlink without modifying its target", async () => {
+test("setup refuses to overwrite a legacy plaintext key and preserves it", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-legacy-key-test-"));
+  const file = path.join(directory, "config.json");
+  const original = JSON.stringify({ provider: "openai", apiKey: "legacy-secret-value" });
+  try {
+    await writeFile(file, original, { mode: 0o600 });
+    await assert.rejects(assertNoLegacyPlaintextApiKey(file, "OPENAI_API_KEY"), /OPENAI_API_KEY.*left unchanged/);
+    assert.equal(await readFile(file, "utf8"), original);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("setup refuses malformed existing config instead of replacing potentially recoverable data", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-malformed-config-test-"));
+  const file = path.join(directory, "config.json");
+  const original = '{"apiKey":"possibly recoverable secret"';
+  try {
+    await writeFile(file, original, { mode: 0o600 });
+    await assert.rejects(assertNoLegacyPlaintextApiKey(file, "SOFIA_MODEL_API_KEY"), /not valid JSON.*refusing to overwrite/);
+    assert.equal(await readFile(file, "utf8"), original);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("setup refuses symlinked config and does not inspect an external target", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-config-symlink-test-"));
+  const file = path.join(directory, "config.json");
+  const target = path.join(directory, "outside.json");
+  try {
+    await writeFile(target, JSON.stringify({ apiKey: "external-secret" }), { mode: 0o600 });
+    await symlink(target, file);
+    await assert.rejects(assertNoLegacyPlaintextApiKey(file, "SOFIA_MODEL_API_KEY"), /regular file, not a symbolic link/);
+    assert.equal((await lstat(file)).isSymbolicLink(), true);
+    assert.equal((await readFile(target, "utf8")).includes("external-secret"), true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("config persistence replaces a symlink without modifying its target", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-config-symlink-write-test-"));
   const configDir = path.join(directory, ".sofia");
   const file = path.join(configDir, "config.json");
   const target = path.join(directory, "outside.json");
