@@ -161,3 +161,73 @@ def test_reranker_output_with_wrong_length_is_rejected(monkeypatch):
         headers=auth(),
     )
     assert response.status_code == 502
+
+
+
+def test_embedding_model_load_failure_returns_unavailable(monkeypatch):
+    def broken_factory():
+        raise RuntimeError("private model download details")
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(broken_factory, FakeReranker))
+    response = client.post(
+        "/v1/embeddings", json={"texts": ["hello"]}, headers=auth()
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Embedding model is unavailable."
+    assert "private model download details" not in response.text
+
+
+def test_embedding_inference_failure_returns_sanitized_error(monkeypatch):
+    class BrokenEmbedder:
+        def encode(self, texts, *, normalize_embeddings=True):
+            raise RuntimeError("private inference details")
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(BrokenEmbedder, FakeReranker))
+    response = client.post(
+        "/v1/embeddings", json={"texts": ["hello"]}, headers=auth()
+    )
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Embedding inference returned an invalid result."
+    assert "private inference details" not in response.text
+
+
+def test_embedding_malformed_model_output_returns_bad_gateway(monkeypatch):
+    class MalformedEmbedder:
+        def encode(self, texts, *, normalize_embeddings=True):
+            return [object()]
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(MalformedEmbedder, FakeReranker))
+    response = client.post(
+        "/v1/embeddings", json={"texts": ["hello"]}, headers=auth()
+    )
+    assert response.status_code == 502
+
+
+def test_reranker_model_load_failure_returns_unavailable(monkeypatch):
+    def broken_factory():
+        raise RuntimeError("private model download details")
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(FakeEmbedder, broken_factory))
+    response = client.post(
+        "/v1/rerank", json={"query": "q", "documents": ["doc"]}, headers=auth()
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Reranker model is unavailable."
+    assert "private model download details" not in response.text
+
+
+def test_reranker_malformed_model_output_returns_bad_gateway(monkeypatch):
+    class MalformedReranker:
+        def predict(self, pairs):
+            return [object()]
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(FakeEmbedder, MalformedReranker))
+    response = client.post(
+        "/v1/rerank", json={"query": "q", "documents": ["doc"]}, headers=auth()
+    )
+    assert response.status_code == 502
