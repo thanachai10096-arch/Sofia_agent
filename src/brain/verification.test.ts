@@ -3,6 +3,38 @@ import test from "node:test";
 import { runVerification, verificationCriteria } from "./verification.js";
 import type { ToolGateway } from "./types.js";
 
+test("verification rejects an empty probe set instead of vacuously passing", async () => {
+  const gateway = {
+    describe() { return { effects: ["read"] as const }; },
+    async execute() { throw new Error("must not execute"); },
+    async snapshot() { return { id: "s1", revision: "r1", evidenceId: "snapshot-evidence" }; },
+    async changedFiles() { return []; },
+    async checkpoint() { return { id: "c1", revision: "r1" }; },
+    async rollback() { return []; },
+  } satisfies ToolGateway;
+
+  await assert.rejects(
+    runVerification(gateway, [], new AbortController().signal),
+    /at least one acceptance probe/i,
+  );
+});
+
+test("verification rejects snapshots without durable identity and evidence", async () => {
+  const gateway: ToolGateway = {
+    describe() { return { effects: ["read"] }; },
+    async execute() { throw new Error("must not execute"); },
+    async snapshot() { return { id: "s1", revision: "r1", evidenceId: " " }; },
+    async changedFiles() { return []; },
+    async checkpoint() { return { id: "c1", revision: "r1" }; },
+    async rollback() { return []; },
+  };
+
+  await assert.rejects(
+    runVerification(gateway, ["typecheck"], new AbortController().signal),
+    /incomplete workspace identity or evidence/i,
+  );
+});
+
 test("verification criteria run in typecheck, test, build order", () => {
   assert.deepEqual(
     verificationCriteria().map((item) => item.id),
@@ -38,6 +70,24 @@ test("verification cannot pass without a durable evidence ID", async () => {
 
   assert.equal(calls, 1);
   assert.equal(results.length, 1);
+  assert.equal(results[0]?.passed, false);
+  assert.deepEqual(results[0]?.evidenceIds, []);
+  assert.match(results[0]?.detail ?? "", /no evidence ID/i);
+});
+
+test("verification rejects oversized evidence references", async () => {
+  const gateway: ToolGateway = {
+    describe() { return { effects: ["read"] }; },
+    async execute() {
+      return { ok: true, data: { passed: true, code: 0 }, evidenceId: "e".repeat(501) };
+    },
+    async snapshot() { return { id: "s1", revision: "r1", evidenceId: "snapshot-evidence" }; },
+    async changedFiles() { return []; },
+    async checkpoint() { return { id: "c1", revision: "r1" }; },
+    async rollback() { return []; },
+  };
+
+  const results = await runVerification(gateway, ["typecheck"], new AbortController().signal);
   assert.equal(results[0]?.passed, false);
   assert.deepEqual(results[0]?.evidenceIds, []);
   assert.match(results[0]?.detail ?? "", /no evidence ID/i);
