@@ -16,7 +16,13 @@ const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
 const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
-const messagingScopes = parseMessagingApiScopes(process.env.SOFIA_MESSAGING_API_SCOPES);
+let messagingScopes = ["agent:run", "agent:read"];
+let messagingScopesValid = true;
+try { messagingScopes = parseMessagingApiScopes(process.env.SOFIA_MESSAGING_API_SCOPES); }
+catch {
+  messagingScopesValid = false;
+  console.error("Messaging API scopes are invalid; per-user messaging credentials are disabled.");
+}
 let telegramUserApiKeys = new Map<string, string>();
 if (process.env.SOFIA_MESSAGING_ENABLED === "true" && process.env.TELEGRAM_USER_API_KEYS?.trim()) {
   try {
@@ -40,6 +46,10 @@ if (process.env.DISCORD_USER_API_KEYS?.trim()) {
   } catch {
     console.error("Discord per-user API key mapping disabled: configuration is invalid.");
   }
+}
+if (!messagingScopesValid) {
+  telegramUserApiKeys.clear();
+  discordUserApiKeys.clear();
 }
 const apiKeys: Record<string, string[]> = { [apiKey]: scopes };
 for (const key of telegramUserApiKeys.values()) apiKeys[key] = messagingScopes;
