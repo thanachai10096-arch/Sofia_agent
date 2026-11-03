@@ -308,3 +308,10 @@ Added `src/brain/postgres-job-state-store.ts`, a driver-neutral adapter implemen
 The factory now accepts an optional third argument `{ jobStateStore }`, allowing a host to inject a shared store without replacing the Brain/Executor architecture. Added SQL-contract unit tests and a partial index for active resume reservations. The contract document includes the host wiring example and explicitly keeps Vercel on local temp storage until a server-side Pool and migration are supplied.
 
 Remaining release gates: no PostgreSQL driver/pool or migration runner is selected; no live PostgreSQL test has run; no two-connection integration race has been executed; Vercel adapter is not wired to a shared database; all code/tests/build remain unverified in this environment. Do not promote this adapter scaffold to production based only on SQL-string unit tests.
+
+
+## Follow-up: shared run snapshot persistence (2026-11-03)
+
+Identified a critical cross-instance resume gap: the new PostgreSQL job metadata adapter still depended on `FileRunStore` for Brain snapshots. A job claimed by another serverless instance could not reliably load a snapshot from the first instance's local filesystem. Added `PostgresRunStore` using a dedicated `sofia_agent_run_snapshots` table, injected the same optional `RunStore` into both Brain and DurableJobRuntime via the existing dependency factory, exported the adapter, and added a query-contract unit test. Local FileRunStore remains the default, so existing local behavior is preserved.
+
+Still unverified: TypeScript build/tests, live PostgreSQL compatibility and concurrency, snapshot size/retention limits, host Pool injection, migration execution, and Vercel deployment.
