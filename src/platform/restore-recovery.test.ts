@@ -304,6 +304,71 @@ test("startup recovery retries an idempotent rollback when its journal acknowled
   assert.equal(rollbackCalls, 2);
 });
 
+test("concurrent recovery callers serialize through the supplied transaction lock", async () => {
+  const transactionId = "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd";
+  const initial = createRestoreJournalRecord({
+    transactionId,
+    createdAt: "2026-11-03T00:00:00.000Z",
+    manifestSha256: "9".repeat(64),
+    targets: [{
+      name: "state",
+      paths: ["state.json"],
+      rollbackSnapshotRef: "snapshots/state",
+      rollbackSnapshotSha256: "b".repeat(64),
+    }],
+  });
+  const applying = advanceRestoreJournal(initial, {
+    phase: "applying",
+    updatedAt: "2026-11-03T00:00:01.000Z",
+    targets: initial.targets.map((target) => ({ ...target, phase: "applied" })),
+  });
+  let current = applying;
+  const journal: RestoreJournalStore = {
+    async create() { throw new Error("not used"); },
+    async append(next, expectedRevision) {
+      assert.equal(current.revision, expectedRevision);
+      current = next;
+    },
+    async read() { return current; },
+    async list() { return [current]; },
+  };
+  let lockTail = Promise.resolve();
+  let rollbackCalls = 0;
+  const options = {
+    transactionId,
+    journal,
+    snapshotStore: {
+      async write() { throw new Error("not used"); },
+      async read() { return new Uint8Array([7]); },
+    },
+    adapters: [{
+      name: "state",
+      paths: ["state.json"],
+      async rollbackFromSnapshotBytes(bytes: Uint8Array) {
+        assert.deepEqual([...bytes], [7]);
+        rollbackCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      },
+    }],
+    async withExclusiveLock<T>(_id: string, operation: () => Promise<T>) {
+      const previous = lockTail;
+      let release!: () => void;
+      lockTail = new Promise<void>((resolve) => { release = resolve; });
+      await previous;
+      try { return await operation(); } finally { release(); }
+    },
+  };
+
+  const [first, second] = await Promise.all([
+    recoverInterruptedRestoreTransaction(options),
+    recoverInterruptedRestoreTransaction(options),
+  ]);
+  assert.equal(first.phase, "rolled_back");
+  assert.equal(second.phase, "rolled_back");
+  assert.equal(rollbackCalls, 1);
+  assert.equal(current.phase, "rolled_back");
+});
+
 test("startup recovery resumes a partial rollback without repeating completed targets", async () => {
   const transactionId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
   const initial = createRestoreJournalRecord({
