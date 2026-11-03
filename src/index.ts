@@ -69,6 +69,16 @@ export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/gua
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
 export { VoiceWorkflow } from "./voice/workflow.js";
 export type { VoiceAudioInput, VoiceAudioOutput, SpeechToTextProvider, TextToSpeechProvider, VoiceAgentReply, VoiceTurnResult, VoiceWorkflowOptions } from "./voice/workflow.js";
+export type { VoiceProviderSelection, VoiceProviderRegistry } from "./voice/provider-registry.js";
+export { createVoiceProviderRegistry, loadVoiceProviderSelectionFromEnv } from "./voice/provider-registry.js";
+export {
+  createOpenAICompatibleVoiceProviders,
+  loadOpenAICompatibleVoiceConfigFromEnv,
+} from "./voice/openai-compatible-provider.js";
+export type {
+  OpenAICompatibleVoiceConfig,
+  VoiceProviderEnvironment,
+} from "./voice/openai-compatible-provider.js";
 
 export { createChatCommandHandler } from "./integrations/chat-adapter.js";
 export { FileChatMessageDeduplicator } from "./integrations/file-chat-deduplicator.js";
@@ -79,7 +89,11 @@ export type { MessagingGateway, MessagingGatewayOptions, MessagingRateLimiter } 
 export { RedisMessagingRateLimiter, REDIS_MESSAGING_RATE_LIMIT_SCRIPT } from "./integrations/messaging/redis-rate-limiter.js";
 export type { RedisEvalClient, RedisMessagingRateLimiterOptions } from "./integrations/messaging/redis-rate-limiter.js";
 export { createTelegramAdapter } from "./integrations/messaging/telegram.js";
-export type { TelegramTransport, TelegramUpdate } from "./integrations/messaging/telegram.js";
+export { createTelegramVoiceMessageHandler } from "./integrations/messaging/telegram-voice-handler.js";
+export { createTelegramMessagingRuntime, reportTelegramRunCompletion, parseTelegramUserAllowlist, parseTelegramChatAllowlist } from "./integrations/messaging/telegram-runtime.js";
+export type { TelegramMessagingRuntime, TelegramMessagingRuntimeOptions, TelegramMessagingEnvironment } from "./integrations/messaging/telegram-runtime.js";
+export type { TelegramVoiceHandlerOptions, TelegramAudioInspector, TelegramVoiceMediaClient, TelegramVoiceDeduplicator } from "./integrations/messaging/telegram-voice-handler.js";
+export type { TelegramAdapterOptions, TelegramVoiceMessage, TelegramTransport, TelegramUpdate } from "./integrations/messaging/telegram.js";
 export { createTelegramHttpTransport } from "./integrations/messaging/telegram-http-transport.js";
 export type { TelegramHttpTransportOptions } from "./integrations/messaging/telegram-http-transport.js";
 export { createDiscordAdapter } from "./integrations/messaging/discord.js";
@@ -126,3 +140,30 @@ export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHA
 export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
+
+export { createVoiceChannelHandler } from "./voice/channel-handler.js";
+export type { VoiceChannel, VerifiedVoiceEvent, VoiceEventDeduplicator, VoiceChannelAccessPolicy, VoiceChannelDelivery, VoiceChannelResult, VoiceChannelHandlerOptions } from "./voice/channel-handler.js";
+
+export { createTelegramVoiceMediaClient } from "./integrations/messaging/telegram-voice-media.js";
+export type { TelegramVoiceMediaConfig, TelegramVoiceFile } from "./integrations/messaging/telegram-voice-media.js";
+
+export { createSandboxedTelegramAudioInspector } from "./integrations/messaging/telegram-audio-inspector.js";
+export type { SandboxedTelegramAudioInspectorOptions, TelegramAudioInspection } from "./integrations/messaging/telegram-audio-inspector.js";
+
+export { createVoiceSession } from "./voice/session.js";
+export type { VoiceSession, VoiceSessionOptions, VoiceSessionSnapshot, VoiceSessionState } from "./voice/session.js";
+
+export { iterateBoundedVoiceAudio } from "./voice/audio-stream.js";
+export type { VoiceAudioChunk, VoiceAudioStreamLimits } from "./voice/audio-stream.js";
+
+export { createVoiceActivityDetector } from "./voice/activity.js";
+export type { VoiceActivityOptions, VoiceActivityEvent, VoiceActivityEndReason } from "./voice/activity.js";
+
+export { createVoicePreRollBuffer } from "./voice/pre-roll.js";
+export type { VoicePreRollFrame, VoicePreRollOptions } from "./voice/pre-roll.js";
+
+export { createVoiceUtteranceController } from "./voice/utterance-controller.js";
+export type { VoiceUtteranceController, VoiceUtteranceControllerOptions } from "./voice/utterance-controller.js";
+
+export { createVoicePlaybackController } from "./voice/playback.js";
+export type { VoicePlaybackAdapter, VoicePlaybackController } from "./voice/playback.js";

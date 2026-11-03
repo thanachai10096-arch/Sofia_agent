@@ -75,3 +75,36 @@ The code outline above is not a claim that the repository's API server is alread
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+
+## Telegram voice media building block
+
+`createTelegramVoiceMediaClient` is an opt-in media helper for a future Telegram voice adapter. It is separate from the existing text messaging poller and does not start a second polling loop or automatically execute voice messages.
+
+- `downloadVoice(fileId, signal)` calls Telegram `getFile`, validates the returned relative path, permits only known audio extensions, and downloads only from the fixed `https://api.telegram.org/file/` origin.
+- File metadata and the streamed response are both checked against a configurable byte limit (10 MiB by default; maximum configurable limit 50 MiB).
+- `sendVoice(chatId, audio, signal)` uploads audio using multipart form data and validates the chat ID, MIME type, and byte limit.
+- Requests use HTTPS, reject redirects, support cancellation, and never accept a caller-provided download URL.
+- This helper does not verify actual media duration or decode the audio. The future voice adapter must validate the Telegram-provided duration against decoded media duration before invoking `VoiceWorkflow`.
+- It is an opt-in building block; text messaging behavior remains unchanged unless the host supplies the optional voice handler to `createTelegramMessagingRuntime`. A single Telegram update dispatcher routes voice and text events without running two competing `getUpdates` loops.
+
+Automated tests cover fixed-origin downloads, path traversal rejection, extension allowlisting, streamed size limits, multipart upload, and cancellation. These are mocked HTTP tests, not a live Telegram bot test.
+
+### Telegram voice update handoff
+
+The Telegram adapter can optionally expose voice messages through `TelegramAdapterOptions.onVoiceMessage`. This callback runs from the existing Telegram update poller; it does not create a second `getUpdates` loop and voice messages are not misrouted as text commands. The callback receives the sender/chat identifiers, Telegram file ID, MIME hint, byte-size hint, and Telegram-reported duration.
+
+This is an integration seam, not an enabled voice runtime. A host must still apply the existing user/chat access policy and durable deduplication before downloading media, use `createTelegramVoiceMediaClient` for bounded fixed-origin downloads, independently inspect/decode the audio to verify its actual format and duration (Telegram metadata is untrusted), then pass verified bytes to `VoiceWorkflow`. Only deliver a generated audio reply after the normal Sofia policy/runtime path succeeds. No concrete codec/decoder, STT/TTS provider, audio storage, or live Telegram voice processing is enabled by this callback alone; the host must supply and validate those components before enabling voice.
+
+### Opt-in Telegram voice ingress
+
+The Telegram adapter can pass voice updates from its existing long-polling callback to an optional host-composed handler. `createTelegramMessagingRuntime` accepts a fourth, optional `{ voice: { handle(message, signal) } }` argument; omitting it preserves the current text-only behavior. The callback receives the poller's abort signal so shutdown/cancellation can propagate without creating a second `getUpdates` loop.
+
+Use `createTelegramVoiceMessageHandler` to compose the bounded media client, a trusted `TelegramAudioInspector`, the existing `VoiceWorkflow`, the same Telegram user/chat allowlist policy, a durable `FileChatMessageDeduplicator`-compatible claim store, and outbound text/audio delivery. The handler checks access and claims the message before downloading media. It deliberately requires an injected decoder/inspector: Telegram duration, MIME and file extension are untrusted hints, not proof of actual audio format or duration. Do not enable voice until a sandboxed decoder is configured and tested with malformed, truncated, oversized and adversarial media fixtures. The host should pass the same allowlists and a durable dedupe store. If the deduplicator supports `release(key)`, the handler releases a claim only when download/inspection fails before Sofia agent execution begins. Once agent execution starts, the claim is retained even if a later stage fails, avoiding accidental duplicate task execution on retry. This is an at-most-once boundary, not guaranteed exactly-once delivery.
+
+
+### Container-isolated Telegram audio inspection
+
+`createSandboxedTelegramAudioInspector` provides a concrete `TelegramAudioInspector` implementation using Sofia's existing `ContainerSandbox`. It refuses process/policy isolation, writes the input to a unique temporary workspace containing only that audio file, and invokes `ffprobe` without a shell, with networking disabled and bounded execution/output. The temporary workspace is removed after inspection. It validates that an audio stream exists, derives duration from decoded container metadata rather than Telegram hints, enforces configured size/duration limits, and maps a deliberately limited set of common audio containers to MIME types.
+
+The configured `SOFIA_SANDBOX_IMAGE` must be digest-pinned and preloaded and must include `ffprobe`; this repository does not bundle or install FFmpeg. Missing decoder binaries fail closed. Container isolation uses the existing Docker resource limits (memory, CPU, PIDs, dropped capabilities, no-new-privileges, read-only root, and no network). This is metadata inspection, not a guarantee against decoder or container-runtime vulnerabilities. Test the exact immutable image with malformed, truncated and adversarial media before enabling the feature. No live Telegram or production deployment is implied.

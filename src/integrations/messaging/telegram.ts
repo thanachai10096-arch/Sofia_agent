@@ -10,6 +10,7 @@ export interface TelegramUpdate {
     chat: { id: number | string; type: string; title?: string; username?: string };
     from?: { id: number | string; username?: string; first_name?: string };
     document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
+    voice?: { file_id: string; mime_type?: string; file_size?: number; duration: number };
   };
 }
 export interface TelegramTransport {
@@ -17,8 +18,25 @@ export interface TelegramTransport {
   sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<{ messageId: string }>;
   stop(): Promise<void>;
 }
-/** Adapter mapping already-authenticated Telegram updates to the shared gateway contract. */
-export function createTelegramAdapter(transport: TelegramTransport): MessagingAdapter {
+export interface TelegramVoiceMessage {
+  updateId: number;
+  messageId: string;
+  userId: string;
+  conversationId: string;
+  fileId: string;
+  mimeType: string;
+  fileSizeBytes?: number;
+  durationMs: number;
+  receivedAt: number;
+}
+
+/** Optional voice callback; host must enforce the same identity policy and dedupe rules as text. */
+export interface TelegramAdapterOptions {
+  onVoiceMessage?: (message: TelegramVoiceMessage, signal: AbortSignal) => Promise<void>;
+}
+
+/** Adapter mapping authenticated Telegram updates to the shared gateway contract. */
+export function createTelegramAdapter(transport: TelegramTransport, options: TelegramAdapterOptions = {}): MessagingAdapter {
   let running = false;
   return {
     platform: "telegram",
@@ -28,9 +46,28 @@ export function createTelegramAdapter(transport: TelegramTransport): MessagingAd
       await transport.start(signal, async (update) => {
         const msg = update.message;
         if (!msg || !Number.isSafeInteger(update.update_id) || !Number.isSafeInteger(msg.message_id) ||
-            !msg.from || !msg.chat || (!msg.text && !msg.document)) return;
+            !msg.from || !msg.chat) return;
         const channelId = String(msg.chat.id);
         const userId = String(msg.from.id);
+        if (msg.voice) {
+          const voice = msg.voice;
+          if (!options.onVoiceMessage || typeof voice.file_id !== "string" || !voice.file_id.trim() ||
+              !Number.isSafeInteger(voice.duration) || voice.duration <= 0 || voice.duration > 600 ||
+              (voice.file_size !== undefined && (!Number.isSafeInteger(voice.file_size) || voice.file_size < 1))) return;
+          await options.onVoiceMessage({
+            updateId: update.update_id,
+            messageId: String(msg.message_id),
+            userId,
+            conversationId: channelId,
+            fileId: voice.file_id,
+            mimeType: voice.mime_type ?? "audio/ogg",
+            ...(voice.file_size === undefined ? {} : { fileSizeBytes: voice.file_size }),
+            durationMs: voice.duration * 1_000,
+            receivedAt: msg.date * 1_000,
+          }, signal);
+          return;
+        }
+        if (!msg.text && !msg.document) return;
         const attachments = msg.document ? [{
           id: msg.document.file_id,
           ...(msg.document.file_name ? { filename: msg.document.file_name } : {}),
