@@ -103,7 +103,12 @@ export class FileMessagingOutbox {
     return undefined;
   }
 
-  /** A stale worker cannot acknowledge a record after another worker reclaimed its lease. */
+  /**
+   * Best-effort lease-token check before acknowledgement. The token read and the
+   * following filesystem mutations are not atomic, so this is not strict fencing:
+   * a lease may expire and be reclaimed between the check and unlink/rm.
+   * Do not use this filesystem store for high-contention multi-host delivery.
+   */
   async markSent(id: string, token: string): Promise<boolean> {
     await this.chain;
     const lock = this.lockDirectory(id);
