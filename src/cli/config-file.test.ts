@@ -222,3 +222,16 @@ test("safe config loading rejects non-object and invalid-typed settings", async 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("setup refuses non-object legacy config without replacing it", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-nonobject-config-test-"));
+  const file = path.join(directory, "config.json");
+  const original = JSON.stringify(["unexpected", "legacy", "shape"]);
+  try {
+    await writeFile(file, original);
+    await assert.rejects(assertNoLegacyPlaintextApiKey(file, "SOFIA_MODEL_API_KEY"), /must contain a JSON object/);
+    assert.equal(await readFile(file, "utf8"), original);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
