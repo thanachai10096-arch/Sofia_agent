@@ -312,6 +312,10 @@ export class CronScheduler {
         execution.status = "cancelled";
         execution.finishedAt = schedule.updatedAt;
         execution.error ??= "Scheduled execution cancelled by owner.";
+        // Cancellation is a terminal transition: revoke any recovery monitor's
+        // durable lease immediately rather than retaining stale ownership metadata.
+        execution.recoveryLeaseOwnerToken = undefined;
+        execution.recoveryLeaseExpiresAt = undefined;
         if (execution.jobId) jobIds.add(execution.jobId);
       }
       await this.recordAudit(state, { at: schedule.updatedAt, actor, action: "schedule.cancelled", scheduleId: id });
