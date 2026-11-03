@@ -413,7 +413,12 @@ test("cancelled recovered execution does not overwrite schedule completion metad
   });
   const result = await scheduler.recover();
   assert.equal(result.monitoring, 1);
+  assert.ok(state.history[0].recoveryLeaseOwnerToken, "the recovered monitor should own a durable lease");
   await scheduler.cancel(schedule.id, "alice");
+  assert.equal(state.history[0].recoveryLeaseOwnerToken, undefined,
+    "cancellation must revoke the recovered monitor's lease token");
+  assert.equal(state.history[0].recoveryLeaseExpiresAt, undefined,
+    "cancellation must clear the recovered monitor's lease deadline");
   now = new Date("2026-10-17T00:01:00.000Z");
   for (let i = 0; i < 50 && !state.audit.some((event: any) => event.action === "schedule.recovery.finished"); i++) {
     await new Promise(resolve => setTimeout(resolve, 10));
