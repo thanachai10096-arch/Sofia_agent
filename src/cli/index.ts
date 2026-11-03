@@ -8,7 +8,7 @@ import { SofiaAgent } from "../agent/core.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createCliSessionId } from "./session-id.js";
-import { writeSafeLocalConfig } from "./config-file.js";
+import { assertNoLegacyPlaintextApiKey, writeSafeLocalConfig } from "./config-file.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -113,24 +113,10 @@ async function setup() {
       perplexity: "PERPLEXITY_API_KEY",
     };
     const requiredKeyEnv = keyEnv[provider] ?? "SOFIA_MODEL_API_KEY";
+    // Never replace a legacy config until its only stored credential has been moved safely.
+    await assertNoLegacyPlaintextApiKey(configPath, requiredKeyEnv);
     if (provider !== "ollama" && !process.env[requiredKeyEnv]?.trim()) {
-      let legacyKeyFound = false;
-      try {
-        const configStat = await lstat(configPath);
-        if (!configStat.isFile() || configStat.isSymbolicLink()) {
-          throw new Error("Sofia config must be a regular file, not a symbolic link.");
-        }
-        const existing: unknown = JSON.parse(await readFile(configPath, "utf8"));
-        legacyKeyFound = !!existing && typeof existing === "object" && !Array.isArray(existing) &&
-          typeof (existing as { apiKey?: unknown }).apiKey === "string" &&
-          !!(existing as { apiKey: string }).apiKey;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
-      }
-      if (legacyKeyFound) {
-        throw new Error(`An older plaintext API key exists in ~/.sofia/config.json. To avoid losing it, first move it to the ${requiredKeyEnv} environment variable, then rerun setup. The existing config was left unchanged.`);
-      }
-      console.log(`\nSet ${requiredKeyEnv} in your shell environment before starting Sofia. The setup wizard never asks for or writes API keys.`);
+      console.log(`\\nSet ${requiredKeyEnv} in your shell environment before starting Sofia. The setup wizard never asks for or writes API keys.`);
     }
     await writeSafeLocalConfig(configPath, { provider, baseUrl, model });
     console.log("Saved provider, endpoint, and model configuration to ~/.sofia/config.json (owner-only permissions).");
