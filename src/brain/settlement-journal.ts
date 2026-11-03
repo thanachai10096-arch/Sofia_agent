@@ -536,8 +536,10 @@ export class FileSettlementJournal {
       }
       if (event.type === "started" &&
           typeof event.attemptId === "string" && event.attemptId.length > 0 &&
-          Number.isSafeInteger(event.maxInputTokens) && (event.maxInputTokens as number) >= 0 &&
-          Number.isSafeInteger(event.maxOutputTokens) && (event.maxOutputTokens as number) >= 0) {
+          isValidJournalUsage({
+            inputTokens: event.maxInputTokens,
+            outputTokens: event.maxOutputTokens,
+          })) {
         if (seenAttemptIds.has(event.attemptId)) {
           corrupt = true;
           break;
