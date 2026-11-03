@@ -26,6 +26,10 @@ const names = [
   "ANTHROPIC_VISION_MODEL",
   "SOFIA_MODEL_PROTOCOL",
   "SOFIA_MODEL_PROVIDER",
+  "SOFIA_FAST_PROVIDER",
+  "SOFIA_CODING_PROVIDER",
+  "SOFIA_REASONING_PROVIDER",
+  "SOFIA_VISION_PROVIDER",
   "SOFIA_BASE_URL",
   "SOFIA_API_KEY",
   "SOFIA_MODEL_API_KEY",
@@ -53,6 +57,47 @@ afterEach(() => {
   for (const [name, value] of original) {
     if (value !== undefined) process.env[name] = value;
   }
+});
+
+test("model routes can use different configured providers in the same Sofia runtime", () => {
+  clear();
+  process.env.OPENROUTER_API_KEY = "openrouter-provider-key";
+  process.env.GEMINI_API_KEY = "gemini-provider-key";
+  process.env.ANTHROPIC_API_KEY = "anthropic-provider-key";
+  process.env.ANTHROPIC_MODEL = "claude-default";
+  process.env.SOFIA_BASE_URL = "https://local-model.example.test/v1";
+  process.env.SOFIA_MODEL_API_KEY = "local-provider-key";
+  process.env.SOFIA_MODEL = "local-default";
+  process.env.SOFIA_FAST_PROVIDER = "openrouter";
+  process.env.SOFIA_CODING_PROVIDER = "anthropic";
+  process.env.SOFIA_REASONING_PROVIDER = "gemini";
+  process.env.SOFIA_VISION_PROVIDER = "custom";
+  process.env.OPENROUTER_FAST_MODEL = "openrouter/fast";
+  process.env.ANTHROPIC_CODING_MODEL = "claude-code";
+  process.env.GEMINI_REASONING_MODEL = "gemini-reason";
+  process.env.SOFIA_VISION_MODEL = "local-vision";
+
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(config.providers.fast?.apiKey, "openrouter-provider-key");
+  assert.equal(config.providers.fast?.model, "openrouter/fast");
+  assert.equal(config.providers.coding?.baseUrl, "https://api.anthropic.com/v1");
+  assert.equal(config.providers.coding?.protocol, "anthropic-messages");
+  assert.equal(config.providers.coding?.model, "claude-code");
+  assert.equal(config.providers.reasoning?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
+  assert.equal(config.providers.reasoning?.apiKey, "gemini-provider-key");
+  assert.equal(config.providers.reasoning?.model, "gemini-reason");
+  assert.equal(config.providers.vision?.baseUrl, "https://local-model.example.test/v1");
+  assert.equal(config.providers.vision?.apiKey, "local-provider-key");
+  assert.equal(config.providers.vision?.model, "local-vision");
+});
+
+test("partial route provider overrides still require an unambiguous global fallback", () => {
+  clear();
+  process.env.OPENROUTER_API_KEY = "openrouter-provider-key";
+  process.env.GEMINI_API_KEY = "gemini-provider-key";
+  process.env.SOFIA_FAST_PROVIDER = "openrouter";
+  assert.throws(loadModelConfigFromEnv, /set SOFIA_MODEL_PROVIDER to choose explicitly/);
 });
 
 test("Gemini key selects direct Google Gemini API when no other provider is configured", () => {
