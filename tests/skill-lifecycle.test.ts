@@ -37,7 +37,7 @@ test("skill lifecycle rejects missing, blank, duplicate, or oversized provenance
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("separate lifecycle instances reload under the writer lock and preserve each other's candidates", () => {
+test("separate lifecycle instances reload under the writer lock and preserve each other's candidates", async () => {
   const root = dir();
   try {
     const file = path.join(root, "shared", "lifecycle.json");
