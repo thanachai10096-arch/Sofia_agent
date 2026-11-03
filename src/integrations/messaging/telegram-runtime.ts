@@ -182,16 +182,18 @@ export function createTelegramMessagingRuntime(
     const userApiKeys = rawUserApiKeys
       ? parseTelegramUserApiKeys(rawUserApiKeys, allowedUsers)
       : allowedUsers.size === 1 && apiKey
-        ? new Map([[...allowedUsers][0]!, apiKey])
+        ? new Map<string, string>(Array.from(allowedUsers, (userId) => [userId, apiKey] as const))
         : undefined;
     if (!userApiKeys) {
       onWarning("Telegram integration disabled: configure TELEGRAM_USER_API_KEYS with a separate API key for every allowed user, or allow exactly one user with SOFIA_API_KEY.");
       return undefined;
     }
-    const clientsByUser = new Map([...userApiKeys].map(([userId, key]) => [
-      userId,
-      new SofiaClient({ apiKey: key, baseUrl }),
-    ]));
+    const clientsByUser = new Map<string, SofiaClient>(
+      [...userApiKeys].map(([userId, key]) => [
+        userId,
+        new SofiaClient({ apiKey: key, baseUrl }),
+      ] as const),
+    );
     const defaultClient = clientsByUser.values().next().value as SofiaClient | undefined;
     if (!defaultClient) {
       onWarning("Telegram integration disabled: no per-user Sofia API clients are configured.");
