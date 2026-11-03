@@ -50,11 +50,16 @@ export class VerifiedLearningLoop {
       const evidence = await this.host.verification.getEvidence(scope, receipt.evidenceIds);
       // Persisted verification adapters are an untrusted boundary. A malformed
       // collection or row must reject the receipt instead of throwing or learning.
-      if (!Array.isArray(evidence) || receipt.evidenceIds.some(id =>
-        !evidence.some(item => validEvidence(item, receipt) && item.id === id))) {
+      // The adapter must return a one-to-one set for the requested receipt.
+      // Duplicate rows or unrelated extras are ambiguous provenance and fail closed.
+      if (!Array.isArray(evidence) || evidence.length !== receipt.evidenceIds.length) {
         return { recorded: false };
       }
-      const trustedIds = new Set(evidence.filter(item => validEvidence(item, receipt)).map(item => item.id));
+      const trustedIds = new Set<string>();
+      for (const item of evidence) {
+        if (!validEvidence(item, receipt) || trustedIds.has(item.id)) return { recorded: false };
+        trustedIds.add(item.id);
+      }
       if (receipt.evidenceIds.some(id => !trustedIds.has(id))) return { recorded: false };
 
       const safeSummary = normalizeText(this.host.redact(summary), this.options.maxExperienceSummaryChars);
