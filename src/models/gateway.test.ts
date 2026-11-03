@@ -83,6 +83,7 @@ test("Anthropic Messages adapter sends native tool schema and normalizes tool-us
       input: { path: "README.md" },
     }]);
     assert.equal(result.text, "I will read the file.");
+    assert.equal(result.finishReason, "tool_use");
     assert.deepEqual(result.usage, { inputTokens: 42, outputTokens: 12 });
   } finally {
     globalThis.fetch = originalFetch;
@@ -225,6 +226,32 @@ test("OpenAI-compatible structured Brain requests use JSON mode without enabling
     assert.deepEqual(requestedBody.response_format, { type: "json_object" });
     assert.equal("tools" in requestedBody, false);
     assert.equal(result.text, '{"ok":true}');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("OpenAI-compatible length finish reason is preserved for Brain truncation checks", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: '{"partial":' }, finish_reason: "length" }],
+    usage: { prompt_tokens: 12, completion_tokens: 20, total_tokens: 32 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    const result = await gateway.generate(
+      { task: "plan", kind: "analysis", step: 1 },
+      { ...route, healthy: true },
+    );
+    assert.equal(result.finishReason, "length");
   } finally {
     globalThis.fetch = originalFetch;
   }
