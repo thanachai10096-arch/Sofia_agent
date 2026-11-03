@@ -152,19 +152,24 @@ export async function recoverInterruptedRestoreTransaction(
       throw new Error("Restore transaction has a failed rollback and requires manual recovery.");
     }
 
+    const rollbackBytes = new Map<string, Uint8Array>();
     for (const target of record.targets) {
       const adapter = byName.get(target.name);
       if (!adapter || adapter.paths.length !== target.paths.length ||
           adapter.paths.some((item) => !target.paths.includes(item))) {
         throw new Error(`Restore recovery adapter does not match journal target: ${target.name}`);
       }
-      if (target.phase !== "pending" && target.phase !== "rolled_back" &&
-          target.phase !== "rollback_failed" &&
-          (!target.rollbackSnapshotRef || !target.rollbackSnapshotSha256)) {
-        throw new Error(`Restore target ${target.name} has no durable rollback snapshot.`);
-      }
       if (target.phase === "rollback_failed") {
         throw new Error(`Restore target ${target.name} previously failed rollback and requires manual recovery.`);
+      }
+      if (target.phase !== "pending" && target.phase !== "rolled_back") {
+        if (!target.rollbackSnapshotRef || !target.rollbackSnapshotSha256) {
+          throw new Error(`Restore target ${target.name} has no durable rollback snapshot.`);
+        }
+        // Verify and load every required snapshot before mutating any target.
+        // A corrupt later snapshot must not leave earlier targets half-restored.
+        const bytes = await snapshotStore.read(target.rollbackSnapshotRef, target.rollbackSnapshotSha256);
+        rollbackBytes.set(target.name, bytes);
       }
     }
 
@@ -200,7 +205,8 @@ export async function recoverInterruptedRestoreTransaction(
       if (target.phase === "pending" || target.phase === "rolled_back") continue;
       const adapter = byName.get(target.name)!;
       try {
-        const bytes = await snapshotStore.read(target.rollbackSnapshotRef!, target.rollbackSnapshotSha256!);
+        const bytes = rollbackBytes.get(target.name);
+        if (!bytes) throw new Error(`Verified rollback snapshot is missing for target: ${target.name}`);
         await adapter.rollbackFromSnapshotBytes(bytes);
         const updated = record.targets.map((item) =>
           item.name === target.name ? { ...item, phase: "rolled_back" as const } : item);
