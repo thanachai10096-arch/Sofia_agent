@@ -31,7 +31,7 @@ Set these on a dedicated test service:
 
 Enable the privileged **Message Content Intent** in the Discord Developer Portal. The runtime must provide global WebSocket support. Gateway mode is independent of the signed HTTP interactions endpoint; configure `DISCORD_PUBLIC_KEY` as well only if slash commands are also wanted.
 
-Direct messages accept natural chat without `/run`. In guild channels, Sofia responds only when explicitly mentioned or when the user replies to Sofia. Unaddressed group chatter is ignored. Both allowlists are required. Message deduplication in the entrypoint is process-local; use a shared atomic deduplicator before running multiple replicas.
+Direct messages accept natural chat without `/run`. In guild channels, Sofia responds only when explicitly mentioned or when the user replies to Sofia. Unaddressed group chatter is ignored. Both allowlists are required. Gateway chat also supports `/status job_id:<id>`, `/cancel job_id:<id>`, and `/resume job_id:<id>`; each command verifies the job's immutable `discord:<user-id>` owner before reading or changing it. Message deduplication in the entrypoint is process-local; use a shared atomic deduplicator before running multiple replicas. Per-user/channel inbound work is serialized with a bounded queue; queue overflow is reported through safe server diagnostics.
 
 Do not enable on Production until a real Discord test bot confirms DM, mention/reply, allowlist denials, reconnect, and completion delivery.
 
