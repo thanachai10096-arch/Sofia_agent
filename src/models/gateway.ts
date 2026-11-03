@@ -324,7 +324,9 @@ export class SofiaModelGateway implements ModelProvider {
     }
 
     const protocol = config.protocol ?? "openai-compatible";
-    const openAiNames = providerToolNames(tools);
+    const openAiNames = protocol === "openai-compatible"
+      ? providerToolNames(tools)
+      : { toProvider: new Map<string, string>(), toSofia: new Map<string, string>() };
     let endpoint: string;
     let requestHeaders: Record<string, string>;
     let body: Record<string, unknown>;
