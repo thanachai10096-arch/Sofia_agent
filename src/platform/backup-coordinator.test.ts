@@ -8,6 +8,7 @@ import { FileProjectMemoryStore, memoryEntryFromConvention } from "../brain/proj
 import { FileUserMemoryStore, createUserMemoryEntry } from "../brain/user-memory.js";
 import { SqliteSessionStore } from "../session/sqlite-store.js";
 import { FileRestoreJournalStore, inspectRestoreJournalRecovery } from "./restore-journal.js";
+import { FileRestoreSnapshotStore } from "./restore-snapshot-store.js";
 
 const createdAt = "2026-10-29T04:00:00.000Z";
 
@@ -733,4 +734,70 @@ test("backup bundle owns snapshot bytes after source buffers are mutated", async
   assert.ok(bundledBytes);
   assert.equal(Buffer.from(bundledBytes).toString("utf8"), "original snapshot");
   assert.equal(verifyBackupBundle(bundle).valid, true);
+});
+
+
+test("restore transaction persists rollback snapshots before creating its durable intent", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-restore-durable-transaction-"));
+  const transactionId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+  try {
+    const bundle = await createBackupBundle([
+      { name: "state", async snapshot() {
+        return [{ path: "state.json", content: Buffer.from("restored") }];
+      } },
+    ], createdAt);
+    const journal = new FileRestoreJournalStore(path.join(root, "journal"));
+    const snapshotStore = new FileRestoreSnapshotStore(path.join(root, "snapshots"));
+    const events: string[] = [];
+    await executeBackupRestoreTransaction(bundle, [{
+      name: "state",
+      paths: ["state.json"],
+      async preflight() { events.push("preflight"); },
+      async captureRollback() { events.push("capture"); return Buffer.from("previous-state"); },
+      serializeRollbackSnapshot(snapshot) {
+        assert.ok(snapshot instanceof Uint8Array);
+        events.push("serialize");
+        return new Uint8Array(snapshot);
+      },
+      async rollbackFromSnapshotBytes(bytes) { events.push(`durable-rollback:${Buffer.from(bytes).toString()}`); },
+      async apply() { events.push("apply"); },
+      async rollback() { events.push("rollback"); },
+    }], { journal, snapshotStore, transactionId });
+
+    const record = await journal.read(transactionId);
+    assert.equal(record?.phase, "committed");
+    const target = record?.targets[0];
+    assert.ok(target?.rollbackSnapshotRef);
+    assert.ok(target.rollbackSnapshotSha256);
+    const durable = await snapshotStore.read(target.rollbackSnapshotRef, target.rollbackSnapshotSha256);
+    assert.equal(Buffer.from(durable).toString(), "previous-state");
+    assert.deepEqual(events, ["preflight", "capture", "serialize", "apply"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("durable restore mode fails closed when an adapter has no snapshot codec", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-restore-durable-codec-"));
+  try {
+    const bundle = await createBackupBundle([
+      { name: "state", async snapshot() {
+        return [{ path: "state.json", content: Buffer.from("restored") }];
+      } },
+    ], createdAt);
+    await assert.rejects(executeBackupRestoreTransaction(bundle, [{
+      name: "state",
+      paths: ["state.json"],
+      async preflight() {},
+      async captureRollback() { return Buffer.from("previous"); },
+      async apply() {},
+      async rollback() {},
+    }], {
+      journal: new FileRestoreJournalStore(path.join(root, "journal")),
+      snapshotStore: new FileRestoreSnapshotStore(path.join(root, "snapshots")),
+      transactionId: "ffffffff-ffff-ffff-ffff-ffffffffffff",
+    }), /does not support durable rollback snapshots/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
