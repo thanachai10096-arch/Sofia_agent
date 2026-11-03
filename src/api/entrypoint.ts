@@ -216,7 +216,8 @@ if (discordConfigured) {
 // Register optional Telegram per-user credentials with the API auth layer as well
 // as the messaging runtime. Invalid optional Telegram mapping is ignored here;
 // createTelegramMessagingRuntime emits the sanitized configuration warning.
-const apiKeys: Record<string, string[]> = { [apiKey]: scopes };
+const apiKeys: Record<string, string[]> = Object.create(null) as Record<string, string[]>;
+apiKeys[apiKey] = scopes;
 const telegramUserIds = process.env.TELEGRAM_ALLOWED_USER_IDS?.trim();
 const telegramUserApiKeys = process.env.TELEGRAM_USER_API_KEYS?.trim();
 if (telegramUserIds && telegramUserApiKeys) {
