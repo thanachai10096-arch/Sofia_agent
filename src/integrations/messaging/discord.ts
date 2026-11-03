@@ -14,6 +14,7 @@ export interface VerifiedDiscordMessage {
 }
 export interface DiscordTransport {
   start(signal: AbortSignal, onMessage: (message: VerifiedDiscordMessage) => Promise<void>): Promise<void>;
+  /** When nonce is provided, transports must send it as Discord nonce with enforce_nonce=true. */
   sendMessage(channelId: string, text: string, replyToMessageId?: string, interactionId?: string, nonce?: string): Promise<{ messageId: string }>;
   stop(): Promise<void>;
 }
