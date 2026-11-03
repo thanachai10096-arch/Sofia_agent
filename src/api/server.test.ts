@@ -118,14 +118,14 @@ test("Telegram-style API keys isolate Memory and do not inherit privileged core 
   assert.ok(address && typeof address !== "string");
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const entry = (id: string, content: string) => ({
-    id, kind: "preference", content, source: "explicit-user-request",
+    id, kind: "preference" as const, content, source: "explicit-user-request" as const,
     confidence: 1, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), uses: 0,
   });
-  const request = (key: string, path: string, init: RequestInit = {}) =>
-    fetch(baseUrl + path, {
-      ...init,
-      headers: { authorization: `Bearer ${key}`, ...(init.headers ?? {}) },
-    });
+  const request = (key: string, path: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set("authorization", `Bearer ${key}`);
+    return fetch(baseUrl + path, { ...init, headers });
+  };
   try {
     const saveOne = await request("telegram-user-one", "/v1/memory", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(entry("one", "private memory one")),
