@@ -101,6 +101,36 @@ test("restore journal rejects unsafe paths, malformed digests, and unknown field
   }), /unsafe target path/i);
 });
 
+test("restore journal rejects portable path collisions and file-directory prefix conflicts", () => {
+  const initial = rootRecord();
+  const first = initial.targets[0]!;
+  const second = initial.targets[1]!;
+
+  assert.throws(() => validateRestoreJournalRecord({
+    ...initial,
+    targets: [
+      { ...first, paths: ["state/Session.sqlite"] },
+      { ...second, paths: ["state/session.sqlite"] },
+    ],
+  }), /portable filesystems/i);
+
+  assert.throws(() => validateRestoreJournalRecord({
+    ...initial,
+    targets: [
+      { ...first, paths: ["state"] },
+      { ...second, paths: ["state/session.sqlite"] },
+    ],
+  }), /files and directories/i);
+
+  assert.throws(() => validateRestoreJournalRecord({
+    ...initial,
+    targets: [
+      { ...first, paths: ["café/state.json"] },
+      { ...second, paths: ["cafe\\u0301/state.json"] },
+    ],
+  }), /portable filesystems/i);
+});
+
 test("restore journal files and directories use private permissions on POSIX", async (t) => {
   if (process.platform === "win32") return t.skip("POSIX permission bits are not available on Windows");
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-restore-journal-mode-"));
