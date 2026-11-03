@@ -27,6 +27,7 @@ export function createVoicePlaybackController(adapter: VoicePlaybackAdapter): Vo
   let generation = 0;
   let active: AbortController | undefined;
   let stopBarrier: Promise<void> = Promise.resolve();
+  const isClosed = (): boolean => state === "closed";
 
   const stopCurrent = async (): Promise<void> => {
     const current = active;
@@ -37,7 +38,7 @@ export function createVoicePlaybackController(adapter: VoicePlaybackAdapter): Vo
     try {
       await stopping;
     } finally {
-      if (state !== "closed" && !active) state = "idle";
+      if (!isClosed() && !active) state = "idle";
     }
   };
 
@@ -50,18 +51,18 @@ export function createVoicePlaybackController(adapter: VoicePlaybackAdapter): Vo
       }
       const request = ++generation;
       await stopCurrent();
-      if (state === "closed" || request !== generation) return false;
+      if (isClosed() || request !== generation) return false;
 
       const controller = new AbortController();
       active = controller;
       state = "playing";
       try {
         await adapter.play({ bytes: audio.bytes.slice(), mimeType: audio.mimeType.toLowerCase() }, controller.signal);
-        return !controller.signal.aborted && state !== "closed" && request === generation;
+        return !controller.signal.aborted && !isClosed() && request === generation;
       } finally {
         if (active === controller) {
           active = undefined;
-          if (state !== "closed") state = "idle";
+          if (!isClosed()) state = "idle";
         }
       }
     },
