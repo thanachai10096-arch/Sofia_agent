@@ -1,4 +1,5 @@
-import { actionHash } from "../security/guard.js";
+import { createHash } from "node:crypto";
+import { actionHash, canonicalJson } from "../security/guard.js";
 import type { ApprovalHandler } from "../agent/approval.js";
 import type { LearnedSkillCandidate } from "./learning.js";
 import { runSkillLifecycleWorkflow } from "./skill-lifecycle-workflow.js";
@@ -41,9 +42,16 @@ export function createManagedSkillLearningHandler(
         approvePromotion: async (record) => {
           if (!approval) return false;
           const toolName = "skill.lifecycle.promote";
+          const packageHash = createHash("sha256").update(canonicalJson(record.package)).digest("hex");
+          const procedureHash = createHash("sha256")
+            .update(canonicalJson(record.package.skill.procedure))
+            .digest("hex");
           const input: Record<string, unknown> = {
             candidateId: record.id,
             skillId: record.skillId,
+            skillVersion: record.package.version,
+            packageHash,
+            procedureHash,
             skillName: record.package.skill.name,
             category: candidate.category,
             evidenceIds: [...record.provenance.evidenceIds],
