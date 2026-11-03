@@ -303,26 +303,27 @@ export interface MessagingOutboxRetryWorkerOptions {
 export function startMessagingOutboxRetryWorker(
   outbox: FileMessagingOutbox,
   options: MessagingOutboxRetryWorkerOptions,
-): { stop(): void } {
+): { stop(): Promise<void> } {
   const intervalMs = options.intervalMs ?? 30_000;
   if (!Number.isSafeInteger(intervalMs) || intervalMs < 1_000 || intervalMs > 60 * 60_000) {
     throw new Error("Invalid messaging outbox retry worker interval.");
   }
   let stopped = false;
-  let running = false;
+  let inFlight: Promise<unknown> | undefined;
   const timer = setInterval(() => {
-    if (stopped || running) return;
-    running = true;
-    void flushMessagingOutbox(outbox, options.send, options.onFailure, options.platform)
+    if (stopped || inFlight) return;
+    inFlight = flushMessagingOutbox(outbox, options.send, options.onFailure, options.platform)
       .catch(() => options.onFailure?.(options.platform))
-      .finally(() => { running = false; });
+      .finally(() => { inFlight = undefined; });
   }, intervalMs);
   timer.unref?.();
   return {
-    stop() {
-      if (stopped) return;
-      stopped = true;
-      clearInterval(timer);
+    async stop() {
+      if (!stopped) {
+        stopped = true;
+        clearInterval(timer);
+      }
+      await inFlight;
     },
   };
 }
