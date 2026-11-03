@@ -20,8 +20,10 @@ import { registerVerifiedSecurityCoordinationSkills } from "./security-coordinat
 import { registerVerifiedRemainingDomainSkills } from "./remaining-domain-handlers.js";
 
 export interface AdvancedSkillRegistryOptions {
-  /** Enables the verified project-memory retrieval skill when supplied. */
+  /** Optional shared project-memory backend for the retrieval skill. */
   readonly projectMemoryStore?: ProjectMemoryStore;
+  /** Trusted project root/scope resolved by the host; never pass a client-supplied project name. */
+  readonly projectMemoryProject?: string;
   /** Must consult a trusted, action-bound Sofia approval source. Defaults to deny. */
   readonly verifyApproval?: AdvancedSkillApprovalVerifier;
   /** Optional global kill switch and abort binding shared with Sofia security. */
@@ -44,7 +46,7 @@ export function createAdvancedSkillRegistry(
   registerVerifiedCoreSkills(registry);
   registerVerifiedRuntimeRecoverySkills(registry);
   registerVerifiedSecuritySkills(registry);
-  registerVerifiedMemorySkills(registry, options.projectMemoryStore);
+  registerVerifiedMemorySkills(registry, options.projectMemoryStore, options.projectMemoryProject);
   registerVerifiedQualitySkills(registry);
   registerVerifiedResearchSkills(registry);
   registerVerifiedWorkflowSkills(registry);
