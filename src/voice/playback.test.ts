@@ -69,3 +69,33 @@ test("close stops output and rejects later playback", async () => {
   assert.equal(controller.snapshot().state, "closed");
   await assert.rejects(controller.play(audio), /closed/);
 });
+
+test("an adapter rejection caused by interruption resolves as superseded", async () => {
+  let start!: () => void;
+  const started = new Promise<void>((resolve) => { start = resolve; });
+  const controller = createVoicePlaybackController({
+    async play(_audio, signal) {
+      start();
+      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+      throw new Error("AbortError");
+    },
+    stop() {},
+  });
+  const playing = controller.play(audio);
+  await started;
+  await controller.interrupt();
+  assert.equal(await playing, false);
+  assert.equal(controller.snapshot().state, "idle");
+  await controller.close();
+});
+
+test("non-cancellation adapter failures remain visible to the caller", async () => {
+  const failure = new Error("device unavailable");
+  const controller = createVoicePlaybackController({
+    async play() { throw failure; },
+    stop() {},
+  });
+  await assert.rejects(controller.play(audio), (error) => error === failure);
+  assert.equal(controller.snapshot().state, "idle");
+  await controller.close();
+});
