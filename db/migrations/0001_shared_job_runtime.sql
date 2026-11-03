@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS sofia_agent_jobs (
   lease_owner_token uuid,
   lease_expires_at timestamptz,
   heartbeat_at timestamptz,
+  resume_reservation_token uuid,
+  resume_reservation_expires_at timestamptz,
   snapshot jsonb,
   result jsonb,
   error text,
