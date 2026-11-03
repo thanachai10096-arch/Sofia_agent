@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchDiscordUserApiKeys, parseDiscordUserApiKeys } from "./discord-user-api-keys.js";
+import { matchDiscordUserApiKeys, parseDiscordUserApiKeys, resolveDiscordUserApiKey } from "./discord-user-api-keys.js";
 
 test("Discord API key mapping parses distinct keys for numeric user IDs", () => {
   const mapping = parseDiscordUserApiKeys(JSON.stringify({
@@ -34,4 +34,16 @@ test("Discord API key mapping must match the complete allowlist exactly", () => 
   assert.equal(matchDiscordUserApiKeys(mapping, ["123"]), false);
   assert.equal(matchDiscordUserApiKeys(mapping, ["123", "456", "789"]), false);
   assert.equal(matchDiscordUserApiKeys(mapping, []), false);
+});
+
+test("Discord sender resolution fails closed for missing, mismatched, reused, or reserved keys", () => {
+  const mapping = JSON.stringify({
+    "123": "discord-user-one-secret-key",
+    "456": "discord-user-two-secret-key",
+  });
+  assert.equal(resolveDiscordUserApiKey(mapping, ["123", "456"], "123"), "discord-user-one-secret-key");
+  assert.equal(resolveDiscordUserApiKey(mapping, ["123", "456"], "789"), undefined);
+  assert.equal(resolveDiscordUserApiKey(undefined, ["123", "456"], "123"), undefined);
+  assert.equal(resolveDiscordUserApiKey(mapping, ["123"], "123"), undefined);
+  assert.equal(resolveDiscordUserApiKey(mapping, ["123", "456"], "123", ["discord-user-one-secret-key"]), undefined);
 });
