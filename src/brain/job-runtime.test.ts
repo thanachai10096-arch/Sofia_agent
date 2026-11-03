@@ -1139,3 +1139,70 @@ test("DurableJobRuntime scopes job reads and lists to the authenticated owner", 
   assert.deepEqual((await runtime.listForOwner("owner-b")).map((job) => job.id), [ownerB.id]);
   assert.equal(await runtime.cancelForOwner(ownerA.id, "owner-b"), false);
 });
+
+
+test("DurableJobRuntime atomically allows only one owner-scoped resume across runtime instances", async () => {
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-atomic-resume-"));
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "atomic-owner-resume-" + randomUUID();
+  let resumeCalls = 0;
+  const snapshot = {
+    version: 1,
+    runId: "resume-run-" + randomUUID(),
+    task: "resume this job",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "resume-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const brain = {
+    run: async ({ resume }: { resume?: unknown }) => {
+      if (resume) {
+        resumeCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return { completed: true, state: "completed", summary: "resumed" };
+      }
+      return { completed: false, state: "failed", summary: "initial attempt failed" };
+    },
+  } as unknown as SofiaBrain;
+  try {
+    const first = new DurableJobRuntime(() => brain, undefined, namespace);
+    const submitted = await first.submit({ task: "resume this job", ownerKeyId: "owner-resume-test" });
+    // Ensure a resumable checkpoint exists before the initial attempt terminates.
+    const stateFile = path.join(root, "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const records = JSON.parse(await readFile(stateFile, "utf8")) as JobRecord[];
+      const current = records.find((record) => record.id === submitted.id);
+      if (current?.status === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const records = JSON.parse(await readFile(stateFile, "utf8")) as JobRecord[];
+    const current = records.find((record) => record.id === submitted.id);
+    assert.ok(current);
+    current.status = "failed";
+    current.snapshot = snapshot;
+    await writeFile(stateFile + ".seed", JSON.stringify(records, null, 2), "utf8");
+    await (await import("node:fs/promises")).rename(stateFile + ".seed", stateFile);
+
+    const second = new DurableJobRuntime(() => brain, undefined, namespace);
+    const outcomes = await Promise.allSettled([
+      first.resumeForOwner(submitted.id, "owner-resume-test"),
+      second.resumeForOwner(submitted.id, "owner-resume-test"),
+    ]);
+    assert.equal(outcomes.filter((item) => item.status === "fulfilled").length, 1);
+    assert.equal(outcomes.filter((item) => item.status === "rejected").length, 1);
+    assert.equal(resumeCalls, 1, "only one runtime may execute the reserved checkpoint");
+  } finally {
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+});
