@@ -344,6 +344,8 @@ test("Brain can resume from a saved run snapshot without repeating completed ste
   assert.equal(report.completed, true, report.summary);
   assert.equal(report.state, "completed", report.summary);
   assert.equal(writes, 1, report.summary);
+  assert.equal(resumed.runId, saved.runId, "resumed execution must preserve the original logical run ID");
+  assert.ok(resumed.getExecutionTrace().every((entry) => entry.runId === saved!.runId));
 });
 
 

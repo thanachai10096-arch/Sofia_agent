@@ -41,6 +41,12 @@ export interface CronExecution {
   attempt: number;
   error?: string;
 }
+interface StoredCronExecution extends CronExecution {
+  /** Opaque owner token for the cross-instance recovery monitor lease. */
+  recoveryLeaseOwnerToken?: string;
+  /** Lease deadline; expired leases may be claimed by another scheduler. */
+  recoveryLeaseExpiresAt?: string;
+}
 export interface CronAuditEvent {
   at: string;
   actor: string;
@@ -48,9 +54,14 @@ export interface CronAuditEvent {
   scheduleId: string;
   detail?: string;
 }
+function hasLiveRecoveryLease(execution: StoredCronExecution, nowMs: number): boolean {
+  const expiresAt = execution.recoveryLeaseExpiresAt ? Date.parse(execution.recoveryLeaseExpiresAt) : 0;
+  return !!execution.recoveryLeaseOwnerToken && Number.isFinite(expiresAt) && expiresAt > nowMs;
+}
+
 interface SchedulerState {
   schedules: CronSchedule[];
-  history: CronExecution[];
+  history: StoredCronExecution[];
   audit: CronAuditEvent[];
 }
 export interface CronStore {
@@ -62,6 +73,7 @@ export interface CronSchedulerOptions {
   authorize?: (actor: string, action: "create" | "update" | "cancel" | "run", schedule?: CronSchedule) => Promise<boolean> | boolean;
   maxConcurrent?: number;
   maxSchedulesPerOwner?: number;
+  recoveryLeaseMs?: number;
   audit?: (event: CronAuditEvent) => void | Promise<void>;
 }
 
@@ -203,6 +215,7 @@ export class CronScheduler {
   private readonly authorize: NonNullable<CronSchedulerOptions["authorize"]>;
   private readonly maxConcurrent: number;
   private readonly maxSchedulesPerOwner: number;
+  private readonly recoveryLeaseMs: number;
   private readonly auditCallback?: CronSchedulerOptions["audit"];
   private ticking = false;
   private readonly active = new Map<string, AbortController>();
@@ -213,6 +226,10 @@ export class CronScheduler {
     this.authorize = options.authorize ?? ((actor, _action, schedule) => !!actor && (!schedule || actor === schedule.ownerKeyId));
     this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
     this.maxSchedulesPerOwner = Math.max(1, Math.min(10_000, Math.floor(options.maxSchedulesPerOwner ?? 100)));
+    const requestedRecoveryLeaseMs = options.recoveryLeaseMs ?? 30_000;
+    this.recoveryLeaseMs = Number.isFinite(requestedRecoveryLeaseMs)
+      ? Math.max(3_000, Math.min(300_000, Math.floor(requestedRecoveryLeaseMs)))
+      : 30_000;
     this.auditCallback = options.audit;
   }
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
@@ -292,13 +309,27 @@ export class CronScheduler {
       if (!await this.authorize(actor, "cancel", schedule)) throw new Error("Not authorized to cancel cron schedule");
       schedule.status = "disabled";
       schedule.updatedAt = this.now().toISOString();
+      // Persist cancellation against every in-flight occurrence. This closes the
+      // claim -> submit race where cancel() can run before executeClaim stores jobId.
+      const jobIds = new Set<string>();
+      for (const execution of state.history) {
+        if (execution.scheduleId !== id || (execution.status !== "claimed" && execution.status !== "running")) continue;
+        execution.status = "cancelled";
+        execution.finishedAt = schedule.updatedAt;
+        execution.error ??= "Scheduled execution cancelled by owner.";
+        // Cancellation is a terminal transition: revoke any recovery monitor's
+        // durable lease immediately rather than retaining stale ownership metadata.
+        execution.recoveryLeaseOwnerToken = undefined;
+        execution.recoveryLeaseExpiresAt = undefined;
+        if (execution.jobId) jobIds.add(execution.jobId);
+      }
       await this.recordAudit(state, { at: schedule.updatedAt, actor, action: "schedule.cancelled", scheduleId: id });
-      return { ...schedule, jobId: schedule.lastJobId };
+      return { ...schedule, jobIds: [...jobIds] };
     });
     if (!target) return false;
     const controller = this.active.get(id);
     controller?.abort(new Error("Scheduled execution cancelled"));
-    if (target.jobId) await this.runtime.cancel(target.jobId);
+    await Promise.all((target.jobIds as string[]).map(jobId => this.runtime.cancel(jobId).catch(() => false)));
     return true;
   }
   async history(id: string, actor: string): Promise<CronExecution[]> {
@@ -306,7 +337,12 @@ export class CronScheduler {
       const schedule = state.schedules.find(s => s.id === id);
       if (!schedule) throw new Error("Unknown cron schedule");
       if (!await this.authorize(actor, "update", schedule)) throw new Error("Not authorized to view cron history");
-      return state.history.filter(h => h.scheduleId === id).map(h => ({ ...h }));
+      return state.history.filter(h => h.scheduleId === id).map(h => {
+        const execution = { ...h };
+        delete execution.recoveryLeaseOwnerToken;
+        delete execution.recoveryLeaseExpiresAt;
+        return execution;
+      });
     });
   }
   async tick(): Promise<void> {
@@ -387,12 +423,31 @@ export class CronScheduler {
         const found = state.schedules.find(item => item.id === execution.scheduleId);
         return found ? { ...found } : undefined;
       });
-      if (!schedule) continue;
+      if (!schedule) {
+        // A deleted/missing schedule must not leave a claimed execution consuming
+        // the global concurrency budget forever after a restart.
+        const orphaned = await this.store.transact(async state => {
+          const current = state.history.find(item => item.id === execution.id);
+          if (!current || (current.status !== "claimed" && current.status !== "running") ||
+            hasLiveRecoveryLease(current, this.now().getTime())) return false;
+          current.status = "failed";
+          current.finishedAt = this.now().toISOString();
+          current.error = "Schedule record is missing during recovery; execution cannot be safely resumed.";
+          await this.recordAudit(state, {
+            at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.orphaned",
+            scheduleId: execution.scheduleId, detail: execution.id,
+          });
+          return true;
+        });
+        if (orphaned) reconciled++;
+        continue;
+      }
 
       if (!execution.jobId) {
-        await this.store.transact(async state => {
+        const transitioned = await this.store.transact(async state => {
           const current = state.history.find(item => item.id === execution.id);
-          if (!current || (current.status !== "claimed" && current.status !== "running")) return;
+          if (!current || (current.status !== "claimed" && current.status !== "running") ||
+            hasLiveRecoveryLease(current, this.now().getTime())) return false;
           current.status = "failed";
           current.finishedAt = this.now().toISOString();
           current.error = "Dispatch outcome is indeterminate after restart; automatic resubmission suppressed to prevent duplicate work.";
@@ -405,9 +460,12 @@ export class CronScheduler {
             at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.indeterminate",
             scheduleId: execution.scheduleId, detail: execution.id,
           });
+          return true;
         });
-        indeterminate++;
-        reconciled++;
+        if (transitioned) {
+          indeterminate++;
+          reconciled++;
+        }
         continue;
       }
 
@@ -415,36 +473,22 @@ export class CronScheduler {
       try {
         job = await this.runtime.get(execution.jobId);
       } catch {
-        job = undefined;
-      }
-      if (!job) {
-        await this.store.transact(async state => {
-          const current = state.history.find(item => item.id === execution.id);
-          if (!current || (current.status !== "claimed" && current.status !== "running")) return;
-          current.status = "failed";
-          current.finishedAt = this.now().toISOString();
-          current.error = "Runtime job was not found during scheduler recovery.";
-          const latest = state.schedules.find(item => item.id === execution.scheduleId);
-          if (latest) {
-            latest.lastRunAt = current.finishedAt;
-            latest.consecutiveFailures += 1;
-          }
-          await this.recordAudit(state, {
-            at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.job_missing",
-            scheduleId: execution.scheduleId, detail: execution.jobId,
-          });
-        });
-        reconciled++;
+        // A runtime lookup failure is not proof that the job is missing.
+        // Leave the durable execution active so a later recovery pass can retry;
+        // terminalizing it here could discard a still-running external operation.
         continue;
       }
-
-      if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+      // A missing record on the first lookup can be a runtime restart or
+      // replication delay. Acquire the normal recovery lease below and let the
+      // bounded monitor retry; do not fail an execution on a single empty read.
+      if (job && (job.status === "completed" || job.status === "failed" || job.status === "cancelled")) {
         const recoveredStatus: CronExecution["status"] = job.status;
         const recoveredJobId = job.id;
         const recoveredError = job.error;
-        await this.store.transact(async state => {
+        const transitioned = await this.store.transact(async state => {
           const current = state.history.find(item => item.id === execution.id);
-          if (!current || (current.status !== "claimed" && current.status !== "running")) return;
+          if (!current || (current.status !== "claimed" && current.status !== "running") ||
+            hasLiveRecoveryLease(current, this.now().getTime())) return false;
           current.status = recoveredStatus;
           current.finishedAt = this.now().toISOString();
           if (recoveredError) current.error = recoveredError;
@@ -459,58 +503,152 @@ export class CronScheduler {
             at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.reconciled",
             scheduleId: execution.scheduleId, detail: recoveredStatus,
           });
+          return true;
         });
-        reconciled++;
+        if (transitioned) reconciled++;
         continue;
       }
 
       if (!this.active.has(schedule.id)) {
-        const controller = new AbortController();
-        this.active.set(schedule.id, controller);
-        void this.monitorRecovered(schedule, execution.id, execution.jobId, controller);
-        monitoring++;
+        const leaseToken = randomUUID();
+        const leaseAcquired = await this.store.transact(state => {
+          const current = state.history.find(item => item.id === execution.id);
+          if (!current || (current.status !== "claimed" && current.status !== "running")) return false;
+          const expiresAt = current.recoveryLeaseExpiresAt ? Date.parse(current.recoveryLeaseExpiresAt) : 0;
+          if (current.recoveryLeaseOwnerToken && Number.isFinite(expiresAt) && expiresAt > this.now().getTime()) return false;
+          current.recoveryLeaseOwnerToken = leaseToken;
+          current.recoveryLeaseExpiresAt = new Date(this.now().getTime() + this.recoveryLeaseMs).toISOString();
+          return true;
+        });
+        if (leaseAcquired) {
+          const controller = new AbortController();
+          this.active.set(schedule.id, controller);
+          const leaseExpiresAt = this.now().getTime() + this.recoveryLeaseMs;
+          void this.monitorRecovered(schedule, execution.id, execution.jobId, leaseToken, leaseExpiresAt, controller);
+          monitoring++;
+        }
       }
     }
     return { reconciled, monitoring, indeterminate };
   }
 
-  private async monitorRecovered(schedule: CronSchedule, executionId: string, jobId: string, controller: AbortController): Promise<void> {
+  private async monitorRecovered(
+    schedule: CronSchedule,
+    executionId: string,
+    jobId: string,
+    leaseToken: string,
+    initialLeaseExpiresAt: number,
+    controller: AbortController,
+  ): Promise<void> {
     let status: CronExecution["status"] = "failed";
     let errorText: string | undefined;
     const timeout = new AbortController();
     const timeoutId = setTimeout(() => timeout.abort(new Error("Recovered scheduled task timed out")), schedule.timeoutMs);
     const onAbort = () => timeout.abort(controller.signal.reason ?? new Error("Recovered scheduled execution cancelled"));
     controller.signal.addEventListener("abort", onAbort, { once: true });
+    let leaseLost = false;
+    let deferRecovery = false;
+    let renewingLease = false;
+    // Keep the last confirmed deadline locally. If the store is unavailable
+    // beyond it, stop polling even though we cannot confirm a takeover yet.
+    let leaseExpiresAt = initialLeaseExpiresAt;
+    const loseLease = () => {
+      if (leaseLost) return;
+      leaseLost = true;
+      timeout.abort(new Error("Recovered scheduler monitor lease was lost"));
+    };
+    const renewLease = async (): Promise<void> => {
+      // Do not queue overlapping heartbeats behind a slow transactional store.
+      if (renewingLease || leaseLost) return;
+      renewingLease = true;
+      try {
+        const renewedUntil = await this.store.transact(state => {
+          const current = state.history.find(item => item.id === executionId);
+          if (!current || (current.status !== "claimed" && current.status !== "running") ||
+              current.recoveryLeaseOwnerToken !== leaseToken) return undefined;
+          const expiresAt = current.recoveryLeaseExpiresAt ? Date.parse(current.recoveryLeaseExpiresAt) : 0;
+          const now = this.now().getTime();
+          if (!Number.isFinite(expiresAt) || expiresAt <= now) return undefined;
+          const nextExpiry = now + this.recoveryLeaseMs;
+          current.recoveryLeaseExpiresAt = new Date(nextExpiry).toISOString();
+          return nextExpiry;
+        });
+        if (renewedUntil === undefined) {
+          loseLease();
+        } else {
+          leaseExpiresAt = renewedUntil;
+        }
+      } catch (error) {
+        // A transient store failure is not proof of lease loss. Retry while
+        // the last confirmed lease is live; never keep polling past its deadline.
+        if (this.now().getTime() >= leaseExpiresAt) loseLease();
+        throw error;
+      } finally {
+        renewingLease = false;
+      }
+    };
+    const heartbeat = setInterval(() => {
+      void renewLease().catch(() => {
+        // Transient failures are retried on the next heartbeat.
+      });
+    }, Math.max(1_000, Math.floor(this.recoveryLeaseMs / 3)));
+    heartbeat.unref?.();
     try {
-      const job = await this.waitForJob(jobId, timeout.signal);
+      const job = await this.waitForRecoveredJob(jobId, timeout.signal);
       status = job.status === "completed" ? "completed" : job.status === "cancelled" ? "cancelled" : "failed";
       errorText = status === "failed" ? job.error ?? "Recovered runtime job failed" : undefined;
     } catch (error) {
-      await this.runtime.cancel(jobId).catch(() => false);
-      status = controller.signal.aborted ? "cancelled" : "failed";
+      // A lost lease means another scheduler may now own monitoring. Do not cancel
+      // the shared runtime job merely because this monitor was fenced out.
+      // A recovery monitor cannot safely infer that a job is gone from a
+      // temporarily missing runtime record. On its own observation timeout,
+      // release the lease and let a later recovery pass inspect the job again.
+      if (!leaseLost && !controller.signal.aborted && timeout.signal.aborted) {
+        deferRecovery = true;
+      } else if (!leaseLost && controller.signal.aborted) {
+        await this.runtime.cancel(jobId).catch(() => false);
+      }
+      status = controller.signal.aborted && !leaseLost ? "cancelled" : "failed";
       errorText = error instanceof Error ? error.message : String(error);
     } finally {
       clearTimeout(timeoutId);
+      clearInterval(heartbeat);
       controller.signal.removeEventListener("abort", onAbort);
     }
     await this.store.transact(async state => {
       const execution = state.history.find(item => item.id === executionId);
       const current = state.schedules.find(item => item.id === schedule.id);
-      if (execution && (execution.status === "claimed" || execution.status === "running")) {
+      const stillActive = !!execution && (execution.status === "claimed" || execution.status === "running");
+      const ownsLiveLease = stillActive && execution.recoveryLeaseOwnerToken === leaseToken &&
+        !!execution.recoveryLeaseExpiresAt && Date.parse(execution.recoveryLeaseExpiresAt) > this.now().getTime();
+      if (ownsLiveLease && deferRecovery) {
+        execution.recoveryLeaseOwnerToken = undefined;
+        execution.recoveryLeaseExpiresAt = undefined;
+        await this.recordAudit(state, {
+          at: this.now().toISOString(), actor: "scheduler", action: "schedule.recovery.deferred",
+          scheduleId: schedule.id, detail: errorText,
+        });
+      } else if (ownsLiveLease) {
         execution.status = status;
         execution.finishedAt = this.now().toISOString();
         if (errorText) execution.error = errorText;
+        if (current) {
+          current.lastRunAt = execution.finishedAt;
+          current.lastJobId = jobId;
+          current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled"
+            ? current.consecutiveFailures : current.consecutiveFailures + 1;
+        }
       }
-      if (current) {
-        current.lastRunAt = this.now().toISOString();
-        current.lastJobId = jobId;
-        current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled"
-          ? current.consecutiveFailures : current.consecutiveFailures + 1;
+      // Multiple scheduler instances may observe the same recovered job. Only
+      // the instance that wins the active -> terminal transition owns this audit.
+      if (ownsLiveLease && !deferRecovery) {
+        execution!.recoveryLeaseOwnerToken = undefined;
+        execution!.recoveryLeaseExpiresAt = undefined;
+        await this.recordAudit(state, {
+          at: this.now().toISOString(), actor: "scheduler", action: "schedule.recovery.finished",
+          scheduleId: schedule.id, detail: status,
+        });
       }
-      await this.recordAudit(state, {
-        at: this.now().toISOString(), actor: "scheduler", action: "schedule.recovery.finished",
-        scheduleId: schedule.id, detail: status,
-      });
     }).catch(() => undefined);
     this.active.delete(schedule.id);
   }
@@ -536,16 +674,25 @@ export class CronScheduler {
             errorText = String(controller.signal.reason ?? "Scheduled execution cancelled");
             break;
           }
-          await this.store.transact(async state => {
+          const dispatchAllowed = await this.store.transact(async state => {
             const execution = state.history.find(h => h.id === executionId);
-            if (execution) {
-              execution.status = "running";
-              execution.jobId = submitted.id;
-              execution.attempt = attempt;
-            }
+            if (!execution || execution.status === "cancelled" || execution.status === "completed" ||
+                execution.status === "failed" || execution.status === "skipped") return false;
+            execution.status = "running";
+            execution.jobId = submitted.id;
+            execution.attempt = attempt;
             const current = state.schedules.find(s => s.id === schedule.id);
             if (current) current.lastJobId = submitted.id;
+            return true;
           });
+          if (!dispatchAllowed || controller.signal.aborted) {
+            // cancel() may have won after submit() returned but before its job ID
+            // was persisted. Reconcile by cancelling this newly-created runtime job.
+            await this.runtime.cancel(submitted.id).catch(() => false);
+            status = "cancelled";
+            errorText = String(controller.signal.reason ?? "Scheduled execution cancelled");
+            break;
+          }
 
           const timeout = new AbortController();
           const timeoutId = setTimeout(() => timeout.abort(new Error("Scheduled task timed out")), schedule.timeoutMs);
@@ -592,21 +739,52 @@ export class CronScheduler {
     await this.store.transact(async state => {
       const execution = state.history.find(h => h.id === executionId);
       const current = state.schedules.find(s => s.id === schedule.id);
-      if (execution) {
+      const stillActive = !!execution && execution.status !== "cancelled" &&
+        execution.status !== "completed" && execution.status !== "failed" && execution.status !== "skipped";
+      if (stillActive) {
         execution.status = status;
         execution.finishedAt = this.now().toISOString();
         if (job) execution.jobId = job.id;
         if (errorText) execution.error = errorText;
-      }
-      if (current) {
-        current.lastRunAt = this.now().toISOString();
-        current.lastJobId = job?.id;
-        current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled" ? current.consecutiveFailures : current.consecutiveFailures + 1;
+        if (current) {
+          current.lastRunAt = execution.finishedAt;
+          if (job) current.lastJobId = job.id;
+          current.consecutiveFailures = status === "completed" ? 0 : status === "cancelled"
+            ? current.consecutiveFailures : current.consecutiveFailures + 1;
+        }
       }
       await this.recordAudit(state, { at: this.now().toISOString(), actor: "scheduler", action: "schedule.finished", scheduleId: schedule.id, detail: status });
     }).catch(() => undefined);
     this.active.delete(schedule.id);
   }
+  private async waitForRecoveredJob(id: string, signal: AbortSignal): Promise<JobRecord> {
+    while (!signal.aborted) {
+      let record: JobRecord | undefined;
+      try {
+        record = await this.runtime.get(id);
+      } catch {
+        // A transient runtime read failure is not evidence that the job failed.
+        // Retry under the same lease; the monitor timeout bounds this recovery.
+      }
+      // Runtime stores may briefly hide a persisted job during restart or
+      // replication. Keep the lease monitor alive and retry until timeout.
+      if (record && (record.status === "completed" || record.status === "failed" || record.status === "cancelled")) {
+        return record;
+      }
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => signal.removeEventListener("abort", abort);
+        const timer = setTimeout(() => { cleanup(); resolve(); }, 250);
+        const abort = () => {
+          clearTimeout(timer);
+          cleanup();
+          reject(signal.reason ?? new Error("Recovered scheduled job wait aborted"));
+        };
+        signal.addEventListener("abort", abort, { once: true });
+      });
+    }
+    throw signal.reason ?? new Error("Recovered scheduled job wait aborted");
+  }
+
   private async waitForJob(id: string, signal: AbortSignal): Promise<JobRecord> {
     while (!signal.aborted) {
       const record = await this.runtime.get(id);

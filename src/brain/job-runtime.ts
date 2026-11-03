@@ -93,7 +93,10 @@ async function isExclusiveFileCollision(error: unknown, file: string): Promise<b
     await fs.stat(file);
     return true;
   } catch (statError) {
-    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return false;
+    // The lock may have been reclaimed between open(..., "wx") and stat().
+    // Treat that disappearing path as contention so the caller retries instead
+    // of surfacing a transient Windows EPERM as a fatal write failure.
+    if ((statError as NodeJS.ErrnoException).code === "ENOENT") return true;
     throw statError;
   }
 }
@@ -380,6 +383,13 @@ class FileJobStateStore {
       if (index >= 0) {
         const current = records[index]!;
         if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
+        // A matching token is not sufficient once its lease has expired: a paused
+        // worker may resume after its deadline but before another worker reclaims
+        // the job. Reject its snapshot/result writes during that gap as well.
+        if (current.status === "running" && record.status === "running") {
+          const leaseExpiresAt = current.leaseExpiresAt ? Date.parse(current.leaseExpiresAt) : 0;
+          if (!Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= Date.now()) return false;
+        }
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
         records[index] = {
           ...record,
@@ -438,7 +448,22 @@ export class DurableJobRuntime implements JobRuntime {
     };
     this.jobs.set(id, record);
     await this.state.save(record);
-    void this.execute(record, input);
+    // submit() is intentionally non-blocking, so observe startup/dispatch failures
+    // rather than allowing a rejected background promise to become unhandled.
+    void this.execute(record, input).catch(async (error: unknown) => {
+      if (record.status !== "cancelled") {
+        record.status = "failed";
+        record.error = error instanceof Error ? error.message : String(error);
+        record.updatedAt = new Date().toISOString();
+      }
+      // The store may be the source of the failure (for example, a lock timeout).
+      // Keep the original failure contained and make a best-effort terminal write.
+      try {
+        await this.state.save(record);
+      } catch {
+        // If persistence is unavailable, the in-memory record still reflects the failure.
+      }
+    });
     return publicJobRecord(record);
   }
 

@@ -206,6 +206,45 @@ test("recovery reconciles persisted jobs and suppresses indeterminate resubmissi
 });
 
 
+test("recovery does not terminalize executions while another monitor holds a live lease", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      return id === "finished-under-lease"
+        ? { id, status: "completed", task: "already finished" } as JobRecord
+        : undefined;
+    },
+    async cancel() { return true; }, async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const schedule = await scheduler.create({
+    name: "leased-recovery", task: "task", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  const lease = {
+    recoveryLeaseOwnerToken: "another-live-monitor",
+    recoveryLeaseExpiresAt: "2026-10-17T00:00:30.000Z",
+  };
+  state.history.push(
+    { id: "terminal-under-lease", scheduleId: schedule.id, scheduledFor: now.toISOString(),
+      startedAt: now.toISOString(), status: "running", jobId: "finished-under-lease", attempt: 1, ...lease },
+    { id: "missing-under-lease", scheduleId: schedule.id, scheduledFor: now.toISOString(),
+      startedAt: now.toISOString(), status: "running", jobId: "not-visible-yet", attempt: 1, ...lease },
+  );
+
+  const result = await scheduler.recover();
+
+  assert.deepEqual(result, { reconciled: 0, monitoring: 0, indeterminate: 0 });
+  assert.equal(state.history[0].status, "running", "terminal runtime observation must not bypass a live lease");
+  assert.equal(state.history[1].status, "running", "a temporarily missing runtime record must not bypass a live lease");
+  assert.equal(state.history[0].recoveryLeaseOwnerToken, "another-live-monitor");
+  assert.equal(state.history[1].recoveryLeaseOwnerToken, "another-live-monitor");
+  assert.equal(state.audit.some((event: any) => event.action === "schedule.recovery.reconciled"), false);
+  assert.equal(state.audit.some((event: any) => event.action === "schedule.recovery.job_missing"), false);
+});
+
 test("file cron store serializes concurrent processes without losing updates", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "sofia-cron-lock-test-"));
   const moduleUrl = pathToFileURL(path.join(process.cwd(), "src", "brain", "cron-scheduler.ts")).href;
@@ -284,6 +323,46 @@ test("one-time schedules reject ambiguous or invalid timing input", async () => 
 });
 
 
+test("cross-instance cancellation fences a cron dispatch while runtime submission is pending", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let resolveSubmit!: (job: JobRecord) => void;
+  let markSubmitStarted!: () => void;
+  const submitStarted = new Promise<void>(resolve => { markSubmitStarted = resolve; });
+  const submitGate = new Promise<JobRecord>(resolve => { resolveSubmit = resolve; });
+  let cancelCalls = 0;
+  const runtime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      markSubmitStarted();
+      return submitGate;
+    },
+    async get() { return undefined; },
+    async cancel() { cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const dispatcher = new CronScheduler(runtime, { store, now: () => now });
+  const canceller = new CronScheduler(runtime, { store, now: () => now });
+  const created = await dispatcher.create({
+    name: "cross-instance-cancel", task: "must not survive cancellation",
+    cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  await dispatcher.tick();
+  await submitStarted;
+
+  // A different API/scheduler process cannot abort dispatcher's local controller.
+  // The durable execution record must therefore carry the cancellation decision.
+  assert.equal(await canceller.cancel(created.id, "alice"), true);
+  resolveSubmit({ id: "late-submitted-job", status: "queued", task: "must not survive cancellation" } as JobRecord);
+
+  for (let i = 0; i < 100 && cancelCalls === 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(cancelCalls, 1, "the late runtime job must be cancelled after its ID becomes known");
+  assert.equal(state.history[0].status, "cancelled", "late dispatcher finalization must not overwrite durable cancellation");
+  assert.equal(state.schedules[0].status, "disabled");
+});
+
+
 test("cancelling a running schedule disables it and cancels the runtime job", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
@@ -344,3 +423,383 @@ test("execution timeout cancels the runtime job and records failure", async () =
   assert.equal(state.history[0].status, "failed");
   assert.match(state.history[0].error, /timed out/i);
 });
+
+
+test("cancelled recovered execution does not overwrite schedule completion metadata", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      return { id, status: "queued", task: "already running" } as JobRecord;
+    },
+    async cancel() { return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const schedule = await scheduler.create({
+    name: "cancelled-recovery", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.schedules[0].lastRunAt = "2026-10-16T23:00:00.000Z";
+  state.schedules[0].lastJobId = "previous-job";
+  state.history.push({
+    id: "recovered-cancel", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "active-job", attempt: 1,
+  });
+  const result = await scheduler.recover();
+  assert.equal(result.monitoring, 1);
+  assert.ok(state.history[0].recoveryLeaseOwnerToken, "the recovered monitor should own a durable lease");
+  await scheduler.cancel(schedule.id, "alice");
+  assert.equal(state.history[0].recoveryLeaseOwnerToken, undefined,
+    "cancellation must revoke the recovered monitor's lease token");
+  assert.equal(state.history[0].recoveryLeaseExpiresAt, undefined,
+    "cancellation must clear the recovered monitor's lease deadline");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  for (let i = 0; i < 50 && !state.audit.some((event: any) => event.action === "schedule.recovery.finished"); i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(state.history[0].status, "cancelled");
+  assert.equal(state.schedules[0].lastRunAt, "2026-10-16T23:00:00.000Z");
+  assert.equal(state.schedules[0].lastJobId, "previous-job");
+});
+
+
+test("concurrent recovery monitors emit one terminal audit for a shared execution", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let reads = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      return { id, status: reads <= 2 ? "queued" : "completed", task: "shared recovered job" } as JobRecord;
+    },
+    async cancel() { return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const first = new CronScheduler(runtime, { store });
+  const second = new CronScheduler(runtime, { store });
+  const schedule = await first.create({
+    name: "concurrent-recovery", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "shared-recovered-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "shared-recovered-job", attempt: 1,
+  });
+
+  const recoveryResults = await Promise.all([first.recover(), second.recover()]);
+  assert.equal(recoveryResults.reduce((total, result) => total + result.monitoring, 0), 1,
+    "a live durable recovery lease must elect exactly one monitor across scheduler instances");
+  for (let i = 0; i < 100 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  // Let the losing monitor finish its finalizer after observing the terminal record.
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(state.history[0].status, "completed");
+  assert.equal(state.history[0].recoveryLeaseOwnerToken, undefined, "terminal finalization releases the lease");
+  assert.equal(state.history[0].recoveryLeaseExpiresAt, undefined);
+  const publicHistory = await first.history(schedule.id, "alice");
+  assert.equal("recoveryLeaseOwnerToken" in publicHistory[0]!, false, "lease owner tokens must not be exposed in API history");
+  assert.equal("recoveryLeaseExpiresAt" in publicHistory[0]!, false, "internal lease deadlines must not be exposed in API history");
+  assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 1);
+});
+
+test("expired recovery lease can be taken over and stale monitor is fenced", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  let reads = 0;
+  let cancelCalls = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      return { id, status: reads <= 3 ? "queued" : "completed", task: "lease takeover" } as JobRecord;
+    },
+    async cancel() { cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const first = new CronScheduler(runtime, { store, now: () => now, recoveryLeaseMs: 3_000 });
+  const second = new CronScheduler(runtime, { store, now: () => now, recoveryLeaseMs: 3_000 });
+  const schedule = await first.create({
+    name: "lease-takeover", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "lease-takeover-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "lease-takeover-job", attempt: 1,
+  });
+
+  const initial = await first.recover();
+  assert.equal(initial.monitoring, 1);
+  now = new Date(now.getTime() + 4_000);
+  const takeover = await second.recover();
+  assert.equal(takeover.monitoring, 1, "an expired lease may be claimed by a replacement scheduler");
+
+  for (let i = 0; i < 100 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(state.history[0].status, "completed");
+  assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 1);
+  assert.equal(cancelCalls, 0, "the fenced-out monitor must not cancel the runtime job");
+});
+
+test("recovery terminalizes orphaned executions whose schedule record is missing", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  const runtime = {
+    async submit() { submitted++; throw new Error("orphan recovery must not submit"); },
+    async get() { return undefined; },
+    async cancel() { return false; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store });
+  state.history.push({
+    id: "orphaned-execution", scheduleId: "deleted-schedule",
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "orphaned-job", attempt: 1,
+  });
+
+  const result = await scheduler.recover();
+
+  assert.deepEqual(result, { reconciled: 1, monitoring: 0, indeterminate: 0 });
+  assert.equal(submitted, 0);
+  assert.equal(state.history[0].status, "failed");
+  assert.match(state.history[0].error, /schedule record is missing/i);
+  assert.ok(state.audit.some(event => event.action === "schedule.recovery.orphaned"));
+});
+
+test("runtime lookup outages preserve active executions for a later recovery pass", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let reads = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      if (reads === 1) throw new Error("temporary runtime API outage");
+      return { id, status: reads === 2 ? "queued" : "completed", task: "recover after outage" } as JobRecord;
+    },
+    async cancel() { return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store });
+  const schedule = await scheduler.create({
+    name: "runtime-outage-recovery", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "outage-recovery-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "outage-recovery-job", attempt: 1,
+  });
+
+  const unavailable = await scheduler.recover();
+  assert.deepEqual(unavailable, { reconciled: 0, monitoring: 0, indeterminate: 0 });
+  assert.equal(state.history[0].status, "running",
+    "a transient runtime lookup error must not be misclassified as a missing job");
+  assert.equal(state.history[0].finishedAt, undefined);
+
+  const recovered = await scheduler.recover();
+  assert.equal(recovered.monitoring, 1);
+  for (let i = 0; i < 100 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(state.history[0].status, "completed",
+    "the later recovery pass should reconcile the still-existing runtime job");
+});
+
+test("recovery monitors a runtime job that is temporarily invisible on the first lookup", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let reads = 0;
+  let cancelCalls = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not resubmit"); },
+    async get(id: string) {
+      reads++;
+      if (reads === 1) return undefined;
+      if (reads === 2) return { id, status: "queued", task: "startup visibility delay" } as JobRecord;
+      return { id, status: "completed", task: "startup visibility delay" } as JobRecord;
+    },
+    async cancel() { cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, recoveryLeaseMs: 3_000 });
+  const schedule = await scheduler.create({
+    name: "initial-runtime-invisibility", task: "startup visibility delay", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice", timeoutMs: 5_000,
+  }, "alice");
+  state.history.push({
+    id: "initially-hidden-job", scheduleId: schedule.id, scheduledFor: new Date().toISOString(),
+    startedAt: new Date().toISOString(), status: "running", jobId: "initially-hidden-job", attempt: 1,
+  });
+
+  const result = await scheduler.recover();
+  assert.deepEqual(result, { reconciled: 0, monitoring: 1, indeterminate: 0 });
+  for (let i = 0; i < 100 && state.history[0].status === "running"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+
+  assert.ok(reads >= 3, "recovery monitor should retry the initially missing runtime record");
+  assert.equal(cancelCalls, 0, "recovery must not cancel a job because its first lookup was empty");
+  assert.equal(state.history[0].status, "completed");
+  assert.ok(state.audit.some((event: any) => event.action === "schedule.recovery.finished"));
+});
+
+test("recovered monitor retries a temporarily missing runtime record without cancelling the job", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let reads = 0;
+  let cancelCalls = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      if (reads === 1) return { id, status: "queued", task: "restart recovery" } as JobRecord;
+      if (reads === 2) return undefined;
+      return { id, status: "completed", task: "restart recovery" } as JobRecord;
+    },
+    async cancel() { cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, recoveryLeaseMs: 3_000 });
+  const schedule = await scheduler.create({
+    name: "transient-runtime-visibility", task: "restart recovery", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice", timeoutMs: 5_000,
+  }, "alice");
+  state.history.push({
+    id: "temporarily-hidden-job", scheduleId: schedule.id, scheduledFor: new Date().toISOString(),
+    startedAt: new Date().toISOString(), status: "running", jobId: "temporarily-hidden-job", attempt: 1,
+  });
+
+  const result = await scheduler.recover();
+  assert.equal(result.monitoring, 1);
+  for (let i = 0; i < 40 && state.history[0].status === "running"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+
+  assert.equal(reads >= 3, true, "monitor should retry after the transient missing record");
+  assert.equal(cancelCalls, 0, "temporary runtime invisibility must not cancel the shared job");
+  assert.equal(state.history[0].status, "completed");
+  assert.ok(state.audit.some((event: any) => event.action === "schedule.recovery.finished"));
+});
+
+test("recovery heartbeat retries a transient store outage without fencing a live monitor", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  let transactions = 0;
+  let heartbeatFailures = 0;
+  const store: CronStore = {
+    async transact(fn) {
+      transactions++;
+      // Fail the first transaction after the durable recovery lease is visible.
+      // This targets the heartbeat, independent of transactions used by create/recover.
+      if (state.history.some((item: any) => item.recoveryLeaseOwnerToken) && heartbeatFailures === 0) {
+        heartbeatFailures++;
+        throw new Error("temporary cron store outage during heartbeat");
+      }
+      return fn(state);
+    },
+  };
+  let reads = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      return {
+        id, status: reads < 12 ? "queued" : "completed",
+        task: "heartbeat retry",
+      } as JobRecord;
+    },
+    async cancel() { return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, recoveryLeaseMs: 3_000 });
+  const schedule = await scheduler.create({
+    name: "heartbeat-store-outage", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "heartbeat-outage-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "heartbeat-outage-job", attempt: 1,
+  });
+
+  const recovered = await scheduler.recover();
+  assert.equal(recovered.monitoring, 1);
+  for (let i = 0; i < 500 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+
+  assert.equal(heartbeatFailures, 1, "the first heartbeat should encounter the simulated transient store outage");
+  assert.ok(transactions >= 5, "the next heartbeat should retry the transactional store");
+  assert.equal(state.history[0].status, "completed",
+    "a transient heartbeat store error must not falsely fence the monitor");
+  assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 1);
+});
+
+test("recovery monitor stops polling when a store outage outlives its lease", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  let heartbeatFailures = 0;
+  const store: CronStore = {
+    async transact(fn) {
+      if (state.history.some((item: any) => item.recoveryLeaseOwnerToken) && heartbeatFailures === 0) {
+        heartbeatFailures++;
+        now = new Date(now.getTime() + 4_000);
+        throw new Error("cron store unavailable beyond lease expiry");
+      }
+      return fn(state);
+    },
+  };
+  let reads = 0;
+  let cancelCalls = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      return { id, status: "queued", task: "lease expiry outage" } as JobRecord;
+    },
+    async cancel() { cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, now: () => now, recoveryLeaseMs: 3_000 });
+  const schedule = await scheduler.create({
+    name: "lease-expiry-store-outage", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "lease-expiry-outage-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "lease-expiry-outage-job", attempt: 1,
+  });
+
+  const recovered = await scheduler.recover();
+  assert.equal(recovered.monitoring, 1);
+  for (let i = 0; i < 100 && heartbeatFailures === 0; i++) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  assert.equal(heartbeatFailures, 1, "the heartbeat should encounter the simulated outage");
+  assert.ok(reads <= 6, "the expired monitor must stop polling instead of continuing indefinitely");
+  assert.equal(cancelCalls, 0, "losing the lease must not cancel the shared runtime job");
+  assert.equal(state.history[0].status, "running",
+    "an expired monitor must not terminalize an execution after losing its lease");
+  assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 0);
+});
+

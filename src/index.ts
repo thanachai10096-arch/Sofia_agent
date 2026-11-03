@@ -129,3 +129,9 @@ export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHA
 export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
+
+export { createIsolatedSkillBenchmarkEvaluator } from "./brain/skill-benchmark.js";
+export type { SkillBenchmarkFixture, SkillBenchmarkRun, IsolatedSkillBenchmarkRunner, SkillBenchmarkEvaluatorOptions } from "./brain/skill-benchmark.js";
+
+export { SqliteModelCallJournal } from "./brain/model-call-journal.js";
+export type { ModelCallIdentity, ModelCallSettlement, ModelCallJournalEntry, DispatchDecision, SettlementState } from "./brain/model-call-journal.js";

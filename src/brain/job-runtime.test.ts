@@ -8,6 +8,40 @@ import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
 
+test("DurableJobRuntime contains rejected background startup and persists a failed job", async () => {
+  const namespace = "job-runtime-background-start-failure-" + randomUUID();
+  const runtime = new DurableJobRuntime(() => ({
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  // Simulate a failure before the worker's own execution handler is entered
+  // (for example, a durable lease claim failing after submit() has persisted).
+  Object.defineProperty(runtime, "execute", {
+    configurable: true,
+    value: async () => { throw new Error("simulated worker startup failure"); },
+  });
+
+  const submitted = await runtime.submit({ task: "exercise background startup failure" });
+  assert.equal(submitted.status, "queued");
+
+  let persisted = await runtime.get(submitted.id);
+  const deadline = Date.now() + 5_000;
+  while (persisted?.status !== "failed" && Date.now() < deadline) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    persisted = await runtime.get(submitted.id);
+  }
+  assert.equal(persisted?.status, "failed");
+  assert.match(persisted?.error ?? "", /simulated worker startup failure/);
+
+  const stateFile = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  await rm(stateFile, { force: true });
+  await rm(stateFile + ".lock", { force: true });
+});
+
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
   const namespace = "job-runtime-restart-" + randomUUID();
   const hangingBrain = {
@@ -38,6 +72,111 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
 
   assert.equal(recovered?.status, "failed");
   assert.match(recovered?.error ?? "", /interrupted|lease expired/i);
+});
+
+
+test("DurableJobRuntime fences stale worker writes after an expired lease is reclaimed", async () => {
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-lease-fence-"));
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "job-runtime-lease-fence-" + randomUUID();
+  const stateFile = path.join(
+    root,
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  const runtime = new DurableJobRuntime(() => ({
+    run: async ({ signal }: { signal?: AbortSignal }) => new Promise((resolve) => {
+      if (signal?.aborted) return resolve({ completed: false, state: "cancelled" });
+      signal?.addEventListener("abort", () => resolve({ completed: false, state: "cancelled" }), { once: true });
+    }),
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  let jobId: string | undefined;
+  try {
+    const submitted = await runtime.submit({ task: "prove stale lease fencing" });
+    jobId = submitted.id;
+    let records: Array<{ id: string; status: string; leaseOwnerToken?: string; leaseExpiresAt?: string }> = [];
+    const startDeadline = Date.now() + 5_000;
+    let active = false;
+    while (Date.now() < startDeadline) {
+      try {
+        records = JSON.parse(await readFile(stateFile, "utf8")) as typeof records;
+        active = records.some((item) => item.id === submitted.id && item.status === "running" && Boolean(item.leaseOwnerToken));
+      } catch { /* wait for the initial claim */ }
+      if (active) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(active, "first worker must acquire a durable lease");
+    const original = records.find((item) => item.id === submitted.id)!;
+    const staleToken = original.leaseOwnerToken!;
+
+    // Simulate lease expiry. The original worker must be fenced immediately,
+    // even in the interval before another worker reclaims the job.
+    original.leaseExpiresAt = new Date(0).toISOString();
+    await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+    await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+    const internalState = (runtime as unknown as {
+      state: {
+        claim(id: string, ownerToken: string, leaseMs: number): Promise<{ id: string; status: string; leaseOwnerToken?: string } | undefined>;
+        save(record: { id: string; status: string; leaseOwnerToken?: string; result?: unknown; updatedAt: string }): Promise<boolean>;
+      };
+    }).state;
+    const expiredOwnerWriteAccepted = await internalState.save({
+      id: submitted.id,
+      status: "running",
+      leaseOwnerToken: staleToken,
+      updatedAt: new Date().toISOString(),
+    });
+    assert.equal(expiredOwnerWriteAccepted, false,
+      "an expired owner must not renew or persist while waiting for lease reclamation");
+
+    const replacement = await internalState.claim(submitted.id, "replacement-worker-token", 15_000);
+    assert.equal(replacement?.leaseOwnerToken, "replacement-worker-token");
+    assert.equal(replacement?.status, "running");
+
+    const staleWriteAccepted = await internalState.save({
+      id: submitted.id,
+      status: "completed",
+      leaseOwnerToken: staleToken,
+      result: { completed: true, state: "completed", output: "stale worker" },
+      updatedAt: new Date().toISOString(),
+    });
+    assert.equal(staleWriteAccepted, false, "a worker with an expired lease must not persist a late result");
+
+    const persisted = await runtime.get(submitted.id);
+    assert.equal(persisted?.status, "running");
+    assert.equal(persisted?.leaseOwnerToken, undefined, "lease capabilities must remain private in public reads");
+    assert.equal(persisted?.result, undefined, "stale worker results must not appear in durable state");
+  } finally {
+    if (jobId) await runtime.cancel(jobId);
+    // Cancellation is durable before the local brain has necessarily observed
+    // its abort signal. Wait for execute() to release its controller and file lock
+    // before deleting the isolated state directory (especially on macOS).
+    const internals = runtime as unknown as {
+      controllers: Map<string, AbortController>;
+      starting: Set<string>;
+    };
+    const cleanupDeadline = Date.now() + 5_000;
+    while (jobId && (internals.controllers.has(jobId) || internals.starting.has(jobId)) && Date.now() < cleanupDeadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(!jobId || (!internals.controllers.has(jobId) && !internals.starting.has(jobId)),
+      "worker must finish its cancellation cleanup before temporary state is removed");
+    const lockFile = stateFile + ".lock";
+    while (Date.now() < cleanupDeadline) {
+      try { await stat(lockFile); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") break;
+        throw error;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 
@@ -488,29 +627,71 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
-  const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
-  } as unknown as SofiaBrain), undefined, namespace));
-
+  const workerCount = 12;
+  let startedWorkers = 0;
+  let resolveAllWorkersStarted!: () => void;
+  let releaseWorkers!: () => void;
+  const allWorkersStarted = new Promise<void>((resolve) => { resolveAllWorkersStarted = resolve; });
+  const workerGate = new Promise<void>((resolve) => { releaseWorkers = resolve; });
+  const brainFactory = () => ({
+    run: async () => {
+      startedWorkers += 1;
+      if (startedWorkers === workerCount) resolveAllWorkersStarted();
+      await workerGate;
+      return { completed: true, state: "completed", output: "concurrency-test" };
+    },
+  } as unknown as SofiaBrain);
+  const runtimes = Array.from({ length: workerCount }, () => new DurableJobRuntime(brainFactory, undefined, namespace));
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
     runtime.submit({ task: "concurrent worker submission " + index }),
   ));
-  const reader = new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
-  } as unknown as SofiaBrain), undefined, namespace);
-  const persisted = await reader.list();
-  const persistedIds = new Set(persisted.map((record) => record.id));
+  const reader = new DurableJobRuntime(brainFactory, undefined, namespace);
 
-  assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
-  for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
+  try {
+    // Wait until every worker has claimed its lease and entered brain.run().
+    // The gate keeps all workers active together so this exercises real overlap.
+    let startupTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        allWorkersStarted,
+        new Promise<never>((_, reject) => {
+          startupTimer = setTimeout(() => reject(new Error("all concurrent workers should start within 5 seconds")), 5_000);
+        }),
+      ]);
+    } finally {
+      if (startupTimer) clearTimeout(startupTimer);
+    }
 
-  const file = path.join(
-    os.tmpdir(),
-    "sofia-agents-jobs",
-    createHash("sha256").update(namespace).digest("hex") + ".json",
-  );
-  await rm(file, { force: true });
-  await rm(file + ".lock", { force: true });
+    const running = await reader.list();
+    assert.equal(running.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
+    assert.equal(running.filter((record) => record.status === "running").length, workerCount,
+      "all independent workers should hold running leases concurrently");
+    const runningIds = new Set(running.map((record) => record.id));
+    for (const job of submitted) assert.ok(runningIds.has(job.id), "missing persisted job " + job.id);
+
+    // Let every brain.run() resolve, then wait for durable terminal writes before cleanup.
+    releaseWorkers();
+    let persisted = await reader.list();
+    const completionDeadline = Date.now() + 5_000;
+    while (persisted.length !== submitted.length || persisted.some((record) => record.status !== "completed")) {
+      if (Date.now() >= completionDeadline) {
+        assert.fail("all concurrent workers should finish and persist before cleanup");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      persisted = await reader.list();
+    }
+
+    const file = path.join(
+      os.tmpdir(),
+      "sofia-agents-jobs",
+      createHash("sha256").update(namespace).digest("hex") + ".json",
+    );
+    await rm(file, { force: true });
+    await rm(file + ".lock", { force: true });
+  } finally {
+    // Never leave the test's workers blocked if an assertion or startup wait fails.
+    releaseWorkers();
+  }
 });
 
 
