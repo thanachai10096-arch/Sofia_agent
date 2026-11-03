@@ -1,9 +1,20 @@
+
+test("SQLite runtime compatibility check matches the built-in module introduction", () => {
+  assert.equal(supportsNodeSqlite("20.19.0"), false);
+  assert.equal(supportsNodeSqlite("22.4.1"), false);
+  assert.equal(supportsNodeSqlite("22.5.0"), true);
+  assert.equal(supportsNodeSqlite("22.5.1"), true);
+  assert.equal(supportsNodeSqlite("23.0.0"), true);
+  assert.equal(supportsNodeSqlite("24.1.0"), true);
+  assert.equal(supportsNodeSqlite("not-a-version"), false);
+});
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { SqliteSessionStore } from "./sqlite-store.js";
+import { SqliteSessionStore, supportsNodeSqlite } from "./sqlite-store.js";
 
 test("SQLite sessions survive closing and reopening with exact transcript order", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-test-"));
