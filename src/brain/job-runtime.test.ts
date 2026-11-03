@@ -1163,11 +1163,14 @@ test("DurableJobRuntime fences duplicate checkpoint resumes across independent r
 
   const firstResume = firstWorker.resume(submitted.id);
   const secondResume = secondWorker.resume(submitted.id);
+  // Attach rejection handlers immediately: the losing worker may conflict before
+  // the winning worker reaches the barrier below.
+  const outcomesPromise = Promise.allSettled([firstResume, secondResume]);
   await resumeStarted;
   await new Promise<void>((resolve) => setTimeout(resolve, 30));
   assert.equal(brainCalls, 2, "only one worker may enter resumed Brain execution");
   release();
-  const outcomes = await Promise.allSettled([firstResume, secondResume]);
+  const outcomes = await outcomesPromise;
   assert.equal(brainCalls, 2);
   assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled" && outcome.value.status === "completed").length, 1);
   const rejected = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
