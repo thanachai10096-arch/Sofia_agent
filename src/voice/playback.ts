@@ -46,7 +46,7 @@ export function createVoicePlaybackController(adapter: VoicePlaybackAdapter): Vo
     async play(audio) {
       if (state === "closed") throw new Error("Voice playback controller is closed");
       if (!audio || !(audio.bytes instanceof Uint8Array) || audio.bytes.byteLength === 0 ||
-          typeof audio.mimeType !== "string" || !/^audio\/[a-z0-9.+-]{1,64}$/i.test(audio.mimeType)) {
+          typeof audio.mimeType !== "string" || !/^audio\\/[a-z0-9.+-]{1,64}$/i.test(audio.mimeType)) {
         throw new Error("Voice playback audio is invalid");
       }
       const request = ++generation;
@@ -59,6 +59,11 @@ export function createVoicePlaybackController(adapter: VoicePlaybackAdapter): Vo
       try {
         await adapter.play({ bytes: audio.bytes.slice(), mimeType: audio.mimeType.toLowerCase() }, controller.signal);
         return !controller.signal.aborted && !isClosed() && request === generation;
+      } catch (error) {
+        // Host players commonly reject with AbortError when interrupted. That is
+        // a normal stale-playback outcome; unrelated playback failures propagate.
+        if (controller.signal.aborted || isClosed() || request !== generation) return false;
+        throw error;
       } finally {
         if (active === controller) {
           active = undefined;
