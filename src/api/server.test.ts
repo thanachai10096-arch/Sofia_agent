@@ -35,7 +35,7 @@ test("API sessions are persisted and scoped to the authenticated API key", async
   assert.ok(address && typeof address !== "string");
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
-  const startAndWait = async (apiKey: string, task: string) => {
+  const startAndWait = async (apiKey: string, task: string): Promise<string> => {
     const started = await fetch(`${baseUrl}/v1/agent/runs`, {
       method: "POST",
       headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
@@ -49,7 +49,7 @@ test("API sessions are persisted and scoped to the authenticated API key", async
       });
       assert.equal(response.status, 200);
       const run = await response.json() as { status: string };
-      if (run.status === "completed") return;
+      if (run.status === "completed") return initial.id;
       if (run.status === "failed" || run.status === "cancelled") {
         throw new Error(`API run ended with status ${run.status}`);
       }
@@ -59,8 +59,28 @@ test("API sessions are persisted and scoped to the authenticated API key", async
   };
 
   try {
-    await startAndWait("key-one", "first user's task");
-    await startAndWait("key-two", "second user's task");
+    const firstRunId = await startAndWait("key-one", "first user's task");
+    const secondRunId = await startAndWait("key-two", "second user's task");
+
+    // A different authenticated principal cannot inspect or cancel another user's run.
+    const crossUserRead = await fetch(`${baseUrl}/v1/agent/runs/${firstRunId}`, {
+      headers: { authorization: "Bearer key-two" },
+    });
+    assert.equal(crossUserRead.status, 404);
+    const crossUserDelete = await fetch(`${baseUrl}/v1/agent/runs/${firstRunId}`, {
+      method: "DELETE",
+      headers: { authorization: "Bearer key-two" },
+    });
+    assert.equal(crossUserDelete.status, 404);
+
+    const firstOwnerRead = await fetch(`${baseUrl}/v1/agent/runs/${firstRunId}`, {
+      headers: { authorization: "Bearer key-one" },
+    });
+    assert.equal(firstOwnerRead.status, 200);
+    const secondOwnerRead = await fetch(`${baseUrl}/v1/agent/runs/${secondRunId}`, {
+      headers: { authorization: "Bearer key-two" },
+    });
+    assert.equal(secondOwnerRead.status, 200);
 
     const idFor = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 32);
     assert.deepEqual(sessions.get(`${idFor("key-one")}:shared-client-session`)?.messages, [
