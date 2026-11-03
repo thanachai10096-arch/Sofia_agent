@@ -85,7 +85,7 @@ export function createVerifiedCompletionHandler(options: {
     }
     const receipts = await options.listFinalizedReceipts(scope, checkpoint.lastSequence);
     if (!Array.isArray(receipts)) throw new Error("Receipt recovery adapter returned an invalid result");
-    const ordered = [...receipts].sort((a, b) => a.sequence - b.sequence);
+    // The authoritative adapter contract requires ascending sequence order. Do not sort malformed input into apparent validity.\n    const ordered = [...receipts];
     let previous = checkpoint.lastSequence;
     for (const receipt of ordered) {
       if (!receipt || !Number.isSafeInteger(receipt.sequence) || receipt.sequence <= previous ||
