@@ -458,3 +458,12 @@ Important limitation: Discord nonce enforcement is a bounded recent-message dedu
 - Hardened `OutboxDispatcher` for repeated worker crashes: every reclaim increments attempts; if a reclaimed message is already beyond the configured attempt budget, the dispatcher now performs a lease-fenced terminal retry transition (which marks it `failed`) without attempting another external send.
 - Added a regression test proving a message reclaimed at attempt 9 with a budget of 8 is not sent and is moved to the failed/dead-letter state through the store's fenced retry contract.
 - Tests were added but not executed in this environment. No build/typecheck or live PostgreSQL test was run. No migration, deployment, merge, or production change was performed.
+
+## Follow-up: cancellation payload and destination validation hardening
+
+- Found a concrete integration mismatch: `cancelWithOutbox()` created a `job.cancelled` event with job ID/status only, while the messaging outbox sender requires a non-empty `payload.text`. This meant atomic cancellation notifications would be retried and eventually dead-lettered rather than delivered.
+- Fixed the cancellation event payload to include a short, non-sensitive Thai notification text. It deliberately does not include the task contents or other potentially private job data.
+- Tightened the messaging outbox destination parser: Discord channel IDs must be numeric (1–24 digits); Telegram chat IDs must be signed or unsigned numeric IDs (up to 20 digits). URL-like strings, path fragments, query strings, and arbitrary identifiers are rejected before adapter dispatch.
+- Added source-level regression assertions for the cancellation text field and malformed Telegram/Discord destination values.
+- Ownership boundary remains a host responsibility: the trusted job-submission path must derive `notificationChannelId` from the authenticated messaging identity/allowlist, not from arbitrary user task text or an untrusted request field. The outbox sender's platform allowlist and numeric ID validation do not prove that the destination belongs to the row owner.
+- Tests/typecheck/build and live PostgreSQL validation have not been run. No database migration, merge, deployment, or production change was performed.
