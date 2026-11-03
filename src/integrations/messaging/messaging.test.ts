@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createMessagingGateway } from "./gateway.js";
+import { createTelegramAdapter } from "./telegram.js";
+import { createTelegramHttpTransport } from "./telegram-http-transport.js";
 import { splitMessage } from "./format.js";
 import { messagingSessionKey } from "./session-key.js";
 import { verifyDiscordRequest, verifyTelegramWebhookSecret } from "./platform-security.js";
@@ -223,6 +225,61 @@ test("gateway restart fences stale adapter callbacks and resumes with a fresh ge
   await callbacks[1]!(message({ messageId: "fresh" }));
   assert.equal(handled, 1);
   assert.deepEqual(sent, ["ok"]);
+  await gateway.stop();
+  assert.equal(gateway.getStatus(), "stopped");
+});
+
+test("gateway reports outbound delivery failure after Telegram polling conflict stops transport", async () => {
+  const token = "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
+  let pollConflictResolve!: () => void;
+  const pollConflict = new Promise<void>((resolve) => { pollConflictResolve = resolve; });
+  let pollAttempts = 0;
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/getWebhookInfo")) {
+      return new Response(JSON.stringify({ ok: true, result: { url: "" } }), { status: 200 });
+    }
+    if (url.endsWith("/getUpdates")) {
+      pollAttempts += 1;
+      return new Response(JSON.stringify({
+        ok: false,
+        description: "Conflict: terminated by other getUpdates request",
+      }), { status: 409 });
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event) {
+      if (event === "poll_conflict") pollConflictResolve();
+    },
+  });
+  const gateway = createMessagingGateway({
+    enabled: true,
+    adapters: [createTelegramAdapter(transport)],
+    allowUser: () => true,
+    onMessage: async () => "unused",
+  });
+
+  await gateway.start();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      pollConflict,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("Timed out waiting for Telegram poll conflict")), 1_000);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(gateway.getStatus(), "running");
+  assert.equal(await gateway.send("telegram", { conversationId: "chat-1", text: "must not be reported as sent" }), false);
+  assert.equal(pollAttempts, 1);
+
   await gateway.stop();
   assert.equal(gateway.getStatus(), "stopped");
 });
