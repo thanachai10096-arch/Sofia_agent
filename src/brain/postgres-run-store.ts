@@ -23,7 +23,7 @@ export class PostgresRunStore implements RunStore {
     const value = result.rows[0]?.snapshot;
     if (value === undefined) return undefined;
     if (typeof value !== "string") return value;
-    try { return JSON.parse(value) as BrainRunSnapshot; } catch { return undefined; }
+    return JSON.parse(value) as BrainRunSnapshot;
   }
 
   async delete(runId: string): Promise<void> {
