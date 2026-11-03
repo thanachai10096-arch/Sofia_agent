@@ -288,6 +288,15 @@ export class SofiaModelGateway implements ModelProvider {
     }
 
     const protocol = config.protocol ?? "openai-compatible";
+    const outboundMessages: ChatMessage[] = brainStructuredOutput
+      ? [
+          {
+            role: "system",
+            content: "For this structured Brain request, respond with exactly one valid JSON object. JSON only: no Markdown fences, comments, or surrounding prose.",
+          },
+          ...messages,
+        ]
+      : messages;
     let endpoint: string;
     let requestHeaders: Record<string, string>;
     let body: Record<string, unknown>;
@@ -323,7 +332,7 @@ export class SofiaModelGateway implements ModelProvider {
       };
       body = {
         model: config.model,
-        messages,
+        messages: outboundMessages,
         ...(tools ? { tools, tool_choice: "auto" } : {}),
         ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" as const } } : {}),
         ...(options.maxOutputTokens
