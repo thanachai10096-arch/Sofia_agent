@@ -50,8 +50,16 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
     }
   }
   private async read(): Promise<ProjectMemoryEntry[]> {
-    try { return JSON.parse(await fs.readFile(this.file, "utf8")) as ProjectMemoryEntry[]; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    try {
+      const fileStat = await fs.lstat(this.file);
+      if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+        throw new Error("Project memory storage must be a regular file, not a symbolic link or special file.");
+      }
+      return JSON.parse(await fs.readFile(this.file, "utf8")) as ProjectMemoryEntry[];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
   }
   async save(entry: ProjectMemoryEntry): Promise<void> {
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
@@ -83,8 +91,12 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
     }).map((result) => result.entry);
   }
   readSync(): ProjectMemoryEntry[] {
-    try { const entries=JSON.parse(readFileSync(this.file,"utf8")) as ProjectMemoryEntry[]; return entries.filter(entry=>!containsPromptInjection(entry.content)); }
-    catch { return []; }
+    try {
+      const fileStat = lstatSync(this.file);
+      if (fileStat.isSymbolicLink() || !fileStat.isFile()) return [];
+      const entries = JSON.parse(readFileSync(this.file, "utf8")) as ProjectMemoryEntry[];
+      return entries.filter(entry => !containsPromptInjection(entry.content));
+    } catch { return []; }
   }
 }
 
