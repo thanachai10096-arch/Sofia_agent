@@ -58,7 +58,7 @@ for (const key of discordUserApiKeys.values()) apiKeys[key] = messagingScopes;
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
 const deps = createSofiaAgentDependencies(workspace);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
-const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
+const telegramRuntime = messagingScopesValid ? createTelegramMessagingRuntime(process.env, workspace) : undefined;
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
