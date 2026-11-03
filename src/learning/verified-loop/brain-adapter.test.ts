@@ -171,7 +171,7 @@ test("verified-completion recovery refuses malformed authoritative receipt seque
     redact: value => value,
   });
 
-  await assert.rejects(() => handler.recover(scope), /malformed or duplicate sequence/i);
+  await assert.rejects(() => handler.recover(scope), /malformed, duplicate, or non-contiguous sequence data/i);
   assert.equal(checkpoint.getState().lastSequence, 0);
 });
 
