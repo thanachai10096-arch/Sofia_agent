@@ -235,3 +235,14 @@ The method rejects non-terminal statuses before issuing SQL. If the job update a
 `DurableJobRuntime` detects this optional capability and uses it for completed, failed, and cancelled terminal persistence when present. Local/file stores retain their existing save behavior. The event payload is secret-redacted and intentionally contains only job ID, terminal status, and the available result/error fields; the destination and owner are sourced from the persisted job row, not from the event payload.
 
 Important boundary: this closes the terminal-transition/outbox gap only for hosts that inject `PostgresJobStateStore`. The current Vercel runtime is not wired to PostgreSQL, and no live database test has verified this statement. The dispatcher still needs a trusted worker and platform-specific senders. The notification payload contract must be reviewed by each sender before exposing result content to a chat destination.
+
+
+## Atomic cancellation and host-managed outbox worker
+
+`PostgresJobStateStore.cancelWithOutbox(id, ownerKeyId?)` now performs cancellation and optional `job.cancelled` outbox insertion in one PostgreSQL statement. The owner predicate is applied in the update itself when an owner ID is supplied. The event destination and owner are taken from the updated row; no event is inserted when the job has no notification channel. The unique event key makes repeated cancellation persistence idempotent.
+
+`DurableJobRuntime.cancel()` and `cancelForOwner()` use this optional capability when available. Other stores retain their existing cancellation behavior. This covers queued jobs that never start a worker as well as running jobs whose worker is aborted after the persisted cancellation.
+
+`OutboxWorker` provides a host-managed polling lifecycle around `OutboxDispatcher`: one loop per instance, bounded polling interval, error observation, and graceful stop that waits for an active dispatch. It does not spawn a process or start itself. A trusted long-lived host must explicitly construct and start it; do not run it inside a short-lived API request handler. Vercel Daemons are a possible host integration, but no daemon entrypoint or deployment has been added here.
+
+The worker does not renew leases. Keep sender request timeouts below the dispatcher lease duration until lease renewal is implemented. Delivery remains at-least-once.
