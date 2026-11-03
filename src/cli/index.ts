@@ -7,6 +7,7 @@ import { stdin, stdout } from "node:process";
 import { SofiaAgent } from "../agent/core.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
+import { createCliSessionId } from "./session-id.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -114,7 +115,7 @@ async function runLocal(task: string, interactive: boolean) {
     const agent = new SofiaAgent(deps);
     const result = await agent.run({
       task: task.trim(),
-      sessionId: interactive ? "cli:default" : "cli:run",
+      sessionId: createCliSessionId(interactive),
       principalId: "local-cli",
     });
     console.log(result.output);
