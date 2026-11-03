@@ -42,6 +42,47 @@ export async function assertNoLegacyPlaintextApiKey(filePath: string, environmen
   }
 }
 
+
+/**
+ * Read only non-secret CLI settings. Legacy plaintext credentials are never
+ * imported into process.env; users must migrate them to environment variables.
+ */
+export async function readSafeLocalConfig(filePath: string): Promise<Partial<SafeLocalConfig>> {
+  let fileStat;
+  try {
+    fileStat = await lstat(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+  if (!fileStat.isFile() || fileStat.isSymbolicLink()) {
+    throw new Error("Sofia config must be a regular file, not a symbolic link.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(filePath, "utf8"));
+  } catch {
+    throw new Error("Existing Sofia config is not valid JSON; refusing to load it.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Existing Sofia config must contain a JSON object.");
+  }
+  const config = parsed as Record<string, unknown>;
+  if (typeof config.apiKey === "string" && config.apiKey.length > 0) {
+    throw new Error("A legacy plaintext API key exists in ~/.sofia/config.json. Move it to the matching environment variable, then securely remove the apiKey field before running Sofia.");
+  }
+  for (const field of ["provider", "baseUrl", "model"] as const) {
+    if (config[field] !== undefined && typeof config[field] !== "string") {
+      throw new Error(`Invalid Sofia config: ${field} must be a string.`);
+    }
+  }
+  return {
+    ...(typeof config.provider === "string" ? { provider: config.provider } : {}),
+    ...(typeof config.baseUrl === "string" ? { baseUrl: config.baseUrl } : {}),
+    ...(typeof config.model === "string" ? { model: config.model } : {}),
+  };
+}
+
 /**
  * Atomically persist only non-secret provider metadata. The destination is
  * replaced by rename, so a pre-existing symlink is never followed.
