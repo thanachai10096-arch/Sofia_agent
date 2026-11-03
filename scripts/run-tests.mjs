@@ -26,6 +26,7 @@ async function visit(directory) {
 
 await visit(path.join(root, "src"));
 await visit(path.join(root, "tests"));
+await visit(path.join(root, "api"));
 files.sort();
 if (files.length === 0) {
   console.error("No TypeScript test files were found under src/ or tests/.");

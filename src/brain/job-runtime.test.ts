@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
+import type { JobRecord, JobStateStore } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
 
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
@@ -996,4 +997,72 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(selectedRoute, "coding");
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
+});
+
+
+test("DurableJobRuntime accepts an injected JobStateStore without changing the default file store", async () => {
+  const records = new Map<string, JobRecord>();
+  const store: JobStateStore = {
+    async claim(id, ownerToken, leaseMs) {
+      const current = records.get(id);
+      if (!current || current.status === "completed" || current.status === "cancelled") return undefined;
+      if (current.status === "running" && Date.parse(current.leaseExpiresAt ?? "") > Date.now()) return undefined;
+      const now = Date.now();
+      const claimed = {
+        ...current,
+        status: "running" as const,
+        leaseOwnerToken: ownerToken,
+        heartbeatAt: new Date(now).toISOString(),
+        leaseExpiresAt: new Date(now + leaseMs).toISOString(),
+        updatedAt: new Date(now).toISOString(),
+      };
+      records.set(id, claimed);
+      return { ...claimed };
+    },
+    async heartbeat(id, ownerToken, leaseMs) {
+      const current = records.get(id);
+      if (!current || current.status !== "running" || current.leaseOwnerToken !== ownerToken ||
+          Date.parse(current.leaseExpiresAt ?? "") <= Date.now()) return false;
+      const now = Date.now();
+      records.set(id, { ...current, heartbeatAt: new Date(now).toISOString(),
+        leaseExpiresAt: new Date(now + leaseMs).toISOString(), updatedAt: new Date(now).toISOString() });
+      return true;
+    },
+    async markInterruptedIfExpired(id) {
+      const current = records.get(id);
+      if (!current || current.status !== "running" || Date.parse(current.leaseExpiresAt ?? "") > Date.now()) return current && { ...current };
+      const interrupted = { ...current, status: "failed" as const, error: "Job lease expired.", leaseOwnerToken: undefined };
+      records.set(id, interrupted);
+      return { ...interrupted };
+    },
+    async cancel(id) {
+      const current = records.get(id);
+      if (!current || ["completed", "failed", "cancelled"].includes(current.status)) return undefined;
+      const cancelled = { ...current, status: "cancelled" as const, error: current.error ?? "Job cancelled." };
+      records.set(id, cancelled);
+      return { ...cancelled };
+    },
+    async save(record) {
+      const current = records.get(record.id);
+      if (current && current.leaseOwnerToken !== record.leaseOwnerToken) return false;
+      if (current?.status === "cancelled" && record.status !== "cancelled") return false;
+      records.set(record.id, { ...record });
+      return true;
+    },
+    async list() { return [...records.values()].map((record) => ({ ...record })); },
+    async get(id) { const record = records.get(id); return record && { ...record }; },
+  };
+  const runtime = new DurableJobRuntime(() => ({
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain), undefined, "injected-store-test-" + randomUUID(), store);
+
+  const submitted = await runtime.submit({ task: "persist through injected store" });
+  assert.ok(records.has(submitted.id), "submit must write through the injected store");
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "completed");
+  assert.equal((await runtime.list()).some((record) => record.id === submitted.id), true);
 });

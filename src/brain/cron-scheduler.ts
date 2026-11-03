@@ -48,11 +48,30 @@ export interface CronAuditEvent {
   scheduleId: string;
   detail?: string;
 }
-interface SchedulerState {
+/**
+ * Complete durable state for cron scheduling. Shared-store adapters must preserve
+ * all three collections together; partial writes can cause duplicate dispatch or
+ * make execution/audit history inconsistent.
+ */
+export interface SchedulerState {
   schedules: CronSchedule[];
   history: CronExecution[];
   audit: CronAuditEvent[];
 }
+
+/**
+ * Atomic transaction boundary for CronScheduler.
+ *
+ * Implementations must serialize conflicting transactions across every worker
+ * that shares the store (serializable isolation, or equivalent row/advisory
+ * locking). The callback's state mutations must commit together only when the
+ * callback resolves successfully; rejected callbacks must roll back. Adapters
+ * must not expose partially committed state to another transaction.
+ *
+ * FileCronStore provides this guarantee only for cooperating processes on one
+ * host using the same filesystem. Multi-host/serverless deployments require a
+ * shared transactional implementation; process-local mutexes are insufficient.
+ */
 export interface CronStore {
   transact<T>(operation: (state: SchedulerState) => Promise<T> | T): Promise<T>;
 }

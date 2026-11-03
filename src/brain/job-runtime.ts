@@ -105,7 +105,24 @@ async function isExclusiveFileCollision(error: unknown, file: string): Promise<b
   }
 }
 
-class FileJobStateStore {
+/**
+ * Persistence boundary for durable Brain jobs.
+ *
+ * Implementations must make claim/heartbeat/cancel/save atomic across workers
+ * and enforce lease-owner fencing. FileJobStateStore is the local, single-host
+ * implementation; cloud adapters must use a shared transactional store.
+ */
+export interface JobStateStore {
+  claim(id: string, ownerToken: string, leaseMs: number): Promise<JobRecord | undefined>;
+  heartbeat(id: string, ownerToken: string, leaseMs: number): Promise<boolean>;
+  markInterruptedIfExpired(id: string): Promise<JobRecord | undefined>;
+  cancel(id: string): Promise<JobRecord | undefined>;
+  save(record: JobRecord): Promise<boolean>;
+  list(): Promise<JobRecord[]>;
+  get(id: string): Promise<JobRecord | undefined>;
+}
+
+class FileJobStateStore implements JobStateStore {
   private readonly file: string;
   private readonly lockFile: string;
   private writes: Promise<void> = Promise.resolve();
@@ -418,7 +435,7 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly controllers = new Map<string, AbortController>();
   private readonly resuming = new Set<string>();
   private readonly starting = new Set<string>();
-  private readonly state: FileJobStateStore;
+  private readonly state: JobStateStore;
 
   constructor(
     private readonly brainFactory: (options: {
@@ -429,8 +446,9 @@ export class DurableJobRuntime implements JobRuntime {
     }) => SofiaBrain,
     private readonly runStore?: RunStore,
     namespace = process.cwd(),
+    stateStore?: JobStateStore,
   ) {
-    this.state = new FileJobStateStore(namespace);
+    this.state = stateStore ?? new FileJobStateStore(namespace);
   }
 
   async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {

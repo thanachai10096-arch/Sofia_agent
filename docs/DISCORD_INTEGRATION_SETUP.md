@@ -28,11 +28,32 @@ Completed jobs can contribute a short, redacted session context to later `/run` 
 
 Required for the API entrypoint:
 
-- `SOFIA_API_KEY`: a strong server-side API key.
+- `SOFIA_API_KEY`: a strong server-side API authentication key.
 - `DISCORD_PUBLIC_KEY`: the Discord application's 32-byte public key as 64 hexadecimal characters.
 - `DISCORD_BOT_TOKEN`: bot token.
 - `DISCORD_ALLOWED_USER_IDS`: comma-separated Discord user IDs allowed to invoke Sofia.
 - `DISCORD_ALLOWED_CHANNEL_IDS`: comma-separated channel IDs allowed to invoke Sofia.
+
+### Select DeepSeek for Discord-triggered Sofia jobs (optional)
+
+Discord does not have a separate model gateway. The Discord handler submits jobs to the same `deps.jobRuntime` created by `createSofiaAgentDependencies()`; that dependency factory loads the model provider from the server environment. To route those jobs through DeepSeek, configure the **same API/Core process that receives Discord interactions** with:
+
+```dotenv
+SOFIA_MODEL_PROVIDER=deepseek
+DEEPSEEK_API_KEY=replace-with-your-deepseek-api-key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-flash
+```
+
+`DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL` are optional when the defaults are suitable. You may set route-specific values such as `DEEPSEEK_CODING_MODEL` and `DEEPSEEK_REASONING_MODEL` when those model IDs are supported by your DeepSeek account/API.
+
+Important:
+
+- Store `DEEPSEEK_API_KEY` only in the API host's server-side secret/environment settings. Never put it in Discord command options, a bot/client bundle, source control, screenshots, or chat.
+- `SOFIA_API_KEY` above authenticates requests to the Sofia API; it is not the DeepSeek credential. Keep the two credentials separate.
+- If multiple built-in provider keys are configured, set `SOFIA_MODEL_PROVIDER` explicitly. This prevents adding a second provider key from silently changing provider selection.
+- Changing the model environment requires a controlled API process restart/redeployment. It does not require a Discord-specific model setting.
+- This configuration enables the DeepSeek route in code; it does not by itself prove a live DeepSeek API call or Discord end-to-end delivery. Complete the smoke test below before treating the integration as connected.
 
 Example using placeholders only:
 
@@ -89,6 +110,7 @@ The server exposes the interaction handler at `/v1/integrations/discord/interact
 7. If testing `/cancel` or `/resume`, use a disposable task with a known safe checkpoint and verify its final state.
 8. Restart the server in a controlled test and verify interrupted jobs are reported and that `/resume` works only when a valid checkpoint exists.
 9. Inspect redacted logs and confirm no bot token, API key, or private prompt content is leaked.
+10. With DeepSeek selected, run a harmless prompt such as `Reply with exactly DEEPSEEK_DISCORD_OK`; verify the job completes and the exact response is delivered in the Discord channel. Confirm server logs identify no credential values (never log the key itself).
 
 ## Current limitations / production gate
 

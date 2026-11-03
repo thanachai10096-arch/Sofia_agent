@@ -17,6 +17,20 @@ const names = [
   "GEMINI_CODING_MODEL",
   "GEMINI_REASONING_MODEL",
   "GEMINI_VISION_MODEL",
+  "KIMI_API_KEY",
+  "KIMI_BASE_URL",
+  "KIMI_MODEL",
+  "KIMI_FAST_MODEL",
+  "KIMI_CODING_MODEL",
+  "KIMI_REASONING_MODEL",
+  "KIMI_VISION_MODEL",
+  "DEEPSEEK_API_KEY",
+  "DEEPSEEK_BASE_URL",
+  "DEEPSEEK_MODEL",
+  "DEEPSEEK_FAST_MODEL",
+  "DEEPSEEK_CODING_MODEL",
+  "DEEPSEEK_REASONING_MODEL",
+  "DEEPSEEK_VISION_MODEL",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_MODEL",
@@ -51,6 +65,87 @@ afterEach(() => {
   for (const [name, value] of original) {
     if (value !== undefined) process.env[name] = value;
   }
+});
+
+test("Kimi provider uses the official OpenAI-compatible endpoint and supports route overrides", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "kimi";
+  process.env.KIMI_API_KEY = "kimi-test-key";
+  process.env.KIMI_CODING_MODEL = "kimi-k3";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.moonshot.ai/v1");
+  assert.equal(config.providers.fast?.apiKey, "kimi-test-key");
+  assert.equal(config.providers.fast?.model, "kimi-k3");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
+  assert.equal(config.providers.coding?.model, "kimi-k3");
+});
+
+test("Kimi provider accepts an explicit compatible base URL and model", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "kimi";
+  process.env.KIMI_API_KEY = "kimi-test-key";
+  process.env.KIMI_BASE_URL = "https://api.moonshot.cn/v1";
+  process.env.KIMI_MODEL = "kimi-custom-model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.moonshot.cn/v1");
+  assert.equal(config.providers.fast?.model, "kimi-custom-model");
+});
+
+test("Kimi Code membership endpoint can be selected without changing the provider adapter", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "kimi";
+  process.env.KIMI_API_KEY = "kimi-code-test-key";
+  process.env.KIMI_BASE_URL = "https://api.kimi.ai/coding/v1";
+  process.env.KIMI_MODEL = "kimi-for-coding";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.kimi.ai/coding/v1");
+  assert.equal(config.providers.fast?.apiKey, "kimi-code-test-key");
+  assert.equal(config.providers.fast?.model, "kimi-for-coding");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
+});
+
+test("Kimi provider rejects missing credentials", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "kimi";
+  assert.throws(loadModelConfigFromEnv, /requires KIMI_API_KEY/);
+});
+
+test("Kimi is auto-selected when it is the only configured built-in provider", () => {
+  clear();
+  process.env.KIMI_API_KEY = "kimi-test-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.moonshot.ai/v1");
+  assert.equal(config.providers.fast?.apiKey, "kimi-test-key");
+  assert.equal(config.providers.fast?.model, "kimi-k3");
+});
+
+test("DeepSeek provider uses the official OpenAI-compatible endpoint and supports route overrides", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.DEEPSEEK_CODING_MODEL = "deepseek-v4-pro";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.providers.fast?.apiKey, "deepseek-test-key");
+  assert.equal(config.providers.fast?.model, "deepseek-flash");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
+  assert.equal(config.providers.coding?.model, "deepseek-v4-pro");
+});
+
+test("DeepSeek can be selected explicitly alongside other configured providers", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "deepseek-test-key");
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+});
+
+test("DeepSeek provider rejects missing credentials", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  assert.throws(loadModelConfigFromEnv, /requires DEEPSEEK_API_KEY/);
 });
 
 test("Gemini key selects direct Google Gemini API when no other provider is configured", () => {
@@ -192,4 +287,22 @@ test("custom endpoints can opt into the Anthropic Messages protocol", () => {
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.protocol, "anthropic-messages");
   assert.equal(config.providers.fast?.baseUrl, "https://anthropic-proxy.example.test/v1");
+});
+
+
+test("DeepSeek is auto-selected when it is the only configured built-in provider", () => {
+  clear();
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.providers.fast?.apiKey, "deepseek-test-key");
+  assert.equal(config.providers.fast?.model, "deepseek-flash");
+});
+
+test("DeepSeek base URL rejects credential-bearing or malformed URLs", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.DEEPSEEK_BASE_URL = "https://user:password@api.deepseek.com";
+  assert.throws(loadModelConfigFromEnv, /must not contain credentials/);
 });
