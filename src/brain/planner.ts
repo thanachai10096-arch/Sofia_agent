@@ -40,7 +40,14 @@ export function parseUnderstanding(value: unknown): TaskUnderstanding {
   const input = object(value);
 
   if (input.risk !== "low" && input.risk !== "medium" && input.risk !== "high") {
-    throw new Error("Invalid task risk");
+    const receivedType = input.risk === null
+      ? "null"
+      : Array.isArray(input.risk)
+        ? "array"
+        : typeof input.risk;
+    throw new Error(
+      `Invalid field "risk": expected "low" | "medium" | "high"; received type ${receivedType}.`,
+    );
   }
 
   return {
