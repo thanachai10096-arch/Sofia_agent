@@ -94,49 +94,55 @@ export class SqliteModelCallJournal {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       }
-      if (process.platform !== "win32") {
-        const stat = fs.lstatSync(absolutePath);
-        if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Model call journal must be a regular file");
-        fs.chmodSync(absolutePath, stat.mode & 0o600);
-      }
+      const stat = fs.lstatSync(absolutePath);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Model call journal must be a regular file");
+      // Windows relies on inherited ACLs; POSIX mode bits are tightened only.
+      if (process.platform !== "win32") fs.chmodSync(absolutePath, stat.mode & 0o600);
     }
 
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolutePath);
     try {
       db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
-      const version = Number(db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
-      if (version > 1) throw new Error("Model call journal schema is newer than this Sofia Agent supports");
-      if (version === 0) {
-        db.exec(`
-          BEGIN IMMEDIATE;
-          CREATE TABLE model_call_journal (
-            idempotency_key TEXT PRIMARY KEY NOT NULL,
-            run_id TEXT NOT NULL,
-            phase TEXT NOT NULL,
-            provider_id TEXT NOT NULL,
-            model_id TEXT NOT NULL,
-            attempt INTEGER NOT NULL CHECK (attempt >= 1),
-            reserved_input_tokens INTEGER NOT NULL CHECK (reserved_input_tokens >= 0),
-            reserved_output_tokens INTEGER NOT NULL CHECK (reserved_output_tokens >= 0),
-            state TEXT NOT NULL CHECK (state IN ('dispatched', 'settled', 'indeterminate')),
-            dispatched_at INTEGER NOT NULL,
-            settled_at INTEGER,
-            actual_input_tokens INTEGER,
-            actual_output_tokens INTEGER,
-            cost_nano_usd TEXT,
-            CHECK (
-              (state = 'settled' AND settled_at IS NOT NULL AND actual_input_tokens IS NOT NULL
-                AND actual_output_tokens IS NOT NULL AND cost_nano_usd IS NOT NULL)
-              OR
-              (state <> 'settled' AND settled_at IS NULL AND actual_input_tokens IS NULL
-                AND actual_output_tokens IS NULL AND cost_nano_usd IS NULL)
-            )
-          );
-          CREATE INDEX model_call_journal_run_idx ON model_call_journal(run_id, dispatched_at);
-          PRAGMA user_version = 1;
-          COMMIT;
-        `);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        // Re-read the schema version while holding the write lock. Two processes
+        // opening a new journal concurrently must not both attempt CREATE TABLE.
+        const version = Number(db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
+        if (version > 1) throw new Error("Model call journal schema is newer than this Sofia Agent supports");
+        if (version === 0) {
+          db.exec(`
+            CREATE TABLE model_call_journal (
+              idempotency_key TEXT PRIMARY KEY NOT NULL,
+              run_id TEXT NOT NULL,
+              phase TEXT NOT NULL,
+              provider_id TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              attempt INTEGER NOT NULL CHECK (attempt >= 1),
+              reserved_input_tokens INTEGER NOT NULL CHECK (reserved_input_tokens >= 0),
+              reserved_output_tokens INTEGER NOT NULL CHECK (reserved_output_tokens >= 0),
+              state TEXT NOT NULL CHECK (state IN ('dispatched', 'settled', 'indeterminate')),
+              dispatched_at INTEGER NOT NULL,
+              settled_at INTEGER,
+              actual_input_tokens INTEGER,
+              actual_output_tokens INTEGER,
+              cost_nano_usd TEXT,
+              CHECK (
+                (state = 'settled' AND settled_at IS NOT NULL AND actual_input_tokens IS NOT NULL
+                  AND actual_output_tokens IS NOT NULL AND cost_nano_usd IS NOT NULL)
+                OR
+                (state <> 'settled' AND settled_at IS NULL AND actual_input_tokens IS NULL
+                  AND actual_output_tokens IS NULL AND cost_nano_usd IS NULL)
+              )
+            );
+            CREATE INDEX model_call_journal_run_idx ON model_call_journal(run_id, dispatched_at);
+            PRAGMA user_version = 1;
+          `);
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
       }
       return new SqliteModelCallJournal(db, absolutePath);
     } catch (error) {
