@@ -76,6 +76,27 @@ test("learns only after repeated verified experiences and passing regression evi
   assert.equal((await loop.retrieveSkills(scope, "TypeScript")).length, 1);
   assert.equal((await loop.retrieveSkills({ ...scope, tenantId: "other" }, "TypeScript")).length, 0);
 });
+test("retrieved skill data cannot mutate adapter-owned scope or procedure state", async () => {
+  const state = makeHost();
+  state.active.push({
+    id: "defensive-copy-skill", scope: { ...scope }, experienceId: "experience-1",
+    name: "learned-typescript", trigger: "TypeScript task",
+    procedure: ["inspect trusted evidence", "verify result"], confidence: 0.9,
+    status: "active", activatedAt: new Date().toISOString(), policyRevision: "policy-1",
+  });
+
+  const loop = new VerifiedLearningLoop(state.host);
+  const retrieved = await loop.retrieveSkills(scope, "TypeScript");
+  assert.equal(retrieved.length, 1);
+  retrieved[0]!.scope.tenantId = "other-tenant";
+  retrieved[0]!.procedure[0] = "bypass policy";
+
+  const again = await loop.retrieveSkills(scope, "TypeScript");
+  assert.equal(again.length, 1);
+  assert.equal(again[0]!.scope.tenantId, scope.tenantId);
+  assert.equal(again[0]!.procedure[0], "inspect trusted evidence");
+});
+
 test("does not retrieve active skills when policy changes before the read transaction", async () => {
   const state = makeHost();
   state.active.push({
