@@ -41,6 +41,7 @@ export function createVoiceUtteranceController(options: VoiceUtteranceController
   let state: "listening" | "capturing" | "processing" | "closed" = "listening";
   let activeTurn: Promise<unknown> | undefined;
   let pending = false;
+  let queued: { frames: VoicePreRollFrame[]; durationMs: number } | undefined;
   const isClosed = () => state === "closed";
 
   const report = (cause: unknown) => {
@@ -53,26 +54,41 @@ export function createVoiceUtteranceController(options: VoiceUtteranceController
     bytes += frame.bytes.byteLength;
   };
   const submit = (completed: VoicePreRollFrame[], durationMs: number) => {
-    if (pending) { report(new Error("Voice session is still processing a previous utterance")); return; }
+    if (pending) {
+      if (queued) { report(new Error("Voice utterance queue is full")); return; }
+      queued = { frames: completed, durationMs };
+      return;
+    }
     pending = true;
     state = "processing";
     void (async () => {
+      let next: { frames: VoicePreRollFrame[]; durationMs: number } | undefined = { frames: completed, durationMs };
       try {
-        if (activeTurn) await activeTurn.catch(() => undefined);
-        if (isClosed()) return;
-        const total = completed.reduce((sum, item) => sum + item.bytes.byteLength, 0);
-        const audio = new Uint8Array(total);
-        let offset = 0;
-        for (const item of completed) { audio.set(item.bytes, offset); offset += item.bytes.byteLength; }
-        const turn = options.session.processTurn({ bytes: audio, mimeType, durationMs });
-        activeTurn = turn;
-        const result = await turn;
-        try { await options.onTurnResult?.(result); } catch (error) { report(error); }
+        while (next && !isClosed()) {
+          if (activeTurn) await activeTurn.catch(() => undefined);
+          if (isClosed()) break;
+          const total = next.frames.reduce((sum, item) => sum + item.bytes.byteLength, 0);
+          const audio = new Uint8Array(total);
+          let offset = 0;
+          for (const item of next.frames) { audio.set(item.bytes, offset); offset += item.bytes.byteLength; }
+          const turn = options.session.processTurn({ bytes: audio, mimeType, durationMs: next.durationMs });
+          activeTurn = turn;
+          try {
+            const result = await turn;
+            try { await options.onTurnResult?.(result); } catch (error) { report(error); }
+          } catch (error) {
+            if (!isClosed()) report(error);
+          } finally {
+            if (activeTurn === turn) activeTurn = undefined;
+          }
+          next = queued;
+          queued = undefined;
+        }
       } catch (error) {
         if (!isClosed()) report(error);
       } finally {
         pending = false;
-        activeTurn = undefined;
+        queued = undefined;
         if (!isClosed()) state = "listening";
       }
     })();
@@ -111,7 +127,7 @@ export function createVoiceUtteranceController(options: VoiceUtteranceController
     snapshot() { return { state, bufferedBytes: bytes + preRoll.snapshot().bytes }; },
     close(reason = "Voice utterance controller closed") {
       if (isClosed()) return;
-      state = "closed"; frames = undefined; bytes = 0; preRoll.clear(); vad.reset();
+      state = "closed"; frames = undefined; bytes = 0; queued = undefined; preRoll.clear(); vad.reset();
       options.session.close(reason);
     },
   };
