@@ -328,7 +328,12 @@ export class CronScheduler {
       const schedule = state.schedules.find(s => s.id === id);
       if (!schedule) throw new Error("Unknown cron schedule");
       if (!await this.authorize(actor, "update", schedule)) throw new Error("Not authorized to view cron history");
-      return state.history.filter(h => h.scheduleId === id).map(({ recoveryLeaseOwnerToken: _ownerToken, recoveryLeaseExpiresAt: _leaseExpiry, ...execution }) => ({ ...execution }));
+      return state.history.filter(h => h.scheduleId === id).map(h => {
+        const execution = { ...h };
+        delete execution.recoveryLeaseOwnerToken;
+        delete execution.recoveryLeaseExpiresAt;
+        return execution;
+      });
     });
   }
   async tick(): Promise<void> {
