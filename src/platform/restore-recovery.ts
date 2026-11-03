@@ -204,13 +204,10 @@ export async function recoverInterruptedRestoreTransaction(
     for (const target of [...record.targets].reverse()) {
       if (target.phase === "pending" || target.phase === "rolled_back") continue;
       const adapter = byName.get(target.name)!;
+      const bytes = rollbackBytes.get(target.name);
+      if (!bytes) throw new Error(`Verified rollback snapshot is missing for target: ${target.name}`);
       try {
-        const bytes = rollbackBytes.get(target.name);
-        if (!bytes) throw new Error(`Verified rollback snapshot is missing for target: ${target.name}`);
         await adapter.rollbackFromSnapshotBytes(bytes);
-        const updated = record.targets.map((item) =>
-          item.name === target.name ? { ...item, phase: "rolled_back" as const } : item);
-        await append("rolling_back", updated, "startup_recovery_requested");
       } catch (error) {
         const updated = record.targets.map((item) =>
           item.name === target.name ? { ...item, phase: "rollback_failed" as const } : item);
@@ -227,6 +224,14 @@ export async function recoverInterruptedRestoreTransaction(
           { cause: error },
         );
       }
+
+      // Keep the adapter operation and its journal acknowledgement in separate
+      // failure domains. If the target rollback succeeds but this append fails,
+      // leave the durable phase as rollback_pending so a later attempt can replay
+      // the idempotent rollback instead of falsely recording rollback_failed.
+      const updated = record.targets.map((item) =>
+        item.name === target.name ? { ...item, phase: "rolled_back" as const } : item);
+      await append("rolling_back", updated, "startup_recovery_requested");
     }
 
     await append("rolled_back", record.targets, "startup_recovery_completed");
