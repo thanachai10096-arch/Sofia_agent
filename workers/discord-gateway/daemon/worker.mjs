@@ -80,16 +80,18 @@ async function runSofia({ apiBase, apiKey, bypass, message }) {
   if (bypass) url.searchParams.set("x-vercel-protection-bypass", bypass);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const headers = {
+    authorization: `Bearer ${apiKey}`,
+    "content-type": "application/json",
+    "idempotency-key": `discord_${message.id}`,
+  };
   try {
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        "idempotency-key": `discord_${message.id}`,
-      },
+      headers,
       body: JSON.stringify({
         task,
+        async: true,
         context: [
           "Origin: Discord normal message.",
           `Discord user ID: ${message.author.id}.`,
@@ -99,13 +101,44 @@ async function runSofia({ apiBase, apiKey, bypass, message }) {
       }),
       signal: controller.signal,
     });
-    const data = await response.json().catch(() => ({}));
+    let data = await response.json().catch(() => ({}));
     console.log("sofia_api_response", response.status, Object.keys(data ?? {}).slice(0, 12).join(","));
     if (!response.ok) {
       if (response.status === 429) return "ตอนนี้ Sofia มีคำขอมากเกินไป ลองใหม่อีกครั้งในอีกสักครู่นะครับ";
       throw new Error(`Sofia API request failed: HTTP ${response.status}`);
     }
-    return extractReply(data);
+    if (typeof data.id !== "string" || !data.id || !["queued", "running", "completed", "failed", "cancelled"].includes(data.status)) {
+      throw new Error("Sofia API returned an invalid async run response.");
+    }
+
+    // Replaying the same Discord message ID returns the same owner-scoped async run.
+    // Poll that run instead of accidentally acknowledging the request as its final answer.
+    const deadline = Date.now() + API_TIMEOUT_MS - 5_000;
+    while (data.status === "queued" || data.status === "running") {
+      if (Date.now() >= deadline) throw new Error("Sofia async run polling timed out.");
+      await sleep(1_000);
+      const statusUrl = new URL(`/api/v1/agent/runs/${encodeURIComponent(data.id)}`, apiBase);
+      if (bypass) statusUrl.searchParams.set("x-vercel-protection-bypass", bypass);
+      const statusResponse = await fetch(statusUrl, {
+        method: "GET",
+        headers: { authorization: `Bearer ${apiKey}` },
+        signal: controller.signal,
+      });
+      data = await statusResponse.json().catch(() => ({}));
+      if (!statusResponse.ok) throw new Error(`Sofia run status request failed: HTTP ${statusResponse.status}`);
+      if (data.id !== undefined && data.id !== statusUrl.pathname.split("/").pop()) {
+        throw new Error("Sofia API returned a mismatched run ID.");
+      }
+      if (!["queued", "running", "completed", "failed", "cancelled"].includes(data.status)) {
+        throw new Error("Sofia API returned an invalid run status.");
+      }
+    }
+    if (data.status === "completed") return extractReply(data);
+    if (data.status === "failed" || data.status === "cancelled") {
+      const detail = typeof data.error === "string" && data.error.trim() ? data.error.trim().slice(0, 500) : "ไม่ทราบสาเหตุ";
+      return `Sofia ทำงานไม่สำเร็จ: ${detail}`;
+    }
+    throw new Error("Sofia async run ended in an unexpected state.");
   } finally {
     clearTimeout(timer);
   }
