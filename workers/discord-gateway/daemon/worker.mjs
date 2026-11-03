@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const DISCORD_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const INTENTS = 1 | 512 | 32768; // GUILDS | GUILD_MESSAGES | MESSAGE_CONTENT
@@ -52,35 +54,41 @@ async function createDiscordDmChannel(token, userId) {
   }
   return data.id;
 }
-async function sendDiscordMessage(token, channelId, content, replyTo) {
+async function sendDiscordMessage(token, channelId, content, replyTo, deliveryId) {
   const chunks = [];
   for (let offset = 0; offset < content.length; offset += MAX_DISCORD_MESSAGE) {
     chunks.push(content.slice(offset, offset + MAX_DISCORD_MESSAGE));
   }
   if (!chunks.length) chunks.push("Sofia ไม่สามารถสร้างคำตอบได้");
   let reference = replyTo;
-  for (const chunk of chunks) {
-    const response = await fetch(`${DISCORD_API_BASE}/channels/${channelId}/messages`, {
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+    const nonce = createHash("sha256")
+      .update(`${deliveryId}:${index}:${chunk}`)
+      .digest("hex")
+      .slice(0, 25);
+    const body = JSON.stringify({
+      content: chunk,
+      nonce,
+      enforce_nonce: true,
+      ...(reference ? { message_reference: { message_id: reference, fail_if_not_exists: false } } : {}),
+    });
+    const request = () => fetch(`${DISCORD_API_BASE}/channels/${channelId}/messages`, {
       method: "POST",
       headers: {
         authorization: `Bot ${token}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({
-        content: chunk,
-        ...(reference ? { message_reference: { message_id: reference, fail_if_not_exists: false } } : {}),
-      }),
+      body,
     });
+    const response = await request();
     if (response.status === 429) {
       const data = await response.json().catch(() => ({}));
       await sleep(Math.min(10_000, Math.max(250, Number(data.retry_after ?? 1) * 1000)));
-      const retry = await fetch(`${DISCORD_API_BASE}/channels/${channelId}/messages`, {
-        method: "POST",
-        headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ content: chunk }),
-      });
+      const retry = await request();
       if (!retry.ok) throw new Error("Discord message delivery failed after rate limit.");
-      reference = undefined;
+      const retriedMessage = await retry.json();
+      reference = retriedMessage.id;
       continue;
     }
     if (!response.ok) throw new Error(`Discord message delivery failed: HTTP ${response.status}`);
@@ -225,6 +233,7 @@ async function main() {
           destination,
           reply,
           replyMode === "dm" ? undefined : message.id,
+          message.id,
         );
       }
       seen.set(message.id, Date.now());
