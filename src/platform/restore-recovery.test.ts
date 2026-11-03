@@ -114,7 +114,7 @@ test("startup recovery restores an interrupted file target from a verified durab
     const journal = new FileRestoreJournalStore(path.join(root, "journal"));
 
     const inMemory = await adapter.captureRollback();
-    const encoded = adapter.serializeRollbackSnapshot!(inMemory);
+    const encoded = await adapter.serializeRollbackSnapshot!(inMemory);
     const persisted = await snapshotStore.write(transactionId, "state", encoded);
     const prepared = createRestoreJournalRecord({
       transactionId,
