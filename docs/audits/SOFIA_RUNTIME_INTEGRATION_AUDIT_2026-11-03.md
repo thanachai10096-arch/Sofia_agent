@@ -384,3 +384,17 @@ Remaining limitations:
 - At-least-once delivery remains; receivers should deduplicate using the stable message ID.
 - Stores that do not implement optional lease renewal rely on bounded transport timeouts.
 - PostgreSQL SQL and migration have not been exercised against a live database. Tests have not been run; no typecheck, build, or deployment was performed.
+
+
+## Follow-up: outbox lease renewal hardening (2026-11-03)
+
+Reviewed the lease-renewal path and tightened dispatcher ordering:
+- Lease renewal remains fenced by message ID, processing status, worker token, and unexpired lease.
+- Renewal runs during active sends and aborts the sender when the lease is lost.
+- The dispatcher now stops and joins renewal before ACK/retry, preventing a late heartbeat from racing with terminal acknowledgement.
+- A sender that ignores abort cannot cause ACK after a known lease loss.
+- Explicitly handles JavaScript senders that reject with `undefined`.
+
+Added regression tests for lost-renewal behavior and renewal/ACK ordering. Existing tests also cover renewal success and abort-aware senders.
+
+Not verified: tests/typecheck/build have not been executed in this environment; no live PostgreSQL race test or deployment has been performed.
