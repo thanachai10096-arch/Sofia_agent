@@ -111,7 +111,7 @@ test("Discord persists only explicit remember requests under the user's own prin
   const root = await mkdtemp(path.join(tmpdir(), "sofia-discord-memory-"));
   const store = new FileUserMemoryStore(root);
   try {
-    assert.equal(await saveExplicitDiscordUserMemory(store, "discord:123", "ช่วยจำไว้ว่า ฉันชอบคำตอบภาษาไทย"), true);
+    assert.equal(await saveExplicitDiscordUserMemory(store, "discord:123", "จำไว้ว่า ฉันชอบคำตอบภาษาไทย"), true);
     assert.equal(await saveExplicitDiscordUserMemory(store, "discord:123", "I like concise explanations"), false);
     const alice = await store.list("discord:123");
     assert.equal(alice.length, 1);
