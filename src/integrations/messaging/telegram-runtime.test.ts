@@ -5,6 +5,7 @@ import {
   reportTelegramRunCompletion,
   parseTelegramChatAllowlist,
   parseTelegramUserAllowlist,
+  parseTelegramUserApiKeys,
 } from "./telegram-runtime.js";
 
 test("Telegram allowlists accept numeric user IDs and signed chat IDs", () => {
@@ -98,4 +99,15 @@ test("Telegram run completion reports failed runs without exposing internal erro
   assert.match(sent[0]?.text ?? "", /task failed/i);
   assert.match(sent[0]?.text ?? "", /Reason: provider_http_402_insufficient_credits/);
   assert.doesNotMatch(sent[0]?.text ?? "", /Bearer secret-token/);
+});
+
+
+test("Telegram per-user API keys require unique credentials for numeric user IDs", () => {
+  const keys = parseTelegramUserApiKeys('{"123":"key-one","456":"key-two"}');
+  assert.equal(keys.get("123"), "key-one");
+  assert.equal(keys.get("456"), "key-two");
+  assert.throws(() => parseTelegramUserApiKeys("[]"), /JSON object/);
+  assert.throws(() => parseTelegramUserApiKeys('{"abc":"key-one"}'), /invalid user ID or API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"same","456":"same"}'), /distinct API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"  "}'), /invalid user ID or API key/);
 });
