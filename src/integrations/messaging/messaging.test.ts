@@ -263,10 +263,17 @@ test("gateway reports outbound delivery failure after Telegram polling conflict 
   });
 
   await gateway.start();
-  await Promise.race([
-    pollConflict,
-    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for Telegram poll conflict")), 1_000)),
-  ]);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      pollConflict,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("Timed out waiting for Telegram poll conflict")), 1_000);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(gateway.getStatus(), "running");
