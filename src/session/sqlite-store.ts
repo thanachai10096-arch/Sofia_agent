@@ -34,7 +34,7 @@ type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
 /** Built-in node:sqlite was introduced in Node 22.5.0. */
 export function supportsNodeSqlite(version: string): boolean {
-  const match = /^(\\d+)\\.(\\d+)\\.(\\d+)/.exec(version);
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
   if (!match) return false;
   const major = Number(match[1]);
   const minor = Number(match[2]);
