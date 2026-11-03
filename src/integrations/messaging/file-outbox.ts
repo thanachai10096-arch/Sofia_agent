@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ChatPlatform } from "../chat-adapter.js";
 import type { OutboundMessage } from "./types.js";
 import { calculateMessagingRetry } from "./outbox-retry-policy.js";
+import { isValidMessagingOutboxRecord } from "./outbox-record-validation.js";
 
 export interface MessagingOutboxRecord {
   id: string;
@@ -245,16 +246,8 @@ export class FileMessagingOutbox {
       try {
         const raw = await readFile(this.file(id), "utf8");
         if (Buffer.byteLength(raw, "utf8") > MAX_RECORD_BYTES + 2048) continue;
-        const value = JSON.parse(raw) as MessagingOutboxRecord;
-        if (value.id !== id || !Number.isFinite(value.createdAt) ||
-            typeof value.platform !== "string" || !value.message ||
-            typeof value.message.conversationId !== "string" ||
-            typeof value.message.text !== "string" ||
-            Buffer.byteLength(value.message.text, "utf8") > MAX_RECORD_BYTES) continue;
-        if (value.attemptHistory !== undefined &&
-            (!Array.isArray(value.attemptHistory) || value.attemptHistory.length > 8 ||
-             value.attemptHistory.some((entry) => !entry || !Number.isFinite(entry.at) ||
-               entry.outcome !== "failed" || entry.code !== "provider_unavailable"))) continue;
+        const value: unknown = JSON.parse(raw);
+        if (!isValidMessagingOutboxRecord(value, id)) continue;
         records.push(value);
       } catch { /* corrupt records remain for operator inspection; never auto-delete */ }
     }
