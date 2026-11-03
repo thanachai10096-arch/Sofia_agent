@@ -86,3 +86,8 @@ Checkpoint acknowledgement is serialized by the per-run claim and now validates 
 ## Attempt identifier uniqueness
 
 An attempt ID is a one-time journal identity. The journal rejects a second `started` event reusing an ID already seen, including reuse after a prior settlement. Unresolved-state inspection treats reuse as ambiguous evidence, checkpoint admission rejects it, and settlement validation rejects it before appending. This protects the append-only event history from duplicate or replayed attempt identities.
+
+
+## Historical usage validation before settlement
+
+Before appending a new settlement, the journal validates every prior settled event. A record marked `usageKnown: true` must contain non-negative safe-integer input and output token counts; a record marked `usageKnown: false` must not carry a usage payload. Malformed historical usage blocks further settlement appends and preserves the original evidence for operator reconciliation. This prevents a later valid attempt from extending an accounting log that already contains invalid billing evidence.
