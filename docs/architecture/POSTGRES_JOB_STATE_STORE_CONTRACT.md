@@ -204,3 +204,19 @@ Added `PostgresOutboxStore` for the existing `sofia_agent_outbox` migration tabl
 - Bounded batch size, lease duration, retry delay, maximum attempts, and stored error length.
 
 Delivery semantics are **at-least-once**, not exactly-once: a worker may deliver successfully and crash before acknowledgement, so the destination adapter must deduplicate by outbox message ID where supported. The adapter deliberately does not send Discord/Telegram messages itself and is not yet wired to job completion; a dispatcher, destination-specific delivery adapters, and end-to-end duplicate/restart tests are still release gates. Do not put provider credentials or unnecessary personal data in payloads.
+
+
+## Outbox dispatcher contract (2026-11-03)
+
+`OutboxDispatcher` is an optional host-level worker. It claims bounded batches through `OutboxStore`, calls an injected sender, and acknowledges only while its lease token is still valid. Failed sends use bounded exponential backoff and transition to failed after the configured maximum attempts. Error text is secret-redacted and length-bounded before persistence.
+
+Operational requirements:
+- Run dispatchers only in a trusted server-side worker; never expose worker tokens to clients.
+- Configure transport-level request timeouts shorter than the outbox lease, or add a lease-renewal capability before allowing longer sends.
+- Treat delivery as at-least-once. A process crash after the remote service accepts a message but before acknowledgement can cause a duplicate. The receiver/transport should deduplicate using the stable outbox message ID when supported.
+- A lost lease means the worker no longer has authority to acknowledge or retry. It must not attempt a second state mutation using a stale token.
+- Keep payloads minimal and owner-scoped. Do not put API keys, bot tokens, raw model prompts, full private conversations, or unrelated user data in outbox payloads.
+- The dispatcher is not automatically wired to `DurableJobRuntime`, Discord, or Telegram. In particular, terminal job persistence and outbox enqueue are not yet one atomic database transaction. A crash between those independent operations can leave a terminal job without a notification. Production integration must add a same-transaction terminal transition + outbox insert (or a reconciliation process with durable cursor/idempotency) before claiming reliable completion notifications.
+- The dispatcher currently processes each claimed batch sequentially and does not renew leases. Use bounded sender timeouts; add renewal before introducing slow or unbounded delivery handlers.
+
+The dispatcher unit tests are source additions only until typecheck and test commands execute in CI or a local environment.
