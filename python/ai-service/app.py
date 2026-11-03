@@ -1,4 +1,4 @@
-""""Optional, isolated AI utility service for Sofia.
+"""Optional, isolated AI utility service for Sofia.
 
 The TypeScript control plane remains authoritative for identity, permissions,
 agent execution, tools, jobs, and billing. This service only returns data.
