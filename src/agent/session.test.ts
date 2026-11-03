@@ -63,6 +63,35 @@ test("separate SofiaAgent instances append concurrent turns without losing trans
   assert.equal(messages.length, 4);
 });
 
+test("SofiaAgent preserves compatibility with legacy session stores without appendMessages", async () => {
+  const sessions = new Map<string, { id: string; messages: string[]; updatedAt: number }>();
+  const legacyStore = {
+    getOrCreate(id: string) {
+      const existing = sessions.get(id);
+      if (existing) return existing;
+      const created = { id, messages: [], updatedAt: Date.now() };
+      sessions.set(id, created);
+      return created;
+    },
+    save(session: { id: string; messages: string[]; updatedAt: number }) {
+      session.updatedAt = Date.now();
+      sessions.set(session.id, session);
+    },
+  };
+  const agent = new SofiaAgent({
+    provider: { generate: async () => ({ text: "Legacy adapter works." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: legacyStore,
+  });
+
+  await agent.run({ task: "legacy adapter request", sessionId: "legacy-session" });
+  assert.deepEqual(sessions.get("legacy-session")?.messages, [
+    "user: legacy adapter request",
+    "assistant: Legacy adapter works.",
+  ]);
+});
+
 test("SofiaAgent does not create a session unless sessionId is provided", async () => {
   const sessions = new MemorySessionStore();
   const agent = new SofiaAgent({
