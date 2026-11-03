@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import { verifyDiscordRequest } from "../../src/integrations/messaging/platform-security.js";
+import { matchDiscordUserApiKeys, parseDiscordUserApiKeys } from "../../src/integrations/messaging/discord-user-api-keys.js";
 
 export const config = {
   api: { bodyParser: false },
@@ -67,8 +68,7 @@ export default async function discordInteractions(req: IncomingMessage, res: Ser
 
   const publicKey = process.env.DISCORD_PUBLIC_KEY;
   const apiBase = process.env.SOFIA_API_BASE_URL;
-  const apiKey = process.env.SOFIA_API_KEY;
-  if (!publicKey || !apiBase || !apiKey) {
+  if (!publicKey || !apiBase) {
     reply(res, 503, { error: "discord_integration_not_configured" });
     return;
   }
@@ -128,6 +128,32 @@ export default async function discordInteractions(req: IncomingMessage, res: Ser
   const allowedChannels = allowedIds(process.env.DISCORD_ALLOWED_CHANNEL_IDS);
   if (!allowedUsers.has(user.id) || !allowedChannels.has(interaction.channel_id)) {
     reply(res, 200, { type: 4, data: { content: "Access denied.", flags: 64 } });
+    return;
+  }
+
+  let apiKey = process.env.SOFIA_API_KEY;
+  if (process.env.DISCORD_USER_API_KEYS?.trim()) {
+    try {
+      const userKeys = parseDiscordUserApiKeys(process.env.DISCORD_USER_API_KEYS.trim());
+      if (!matchDiscordUserApiKeys(userKeys, [...allowedUsers])) {
+        reply(res, 503, { error: "discord_user_key_mapping_invalid" });
+        return;
+      }
+      apiKey = userKeys.get(user.id);
+    } catch {
+      reply(res, 503, { error: "discord_user_key_mapping_invalid" });
+      return;
+    }
+  } else if (allowedUsers.size !== 1) {
+    // A shared API key collapses all Discord users into one Sofia principal.
+    reply(res, 200, {
+      type: 4,
+      data: { content: "This Discord deployment requires a distinct Sofia API key for each allowed user.", flags: 64 },
+    });
+    return;
+  }
+  if (!apiKey) {
+    reply(res, 503, { error: "discord_api_key_not_configured" });
     return;
   }
 
