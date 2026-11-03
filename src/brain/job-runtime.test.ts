@@ -1144,3 +1144,56 @@ test("DurableJobRuntime resets prior recovery delivery when a failed job is resu
   assert.equal(await runtime.claimNotification(submitted.id, "new-worker", 30_000), false,
     "recovery notices cannot be claimed while the resumed job is running");
 });
+
+
+test("DurableJobRuntime expires notification claims and fences stale owners", async () => {
+  const namespace = "job-runtime-notification-expiry-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "done" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({
+    task: "notification lease expiry test",
+    ownerKeyId: "discord:test-user",
+    notificationChannelId: "test-channel",
+  });
+
+  let completed = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && completed?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    completed = await runtime.get(submitted.id);
+  }
+  assert.equal(completed?.status, "completed");
+
+  assert.equal(await runtime.claimNotification(submitted.id, "expired-worker", 1), true);
+  await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  assert.equal(await runtime.claimNotification(submitted.id, "current-worker", 30_000), true);
+  await runtime.releaseNotificationClaim(submitted.id, "expired-worker");
+  assert.equal(
+    await runtime.markNotificationDelivered(submitted.id, "expired-worker"),
+    undefined,
+  );
+  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, false);
+  await runtime.markNotificationDelivered(submitted.id, "current-worker");
+  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, true);
+});
+
+test("DurableJobRuntime rejects invalid notification lease durations", async () => {
+  const namespace = "job-runtime-notification-invalid-lease-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "done" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({
+    task: "notification invalid lease test",
+    ownerKeyId: "discord:test-user",
+    notificationChannelId: "test-channel",
+  });
+  let completed = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && completed?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    completed = await runtime.get(submitted.id);
+  }
+  assert.equal(completed?.status, "completed");
+  await assert.rejects(runtime.claimNotification(submitted.id, "worker", 0), /positive safe-integer/);
+});
