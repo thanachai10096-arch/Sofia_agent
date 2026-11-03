@@ -47,10 +47,16 @@ function asInferenceRequest(request: string): InferenceRequest {
           '{"strategy":"initial|inspect-evidence|fix-implementation|fix-environment|alternative-tool","reason":"non-empty string","steps":[{"id":"non-empty string","objective":"non-empty string","dependencies":["step id"],"call":{"tool":"registered tool name","input":{}}}]}',
           "All fields are required. steps must contain 1 or more steps within the supplied step budget. Dependencies must reference existing step IDs and must be acyclic.",
         ].join("\n")
-      : [
-          "Return one JSON object matching the output contract for this Brain phase.",
-          "Do not invent fields or omit required fields. Do not claim that tools were executed.",
-        ].join("\n");
+      : phase === "subagent"
+        ? [
+            "Return one JSON object describing your proposal:",
+            '{"tool":"registered tool name","input":{},"reason":"non-empty string"}',
+            "All fields are required. This is an untrusted proposal only; the parent Brain must validate permissions and execute any approved tool.",
+          ].join("\n")
+        : [
+            "Return one JSON object only. This phase has no independent parser contract in the current Brain implementation.",
+            "Do not invent a tool call, claim execution, or claim completion.",
+          ].join("\n");
 
   return {
     phase: phaseFromRequest(request),
