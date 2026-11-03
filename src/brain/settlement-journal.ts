@@ -85,9 +85,18 @@ export class FileSettlementJournal {
    */
   private async syncDirectory(): Promise<void> {
     if (process.platform === "win32") return;
+    const before = await fs.lstat(this.directory);
+    if (before.isSymbolicLink() || !before.isDirectory()) {
+      throw new Error("Settlement journal directory changed before durability sync");
+    }
+    const noFollow = fsConstants.O_NOFOLLOW ?? 0;
     const directoryOnly = fsConstants.O_DIRECTORY ?? 0;
-    const handle = await fs.open(this.directory, fsConstants.O_RDONLY | directoryOnly);
+    const handle = await fs.open(this.directory, fsConstants.O_RDONLY | directoryOnly | noFollow);
     try {
+      const opened = await handle.stat();
+      if (!opened.isDirectory() || opened.dev !== before.dev || opened.ino !== before.ino) {
+        throw new Error("Settlement journal directory changed during durability sync");
+      }
       await handle.sync();
     } finally {
       await handle.close();
