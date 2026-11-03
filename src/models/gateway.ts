@@ -61,7 +61,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boolean): {
+function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boolean, toolNames: ReadonlyMap<string, string>): {
   system: string;
   messages: Array<{ role: "user" | "assistant"; content: string | Array<Record<string, unknown>> }>;
 } {
@@ -106,7 +106,9 @@ function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boole
         }
         const recordInput = asRecord(input);
         if (!recordInput) throw new Error("Anthropic tool-call input must be a JSON object.");
-        blocks.push({ type: "tool_use", id: call.id, name: call.name, input: recordInput });
+        const wireName = toolNames.get(call.name);
+        if (!wireName) throw new Error("Anthropic assistant tool call does not match the declared tool set.");
+        blocks.push({ type: "tool_use", id: call.id, name: wireName, input: recordInput });
       }
       append("assistant", blocks);
       return;
@@ -118,7 +120,7 @@ function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boole
   return { system, messages: result };
 }
 
-function normalizeAnthropicResponse(value: unknown): ChatResponse {
+function normalizeAnthropicResponse(value: unknown, originalToolNames: ReadonlyMap<string, string>): ChatResponse {
   const raw = asRecord(value) as AnthropicResponse | undefined;
   if (!raw || !Array.isArray(raw.content)) throw new Error("Anthropic Messages API returned an invalid response.");
   const textParts: string[] = [];
@@ -130,9 +132,11 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
       const name = typeof block.name === "string" ? block.name : "";
       const id = typeof block.id === "string" ? block.id : "";
       if (!name || !id) throw new Error("Anthropic Messages API returned an invalid tool-use block.");
+      const originalName = originalToolNames.get(name);
+      if (!originalName) throw new Error("Anthropic Messages API returned an unknown tool name.");
       toolCalls.push({
         id,
-        function: { name, arguments: JSON.stringify(block.input ?? {}) },
+        function: { name: originalName, arguments: JSON.stringify(block.input ?? {}) },
       });
     }
   }
@@ -266,6 +270,14 @@ export class SofiaModelGateway implements ModelProvider {
     const tools: ToolDefinition[] | undefined = request.tools?.length
       ? request.tools
       : undefined;
+    // Anthropic tool names allow only ASCII letters, digits, underscores, and
+    // hyphens. Keep Sofia's registry names intact by assigning request-local wire names.
+    const anthropicWireNames = new Map(
+      (tools ?? []).map((tool, index) => [tool.function.name, `sofia_tool_${index}`] as const),
+    );
+    const anthropicOriginalNames = new Map(
+      [...anthropicWireNames].map(([original, wire]) => [wire, original] as const),
+    );
 
     // Brain route adapter supplies a JSON context envelope and expects a
     // machine-readable object. OpenAI-compatible endpoints receive JSON mode;
@@ -292,7 +304,7 @@ export class SofiaModelGateway implements ModelProvider {
     let requestHeaders: Record<string, string>;
     let body: Record<string, unknown>;
     if (protocol === "anthropic-messages") {
-      const converted = anthropicMessages(messages, brainStructuredOutput);
+      const converted = anthropicMessages(messages, brainStructuredOutput, anthropicWireNames);
       endpoint = config.baseUrl.replace(/\/+$/, "") + "/messages";
       requestHeaders = {
         ...config.headers,
@@ -307,7 +319,7 @@ export class SofiaModelGateway implements ModelProvider {
         messages: converted.messages,
         ...(tools ? {
           tools: tools.map((tool) => ({
-            name: tool.function.name,
+            name: anthropicWireNames.get(tool.function.name)!,
             description: tool.function.description,
             input_schema: tool.function.parameters,
           })),
@@ -366,10 +378,15 @@ export class SofiaModelGateway implements ModelProvider {
             // Do not close a half-open circuit until the payload has been validated.
             return response;
           }
-          const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+          // A 429 is an explicit rejection and is safe to retry. A timeout,
+          // network disconnect, or 5xx can happen after a provider accepted and
+          // billed the request; without provider-supported idempotency, retrying
+          // those ambiguous outcomes can double-charge the user.
+          const retryable = response.status === 429;
           retryableFailure = retryable;
-          const detail = await response.text();
-          lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
+          // Provider bodies are untrusted and may echo prompts, identifiers, or secrets.
+          // Keep diagnostics to the HTTP status; never forward raw provider payloads.
+          lastError = new Error(`Model gateway request failed (${response.status}).`);
           if (!retryable || attempt === maxAttempts || options.signal?.aborted) throw lastError;
           const retryAfter = Number(response.headers.get("retry-after") ?? "");
           const delay = Number.isFinite(retryAfter) && retryAfter > 0
@@ -379,8 +396,7 @@ export class SofiaModelGateway implements ModelProvider {
           await abortableDelay(delay, requestSignal);
         } catch (error) {
           lastError = error;
-          if (requestSignal.aborted || attempt === maxAttempts ||
-              (error instanceof Error && error.message.startsWith("Model gateway request failed (") && !retryableFailure)) {
+          if (requestSignal.aborted || attempt === maxAttempts || !retryableFailure) {
             throw requestSignal.aborted && requestSignal.reason instanceof Error ? requestSignal.reason : error;
           }
           await abortableDelay(Math.min(250 * 2 ** (attempt - 1), 2_000), requestSignal);
@@ -405,10 +421,8 @@ export class SofiaModelGateway implements ModelProvider {
     }
 
     if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(
-        `Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`,
-      );
+      // Defensive guard for custom fetch implementations; never expose provider bodies.
+      throw new Error(`Model gateway request failed (${response.status}).`);
     }
 
     const failResponse = (message: string): never => {
@@ -426,7 +440,7 @@ export class SofiaModelGateway implements ModelProvider {
     try {
       const raw: unknown = await response.json();
       data = protocol === "anthropic-messages"
-        ? normalizeAnthropicResponse(raw)
+        ? normalizeAnthropicResponse(raw, anthropicOriginalNames)
         : raw as ChatResponse;
     } catch {
       return failResponse("Model gateway returned invalid JSON or an unsupported provider response.");
@@ -437,8 +451,21 @@ export class SofiaModelGateway implements ModelProvider {
       return failResponse("Model gateway returned no message.");
     }
 
+    const seenToolCallIds = new Set<string>();
     const calls = (message.tool_calls ?? []).map((call, index) => {
       const name = call.function?.name ?? "";
+      const suppliedId = call.id;
+      // Tool-call IDs are the correlation keys used when returning tool results.
+      // Reject empty or duplicate provider IDs rather than attaching a result to
+      // the wrong call on the next model turn. Generate an ID only when omitted.
+      if (suppliedId !== undefined && (typeof suppliedId !== "string" || !suppliedId.trim())) {
+        return failResponse(`invalid tool-call id for ${name || index}.`);
+      }
+      const id = suppliedId ?? `sofia_call_${request.step}_${index}`;
+      if (seenToolCallIds.has(id)) {
+        return failResponse(`duplicate tool-call id for ${name || index}.`);
+      }
+      seenToolCallIds.add(id);
       let parsed: unknown;
       try {
         parsed = JSON.parse(call.function?.arguments ?? "{}") as unknown;
@@ -448,11 +475,7 @@ export class SofiaModelGateway implements ModelProvider {
       if (!name.trim() || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         return failResponse(`invalid arguments for tool call ${name || index}.`);
       }
-      return {
-        id: call.id ?? `call-${request.step}-${index}`,
-        name,
-        input: parsed as Record<string, unknown>,
-      };
+      return { id, name, input: parsed as Record<string, unknown> };
     });
 
     // Gemini's OpenAI-compatible endpoint can return content as typed parts,
@@ -512,6 +535,9 @@ export class SofiaModelGateway implements ModelProvider {
         })),
       },
       ...(usage ? { usage } : {}),
+      ...(typeof data.choices?.[0]?.finish_reason === "string"
+        ? { finishReason: data.choices[0].finish_reason }
+        : {}),
     };
   }
 }

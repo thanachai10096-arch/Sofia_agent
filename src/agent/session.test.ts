@@ -34,6 +34,29 @@ test("SofiaAgent records user and assistant turns when a session store is config
   ]);
 });
 
+test("SofiaAgent restores bounded prior conversation context on the next turn", async () => {
+  const sessions = new MemorySessionStore();
+  const contexts: string[] = [];
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async (request) => {
+        contexts.push(request.context ?? "");
+        return { text: "Task completed." };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await agent.run({ task: "We are building Sofia's memory subsystem.", sessionId: "conversation-memory" });
+  await agent.run({ task: "Continue from our previous decision.", sessionId: "conversation-memory" });
+
+  assert.match(contexts[1] ?? "", /Recent conversation transcript \(untrusted reference data/);
+  assert.match(contexts[1] ?? "", /We are building Sofia's memory subsystem/);
+  assert.match(contexts[1] ?? "", /Task completed\./);
+});
+
 test("SofiaAgent does not create a session unless sessionId is provided", async () => {
   const sessions = new MemorySessionStore();
   const agent = new SofiaAgent({

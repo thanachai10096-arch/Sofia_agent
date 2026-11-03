@@ -9,6 +9,8 @@ export interface SofiaClientOptions {
 
 export interface SofiaRunInput {
   task: string;
+  /** Optional conversation key; API scopes it to the authenticated owner. */
+  sessionId?: string;
   workspace?: string;
   context?: string | Record<string, unknown>;
   /** Configured model route ID from listModels(); omit or use auto for automatic selection. */

@@ -16,7 +16,7 @@ interface ProviderSelection {
   baseUrl: string;
   apiKey: string;
   defaultModel: string;
-  routeModelPrefix: "OPENROUTER" | "GEMINI" | "ANTHROPIC" | "SOFIA";
+  routeModelPrefix: "OPENROUTER" | "GEMINI" | "ANTHROPIC" | "OPENAI" | "SOFIA";
   protocol: "openai-compatible" | "anthropic-messages";
 }
 
@@ -53,24 +53,28 @@ function normalizeBaseUrl(value: string): string {
   return normalized;
 }
 
-function selectProvider(): ProviderSelection {
-  const requested = process.env.SOFIA_MODEL_PROVIDER?.trim().toLowerCase();
+function selectProvider(providerOverride?: string): ProviderSelection {
+  const requested = (providerOverride || process.env.SOFIA_MODEL_PROVIDER || "").trim().toLowerCase();
   const customBaseUrl = firstEnv("SOFIA_BASE_URL", "BASE_URL");
-  const customApiKey = firstEnv("SOFIA_API_KEY", "API_KEY");
+  const dedicatedCustomApiKey = firstEnv("SOFIA_MODEL_API_KEY", "SOFIA_PROVIDER_API_KEY", "API_KEY");
   const customModel = firstEnv("SOFIA_MODEL", "MODEL");
-  const hasCustomConfig = Boolean(customBaseUrl || customApiKey || customModel);
+  // SOFIA_API_KEY authenticates clients to Sofia's own API in server deployments.
+  // Treat it as a legacy provider key only when a custom endpoint/model is explicitly configured.
+  const customApiKey = dedicatedCustomApiKey || ((customBaseUrl || customModel) ? firstEnv("SOFIA_API_KEY") : "");
+  const hasCustomConfig = Boolean(customBaseUrl || dedicatedCustomApiKey || customModel);
 
   const openRouterKey = process.env.OPENROUTER_API_KEY?.trim() ?? "";
   const geminiKey = firstEnv("GEMINI_API_KEY", "Gemini_API_Key");
   const anthropicKey = firstEnv("ANTHROPIC_API_KEY");
+  const openAiKey = firstEnv("OPENAI_API_KEY");
 
-  if (requested && !["openrouter", "gemini", "anthropic", "custom", "openai-compatible"].includes(requested)) {
-    throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, anthropic, or custom.");
+  if (requested && !["openrouter", "gemini", "anthropic", "openai", "custom", "openai-compatible"].includes(requested)) {
+    throw new Error("SOFIA_MODEL_PROVIDER must be openrouter, gemini, anthropic, openai, custom, or openai-compatible.");
   }
 
   const chooseCustom = (): ProviderSelection => {
     if (!customBaseUrl || !customApiKey || !customModel) {
-      throw new Error("Custom model configuration requires SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL (or BASE_URL, API_KEY, and MODEL).");
+      throw new Error("Custom model configuration requires SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL (or BASE_URL, API_KEY, and MODEL).");
     }
     const protocol = firstEnv("SOFIA_MODEL_PROTOCOL") || "openai-compatible";
     if (protocol !== "openai-compatible" && protocol !== "anthropic-messages") {
@@ -121,26 +125,41 @@ function selectProvider(): ProviderSelection {
     };
   };
 
+  const chooseOpenAi = (): ProviderSelection => {
+    if (!openAiKey) throw new Error("SOFIA_MODEL_PROVIDER=openai requires OPENAI_API_KEY.");
+    const model = firstEnv("OPENAI_MODEL");
+    if (!model) throw new Error("SOFIA_MODEL_PROVIDER=openai requires OPENAI_MODEL.");
+    return {
+      baseUrl: normalizeBaseUrl(firstEnv("OPENAI_BASE_URL") || "https://api.openai.com/v1"),
+      apiKey: openAiKey,
+      defaultModel: model,
+      routeModelPrefix: "OPENAI",
+      protocol: "openai-compatible",
+    };
+  };
+
   if (requested === "custom" || requested === "openai-compatible") return chooseCustom();
   if (requested === "openrouter") return chooseOpenRouter();
   if (requested === "gemini") return chooseGemini();
   if (requested === "anthropic") return chooseAnthropic();
+  if (requested === "openai") return chooseOpenAi();
 
   // A complete custom tuple is an explicit provider choice. If multiple
   // built-in providers are configured, require an explicit selection so adding
   // a second credential cannot silently redirect prompts to another vendor.
   if (hasCustomConfig) return chooseCustom();
-  const configuredBuiltIns = [openRouterKey, geminiKey, anthropicKey].filter(Boolean).length;
+  const configuredBuiltIns = [openRouterKey, geminiKey, anthropicKey, openAiKey].filter(Boolean).length;
   if (configuredBuiltIns > 1) {
     throw new Error("Multiple built-in provider credentials are configured; set SOFIA_MODEL_PROVIDER to choose explicitly.");
   }
   if (openRouterKey) return chooseOpenRouter();
   if (geminiKey) return chooseGemini();
   if (anthropicKey) return chooseAnthropic();
+  if (openAiKey) return chooseOpenAi();
 
   throw new Error(
-    "Configure SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL for an OpenAI-compatible endpoint, " +
-    "or set OPENROUTER_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY.",
+    "Configure SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL for an OpenAI-compatible endpoint, " +
+    "or set OPENROUTER_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY with OPENAI_MODEL.",
   );
 }
 
@@ -150,7 +169,6 @@ function selectProvider(): ProviderSelection {
  * implement the OpenAI Chat Completions-compatible API.
  */
 export function loadModelConfigFromEnv(): SofiaModelConfig {
-  const selected = selectProvider();
   const definitions = [
     ["fast", ["fast"], 1, 1, 5],
     ["coding", ["coding", "tool-use", "reasoning"], 2, 2, 8],
@@ -158,10 +176,27 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     ["vision", ["vision", "reasoning"], 3, 3, 8],
   ] as const;
 
+  // Route-level provider assignments are additive: existing deployments can
+  // continue selecting one global provider, while advanced deployments may
+  // route fast/coding/reasoning/vision independently.
+  const routeProviderOverrides = definitions.map(([id]) =>
+    firstEnv("SOFIA_" + id.toUpperCase() + "_PROVIDER"));
+  const allRoutesExplicit = routeProviderOverrides.every(Boolean);
+  const globalProviderConfigured = Boolean(firstEnv("SOFIA_MODEL_PROVIDER"));
+  const fallback = allRoutesExplicit && !globalProviderConfigured
+    ? undefined
+    : selectProvider();
+
   const routes: ModelRoute[] = [];
   const providers: SofiaModelConfig["providers"] = {};
 
-  for (const [id, capabilities, cost, latency, quality] of definitions) {
+  for (const [index, [id, capabilities, cost, latency, quality]] of definitions.entries()) {
+    const selected = routeProviderOverrides[index]
+      ? selectProvider(routeProviderOverrides[index])
+      : fallback;
+    if (!selected) {
+      throw new Error("Set SOFIA_MODEL_PROVIDER or configure SOFIA_" + id.toUpperCase() + "_PROVIDER for every route.");
+    }
     const routeModelName = selected.routeModelPrefix + "_" + id.toUpperCase() + "_MODEL";
     const model = firstEnv(routeModelName) || selected.defaultModel;
 

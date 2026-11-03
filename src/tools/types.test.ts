@@ -31,3 +31,34 @@ test("tool input validation checks nested array items and bounds", () => {
   assert.throws(() => validateToolInput(schema, { command: "npm", kind: "test", args: ["run", 5] }), /expected string/);
   assert.throws(() => validateToolInput(schema, { command: "npm", kind: "test", args: [] }), /expected at least 1 items/);
 });
+
+
+test("tool input validation enforces string and numeric bounds", () => {
+  assert.throws(
+    () => validateToolInput({ type: "object", properties: { name: { type: "string", minLength: 2, maxLength: 4 } }, required: ["name"] }, { name: "x" }),
+    /at least 2 characters/,
+  );
+  assert.throws(
+    () => validateToolInput({ type: "object", properties: { count: { type: "integer", minimum: 1, maximum: 5 } }, required: ["count"] }, { count: 6 }),
+    /above maximum 5/,
+  );
+  assert.throws(
+    () => validateToolInput({ type: "object", properties: { ratio: { type: "number", exclusiveMinimum: 0 } }, required: ["ratio"] }, { ratio: 0 }),
+    /must be greater than 0/,
+  );
+});
+
+test("tool input validation enforces unique array items and object property bounds", () => {
+  assert.throws(
+    () => validateToolInput({ type: "object", properties: { tags: { type: "array", uniqueItems: true, items: { type: "string" } } } }, { tags: ["same", "same"] }),
+    /expected unique items/,
+  );
+  assert.throws(
+    () => validateToolInput({ type: "object", minProperties: 1 }, {}),
+    /expected at least 1 properties/,
+  );
+  assert.throws(
+    () => validateToolInput({ type: "object", maxProperties: 1 }, { a: 1, b: 2 }),
+    /expected at most 1 properties/,
+  );
+});

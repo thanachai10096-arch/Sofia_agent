@@ -8,6 +8,9 @@ import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allow
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { FileUserMemoryStore } from "../brain/user-memory.js";
+import { SqliteSessionStore } from "../session/sqlite-store.js";
+import { MemorySessionStore } from "../session/store.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -16,6 +19,30 @@ if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
 const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
 const deps = createSofiaAgentDependencies(workspace);
+// Wire the existing user-scoped memory store into the same Core used by API and chat channels.
+deps.userMemoryStore = new FileUserMemoryStore(path.join(workspace, ".sofia", "user-memory"));
+// Persist conversation transcripts locally. Keep Node 20 compatibility: node:sqlite is
+// available only on newer Node releases, so older runtimes degrade explicitly to memory.
+let sessionStore: SqliteSessionStore | MemorySessionStore;
+try {
+  sessionStore = await SqliteSessionStore.open(path.join(workspace, ".sofia", "sessions.sqlite"));
+} catch (error) {
+  const code = error && typeof error === "object" && "code" in error
+    ? String((error as NodeJS.ErrnoException).code)
+    : "";
+  // Only fall back when the runtime genuinely lacks node:sqlite. A corrupt,
+  // inaccessible, symlinked, or newer-schema database must stop startup rather
+  // than silently discarding the user's persistent-session guarantee.
+  if (code !== "ERR_UNKNOWN_BUILTIN_MODULE" && code !== "ERR_MODULE_NOT_FOUND") {
+    throw error;
+  }
+  console.error(
+    "Persistent SQLite sessions unavailable on this Node runtime; using in-memory sessions:",
+    code,
+  );
+  sessionStore = new MemorySessionStore();
+}
+deps.sessionStore = sessionStore;
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -230,6 +257,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
-    server.close();
+    server.close(() => {
+      if ("close" in sessionStore) sessionStore.close();
+    });
   });
 }

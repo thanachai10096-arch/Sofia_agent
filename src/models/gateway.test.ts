@@ -29,7 +29,7 @@ test("Anthropic Messages adapter sends native tool schema and normalizes tool-us
       role: "assistant",
       content: [
         { type: "text", text: "I will read the file." },
-        { type: "tool_use", id: "toolu_1", name: "workspace.read_file", input: { path: "README.md" } },
+        { type: "tool_use", id: "toolu_1", name: "sofia_tool_0", input: { path: "README.md" } },
       ],
       stop_reason: "tool_use",
       usage: { input_tokens: 42, output_tokens: 12 },
@@ -73,7 +73,7 @@ test("Anthropic Messages adapter sends native tool schema and normalizes tool-us
     assert.equal(requestedBody.system, "You are Sofia.");
     assert.deepEqual(requestedBody.messages, [{ role: "user", content: "Read README.md" }]);
     assert.deepEqual(requestedBody.tools, [{
-      name: "workspace.read_file",
+      name: "sofia_tool_0",
       description: "Read a workspace file.",
       input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
     }]);
@@ -83,7 +83,76 @@ test("Anthropic Messages adapter sends native tool schema and normalizes tool-us
       input: { path: "README.md" },
     }]);
     assert.equal(result.text, "I will read the file.");
+    assert.equal(result.finishReason, "tool_use");
     assert.deepEqual(result.usage, { inputTokens: 42, outputTokens: 12 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Anthropic adapter maps multiple prior tool calls and results across turns", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      content: [{ type: "text", text: "Both tools completed." }],
+      stop_reason: "end_turn",
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://api.anthropic.com/v1",
+        apiKey: "anthropic-secret",
+        model: "claude-test-model",
+        protocol: "anthropic-messages",
+      },
+    });
+    await gateway.generate({
+      task: "Continue after tools",
+      kind: "coding",
+      step: 2,
+      messages: [
+        { role: "system", content: "You are Sofia." },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            { id: "call_1", name: "workspace.read_file", arguments: "{\"path\":\"README.md\"}" },
+            { id: "call_2", name: "terminal.run", arguments: "{\"command\":\"pwd\"}" },
+          ],
+        },
+        { role: "tool", toolCallId: "call_1", content: "README contents" },
+        { role: "tool", toolCallId: "call_2", content: "/workspace" },
+      ],
+      tools: [
+        { type: "function", function: { name: "workspace.read_file", description: "Read a file", parameters: { type: "object" } } },
+        { type: "function", function: { name: "terminal.run", description: "Run a command", parameters: { type: "object" } } },
+      ],
+    }, route, { maxOutputTokens: 128 });
+
+    assert.deepEqual(requestedBody.tools, [
+      { name: "sofia_tool_0", description: "Read a file", input_schema: { type: "object" } },
+      { name: "sofia_tool_1", description: "Run a command", input_schema: { type: "object" } },
+    ]);
+    assert.deepEqual(requestedBody.messages, [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "call_1", name: "sofia_tool_0", input: { path: "README.md" } },
+          { type: "tool_use", id: "call_2", name: "sofia_tool_1", input: { command: "pwd" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "call_1", content: "README contents" },
+          { type: "tool_result", tool_use_id: "call_2", content: "/workspace" },
+        ],
+      },
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -120,6 +189,178 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
     assert.match(String(requestedBody.system), /exactly one valid JSON object/);
     assert.equal("response_format" in requestedBody, false);
     assert.equal(result.text, "{\"ok\":true}");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("provider HTTP errors expose status but never echo response bodies", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  const secretEcho = "provider echoed prompt=private-user-data api_key=do-not-leak";
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response(secretEcho, { status: 503 });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    await assert.rejects(
+      gateway.generate({ task: "test", kind: "coding", step: 1 }, { ...route, healthy: true }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /503/);
+        assert.equal(error.message.includes("private-user-data"), false);
+        assert.equal(error.message.includes("do-not-leak"), false);
+        return true;
+      },
+    );
+    assert.equal(calls, 1, "ambiguous 5xx outcomes must not be retried");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("explicit HTTP 429 rejection is retried and a later valid response is accepted", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls === 1) {
+      return new Response("rate limited", {
+        status: 429,
+        headers: { "retry-after": "0.001" },
+      });
+    }
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: "recovered response" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    const result = await gateway.generate(
+      { task: "test", kind: "coding", step: 1 },
+      { ...route, healthy: true },
+    );
+    assert.equal(calls, 2);
+    assert.equal(result.text, "recovered response");
+    assert.deepEqual(result.usage, { inputTokens: 10, outputTokens: 4 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("OpenAI-compatible structured Brain requests use JSON mode without enabling tools", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: "{\"ok\":true}" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 8, completion_tokens: 3, total_tokens: 11 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    const result = await gateway.generate({
+      task: "plan the task",
+      kind: "analysis",
+      step: 1,
+      context: JSON.stringify({ phase: "plan", instructions: "Return JSON", acceptanceCriteria: [] }),
+    }, { ...route, healthy: true });
+
+    assert.deepEqual(requestedBody.response_format, { type: "json_object" });
+    assert.equal("tools" in requestedBody, false);
+    assert.equal(result.text, '{"ok":true}');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("OpenAI-compatible length finish reason is preserved for Brain truncation checks", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: '{"partial":' }, finish_reason: "length" }],
+    usage: { prompt_tokens: 12, completion_tokens: 20, total_tokens: 32 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    const result = await gateway.generate(
+      { task: "plan", kind: "analysis", step: 1 },
+      { ...route, healthy: true },
+    );
+    assert.equal(result.finishReason, "length");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("gateway rejects empty and duplicate tool-call IDs before returning executable calls", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const toolCalls of [
+      [{ id: "", function: { name: "workspace.read_file", arguments: "{\"path\":\"README.md\"}" } }],
+      [
+        { id: "same-call", function: { name: "workspace.read_file", arguments: "{\"path\":\"README.md\"}" } },
+        { id: "same-call", function: { name: "terminal.run", arguments: "{\"command\":\"pwd\"}" } },
+      ],
+    ]) {
+      globalThis.fetch = async () => new Response(JSON.stringify({
+        choices: [{ message: { content: null, tool_calls: toolCalls }, finish_reason: "tool_calls" }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+
+      const gateway = new SofiaModelGateway({
+        coding: {
+          baseUrl: "https://provider.example.test/v1",
+          apiKey: "provider-secret",
+          model: "test-model",
+        },
+      });
+      await assert.rejects(
+        gateway.generate({
+          task: "run a tool",
+          kind: "coding",
+          step: 3,
+          tools: [
+            { type: "function", function: { name: "workspace.read_file", description: "Read a file", parameters: { type: "object" } } },
+            { type: "function", function: { name: "terminal.run", description: "Run a command", parameters: { type: "object" } } },
+          ],
+        }, { ...route, healthy: true }),
+        /tool-call id/,
+      );
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }

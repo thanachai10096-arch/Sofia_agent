@@ -32,8 +32,17 @@ An explicitly selected route is not silently replaced by another route. If the r
 
 - SOFIA_MODEL_PROVIDER=openrouter selects OpenRouter.
 - SOFIA_MODEL_PROVIDER=gemini selects Gemini.
-- SOFIA_MODEL_PROVIDER=custom uses SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL for an OpenAI Chat Completions-compatible endpoint.
-- When no provider is explicitly selected, configure only one built-in provider credential. If both OpenRouter and Gemini credentials exist, Sofia requires explicit selection rather than silently redirecting requests.
-- Route-specific environment variables can assign different model IDs to fast, coding, reasoning, and vision routes.
+- SOFIA_MODEL_PROVIDER=openai selects OpenAI using OPENAI_API_KEY and OPENAI_MODEL (OPENAI_BASE_URL defaults to https://api.openai.com/v1).
+- SOFIA_MODEL_PROVIDER=custom uses SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL for an OpenAI Chat Completions-compatible endpoint. Keep SOFIA_MODEL_API_KEY separate from SOFIA_API_KEY, which authenticates clients to Sofia's own API. Legacy SOFIA_API_KEY and generic API_KEY aliases remain supported for backward compatibility, but the dedicated variable is recommended.
+- When no provider is explicitly selected, configure only one built-in provider credential. If multiple provider credentials exist, Sofia requires an explicit selection rather than silently redirecting requests.
+- Advanced deployments can assign providers independently with `SOFIA_FAST_PROVIDER`, `SOFIA_CODING_PROVIDER`, `SOFIA_REASONING_PROVIDER`, and `SOFIA_VISION_PROVIDER` (values: `openrouter`, `gemini`, `anthropic`, `openai`, or `custom`). If no global `SOFIA_MODEL_PROVIDER` is set, all four route providers must be explicit. This allows, for example, OpenRouter for fast tasks, Anthropic for coding, Gemini for reasoning, and OpenAI for vision.
+- Route-specific model variables can independently assign model IDs to fast, coding, reasoning, and vision routes. Existing deployments using one global provider continue to work unchanged.
 
 Custom endpoints use the OpenAI Chat Completions-compatible protocol by default. Set `SOFIA_MODEL_PROTOCOL=anthropic-messages` only when the configured custom endpoint implements the Anthropic Messages API. Built-in OpenRouter and Gemini use OpenAI-compatible requests; Anthropic uses its native Messages request/response format. Other native protocols still need a dedicated adapter; Sofia does not claim every model API is protocol-identical.
+
+
+## Current protocol boundaries
+
+- The provider gateway currently uses non-streaming completion requests. API run-event streaming is not the same as provider token streaming; token-by-token delivery still requires a streaming provider adapter and channel-level backpressure/cancellation.
+- The `vision` route is currently a routing slot, not proof of image-input support. The current `ChatMessage` contract carries text content only; do not send image tasks to it as if image payloads were supported. A typed multimodal content contract, safe image ingestion, and provider-specific image mapping must be implemented and tested before advertising vision input.
+- Structured Brain output must be complete. Provider finish reasons such as OpenAI-compatible `length` and Anthropic `max_tokens` are propagated and treated as incomplete output rather than accepted as a successful plan.
