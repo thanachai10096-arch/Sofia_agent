@@ -491,3 +491,19 @@ Verification and remaining limits:
 - `channel` remains the compatibility default; deployments handling personal/sensitive tasks must explicitly configure `DISCORD_REPLY_MODE=dm` until a product-wide private-delivery policy is approved.
 - DM mode cannot guarantee delivery when the user has disabled DMs or Discord rejects DM creation; it intentionally fails closed rather than leaking to a shared channel.
 - This does not make the worker's process-local `seen`/inflight state durable and does not add provider-level idempotency to its direct-send path.
+
+
+## Follow-up: direct Discord Gateway provider-side retry deduplication
+
+Re-reviewed the standalone direct-send worker after adding the opt-in DM privacy mode. Found that its API request already reused `discord_<messageId>` as the async-run idempotency key, but the outbound Discord message did not carry a stable provider nonce. Because `seen` and `inflight` are process-local, a replay after restart could retrieve the same logical run and still post the result again.
+
+Implemented:
+- Added a deterministic 25-character hexadecimal nonce for each outbound chunk, derived from the source Discord message ID, chunk index, and exact chunk content.
+- Sends the nonce with Discord's `enforce_nonce: true` flag for both successful results and error notices.
+- The HTTP 429 retry now reuses the exact same request body and nonce rather than issuing a second unkeyed POST.
+- Keeps DM privacy routing intact; the same deterministic nonce is used whether the configured destination is the originating channel or the user's DM.
+
+Limits:
+- Discord's nonce deduplication is bounded provider-side suppression, not an indefinite exactly-once guarantee or a durable delivery ledger.
+- The worker still has process-local pending/inflight/seen state. A durable ingress/delivery ledger and crash-recovery policy are still needed for robust multi-instance operation.
+- No Node syntax check, test suite, typecheck, build, or live Discord API test was run in this environment. No deployment or production change was made.
