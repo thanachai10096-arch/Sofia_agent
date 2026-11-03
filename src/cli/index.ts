@@ -121,7 +121,7 @@ async function runLocal(task: string, interactive: boolean) {
     });
     console.log(result.output);
   } finally {
-    deps.closeSessionStore();
+    await deps.closeSessionStore();
   }
 }
 
@@ -145,7 +145,7 @@ async function chat() {
     }
   } finally {
     rl.close();
-    deps.closeSessionStore();
+    await deps.closeSessionStore();
   }
 }
 
