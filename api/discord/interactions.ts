@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import { verifyDiscordRequest } from "../../src/integrations/messaging/platform-security.js";
 import { matchDiscordUserApiKeys, parseDiscordUserApiKeys } from "../../src/integrations/messaging/discord-user-api-keys.js";
+import { parseDiscordIdAllowlist } from "../../src/integrations/messaging/discord-allowlist.js";
 
 export const config = {
   api: { bodyParser: false },
@@ -124,8 +125,8 @@ export default async function discordInteractions(req: IncomingMessage, res: Ser
   }
 
   // Empty allowlists deny all requests; access must be explicitly configured.
-  const allowedUsers = allowedIds(process.env.DISCORD_ALLOWED_USER_IDS);
-  const allowedChannels = allowedIds(process.env.DISCORD_ALLOWED_CHANNEL_IDS);
+  const allowedUsers = allowedIds(process.env.DISCORD_ALLOWED_USER_IDS, "DISCORD_ALLOWED_USER_IDS");
+  const allowedChannels = allowedIds(process.env.DISCORD_ALLOWED_CHANNEL_IDS, "DISCORD_ALLOWED_CHANNEL_IDS");
   if (!allowedUsers.has(user.id) || !allowedChannels.has(interaction.channel_id)) {
     reply(res, 200, { type: 4, data: { content: "Access denied.", flags: 64 } });
     return;
