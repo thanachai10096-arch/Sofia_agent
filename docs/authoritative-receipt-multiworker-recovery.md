@@ -103,32 +103,32 @@ Until all evidence exists, keep the recovery adapter unwired and automatic produ
 
 ## 9. Verified implementation boundary at PR review
 
-The following is an as-built review of the current PR head, not a target-state claim:
+The following is an as-built review of the latest inspected PR head, not a target-state claim:
 
-- `SqliteSelfImprovementCheckpointStore` provides durable, scope-keyed SQLite reads and atomic single-row writes using `BEGIN IMMEDIATE`. Its current `write` operation is an unconditional upsert; it does not compare an expected checkpoint version or verify a fencing token.
-- `ScopedSelfImprovement` uses a promise tail, which serializes notifications only inside one JavaScript object/process. It is not a cross-process lock.
-- `createVerifiedCompletionHandler.recover` preflights the returned receipt array for contiguous ascending sequence numbers before replay. It then delegates to the same process-local worker and does not acquire a distributed scope lease.
-- The checkpoint schema currently has no lease owner, fencing token, lease expiry, or monotonic checkpoint version.
+- `SqliteSelfImprovementCheckpointStore` now stores a monotonic per-scope revision, migrates existing checkpoint tables additively, returns the revision from `read`, and implements `compareAndSet` under `BEGIN IMMEDIATE`. Both the initial insert and later updates advance the revision.
+- `ScopedSelfImprovement` uses revision CAS when the configured checkpoint adapter exposes it, reloads and recomputes after a conflict, and bounds retries. Adapters without CAS retain the legacy unconditional-write compatibility path and are not thereby safe for concurrent workers.
+- Pending notifications now reject a conflicting receipt ID for an already-pending sequence and reject reuse of a pending receipt ID at another sequence.
+- `createVerifiedCompletionHandler.recover` preflights the returned receipt array for contiguous ascending sequence numbers before replay. It still does not acquire a distributed scope lease.
+- The checkpoint schema still has no lease owner, fencing token, or lease expiry.
 - `src/api/entrypoint.ts` does not call `recover(scope)`; the inspected host does not currently compose an authoritative finalized-receipt listing adapter or authenticated tenant/project scope enumerator.
-- The learning transaction store enforces scoped receipt/experience uniqueness, which is useful for idempotent learning writes, but it does not make checkpoint read-modify-write atomic with the learning transaction or with another process.
+- The learning transaction store enforces scoped receipt/experience uniqueness, which supports idempotent learning writes, but it does not atomically couple the learning transaction with checkpoint advancement.
 
-### Concrete race this leaves open
+### Remaining concurrency and recovery boundaries
 
-Two independent workers can both read the same checkpoint and process overlapping notifications. Their learning writes may deduplicate by scoped receipt ID, but their later unconditional checkpoint upserts can race. A stale writer can replace newer pending-notification metadata, and there is no fencing token that prevents a worker whose lease should have expired from writing. Atomic SQLite upsert alone does not solve this read-modify-write race.
+Revision CAS prevents stale checkpoint snapshots from overwriting newer pending-event state. It does not provide worker ownership, lease expiry, or fencing; it also cannot prove that a receipt listing adapter returned a complete stable snapshot across pagination. A worker may replay an already-recorded receipt after a crash before checkpoint advancement, so idempotency at the scoped receipt/experience boundary remains required.
 
-Therefore the existing implementation is durable and restart-readable, but it is **not yet proven safe for concurrent multi-process recovery**. Do not describe it as multi-worker safe, do not wire it into production startup, and do not enable automatic production learning on the strength of these primitives alone.
+The current implementation is therefore a meaningful cross-connection checkpoint-safety increment, **not a complete multi-worker recovery system**. Do not describe the whole recovery pipeline as production multi-worker safe, do not wire it into startup, and do not enable automatic production learning on the strength of CAS alone.
 
 ### Required next implementation increment
 
-1. Add a checkpoint revision/version that increments on every mutation, including pending-only writes.
-2. Add a SQLite compare-and-set operation that checks expected revision and the active fencing token in the same transaction as the checkpoint update.
-3. Add scope-bound lease claim/renew/release operations with store-clock expiry and fresh fencing tokens on takeover.
-4. Route both live finalized notifications and crash recovery through the same lease/CAS discipline; protecting recovery alone is insufficient if live notifications can race with it.
-5. On CAS conflict, reload and recompute from the new state; never retry a stale serialized snapshot blindly.
-6. Make receipt listing use a stable high-water mark or snapshot and prove all pages were consumed before any replay begins.
-7. Add deterministic two-connection and two-process tests that force stale-write interleavings, lease expiry/takeover, stale-token rejection, pending-event preservation, and crash points around learning and checkpoint commits.
+1. Add scope-bound lease claim/renew/release operations with store-clock expiry and fresh fencing tokens on takeover.
+2. Require the active fencing token in checkpoint CAS, and reject stale-token writes and releases.
+3. Route both live finalized notifications and crash recovery through the same lease/CAS discipline.
+4. Make receipt listing use a stable high-water mark or snapshot and prove all pages were consumed before any replay begins.
+5. Add deterministic two-process tests for lease races, expiry/takeover, stale-token rejection, pending-event preservation, and crash points around learning and checkpoint commits.
+6. Verify the real authenticated scope resolver, authoritative receipt adapter, evidence resolver, lifecycle approval gate, and runtime registry before considering startup integration.
 
-Until these changes and their tests exist, the safe action is to leave startup recovery unwired and report the multi-worker capability as pending.
+Until these changes and their tests exist, keep startup recovery unwired and automatic production learning disabled.
 
 
 ### 10. Checkpoint CAS increment — implemented, lease boundary remains open
