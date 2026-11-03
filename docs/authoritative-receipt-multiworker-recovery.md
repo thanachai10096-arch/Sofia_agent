@@ -129,3 +129,14 @@ Therefore the existing implementation is durable and restart-readable, but it is
 7. Add deterministic two-connection and two-process tests that force stale-write interleavings, lease expiry/takeover, stale-token rejection, pending-event preservation, and crash points around learning and checkpoint commits.
 
 Until these changes and their tests exist, the safe action is to leave startup recovery unwired and report the multi-worker capability as pending.
+
+
+### 10. Checkpoint CAS increment — implemented, lease boundary remains open
+
+The current branch adds a monotonic revision to verified_learning_checkpoints and an additive SQLite migration for existing databases. read returns the revision; compareAndSet(scope, expectedRevision, state) checks and increments it in one BEGIN IMMEDIATE transaction. A stale writer receives false and must reload rather than overwrite the newer pending-event set.
+
+ScopedSelfImprovement uses this CAS path when the checkpoint adapter supports it. After a conflict it reloads and recomputes, with a bounded retry count. Replaying a receipt while recomputing relies on the existing learning transaction's unique (scope, receiptId) constraint. Older checkpoint adapters retain the legacy write fallback for compatibility and therefore do not gain cross-process CAS protection.
+
+Regression coverage now includes two independent SQLite connections reading the same revision, one winning the CAS, the stale writer being rejected, pending notification preservation, and migration of a legacy checkpoint table.
+
+This increment does not complete multi-worker safety. It prevents stale checkpoint overwrites but does not provide a scope lease/fencing token, does not make the receipt-store snapshot stable across pagination, and does not atomically couple learning transaction commit with checkpoint advancement. Recovery and live delivery must still be routed through a shared lease/CAS discipline before production enablement. The legacy write fallback must not be used by production multi-worker adapters.
