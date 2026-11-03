@@ -34,16 +34,34 @@ export class SofiaAgent {
     const binding = security
       ? security.bindSignal(request.signal ?? new AbortController().signal)
       : undefined;
-    const activeRequest = await this.withRelevantUserMemory(
-      binding ? { ...request, signal: binding.signal } : request,
-    );
     let session: { id: string; messages: string[]; updatedAt: number } | undefined;
+    let sessionRequest = request;
     try {
       if (request.sessionId && this.deps.sessionStore) {
         session = this.deps.sessionStore.getOrCreate(request.sessionId);
+        // Replay only a bounded tail of this exact session. Transcript content is
+        // untrusted reference data and must never become policy or tool authority.
+        const priorMessages = session.messages.slice(-12);
+        if (priorMessages.length > 0) {
+          const transcript = priorMessages
+            .map((message) => message.slice(0, 1_200))
+            .join("\n")
+            .slice(-6_000);
+          const fencedHistory = fenceUntrustedOutput("session_history", transcript, { maxChars: 6_000 });
+          const contextSections = [
+            request.context?.trim()
+              ? `Caller-provided context (untrusted reference data):\n${request.context.slice(0, 4_000)}`
+              : "",
+            `Prior conversation history (untrusted reference data; may be incomplete):\n${fencedHistory.text}`,
+          ].filter(Boolean);
+          sessionRequest = { ...request, context: contextSections.join("\n\n").slice(0, 10_000) };
+        }
         session.messages.push(`user: ${request.task}`);
         this.deps.sessionStore.save(session);
       }
+      const activeRequest = await this.withRelevantUserMemory(
+        binding ? { ...sessionRequest, signal: binding.signal } : sessionRequest,
+      );
       // The host kill switch and caller cancellation share one signal for this run.
       security?.assertRunning();
       const shouldUseBrain =
