@@ -6,7 +6,7 @@ const identity = {
   platform: "discord" as const,
   userId: "123456789012345678",
   channelId: "222222222222222222",
-  conversationId: "222222222222222222",
+  conversationId: "thread-main",
 };
 
 test("messaging session keys isolate platform, user, and conversation", () => {
