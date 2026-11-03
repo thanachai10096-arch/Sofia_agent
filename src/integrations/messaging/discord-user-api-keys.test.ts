@@ -29,6 +29,8 @@ test("Discord API key mapping must match the complete allowlist exactly", () => 
     "456": "sofia_user_key_456789123_abcdefghijkl",
   }));
   assert.equal(matchDiscordUserApiKeys(mapping, ["123", "456"]), true);
+  assert.equal(matchDiscordUserApiKeys(mapping, ["123", "456"], ["primary-key"]), true);
+  assert.equal(matchDiscordUserApiKeys(mapping, ["123", "456"], ["sofia_user_key_123456789_abcdefghijkl"]), false);
   assert.equal(matchDiscordUserApiKeys(mapping, ["123"]), false);
   assert.equal(matchDiscordUserApiKeys(mapping, ["123", "456", "789"]), false);
   assert.equal(matchDiscordUserApiKeys(mapping, []), false);
