@@ -191,7 +191,7 @@ export function createTelegramMessagingRuntime(
     // The API's core credential is a separate principal. Reusing it for a
     // Telegram sender would silently share that sender's Memory identity with
     // server-side callers that use SOFIA_API_KEY.
-    if (apiKey && [...userApiKeys.values()].includes(apiKey)) {
+    if (rawUserApiKeys && apiKey && [...userApiKeys.values()].includes(apiKey)) {
       throw new Error("TELEGRAM_USER_API_KEYS must not reuse SOFIA_API_KEY.");
     }
     const clientsByUser = new Map<string, SofiaClient>(
