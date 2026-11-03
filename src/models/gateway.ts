@@ -514,6 +514,9 @@ export class SofiaModelGateway implements ModelProvider {
         })),
       },
       ...(usage ? { usage } : {}),
+      ...(typeof data.choices?.[0]?.finish_reason === "string"
+        ? { finishReason: data.choices[0].finish_reason }
+        : {}),
     };
   }
 }
