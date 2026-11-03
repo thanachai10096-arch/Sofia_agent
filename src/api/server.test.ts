@@ -191,7 +191,6 @@ test("API personal memory is isolated by distinct authenticated per-user API key
     headers: {
       authorization: "Bearer " + key,
       ...(init.body ? { "content-type": "application/json" } : {}),
-      ...(init.headers ?? {}),
     },
   });
 
