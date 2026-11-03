@@ -461,6 +461,44 @@ test("journal cleanup refuses to erase corrupt settlement evidence", async () =>
   }
 });
 
+test("settlement validation rejects malformed historical known-usage evidence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-invalid-history-"));
+  try {
+    const namespace = "workspace";
+    const runId = "invalid-history-run";
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    const at = new Date().toISOString();
+    const malformedSettled = JSON.stringify({
+      version: 1, type: "settled", attemptId: "attempt-1", at,
+      usageKnown: true, usage: { inputTokens: -1, outputTokens: 2 },
+    });
+    const source = [
+      JSON.stringify({ version: 1, type: "started", attemptId: "attempt-1", at, maxInputTokens: 10, maxOutputTokens: 10 }),
+      malformedSettled,
+      JSON.stringify({ version: 1, type: "started", attemptId: "attempt-2", at, maxInputTokens: 10, maxOutputTokens: 10 }),
+    ].join("\\n") + "\\n";
+    await writeFile(journalFile, source, { mode: 0o600 });
+
+    const journal = new FileSettlementJournal(namespace, root);
+    const claim = await journal.claimRun(runId);
+    try {
+      await assert.rejects(
+        journal.settle(runId, { id: "attempt-2" }, { inputTokens: 1, outputTokens: 1 }, claim),
+        /invalid usage evidence/,
+        "settle() must not append to a journal containing malformed historical usage",
+      );
+    } finally {
+      await claim.release();
+    }
+    assert.equal(await readFile(journalFile, "utf8"), source,
+      "rejected validation must preserve the original corrupt evidence byte-for-byte");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("reused attempt IDs make settlement evidence corrupt and block checkpoint acknowledgement", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-reused-attempt-"));
   try {
