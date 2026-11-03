@@ -1170,7 +1170,14 @@ test("DurableJobRuntime fences duplicate checkpoint resumes across independent r
   const outcomes = await Promise.allSettled([firstResume, secondResume]);
   assert.equal(brainCalls, 2);
   assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled" && outcome.value.status === "completed").length, 1);
-  assert.equal(outcomes.filter((outcome) => outcome.status === "rejected").length, 1, "the competing resume must receive a conflict instead of starting a second worker");
+  const rejected = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+  assert.equal(rejected.length, 1, "the competing resume must not start a second worker");
+  const conflictMessage = rejected[0]?.reason instanceof Error ? rejected[0].reason.message : String(rejected[0]?.reason);
+  assert.match(
+    conflictMessage,
+    /already being resumed|already running|state changed before resume could be scheduled/i,
+    "the losing worker must receive a recognized concurrency conflict",
+  );
   assert.equal((await creator.get(submitted.id))?.status, "completed");
 });
 
