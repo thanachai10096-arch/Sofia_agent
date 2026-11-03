@@ -354,7 +354,7 @@ Remaining limits:
 - No live PostgreSQL migration or integration test has run, so SQL dialect/runtime behavior is not yet proven.
 - Cancellation requested for a queued job without an active worker still follows the direct cancellation path and does not yet guarantee an outbox event.
 - Outbox delivery still requires a trusted worker and concrete platform sender implementations.
-- The dispatcher remains sequential with no lease renewal; configure bounded transport timeouts below the lease duration.
+- The dispatcher is sequential and renews leases when the store supports it; sender adapters must honor AbortSignal and enforce bounded transport timeouts.
 - No build, typecheck, unit tests, deployment, or production change was performed.
 
 
@@ -372,6 +372,15 @@ Remaining limitations:
 - Lease renewal is not implemented; send timeouts must remain below the outbox lease duration.
 - At-least-once delivery and crash-after-send duplicate risk remain.
 - PostgreSQL SQL and migration have not been exercised against a live database. Added tests have not been run; no typecheck, build, or deployment was performed.
- 
 
-```text
+## Follow-up: outbox lease renewal (2026-11-03)
+
+Added optional `OutboxStore.renewLease()` and PostgreSQL implementation. Renewal requires the message to remain processing, the same worker token, and an unexpired lease. The dispatcher renews approximately every third of the lease duration while a sender is active, supplies an AbortSignal, and aborts when renewal is lost or errors.
+
+Changed dispatch cadence to claim one message at a time (up to batchSize) so later messages do not lose their leases while queued behind a slow send. Added tests for renewal fencing, successful long-send renewal, and abort on lease loss.
+
+Remaining limitations:
+- Sender adapters must honor AbortSignal; a remote side effect already accepted cannot be rolled back.
+- At-least-once delivery remains; receivers should deduplicate using the stable message ID.
+- Stores that do not implement optional lease renewal rely on bounded transport timeouts.
+- PostgreSQL SQL and migration have not been exercised against a live database. Tests have not been run; no typecheck, build, or deployment was performed.
