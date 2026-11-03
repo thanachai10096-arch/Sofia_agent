@@ -27,6 +27,7 @@ test("Telegram per-user API key map requires an exact allowlist match and valid 
   assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one"}', allowed), /exactly one API key/);
   assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one","456":"key-two","789":"extra"}', allowed), /exactly one API key/);
   assert.throws(() => parseTelegramUserApiKeys('{"123":"","456":"key-two"}', allowed), /invalid user ID or API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"same-key","456":"same-key"}', allowed), /distinct API key/);
   assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one\\nleak","456":"key-two"}', allowed), /invalid user ID or API key/);
   assert.throws(() => parseTelegramUserApiKeys("[]", allowed), /JSON object/);
   assert.throws(() => parseTelegramUserApiKeys("{", allowed), /JSON object/);
