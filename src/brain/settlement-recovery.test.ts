@@ -76,3 +76,15 @@ test("recovery decision fails closed on inconsistent inspection counters", () =>
       reason === "inspection_counts_invalid" || reason === "unknown_usage_reported"));
   }
 });
+
+
+test("a resolved journal cannot contain an unmatched started attempt", () => {
+  const result = decideSettlementRecovery(inspection({
+    journal: "resolved",
+    startedAttempts: 1,
+    settledAttempts: 0,
+    unresolved: false,
+  }));
+  assert.equal(result.decision, "operator_reconciliation_required");
+  assert.ok(result.reasons.includes("resolved_journal_has_unmatched_attempts"));
+});
