@@ -2,7 +2,7 @@ import path from "node:path";
 import { SofiaClient } from "../../sdk/client.js";
 import { FileChatMessageDeduplicator } from "../file-chat-deduplicator.js";
 import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
-import { FileMessagingOutbox, flushMessagingOutbox } from "./file-outbox.js";
+import { FileMessagingOutbox, flushMessagingOutbox, startMessagingOutboxRetryWorker } from "./file-outbox.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createWhatsAppAdapter } from "./whatsapp.js";
 import { createWhatsAppHttpTransport } from "./whatsapp-http-transport.js";
@@ -74,6 +74,7 @@ export function createWhatsAppMessagingRuntime(
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
     let gateway: MessagingGateway | undefined;
     const outbox = new FileMessagingOutbox(path.join(workspace, ".sofia", "messaging-outbox"));
+    let retryWorker: { stop(): void } | undefined;
     const queueDelivery = async (platform: "line" | "whatsapp", conversationId: string, text: string) => {
       try {
         await outbox.enqueue(platform, { conversationId, text });
@@ -140,8 +141,17 @@ export function createWhatsAppMessagingRuntime(
         const result = await flushMessagingOutbox(outbox, (target, message) => gateway!.send(target, message),
           () => onWarning("Messaging outbox retry remains pending."), "whatsapp");
         if (result.pending > 0) onWarning("Messaging outbox has pending outbound messages.");
+        retryWorker = startMessagingOutboxRetryWorker(outbox, {
+          platform: "whatsapp",
+          send: (target, message) => gateway!.send(target, message),
+          onFailure: () => onWarning("WHATSAPP background delivery retry remains pending."),
+        });
       },
-      stop: () => gateway!.stop(),
+      stop: async () => {
+        retryWorker?.stop();
+        retryWorker = undefined;
+        await gateway!.stop();
+      },
       webhookTransport: transport,
     };
   } catch (error) {
