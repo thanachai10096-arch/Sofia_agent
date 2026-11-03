@@ -177,38 +177,6 @@ if (discordConfigured) {
     }
   });
 
-  // Retry recovery notifications while the process is alive. A crashed worker may
-  // still have an unexpired lease at startup; periodic list() calls let the runtime
-  // mark it interrupted once that lease expires, then notify the user without a new restart.
-  const notificationInFlight = new Set<string>();
-  const notifyRecoveredJobs = async (): Promise<void> => {
-    if (!deps.jobRuntime || !discordTransport || discordAbort.signal.aborted) return;
-    const recoveredJobs = await deps.jobRuntime.list();
-    for (const job of recoveredJobs) {
-      if (!job.ownerKeyId?.startsWith("discord:") || !job.notificationChannelId ||
-          job.notificationDelivered || job.status === "queued" || job.status === "running" ||
-          Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
-      notificationInFlight.add(job.id);
-      try {
-        const message = job.status === "completed"
-          ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
-          : job.snapshot
-            ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
-            : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
-        await discordTransport.sendMessage(job.notificationChannelId, message);
-        await deps.jobRuntime.markNotificationDelivered?.(job.id);
-      } catch {
-        // Keep the marker unset so the next retry can attempt delivery again.
-      } finally {
-        notificationInFlight.delete(job.id);
-      }
-    }
-  };
-  await notifyRecoveredJobs();
-  discordRecoveryTimer = setInterval(() => {
-    void notifyRecoveredJobs().catch(() => undefined);
-  }, 5_000);
-  discordRecoveryTimer.unref?.();
 }
 
 
@@ -273,6 +241,44 @@ if (process.env.DISCORD_GATEWAY_ENABLED === "true") {
     await discordGatewayTransport?.stop();
     discordGatewayTransport = undefined;
   }
+}
+
+// Retry recovery notifications for either Discord transport. This must be
+// outside the interaction-only setup block so Gateway-only deployments recover too.
+if (discordTransport || discordGatewayTransport) {
+  const notificationInFlight = new Set<string>();
+  const notifyRecoveredJobs = async (): Promise<void> => {
+    if (!deps.jobRuntime || discordAbort.signal.aborted) return;
+    const recoveredJobs = await deps.jobRuntime.list();
+    for (const job of recoveredJobs) {
+      if (!job.ownerKeyId?.startsWith("discord:") || !job.notificationChannelId ||
+          job.notificationDelivered || job.status === "queued" || job.status === "running" ||
+          Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
+      notificationInFlight.add(job.id);
+      try {
+        const message = job.status === "completed"
+          ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
+          : job.snapshot
+            ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
+            : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
+        if (discordTransport) {
+          await discordTransport.sendMessage(job.notificationChannelId, message);
+        } else {
+          await discordGatewayTransport?.sendMessage(job.notificationChannelId, message);
+        }
+        await deps.jobRuntime.markNotificationDelivered?.(job.id);
+      } catch {
+        // Keep the marker unset so the next retry can attempt delivery again.
+      } finally {
+        notificationInFlight.delete(job.id);
+      }
+    }
+  };
+  await notifyRecoveredJobs();
+  discordRecoveryTimer = setInterval(() => {
+    void notifyRecoveredJobs().catch(() => undefined);
+  }, 5_000);
+  discordRecoveryTimer.unref?.();
 }
 
 const server = createSofiaApi(deps, {
