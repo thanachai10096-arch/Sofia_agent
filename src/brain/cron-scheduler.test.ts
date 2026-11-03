@@ -621,6 +621,44 @@ test("runtime lookup outages preserve active executions for a later recovery pas
     "the later recovery pass should reconcile the still-existing runtime job");
 });
 
+test("recovered monitor retries a temporarily missing runtime record without cancelling the job", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let reads = 0;
+  let cancelCalls = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      if (reads === 1) return { id, status: "queued", task: "restart recovery" } as JobRecord;
+      if (reads === 2) return undefined;
+      return { id, status: "completed", task: "restart recovery" } as JobRecord;
+    },
+    async cancel() { cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, recoveryLeaseMs: 3_000 });
+  const schedule = await scheduler.create({
+    name: "transient-runtime-visibility", task: "restart recovery", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice", timeoutMs: 5_000,
+  }, "alice");
+  state.history.push({
+    id: "temporarily-hidden-job", scheduleId: schedule.id, scheduledFor: new Date().toISOString(),
+    startedAt: new Date().toISOString(), status: "running", jobId: "temporarily-hidden-job", attempt: 1,
+  });
+
+  const result = await scheduler.recover();
+  assert.equal(result.monitoring, 1);
+  for (let i = 0; i < 40 && state.history[0].status === "running"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+
+  assert.equal(reads >= 3, true, "monitor should retry after the transient missing record");
+  assert.equal(cancelCalls, 0, "temporary runtime invisibility must not cancel the shared job");
+  assert.equal(state.history[0].status, "completed");
+  assert.ok(state.audit.some((event: any) => event.action === "schedule.recovery.finished"));
+});
+
 test("recovery heartbeat retries a transient store outage without fencing a live monitor", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   let transactions = 0;
