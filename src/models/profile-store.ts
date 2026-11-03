@@ -271,12 +271,13 @@ export class EncryptedUserModelProfileStore implements UserModelProfileStore {
     const directory = path.dirname(this.filePath);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const temporary = this.filePath + "." + randomUUID() + ".tmp";
-    await writeFile(temporary, JSON.stringify(state), { encoding: "utf8", mode: 0o600, flag: "wx" });
     try {
+      await writeFile(temporary, JSON.stringify(state), { encoding: "utf8", mode: 0o600, flag: "wx" });
       await rename(temporary, this.filePath);
-    } catch (error) {
-      // Never delete the existing state to force a replacement.
-      throw error;
+    } finally {
+      // rename removes the temporary path on success; on any failure, clean up
+      // only this operation's uniquely-named temporary file.
+      await rm(temporary, { force: true }).catch(() => undefined);
     }
   }
 }
