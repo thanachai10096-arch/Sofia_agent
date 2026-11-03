@@ -110,3 +110,35 @@ For transparent automatic recovery, claim may instead take over the expired job 
 - SQL above is a contract sketch, not a ready-to-run implementation; use narrow transition-specific SQL and test against the selected PostgreSQL version.
 
 Until these blockers are resolved, keep the migration unapplied and the shared adapter unconfigured.
+
+## Concrete owner-scope integration point (verified 2026-11-03)
+
+The current public API routes in `src/api/server.ts` behave as follows:
+- `GET /v1/jobs/:id` calls `JobRuntime.get(id)`, then compares `ownerKeyId` with the authenticated `auth.keyId` before returning the record.
+- Resume and cancel first perform the same read-and-compare check, then call the unscoped runtime mutation.
+- `GET /v1/jobs` calls `JobRuntime.list()` and filters by `ownerKeyId` in the API process.
+- The public `JobRuntime` port exposes only `get(id)` and `list()`; the lower `JobStateStore` port likewise exposes only unscoped `get(id)` and `list()`.
+
+This is an API response authorization check, not a storage-level tenant boundary. It currently prevents a normal authenticated caller from receiving another owner's job through these routes, but it loads unrelated job records into the same function process and makes it easy for a future route to omit the owner check. The new cloud adapter must not copy this pattern.
+
+### Additive capability shape
+
+Before introducing the cloud adapter, add an explicit owner-scoped capability alongside the existing interfaces (do not break local/custom implementations in the first change):
+
+    interface OwnedJobStateStore {
+      getForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined>;
+      listForOwner(ownerKeyId: string, limit: number, cursor?: string): Promise<JobRecord[]>;
+      cancelForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined>;
+    }
+
+The shared PostgreSQL implementation should implement this capability with owner predicates in SQL. The file adapter may implement the same semantics by filtering its local file under its existing lock/read boundary. API routes should prefer this capability; if a configured cloud runtime lacks it, fail closed for owner-facing job operations rather than silently falling back to an unscoped full-table scan. Compatibility fallback can remain available only for explicitly local/file-backed mode while migration is in progress.
+
+Resume requires special care: authorization and the state transition must be bound to the same owner-scoped record. The adapter/runtime should expose a single owner-authorized resume operation or an atomic owner check immediately before scheduling, while retaining the existing resume-slot and lease fencing rules. Do not implement it as an API-only `getForOwner()` followed by an unrelated unscoped mutation once shared multi-tenant storage is enabled.
+
+### Required regression tests for API wiring
+
+- Owner A's list query invokes the owner-scoped store method with A's authenticated principal and does not call unscoped `list()` in cloud mode.
+- Owner A cannot read, cancel, or resume Owner B's job; response shape does not reveal whether B's job exists.
+- A store configured as cloud/shared but missing the owner-scoped capability returns a service-unavailable/fail-closed result; it must not silently scan all tenants.
+- Local file mode preserves existing API compatibility while returning only the requesting owner's jobs.
+- Cursor pagination is stable under concurrent inserts and is bounded by a server-side maximum.
