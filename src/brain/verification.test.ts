@@ -43,6 +43,35 @@ test("verification cannot pass without a durable evidence ID", async () => {
   assert.match(results[0]?.detail ?? "", /no evidence ID/i);
 });
 
+test("verification fails closed when the workspace changes during a probe", async () => {
+  let snapshots = 0;
+  const gateway: ToolGateway = {
+    describe() { return { effects: ["read"] }; },
+    async execute() {
+      return {
+        ok: true,
+        data: { passed: true, code: 0, stdout: "all checks passed" },
+        evidenceId: "probe-evidence",
+      };
+    },
+    async snapshot() {
+      snapshots += 1;
+      return { id: "s" + snapshots, revision: snapshots === 1 ? "r1" : "r2", evidenceId: "snapshot-evidence-" + snapshots };
+    },
+    async changedFiles() { return []; },
+    async checkpoint() { return { id: "c1", revision: "r1" }; },
+    async rollback() { return []; },
+  };
+
+  const results = await runVerification(gateway, ["typecheck", "test"], new AbortController().signal);
+
+  assert.equal(snapshots, 2);
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.passed, false);
+  assert.deepEqual(results[0]?.evidenceIds, ["probe-evidence"]);
+  assert.match(results[0]?.detail ?? "", /revision changed/i);
+});
+
 test("verification stops after the first failed probe", async () => {
   const calls: string[] = [];
   const gateway: ToolGateway = {
