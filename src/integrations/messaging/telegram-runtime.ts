@@ -146,7 +146,7 @@ export function createTelegramMessagingRuntime(
     const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
     let gateway: MessagingGateway | undefined;
     const outbox = new FileMessagingOutbox(path.join(workspace, ".sofia", "messaging-outbox"));
-    let retryWorker: { stop(): void } | undefined;
+    let retryWorker: { stop(): Promise<void> } | undefined;
     const deliverQueued = async (message: OutboundMessage): Promise<boolean> => {
       try {
         const id = await outbox.enqueue("telegram", message);
@@ -215,7 +215,7 @@ export function createTelegramMessagingRuntime(
         });
       },
       stop: async () => {
-        retryWorker?.stop();
+        await retryWorker?.stop();
         retryWorker = undefined;
         await gateway!.stop();
       },
