@@ -419,3 +419,22 @@ Remaining limitations:
 - The bridge is not wired into a running Vercel Daemon or deployment. The host must construct it with authenticated, allowlisted adapters and explicitly start the OutboxWorker.
 - Destination ownership must be enforced when trusted application code persists the job notification destination; the sender's platform allowlist is not a substitute for tenant authorization.
 - No tests, typecheck, or build have been executed in this environment. No live PostgreSQL migration, integration test, deployment, or production change was performed.
+
+
+## Follow-up: stable outbox identity propagation to messaging transports (2026-11-03)
+
+Propagated the durable outbox `messageId` through `OutboundMessage.deliveryId` into the messaging adapter layer. The field is optional, so existing callers remain source-compatible.
+
+Discord:
+- Derives a deterministic 25-character hexadecimal nonce per message chunk from the outbox ID and chunk index.
+- The Discord HTTP transport includes `nonce` and `enforce_nonce: true` for ordinary channel message creation.
+- Interaction webhook responses are unchanged; they do not use this nonce path.
+- Added a transport test asserting the exact provider payload.
+
+Telegram:
+- The stable delivery ID reaches the adapter contract but Telegram's current Bot API sendMessage transport has no corresponding idempotency key. Duplicate suppression is therefore not guaranteed for Telegram retries.
+
+Limitations:
+- Discord nonce enforcement is provider-side duplicate suppression, not a replacement for a durable receiver-side idempotency ledger; its protection window/provider semantics must not be treated as permanent exactly-once delivery.
+- Outbox delivery remains at-least-once, especially for Telegram and after provider deduplication windows expire.
+- No tests, typecheck, or build have been executed in this environment. No live PostgreSQL integration, deployment, or production change was performed.
