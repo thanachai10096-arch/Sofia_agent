@@ -8,7 +8,7 @@ import { SofiaAgent } from "../agent/core.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createCliSessionId } from "./session-id.js";
-import { assertNoLegacyPlaintextApiKey, writeSafeLocalConfig } from "./config-file.js";
+import { applySafeLocalConfigEnvironment, assertNoLegacyPlaintextApiKey, writeSafeLocalConfig } from "./config-file.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -31,9 +31,7 @@ async function loadLocalConfig(): Promise<LocalConfig> {
     const parsed: unknown = JSON.parse(await readFile(configPath, "utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     const config = parsed as LocalConfig;
-    if (!process.env.SOFIA_MODEL_PROVIDER && config.provider) process.env.SOFIA_MODEL_PROVIDER = config.provider;
-    if (!process.env.SOFIA_MODEL_BASE_URL && config.baseUrl) process.env.SOFIA_MODEL_BASE_URL = config.baseUrl;
-    if (!process.env.SOFIA_MODEL_NAME && config.model) process.env.SOFIA_MODEL_NAME = config.model;
+    applySafeLocalConfigEnvironment(config, process.env);
     return config;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
