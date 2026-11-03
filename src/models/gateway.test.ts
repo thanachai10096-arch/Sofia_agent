@@ -125,6 +125,94 @@ test("Brain gateway does not fail over when provider usage is unknown", async ()
   assert.equal(budget.snapshot().inFlight, 0);
 });
 
+test("Brain structured provider request is not retried after an unknown network failure", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    throw new Error("socket disconnected after request dispatch");
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    await assert.rejects(gateway.generate({
+      task: "plan the task",
+      kind: "analysis",
+      step: 1,
+      context: JSON.stringify({ phase: "plan", instructions: "Return JSON", acceptanceCriteria: [] }),
+    }, { ...route, healthy: true }));
+    assert.equal(calls, 1, "unknown usage must not trigger another potentially billable request");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Brain structured provider request is not retried after HTTP 503", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response("temporarily unavailable", { status: 503 });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    await assert.rejects(gateway.generate({
+      task: "plan the task",
+      kind: "analysis",
+      step: 1,
+      context: JSON.stringify({ phase: "plan", instructions: "Return JSON", acceptanceCriteria: [] }),
+    }, { ...route, healthy: true }));
+    assert.equal(calls, 1, "Brain attempt must not retry an HTTP error without usage reconciliation");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ordinary chat retains bounded retries for transient provider responses", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) return new Response("temporarily unavailable", { status: 503 });
+    return new Response(JSON.stringify({
+      choices: [{ message: { role: "assistant", content: "hello" } }],
+      usage: { prompt_tokens: 2, completion_tokens: 1 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    const result = await gateway.generate({
+      task: "say hello",
+      kind: "general",
+      step: 1,
+    }, { ...route, healthy: true });
+    assert.equal(result.text, "hello");
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Anthropic Messages adapter sends native tool schema and normalizes tool-use responses", async () => {
   const originalFetch = globalThis.fetch;
   let requestedUrl = "";
