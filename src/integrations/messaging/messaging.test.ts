@@ -124,6 +124,33 @@ test("session keys isolate platform, user and conversation without separator col
   assert.notEqual(messagingSessionKey(base), messagingSessionKey({ ...base, platform: "discord" }));
   assert.notEqual(messagingSessionKey(base), messagingSessionKey({ ...base, conversationId: "conv2" }));
   assert.notEqual(messagingSessionKey({ ...base, userId: "a|b" }), messagingSessionKey({ ...base, userId: "a", conversationId: "b|conv1" }));
+
+  // Conversation mode follows the actual conversation/thread identity.
+  assert.equal(
+    messagingSessionKey(base, "user-conversation"),
+    messagingSessionKey({ ...base, channelId: "other-channel" }, "user-conversation"),
+  );
+  assert.notEqual(
+    messagingSessionKey(base, "user-conversation"),
+    messagingSessionKey({ ...base, conversationId: "thread-2" }, "user-conversation"),
+  );
+
+  // Channel mode intentionally shares context within a user's channel, not across channels.
+  assert.equal(
+    messagingSessionKey(base, "user-channel"),
+    messagingSessionKey({ ...base, conversationId: "thread-2" }, "user-channel"),
+  );
+  assert.notEqual(
+    messagingSessionKey(base, "user-channel"),
+    messagingSessionKey({ ...base, channelId: "channel-2" }, "user-channel"),
+  );
+  assert.notEqual(
+    messagingSessionKey(base, "user-channel"),
+    messagingSessionKey({ ...base, userId: "u2" }, "user-channel"),
+  );
+
+  assert.throws(() => messagingSessionKey({ ...base, userId: "" }), /Invalid messaging identity/);
+  assert.throws(() => messagingSessionKey({ ...base, conversationId: "x".repeat(513) }), /Invalid messaging identity/);
 });
 test("Telegram webhook secret check fails closed", () => {
   assert.equal(verifyTelegramWebhookSecret("secret", "secret"), true);
