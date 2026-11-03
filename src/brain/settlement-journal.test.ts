@@ -118,6 +118,39 @@ test("settlement rejects fabricated and duplicate attempt IDs", async () => {
   }
 });
 
+test("incomplete JSONL tails remain corrupt and cannot be checkpointed or deleted", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-truncated-tail-"));
+  try {
+    const namespace = "workspace";
+    const runId = "truncated-tail-run";
+    const journal = new FileSettlementJournal(namespace, root);
+    const claim = await journal.claimRun(runId);
+    const attempt = await journal.begin(runId, { inputTokens: 9, outputTokens: 5 }, claim);
+    await journal.settle(runId, attempt, { inputTokens: 7, outputTokens: 2 }, claim);
+    await claim.release();
+
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    const record = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    const complete = await readFile(record, "utf8");
+    assert.ok(complete.endsWith("\n"));
+    // Simulate a crash after the JSON payload reached disk but before its
+    // JSONL record delimiter was durably appended.
+    await writeFile(record, complete.slice(0, -1), "utf8");
+
+    assert.equal(await journal.hasUnresolved(runId), true,
+      "a syntactically valid JSON tail without its delimiter is incomplete evidence");
+    const inspection = await journal.inspectRun(runId);
+    assert.equal(inspection.journal, "corrupt");
+    assert.equal(inspection.unresolved, true);
+    await assert.rejects(journal.acknowledgeCheckpoint(runId), /incomplete settlement journal record/);
+    await assert.rejects(journal.deleteRun(runId), /Cannot delete unresolved settlement evidence/);
+    assert.equal(await readFile(record, "utf8"), complete.slice(0, -1),
+      "failed recovery operations must preserve the original incomplete evidence");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("settlement validates attempts across multiple JSONL events", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-multi-attempt-"));
   try {
