@@ -351,6 +351,21 @@ export class FileSettlementJournal {
             typeof event.usageKnown !== "boolean" || !pendingAttemptIds.has(event.attemptId)) {
           throw new Error("Cannot settle an attempt from a journal with unmatched settlement evidence");
         }
+        // Validate historical usage records here as well as during recovery and
+        // checkpoint admission. Otherwise a new settle() could append after
+        // malformed "known" usage and extend an already-corrupt accounting log.
+        if (event.usageKnown) {
+          const usage = event.usage;
+          if (!usage || typeof usage !== "object" ||
+              !Number.isSafeInteger((usage as Record<string, unknown>).inputTokens) ||
+              ((usage as Record<string, number>).inputTokens < 0) ||
+              !Number.isSafeInteger((usage as Record<string, unknown>).outputTokens) ||
+              ((usage as Record<string, number>).outputTokens < 0)) {
+            throw new Error("Cannot settle an attempt from a journal with invalid usage evidence");
+          }
+        } else if (event.usage !== undefined) {
+          throw new Error("Cannot settle an attempt from a journal with inconsistent unknown usage evidence");
+        }
         pendingAttemptIds.delete(event.attemptId);
         if (event.attemptId === attemptId) settled += 1;
       } else if (event.type !== "checkpoint") {
