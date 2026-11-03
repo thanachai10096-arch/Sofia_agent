@@ -360,11 +360,25 @@ export class FileSettlementJournal {
   }
 
   async hasUnresolved(runId: string): Promise<boolean> {
+    const journalFile = this.file(runId);
     let source: string;
     try {
-      source = await fs.readFile(this.file(runId), "utf8");
+      const info = await fs.lstat(journalFile);
+      // Never follow a replaced or attacker-controlled journal path. Treat
+      // non-regular files as ambiguous evidence so callers fail closed.
+      if (info.isSymbolicLink() || !info.isFile()) return true;
+      const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+      const handle = await fs.open(journalFile, fsConstants.O_RDONLY | noFollow);
+      try {
+        const opened = await handle.stat();
+        if (!opened.isFile() || opened.dev !== info.dev || opened.ino !== info.ino) return true;
+        source = await handle.readFile("utf8");
+      } finally {
+        await handle.close();
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      if ((error as NodeJS.ErrnoException).code === "ELOOP") return true;
       throw error;
     }
 
