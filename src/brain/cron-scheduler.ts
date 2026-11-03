@@ -40,6 +40,8 @@ export interface CronExecution {
   jobId?: string;
   attempt: number;
   error?: string;
+}
+interface StoredCronExecution extends CronExecution {
   /** Opaque owner token for the cross-instance recovery monitor lease. */
   recoveryLeaseOwnerToken?: string;
   /** Lease deadline; expired leases may be claimed by another scheduler. */
@@ -54,7 +56,7 @@ export interface CronAuditEvent {
 }
 interface SchedulerState {
   schedules: CronSchedule[];
-  history: CronExecution[];
+  history: StoredCronExecution[];
   audit: CronAuditEvent[];
 }
 export interface CronStore {
@@ -326,7 +328,7 @@ export class CronScheduler {
       const schedule = state.schedules.find(s => s.id === id);
       if (!schedule) throw new Error("Unknown cron schedule");
       if (!await this.authorize(actor, "update", schedule)) throw new Error("Not authorized to view cron history");
-      return state.history.filter(h => h.scheduleId === id).map(h => ({ ...h }));
+      return state.history.filter(h => h.scheduleId === id).map(({ recoveryLeaseOwnerToken: _ownerToken, recoveryLeaseExpiresAt: _leaseExpiry, ...execution }) => ({ ...execution }));
     });
   }
   async tick(): Promise<void> {
