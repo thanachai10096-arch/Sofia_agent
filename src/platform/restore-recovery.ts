@@ -155,8 +155,10 @@ export async function recoverInterruptedRestoreTransaction(
     const rollbackBytes = new Map<string, Uint8Array>();
     for (const target of record.targets) {
       const adapter = byName.get(target.name);
-      if (!adapter || adapter.paths.length !== target.paths.length ||
-          adapter.paths.some((item) => !target.paths.includes(item))) {
+      const adapterPaths = adapter ? new Set(adapter.paths) : undefined;
+      if (!adapter || !adapterPaths || adapterPaths.size !== adapter.paths.length ||
+          adapterPaths.size !== target.paths.length ||
+          target.paths.some((item) => !adapterPaths.has(item))) {
         throw new Error(`Restore recovery adapter does not match journal target: ${target.name}`);
       }
       if (target.phase === "rollback_failed") {
