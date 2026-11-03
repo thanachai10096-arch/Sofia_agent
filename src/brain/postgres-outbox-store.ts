@@ -30,6 +30,8 @@ export interface OutboxStore {
   enqueue(message: EnqueueOutboxMessage): Promise<boolean>;
   claimBatch(workerToken: string, limit: number, leaseMs: number): Promise<OutboxMessage[]>;
   markDelivered(id: string, workerToken: string): Promise<boolean>;
+  /** Extends only a currently valid lease owned by this worker. */
+  renewLease?(id: string, workerToken: string, leaseMs: number): Promise<boolean>;
   retry(id: string, workerToken: string, error: string, delayMs: number, maxAttempts: number): Promise<boolean>;
 }
 type OutboxRow = {
@@ -96,6 +98,18 @@ export class PostgresOutboxStore implements OutboxStore {
       [workerToken,boundedLimit,boundedLease],
     );
     return result.rows.map(mapRow);
+  }
+
+  async renewLease(id:string,workerToken:string,leaseMs:number):Promise<boolean> {
+    const boundedLease=Math.max(1000,Math.min(300000,Math.floor(leaseMs)));
+    const result=await this.db.query(
+      `UPDATE sofia_agent_outbox SET
+         lease_expires_at=now()+($3::text || ' milliseconds')::interval
+       WHERE id=$1::uuid AND status='processing' AND lease_owner_token=$2::uuid
+         AND lease_expires_at>now() RETURNING id`,
+      [id,workerToken,boundedLease],
+    );
+    return (result.rowCount??result.rows.length)>0;
   }
 
   async markDelivered(id:string,workerToken:string):Promise<boolean> {
