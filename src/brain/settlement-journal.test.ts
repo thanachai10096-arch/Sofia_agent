@@ -634,6 +634,42 @@ test("recovery rejects started bounds whose combined token count is unsafe", asy
   }
 });
 
+test("begin refuses historical reservation bounds with an unsafe aggregate and preserves evidence", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-append-start-overflow-"));
+  try {
+    const namespace = "workspace";
+    const runId = "append-start-overflow-run";
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    const corruptHistory = JSON.stringify({
+      version: 1,
+      type: "started",
+      attemptId: "overflow-reservation",
+      at: new Date().toISOString(),
+      maxInputTokens: Number.MAX_SAFE_INTEGER,
+      maxOutputTokens: Number.MAX_SAFE_INTEGER,
+    }) + "\n";
+    await writeFile(journalFile, corruptHistory, { mode: 0o600 });
+
+    const journal = new FileSettlementJournal(namespace, root);
+    const claim = await journal.claimRun(runId);
+    try {
+      await assert.rejects(
+        journal.begin(runId, { inputTokens: 5, outputTokens: 6 }, claim),
+        /corrupt settlement journal record/,
+        "append admission must apply the same aggregate-safe token validation as recovery",
+      );
+      assert.equal(await readFile(journalFile, "utf8"), corruptHistory,
+        "rejected append must preserve invalid historical evidence byte-for-byte");
+    } finally {
+      await claim.release();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("journal rejects known usage whose combined token count is unsafe", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-overflow-history-"));
   try {
