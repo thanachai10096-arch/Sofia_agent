@@ -54,6 +54,8 @@ function getRuntime(): { server: ReturnType<typeof createSofiaApi>; apiKey: stri
       .map((origin) => origin.trim())
       .filter(Boolean),
     runStore: new FileRunRecordStore(runDirectory),
+    // Cloud-facing job endpoints must never fall back to unscoped global reads or mutations.
+    requireOwnerScopedJobRuntime: true,
     usageStorePath: path.join(stateRoot, "api-usage.json"),
   });
 
