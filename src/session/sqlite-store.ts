@@ -188,6 +188,7 @@ export class SqliteSessionStore {
     }
     const boundedMax = boundedInteger(maxMessages, 200, 1, 1_000);
     const updatedAt = Date.now();
+    let messages: string[];
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.db.prepare(
@@ -196,7 +197,7 @@ export class SqliteSessionStore {
       const existing = this.db.prepare(
         "SELECT content FROM session_messages WHERE session_id = ? ORDER BY position ASC",
       ).all(id) as Array<{ content: string }>;
-      const messages = [...existing.map((row) => row.content), ...appended].slice(-boundedMax);
+      messages = [...existing.map((row) => row.content), ...appended].slice(-boundedMax);
 
       this.db.prepare("DELETE FROM session_messages WHERE session_id = ?").run(id);
       if (this.ftsAvailable) {
@@ -214,12 +215,14 @@ export class SqliteSessionStore {
       });
       this.db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(updatedAt, id);
       this.db.exec("COMMIT");
-      restrictSqlitePermissions(this.filePath);
-      return { id, messages, updatedAt };
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
+    // Permission tightening is deliberately outside the transaction catch: a
+    // post-commit filesystem error must not attempt to roll back a committed write.
+    restrictSqlitePermissions(this.filePath);
+    return { id, messages, updatedAt };
   }
 
   listMessages(id: string, options: { limit?: number; offset?: number } = {}): string[] {
