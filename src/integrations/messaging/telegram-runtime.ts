@@ -93,12 +93,33 @@ function parseTelegramIds(value: string, pattern: RegExp, name: string): Readonl
   return ids;
 }
 
+export function parseTelegramUserApiKeys(value: string): ReadonlyMap<string, string> {
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { throw new Error("TELEGRAM_USER_API_KEYS must be a JSON object mapping numeric user IDs to API keys."); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("TELEGRAM_USER_API_KEYS must be a JSON object mapping numeric user IDs to API keys.");
+  }
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (entries.length === 0 || entries.some(([userId, key]) =>
+    !/^\\d{1,20}$/.test(userId) || typeof key !== "string" || !key.trim() ||
+    key.length > 4096 || /[\\r\\n\\0]/.test(key))) {
+    throw new Error("TELEGRAM_USER_API_KEYS contains an invalid user ID or API key.");
+  }
+  const keys = entries.map(([, key]) => (key as string).trim());
+  if (new Set(keys).size !== keys.length) {
+    throw new Error("TELEGRAM_USER_API_KEYS must assign a distinct API key to each user.");
+  }
+  return new Map(entries.map(([userId, key]) => [userId, (key as string).trim()]));
+}
+
 export interface TelegramMessagingEnvironment {
   SOFIA_MESSAGING_ENABLED?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
   SOFIA_API_KEY?: string;
+  /** Optional JSON object mapping verified Telegram numeric user IDs to distinct Sofia API keys. */
+  TELEGRAM_USER_API_KEYS?: string;
   SOFIA_API_BASE_URL?: string;
   RAILWAY_PUBLIC_DOMAIN?: string;
 }
@@ -120,11 +141,12 @@ export function createTelegramMessagingRuntime(
   const rawUsers = env.TELEGRAM_ALLOWED_USER_IDS?.trim();
   const rawChats = env.TELEGRAM_ALLOWED_CHAT_IDS?.trim();
   const apiKey = env.SOFIA_API_KEY?.trim();
+  const rawUserApiKeys = env.TELEGRAM_USER_API_KEYS?.trim();
   const railwayDomain = env.RAILWAY_PUBLIC_DOMAIN?.trim();
   const baseUrl = env.SOFIA_API_BASE_URL?.trim() ||
     (railwayDomain ? "https://" + railwayDomain.replace(/^https?:\/\//i, "").replace(/\/$/, "") : "");
 
-  if (!token || !rawUsers || !rawChats || !apiKey || !baseUrl) {
+  if (!token || !rawUsers || !rawChats || (!apiKey && !rawUserApiKeys) || !baseUrl) {
     onWarning("Telegram integration disabled: token, API connection, and explicit user/chat allowlists are required.");
     return undefined;
   }
@@ -132,11 +154,28 @@ export function createTelegramMessagingRuntime(
   try {
     const allowedUsers = parseTelegramUserAllowlist(rawUsers);
     const allowedChats = parseTelegramChatAllowlist(rawChats);
-    const client = new SofiaClient({ apiKey, baseUrl });
+    const userApiKeys = rawUserApiKeys ? parseTelegramUserApiKeys(rawUserApiKeys) : undefined;
+    if (userApiKeys && [...allowedUsers].some((userId) => !userApiKeys.has(userId))) {
+      throw new Error("TELEGRAM_USER_API_KEYS must include every allowed Telegram user ID.");
+    }
+    const clientCache = new Map<string, SofiaClient>();
+    const clientForUser = (userId: string): SofiaClient => {
+      const key = userApiKeys?.get(userId) ?? apiKey;
+      if (!key) throw new Error("No Sofia API key is configured for this Telegram user.");
+      let resolved = clientCache.get(userId);
+      if (!resolved) {
+        resolved = new SofiaClient({ apiKey: key, baseUrl });
+        clientCache.set(userId, resolved);
+      }
+      return resolved;
+    };
+    // Sender-specific clients are selected for every mapped message.
+    const client = new SofiaClient({ apiKey: apiKey ?? [...(userApiKeys?.values() ?? [])][0]!, baseUrl });
     const accessPolicy = {
       isAllowed(input: { platform: "telegram" | "discord" | "slack"; senderId: string; conversationId: string }) {
         return input.platform === "telegram" &&
           allowedUsers.has(input.senderId) &&
+          (!userApiKeys || userApiKeys.has(input.senderId)) &&
           allowedChats.has(input.conversationId);
       },
     };
@@ -144,12 +183,13 @@ export function createTelegramMessagingRuntime(
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
+      ...(userApiKeys ? { clientForCommand: (command) => clientForUser(command.senderId) } : {}),
       onAccepted: ({ runId, message }) => {
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
           runId,
           conversationId: message.identity.conversationId,
-          waitForRun: (id, options) => client.waitForRun(id, options),
+          waitForRun: (id, options) => (userApiKeys ? clientForUser(message.identity.userId) : client).waitForRun(id, options),
           send: (outbound) => gateway
             ? gateway.send("telegram", outbound)
             : Promise.resolve(false),
@@ -176,6 +216,7 @@ export function createTelegramMessagingRuntime(
         warn: (event) => onWarning("Telegram messaging warning: " + event + "."),
       },
     });
+    if (!userApiKeys) onWarning("Telegram is using one shared Sofia API key; all allowed Telegram users share that API key's memory and session scope. Configure TELEGRAM_USER_API_KEYS for per-user isolation.");
     return {
       start: () => gateway.start(),
       stop: () => gateway.stop(),
