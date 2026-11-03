@@ -32,3 +32,23 @@ export function matchDiscordUserApiKeys(
     allowedUserIds.every((userId) => apiKeys.has(userId)) &&
     [...apiKeys.values()].every((apiKey) => !reserved.has(apiKey));
 }
+
+/**
+ * Resolve the credential for a verified Discord sender. Invalid or incomplete
+ * configuration deliberately returns undefined so callers can fail closed.
+ */
+export function resolveDiscordUserApiKey(
+  value: string | undefined,
+  allowedUserIds: readonly string[],
+  senderId: string,
+  reservedApiKeys: readonly string[] = [],
+): string | undefined {
+  if (!value?.trim() || !allowedUserIds.includes(senderId)) return undefined;
+  try {
+    const apiKeys = parseDiscordUserApiKeys(value);
+    if (!matchDiscordUserApiKeys(apiKeys, allowedUserIds, reservedApiKeys)) return undefined;
+    return apiKeys.get(senderId);
+  } catch {
+    return undefined;
+  }
+}
