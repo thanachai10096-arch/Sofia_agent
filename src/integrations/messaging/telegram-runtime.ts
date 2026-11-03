@@ -110,7 +110,13 @@ export function buildTelegramSessionContext(
   userId: string,
   conversationId: string,
 ): string | undefined {
-  const session = store?.get(telegramSessionKey(userId, conversationId));
+  let session;
+  try {
+    session = store?.get(telegramSessionKey(userId, conversationId));
+  } catch {
+    // Session storage is an optional context enhancement; a read failure must not block chat.
+    return undefined;
+  }
   const history = (session?.messages ?? [])
     .filter((entry) => !containsPromptInjection(entry))
     .slice(-10)
@@ -179,7 +185,11 @@ export function createTelegramMessagingRuntime(
       onAccepted: async ({ runId, message }) => {
         const sessionId = telegramSessionKey(message.identity.userId, message.identity.conversationId);
         const safeUserText = String(redactSecrets(message.text)).slice(0, 4_000);
-        sessionStore?.append(sessionId, "user: " + safeUserText, 20);
+        try {
+          sessionStore?.append(sessionId, "user: " + safeUserText, 20);
+        } catch {
+          onWarning("Telegram session storage unavailable; continuing without saved history.");
+        }
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
           runId,
@@ -214,14 +224,14 @@ export function createTelegramMessagingRuntime(
     });
     return {
       async start() {
-        if (!sessionStore) sessionStore = await SqliteSessionStore.open();
-        try {
-          await gateway!.start();
-        } catch (error) {
-          sessionStore.close();
-          sessionStore = undefined;
-          throw error;
+        if (!sessionStore) {
+          try {
+            sessionStore = await SqliteSessionStore.open();
+          } catch {
+            onWarning("Telegram session storage unavailable; continuing without saved history.");
+          }
         }
+        await gateway!.start();
       },
       async stop() {
         await gateway!.stop();
