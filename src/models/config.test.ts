@@ -24,6 +24,13 @@ const names = [
   "ANTHROPIC_CODING_MODEL",
   "ANTHROPIC_REASONING_MODEL",
   "ANTHROPIC_VISION_MODEL",
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "OPENAI_MODEL",
+  "OPENAI_FAST_MODEL",
+  "OPENAI_CODING_MODEL",
+  "OPENAI_REASONING_MODEL",
+  "OPENAI_VISION_MODEL",
   "SOFIA_MODEL_PROTOCOL",
   "SOFIA_MODEL_PROVIDER",
   "SOFIA_FAST_PROVIDER",
@@ -98,6 +105,19 @@ test("partial route provider overrides still require an unambiguous global fallb
   process.env.GEMINI_API_KEY = "gemini-provider-key";
   process.env.SOFIA_FAST_PROVIDER = "openrouter";
   assert.throws(loadModelConfigFromEnv, /set SOFIA_MODEL_PROVIDER to choose explicitly/);
+});
+
+test("OpenAI provider uses its native OpenAI-compatible endpoint and explicit model", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "openai";
+  process.env.OPENAI_API_KEY = "openai-provider-key";
+  process.env.OPENAI_MODEL = "gpt-test-model";
+  process.env.OPENAI_BASE_URL = "https://api.openai.com/v1/";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.openai.com/v1");
+  assert.equal(config.providers.fast?.apiKey, "openai-provider-key");
+  assert.equal(config.providers.fast?.model, "gpt-test-model");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
 });
 
 test("Gemini key selects direct Google Gemini API when no other provider is configured", () => {
