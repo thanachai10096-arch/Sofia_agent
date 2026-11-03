@@ -1,7 +1,7 @@
 -- Sofia Agent shared job persistence schema (PostgreSQL).
--- Additive migration only. This schema is NOT wired to the runtime until a
--- PostgreSQL JobStateStore adapter and its integration tests are implemented.
--- Apply with a migration runner inside a transaction.
+-- Additive migration only. A driver-neutral PostgresJobStateStore adapter and
+-- SQL-contract tests exist; live database integration and host wiring remain
+-- release gates. Apply with a migration runner inside a transaction.
 
 CREATE TABLE IF NOT EXISTS sofia_agent_jobs (
   id uuid PRIMARY KEY,
