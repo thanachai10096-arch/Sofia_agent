@@ -3,7 +3,7 @@ import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { parseMessagingApiScopes } from "./messaging-scopes.js";
 import { FileRunRecordStore } from "./run-record-store.js";
-import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
+import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { matchDiscordUserApiKeys, parseDiscordUserApiKeys } from "../integrations/messaging/discord-user-api-keys.js";
@@ -57,7 +57,7 @@ apiKeys[apiKey] = scopes;
 for (const key of telegramUserApiKeys.values()) apiKeys[key] = messagingScopes;
 for (const key of discordUserApiKeys.values()) apiKeys[key] = messagingScopes;
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+const deps = createSofiaAgentDependencies(workspace);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = messagingScopesValid ? createTelegramMessagingRuntime(process.env, workspace) : undefined;
 
@@ -272,6 +272,6 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
-    server.close(() => deps.closeSessionStore());
+    server.close();
   });
 }
