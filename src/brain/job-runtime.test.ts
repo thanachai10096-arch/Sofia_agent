@@ -1107,3 +1107,30 @@ test("DurableJobRuntime renews notification leases and allows takeover after exp
   assert.equal(await second.claimNotification(submitted.id, "worker-b", 30_000), true,
     "another worker may recover the notification after the renewed lease expires");
 });
+
+
+test("DurableJobRuntime resets prior recovery delivery when a failed job is resumed", async () => {
+  const namespace = "job-runtime-notification-reset-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: false, state: "failed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({ task: "notification reset test" });
+
+  let failed = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && failed?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    failed = await runtime.get(submitted.id);
+  }
+  assert.equal(failed?.status, "failed");
+  assert.equal(await runtime.claimNotification(submitted.id, "old-worker", 30_000), true);
+  await runtime.markNotificationDelivered(submitted.id, "old-worker");
+  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, true);
+
+  assert.equal(await runtime.resetNotificationDelivery(submitted.id), true);
+  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, false);
+  await runtime.markNotificationDelivered(submitted.id, "old-worker");
+  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, false,
+    "a notifier from the previous attempt cannot mark the resumed attempt delivered");
+  assert.equal(await runtime.claimNotification(submitted.id, "new-worker", 30_000), true);
+});
