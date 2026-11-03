@@ -438,12 +438,17 @@ class FileJobStateStore {
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
         records[index] = {
           ...record,
-          ...(current.notificationLeaseOwnerToken && record.notificationLeaseOwnerToken === undefined
-            ? {
-                notificationLeaseOwnerToken: current.notificationLeaseOwnerToken,
-                notificationLeaseExpiresAt: current.notificationLeaseExpiresAt,
-              }
-            : {}),
+          // Notification delivery is monotonic: a stale job snapshot must never
+          // reset a durable delivered marker or resurrect an already-released lease.
+          notificationDelivered: current.notificationDelivered === true || record.notificationDelivered === true,
+          ...(current.notificationDelivered === true
+            ? { notificationLeaseOwnerToken: undefined, notificationLeaseExpiresAt: undefined }
+            : current.notificationLeaseOwnerToken && record.notificationLeaseOwnerToken === undefined
+              ? {
+                  notificationLeaseOwnerToken: current.notificationLeaseOwnerToken,
+                  notificationLeaseExpiresAt: current.notificationLeaseExpiresAt,
+                }
+              : {}),
           ...(record.status === "running" && current.status === "running"
             ? { leaseExpiresAt: current.leaseExpiresAt, heartbeatAt: current.heartbeatAt }
             : {}),
