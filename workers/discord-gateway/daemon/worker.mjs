@@ -47,7 +47,7 @@ async function createDiscordDmChannel(token, userId) {
   });
   if (!response.ok) throw new Error(`Discord DM channel creation failed: HTTP ${response.status}`);
   const data = await response.json();
-  if (typeof data.id !== "string" || !/^\\d{1,24}$/.test(data.id)) {
+  if (typeof data.id !== "string" || !/^\d{1,24}$/.test(data.id)) {
     throw new Error("Discord returned an invalid DM channel.");
   }
   return data.id;
@@ -232,7 +232,16 @@ async function main() {
     } catch (error) {
       console.error("discord_message_failed", safeError(error));
       try {
-        await sendDiscordMessage(token, message.channel_id, "ขออภัยครับ Sofia ประมวลผลข้อความนี้ไม่สำเร็จ ลองส่งใหม่อีกครั้งได้ครับ", message.id);
+        // Keep error notices on the same privacy boundary as successful replies.
+        const errorDestination = replyMode === "dm"
+          ? await createDiscordDmChannel(token, message.author.id)
+          : message.channel_id;
+        await sendDiscordMessage(
+          token,
+          errorDestination,
+          "ขออภัยครับ Sofia ประมวลผลข้อความนี้ไม่สำเร็จ ลองส่งใหม่อีกครั้งได้ครับ",
+          replyMode === "dm" ? undefined : message.id,
+        );
       } catch {
         console.error("discord_error_reply_failed");
       }
