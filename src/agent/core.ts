@@ -44,14 +44,22 @@ export class SofiaAgent {
     };
     try {
       if (request.sessionId && this.deps.sessionStore) {
-        session = this.deps.sessionStore.getOrCreate(request.sessionId);
+        const sessionStore = this.deps.sessionStore;
+        const userTurn = `user: ${request.task.slice(0, 4_000)}`;
+        if (sessionStore.appendMessages) {
+          // SQLite implementations append under a write transaction, avoiding
+          // lost turns when separate Agent instances share the same database.
+          session = sessionStore.appendMessages(request.sessionId, [userTurn], 200);
+        } else {
+          session = sessionStore.getOrCreate(request.sessionId);
+          session.messages.push(userTurn);
+          if (session.messages.length > 200) session.messages.splice(0, session.messages.length - 200);
+          session.updatedAt = Date.now();
+          sessionStore.save(session);
+        }
         // Only prior user/assistant turns are replayed. Treat them as untrusted
         // reference data, cap the replay, and never let them replace system policy.
-        const priorTurns = session.messages.slice(-12).join("\n").slice(-8_000);
-        session.messages.push(`user: ${request.task.slice(0, 4_000)}`);
-        if (session.messages.length > 200) session.messages.splice(0, session.messages.length - 200);
-        session.updatedAt = Date.now();
-        this.deps.sessionStore.save(session);
+        const priorTurns = session.messages.slice(0, -1).slice(-12).join("\n").slice(-8_000);
         if (priorTurns) {
           appendUntrustedContext(
             "prior-session-transcript",
@@ -90,16 +98,30 @@ export class SofiaAgent {
         ? await this.runBrain(activeRequest)
         : await this.runLegacy(activeRequest, singlePassConversation);
       if (session && this.deps.sessionStore) {
-        session.messages.push(`assistant: ${result.output.slice(0, 8_000)}`);
-        if (session.messages.length > 200) session.messages.splice(0, session.messages.length - 200);
-        session.updatedAt = Date.now();
-        this.deps.sessionStore.save(session);
+        const assistantTurn = `assistant: ${result.output.slice(0, 8_000)}`;
+        if (this.deps.sessionStore.appendMessages) {
+          this.deps.sessionStore.appendMessages(session.id, [assistantTurn], 200);
+        } else {
+          session.messages.push(assistantTurn);
+          if (session.messages.length > 200) session.messages.splice(0, session.messages.length - 200);
+          session.updatedAt = Date.now();
+          this.deps.sessionStore.save(session);
+        }
       }
       return result;
     } catch (error) {
       if (session && this.deps.sessionStore) {
-        session.messages.push(`assistant_error: ${error instanceof Error ? error.message : String(error)}`);
-        try { this.deps.sessionStore.save(session); } catch { /* preserve the original run error */ }
+        const errorTurn = `assistant_error: ${error instanceof Error ? error.message : String(error)}`;
+        try {
+          if (this.deps.sessionStore.appendMessages) {
+            this.deps.sessionStore.appendMessages(session.id, [errorTurn], 200);
+          } else {
+            session.messages.push(errorTurn);
+            if (session.messages.length > 200) session.messages.splice(0, session.messages.length - 200);
+            session.updatedAt = Date.now();
+            this.deps.sessionStore.save(session);
+          }
+        } catch { /* preserve the original run error */ }
       }
       throw error;
     } finally {
