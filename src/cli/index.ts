@@ -109,9 +109,22 @@ async function setup() {
     };
     const requiredKeyEnv = keyEnv[provider] ?? "SOFIA_MODEL_API_KEY";
     if (provider !== "ollama" && !process.env[requiredKeyEnv]?.trim()) {
+      let legacyKeyFound = false;
+      try {
+        const existing: unknown = JSON.parse(await readFile(configPath, "utf8"));
+        legacyKeyFound = !!existing && typeof existing === "object" && !Array.isArray(existing) &&
+          typeof (existing as { apiKey?: unknown }).apiKey === "string" &&
+          !!(existing as { apiKey: string }).apiKey;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+      }
+      if (legacyKeyFound) {
+        throw new Error(`An older plaintext API key exists in ~/.sofia/config.json. To avoid losing it, first move it to the ${requiredKeyEnv} environment variable, then rerun setup. The existing config was left unchanged.`);
+      }
       console.log(`\nSet ${requiredKeyEnv} in your shell environment before starting Sofia. The setup wizard never asks for or writes API keys.`);
     }
     await mkdir(configDir, { recursive: true, mode: 0o700 });
+    await chmod(configDir, 0o700);
     const config: LocalConfig = { provider, baseUrl, model };
     await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
     await chmod(configPath, 0o600);
@@ -164,10 +177,10 @@ async function chat() {
 
 async function main() {
   if (!command || command === "help" || command === "--help") return help();
+  if (command === "setup") return setup();
   await loadLocalConfig();
 
   const runtime = createNodeWorkspaceRuntime();
-  if (command === "setup") return setup();
   if (command === "chat") return chat();
 
   if (command === "init") {
