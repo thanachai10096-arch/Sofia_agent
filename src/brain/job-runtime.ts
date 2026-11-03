@@ -122,7 +122,7 @@ async function isExclusiveFileCollision(error: unknown, file: string): Promise<b
  * implementation; cloud adapters must use a shared transactional store.
  */
 export interface JobStateStore {
-  claim(id: string, ownerToken: string, leaseMs: number): Promise<JobRecord | undefined>;
+  claim(id: string, ownerToken: string, leaseMs: number, resumeReservationToken?: string): Promise<JobRecord | undefined>;
   heartbeat(id: string, ownerToken: string, leaseMs: number): Promise<boolean>;
   markInterruptedIfExpired(id: string): Promise<JobRecord | undefined>;
   cancel(id: string): Promise<JobRecord | undefined>;
@@ -340,7 +340,7 @@ class FileJobStateStore implements JobStateStore {
     }
   }
 
-  async claim(id: string, ownerToken: string, leaseMs: number): Promise<JobRecord | undefined> {
+  async claim(id: string, ownerToken: string, leaseMs: number, resumeReservationToken?: string): Promise<JobRecord | undefined> {
     return this.withFileLock(async () => {
       const records = await this.read();
       const record = records.find((item) => item.id === id);
@@ -348,6 +348,10 @@ class FileJobStateStore implements JobStateStore {
       const now = Date.now();
       const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
       if (record.status === "running" && Number.isFinite(expires) && expires > now) return undefined;
+      const reservationExpiry = record.resumeReservationExpiresAt ? Date.parse(record.resumeReservationExpiresAt) : 0;
+      if (record.resumeReservationToken && Number.isFinite(reservationExpiry) && reservationExpiry > now &&
+          record.resumeReservationToken !== resumeReservationToken) return undefined;
+      if (resumeReservationToken && record.resumeReservationToken !== resumeReservationToken) return undefined;
       record.status = "running";
       record.resumeReservationToken = undefined;
       record.resumeReservationExpiresAt = undefined;
@@ -678,7 +682,7 @@ export class DurableJobRuntime implements JobRuntime {
         task: record.task,
         ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}),
         acceptanceCriteria: snapshot.acceptanceCriteria,
-      }, signal, snapshot);
+      }, signal, snapshot, reservationToken);
       return publicJobRecord(record);
     } catch (error) {
       // Reservation expiry allows recovery if execution could not be started.
@@ -754,6 +758,7 @@ export class DurableJobRuntime implements JobRuntime {
     input: Omit<BrainRunInput, "signal" | "resume">,
     externalSignal?: AbortSignal,
     resume?: BrainRunSnapshot,
+    resumeReservationToken?: string,
   ): Promise<void> {
     if (record.status === "cancelled" || record.status === "completed") return;
     const leaseToken = randomUUID();
@@ -761,7 +766,7 @@ export class DurableJobRuntime implements JobRuntime {
     this.starting.add(record.id);
     let claimed: JobRecord | undefined;
     try {
-      claimed = await this.state.claim(record.id, leaseToken, leaseMs);
+      claimed = await this.state.claim(record.id, leaseToken, leaseMs, resumeReservationToken);
     } finally {
       this.starting.delete(record.id);
     }
