@@ -478,30 +478,10 @@ export class CronScheduler {
         // terminalizing it here could discard a still-running external operation.
         continue;
       }
-      if (!job) {
-        const transitioned = await this.store.transact(async state => {
-          const current = state.history.find(item => item.id === execution.id);
-          if (!current || (current.status !== "claimed" && current.status !== "running") ||
-            hasLiveRecoveryLease(current, this.now().getTime())) return false;
-          current.status = "failed";
-          current.finishedAt = this.now().toISOString();
-          current.error = "Runtime job was not found during scheduler recovery.";
-          const latest = state.schedules.find(item => item.id === execution.scheduleId);
-          if (latest) {
-            latest.lastRunAt = current.finishedAt;
-            latest.consecutiveFailures += 1;
-          }
-          await this.recordAudit(state, {
-            at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.job_missing",
-            scheduleId: execution.scheduleId, detail: execution.jobId,
-          });
-          return true;
-        });
-        if (transitioned) reconciled++;
-        continue;
-      }
-
-      if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+      // A missing record on the first lookup can be a runtime restart or
+      // replication delay. Acquire the normal recovery lease below and let the
+      // bounded monitor retry; do not fail an execution on a single empty read.
+      if (job && (job.status === "completed" || job.status === "failed" || job.status === "cancelled")) {
         const recoveredStatus: CronExecution["status"] = job.status;
         const recoveredJobId = job.id;
         const recoveredError = job.error;
