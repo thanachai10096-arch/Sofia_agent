@@ -5,6 +5,10 @@ import { createDiscordGatewayTransport, type DiscordGatewaySocket } from "./disc
 class FakeSocket implements DiscordGatewaySocket {
   readonly sent: Array<Record<string, unknown>> = [];
   private readonly listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+  on(event: "open", listener: () => void): this;
+  on(event: "message", listener: (data: unknown) => void): this;
+  on(event: "close", listener: (code: number, reason?: unknown) => void): this;
+  on(event: "error", listener: (error: unknown) => void): this;
   on(event: "open" | "message" | "close" | "error", listener: (...args: never[]) => void): this {
     const current = this.listeners.get(event) ?? [];
     current.push(listener as (...args: unknown[]) => void);
