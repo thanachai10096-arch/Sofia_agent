@@ -57,8 +57,10 @@ Commands:
   sofia status            Show local workspace status
 
 Provider environment:
-  SOFIA_MODEL_PROVIDER=openai-compatible|gemini|openrouter
-  SOFIA_MODEL_BASE_URL, SOFIA_MODEL_API_KEY, SOFIA_MODEL_NAME
+  SOFIA_MODEL_PROVIDER, SOFIA_MODEL_BASE_URL, SOFIA_MODEL_NAME
+  API keys: provider-specific variables (for example OPENAI_API_KEY,
+  GEMINI_API_KEY, OPENROUTER_API_KEY) or SOFIA_MODEL_API_KEY for
+  OpenAI-compatible endpoints. Keys are never written by "sofia setup".
 `);
 }
 
