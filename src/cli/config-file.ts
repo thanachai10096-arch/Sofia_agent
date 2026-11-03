@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export interface SafeLocalConfig {
@@ -15,6 +15,10 @@ export interface SafeLocalConfig {
 export async function writeSafeLocalConfig(filePath: string, config: SafeLocalConfig): Promise<void> {
   const directory = path.dirname(filePath);
   await mkdir(directory, { recursive: true, mode: 0o700 });
+  const directoryStat = await lstat(directory);
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+    throw new Error("Sofia config directory must be a real directory, not a symbolic link.");
+  }
   await chmod(directory, 0o700);
 
   const safeConfig: SafeLocalConfig = {
