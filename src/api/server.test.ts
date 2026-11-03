@@ -200,6 +200,8 @@ test("API personal memory is isolated by distinct authenticated per-user API key
       body: JSON.stringify({ kind: "preference", content: "I prefer private project summaries." }),
     });
     assert.equal(saved.status, 201);
+    const savedPayload = await saved.json() as { memory: UserMemoryEntry };
+    assert.ok(savedPayload.memory.id);
 
     const ownerRead = await request("telegram-user-one-key");
     const ownerPayload = await ownerRead.json() as { memories: UserMemoryEntry[] };
@@ -209,6 +211,34 @@ test("API personal memory is isolated by distinct authenticated per-user API key
     const otherRead = await request("telegram-user-two-key");
     const otherPayload = await otherRead.json() as { memories: Array<{ content: string }> };
     assert.deepEqual(otherPayload.memories, []);
+
+    // A second principal can write private memory without making it visible to the first.
+    const secondSaved = await request("telegram-user-two-key", {
+      method: "POST",
+      body: JSON.stringify({ kind: "preference", content: "I prefer isolated release notes." }),
+    });
+    assert.equal(secondSaved.status, 201);
+    const secondOwnerRead = await request("telegram-user-two-key");
+    const secondOwnerPayload = await secondOwnerRead.json() as { memories: UserMemoryEntry[] };
+    assert.equal(secondOwnerPayload.memories.length, 1);
+    assert.match(secondOwnerPayload.memories[0]?.content ?? "", /isolated release notes/);
+
+    const firstStillIsolated = await request("telegram-user-one-key");
+    const firstStillIsolatedPayload = await firstStillIsolated.json() as { memories: UserMemoryEntry[] };
+    assert.equal(firstStillIsolatedPayload.memories.length, 1);
+    assert.match(firstStillIsolatedPayload.memories[0]?.content ?? "", /private project summaries/);
+
+    // Knowing another user's memory ID must not authorize deletion.
+    const crossUserDelete = await fetch(baseUrl + "/v1/memory/" + encodeURIComponent(savedPayload.memory.id), {
+      method: "DELETE",
+      headers: { authorization: "Bearer telegram-user-two-key" },
+    });
+    assert.equal(crossUserDelete.status, 404);
+
+    const ownerAfterDeniedDelete = await request("telegram-user-one-key");
+    const ownerAfterDeniedDeletePayload = await ownerAfterDeniedDelete.json() as { memories: UserMemoryEntry[] };
+    assert.equal(ownerAfterDeniedDeletePayload.memories.length, 1);
+    assert.equal(ownerAfterDeniedDeletePayload.memories[0]?.id, savedPayload.memory.id);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
