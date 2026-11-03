@@ -57,8 +57,8 @@ export async function reportTelegramRunCompletion(input: {
     const status = ["failed", "cancelled", "queued", "running"].includes(run.status) ? run.status : "unknown";
     // Provider/runtime errors can reveal internal topology, billing state, or identifiers.
     // Keep diagnostics in server-side logs; chat receives only a stable public status.
-    text = "Sofia task " + status + ".\\nRun ID: " + input.runId +
-      (status === "failed" ? "\\nSofia could not complete this task. Check the run status in the Sofia dashboard." : "");
+    text = "Sofia task " + status + ".\nRun ID: " + input.runId +
+      (status === "failed" ? "\nSofia could not complete this task. Check the run status in the Sofia dashboard." : "");
   }
 
   try {
