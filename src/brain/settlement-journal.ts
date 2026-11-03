@@ -83,7 +83,7 @@ export class FileSettlementJournal {
    * expose a portable directory-fsync contract through Node's FileHandle API;
    * that platform limitation is documented rather than silently overstated.
    */
-  private async syncDirectory(): Promise<void> {
+  protected async syncDirectory(): Promise<void> {
     if (process.platform === "win32") return;
     const before = await fs.lstat(this.directory);
     if (before.isSymbolicLink() || !before.isDirectory()) {
