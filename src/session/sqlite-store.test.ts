@@ -241,3 +241,25 @@ test("SQLite append is atomic, ordered, and bounds retained conversation history
   }
 });
 
+test("deleting a SQLite session atomically removes its transcript and full-text search entries", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-delete-"));
+  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  try {
+    store.save({ id: "erase-me", messages: ["private deletion phrase"], updatedAt: 0 });
+    store.save({ id: "keep-me", messages: ["unrelated retained transcript"], updatedAt: 0 });
+
+    assert.deepEqual(store.search("deletion").map((session) => session.id), ["erase-me"]);
+    store.delete("erase-me");
+
+    assert.equal(store.get("erase-me"), undefined);
+    assert.deepEqual(store.listMessages("erase-me"), []);
+    assert.deepEqual(store.search("deletion"), []);
+    assert.deepEqual(store.get("keep-me")?.messages, ["unrelated retained transcript"]);
+
+    assert.doesNotThrow(() => store.delete("erase-me"));
+    assert.deepEqual(store.get("keep-me")?.messages, ["unrelated retained transcript"]);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
