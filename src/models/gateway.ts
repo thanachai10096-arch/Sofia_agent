@@ -372,8 +372,11 @@ export class SofiaModelGateway implements ModelProvider {
           }
           const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
           retryableFailure = retryable;
-          const detail = await response.text();
-          lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
+          // Provider error bodies may echo prompts, credentials, or account data.
+          // Preserve the status for retry classification without exposing the body
+          // through persisted run errors or API/SSE responses.
+          await response.text();
+          lastError = new Error(`Model gateway request failed (${response.status}).`);
           if (!retryable || attempt === maxAttempts || options.signal?.aborted) throw lastError;
           const retryAfter = Number(response.headers.get("retry-after") ?? "");
           const delay = Number.isFinite(retryAfter) && retryAfter > 0
@@ -409,10 +412,8 @@ export class SofiaModelGateway implements ModelProvider {
     }
 
     if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(
-        `Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`,
-      );
+      await response.text();
+      throw new Error(`Model gateway request failed (${response.status}).`);
     }
 
     const failResponse = (message: string): never => {
