@@ -27,9 +27,18 @@ let sessionStore: SqliteSessionStore | MemorySessionStore;
 try {
   sessionStore = await SqliteSessionStore.open(path.join(workspace, ".sofia", "sessions.sqlite"));
 } catch (error) {
+  const code = error && typeof error === "object" && "code" in error
+    ? String((error as NodeJS.ErrnoException).code)
+    : "";
+  // Only fall back when the runtime genuinely lacks node:sqlite. A corrupt,
+  // inaccessible, symlinked, or newer-schema database must stop startup rather
+  // than silently discarding the user's persistent-session guarantee.
+  if (code !== "ERR_UNKNOWN_BUILTIN_MODULE" && code !== "ERR_MODULE_NOT_FOUND") {
+    throw error;
+  }
   console.error(
-    "Persistent SQLite sessions unavailable; using in-memory sessions:",
-    error instanceof Error ? error.name : "UnknownError",
+    "Persistent SQLite sessions unavailable on this Node runtime; using in-memory sessions:",
+    code,
   );
   sessionStore = new MemorySessionStore();
 }
