@@ -30,10 +30,19 @@ test("fails closed for malformed persisted receipt and evidence objects", () => 
 
   const evidence: RunEvidence = {
     id: "evidence-1", runId: "run-1", scope, kind: "verification", trusted: true,
-    success: true, content: "verified", createdAt: new Date().toISOString(),
+    success: true, content: "verified", createdAt: receipt.completedAt,
   };
   assert.equal(validEvidence(null as unknown as RunEvidence, receipt), false);
   assert.equal(validEvidence({ ...evidence, scope: undefined } as unknown as RunEvidence, receipt), false);
+});
+
+test("rejects evidence created after its verification receipt completed", () => {
+  const evidence: RunEvidence = {
+    id: "evidence-1", runId: "run-1", scope, kind: "verification", trusted: true,
+    success: true, content: "verified",
+    createdAt: new Date(Date.parse(receipt.completedAt) + 1_000).toISOString(),
+  };
+  assert.equal(validEvidence(evidence, receipt), false);
 });
 
 test("receipt evidence references must be unique", () => {
