@@ -74,3 +74,13 @@ export async function writeSafeLocalConfig(filePath: string, config: SafeLocalCo
     throw error;
   }
 }
+
+/** Apply only non-secret CLI metadata. Legacy apiKey fields are intentionally ignored. */
+export function applySafeLocalConfigEnvironment(
+  config: SafeLocalConfig,
+  environment: NodeJS.ProcessEnv,
+): void {
+  if (!environment.SOFIA_MODEL_PROVIDER && config.provider) environment.SOFIA_MODEL_PROVIDER = config.provider;
+  if (!environment.SOFIA_MODEL_BASE_URL && config.baseUrl) environment.SOFIA_MODEL_BASE_URL = config.baseUrl;
+  if (!environment.SOFIA_MODEL_NAME && config.model) environment.SOFIA_MODEL_NAME = config.model;
+}
