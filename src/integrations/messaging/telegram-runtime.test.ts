@@ -56,7 +56,8 @@ test("complete Telegram configuration constructs a runtime without starting netw
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.ok(runtime);
   await runtime.stop();
-  assert.deepEqual(warnings, []);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /share that API key.s memory and session scope/);
 });
 
 
@@ -110,4 +111,35 @@ test("Telegram per-user API keys require unique credentials for numeric user IDs
   assert.throws(() => parseTelegramUserApiKeys('{"abc":"key-one"}'), /invalid user ID or API key/);
   assert.throws(() => parseTelegramUserApiKeys('{"123":"same","456":"same"}'), /distinct API key/);
   assert.throws(() => parseTelegramUserApiKeys('{"123":"  "}'), /invalid user ID or API key/);
+});
+
+
+test("Telegram per-user API credentials allow keyless shared fallback and cover every allowlisted sender", async () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123,456",
+    TELEGRAM_USER_API_KEYS: '{"123":"user-one-key","456":"user-two-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.ok(runtime);
+  await runtime.stop();
+  assert.deepEqual(warnings, []);
+});
+
+test("Telegram per-user credentials fail closed when an allowlisted user has no key", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123,456",
+    TELEGRAM_USER_API_KEYS: '{"123":"user-one-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0] ?? "", /user-one-key|123|456/);
 });
