@@ -21,20 +21,24 @@ const claim = {
 
 test("SQLite replay store persists nonce claims across reopen", { skip: !sqliteAvailable }, async () => {
   const temp = tempDatabase();
-  const first = await SqliteChatDelegationReplayStore.open(temp.filePath);
-  assert.equal(await first.claim(claim), true);
-  first.close();
-
-  const reopened = await SqliteChatDelegationReplayStore.open(temp.filePath);
+  let first: SqliteChatDelegationReplayStore | undefined;
+  let reopened: SqliteChatDelegationReplayStore | undefined;
   try {
+    first = await SqliteChatDelegationReplayStore.open(temp.filePath);
+    assert.equal(await first.claim(claim), true);
+    first.close();
+    first = undefined;
+
+    reopened = await SqliteChatDelegationReplayStore.open(temp.filePath);
     assert.equal(await reopened.claim(claim), false);
   } finally {
-    reopened.close();
+    first?.close();
+    reopened?.close();
     fs.rmSync(temp.directory, { recursive: true, force: true });
   }
 });
 
-test("SQLite replay store permits only one winner across concurrent connections", { skip: !sqliteAvailable }, async () => {
+test("SQLite replay store does not allow a second connection to reclaim the same nonce", { skip: !sqliteAvailable }, async () => {
   const temp = tempDatabase();
   const first = await SqliteChatDelegationReplayStore.open(temp.filePath);
   const second = await SqliteChatDelegationReplayStore.open(temp.filePath);
