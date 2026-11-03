@@ -44,6 +44,18 @@ export function decideSettlementRecovery(
   }
 
   const reasons: string[] = [];
+  const counts = [
+    inspection.startedAttempts,
+    inspection.settledAttempts,
+    inspection.unknownUsageAttempts,
+    inspection.checkpoints,
+  ];
+  const countsValid = counts.every((count) => Number.isSafeInteger(count) && count >= 0) &&
+    inspection.settledAttempts <= inspection.startedAttempts &&
+    inspection.unknownUsageAttempts <= inspection.settledAttempts &&
+    (inspection.journal !== "missing" || counts.every((count) => count === 0));
+  if (!countsValid) reasons.push("inspection_counts_invalid");
+  if (inspection.unknownUsageAttempts > 0) reasons.push("unknown_usage_reported");
   if (inspection.claim === "invalid") reasons.push("claim_invalid");
   if (inspection.journal === "corrupt") reasons.push("journal_corrupt");
   if (inspection.journal === "unresolved" || inspection.unresolved) {
