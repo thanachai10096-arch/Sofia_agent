@@ -80,8 +80,10 @@ export class VersionedSkillLifecycle {
 
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
     const safePackage = validatePackage(skillPackage);
-    if (!isRecord(provenance) || typeof provenance.source !== "string" || !provenance.source.trim() ||
-        !Array.isArray(provenance.evidenceIds) || !provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
+    if (!isRecord(provenance) || typeof provenance.source !== "string" || !provenance.source.trim() || provenance.source.length > 200 ||
+        !Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length === 0 ||
+        !provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
+        new Set(provenance.evidenceIds).size !== provenance.evidenceIds.length ||
         !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1) {
       throw new Error("Invalid skill provenance");
     }
@@ -225,7 +227,9 @@ export class VersionedSkillLifecycle {
           typeof item.skillId !== "string" || !item.skillId.trim() ||
           !["candidate", "verified", "rejected", "active", "superseded", "rolled_back"].includes(String(item.status)) ||
           !isRecord(item.provenance) || typeof item.provenance.source !== "string" || !item.provenance.source.trim() ||
-          !Array.isArray(item.provenance.evidenceIds) || !item.provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
+          !Array.isArray(item.provenance.evidenceIds) || item.provenance.evidenceIds.length === 0 ||
+          !item.provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
+          new Set(item.provenance.evidenceIds).size !== item.provenance.evidenceIds.length ||
           typeof item.provenance.confidence !== "number" || !Number.isFinite(item.provenance.confidence) ||
           item.provenance.confidence < 0 || item.provenance.confidence > 1 ||
           typeof item.createdAt !== "string" || typeof item.updatedAt !== "string") {
