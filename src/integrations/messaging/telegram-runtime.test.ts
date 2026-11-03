@@ -64,6 +64,7 @@ test("complete Telegram configuration constructs a runtime without starting netw
 test("Telegram run completion sends the real completed output to the originating chat", async () => {
   const sent: Array<{ conversationId: string; text: string }> = [];
   const warnings: string[] = [];
+  const persisted: string[] = [];
   await reportTelegramRunCompletion({
     runId: "run-123",
     conversationId: "chat-456",
@@ -77,12 +78,14 @@ test("Telegram run completion sends the real completed output to the originating
       sent.push({ conversationId: message.conversationId, text: message.text });
       return true;
     },
+    onCompleted: (output) => { persisted.push(output); },
     onWarning: (event) => warnings.push(event),
   });
   assert.equal(sent.length, 1);
   assert.equal(sent[0]?.conversationId, "chat-456");
   assert.match(sent[0]?.text ?? "", /Sofia completed the task/);
   assert.match(sent[0]?.text ?? "", /สวัสดีจาก Sofia/);
+  assert.deepEqual(persisted, ["สวัสดีจาก Sofia"]);
   assert.deepEqual(warnings, []);
 });
 
