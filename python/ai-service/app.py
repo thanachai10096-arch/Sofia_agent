@@ -12,8 +12,8 @@ from functools import lru_cache
 from typing import Annotated, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
-from starlette.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.responses import JSONResponse
 
 MAX_TEXT_CHARS = 20_000
 MAX_ITEMS = 64
