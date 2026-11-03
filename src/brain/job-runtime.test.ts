@@ -1127,10 +1127,18 @@ test("DurableJobRuntime resets prior recovery delivery when a failed job is resu
   await runtime.markNotificationDelivered(submitted.id, "old-worker");
   assert.equal((await runtime.get(submitted.id))?.notificationDelivered, true);
 
-  assert.equal(await runtime.resetNotificationDelivery(submitted.id), true);
-  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, false);
+  const stateStore = (runtime as unknown as {
+    state: {
+      claim(id: string, ownerToken: string, leaseMs: number): Promise<import("./job-runtime.js").JobRecord | undefined>;
+    };
+  }).state;
+  const resumed = await stateStore.claim(submitted.id, "new-job-worker", 15_000);
+  assert.equal(resumed?.status, "running");
+  assert.equal(resumed?.notificationDelivered, false,
+    "the failed-to-running claim resets the prior attempt's delivery marker atomically");
   await runtime.markNotificationDelivered(submitted.id, "old-worker");
   assert.equal((await runtime.get(submitted.id))?.notificationDelivered, false,
-    "a notifier from the previous attempt cannot mark the resumed attempt delivered");
-  assert.equal(await runtime.claimNotification(submitted.id, "new-worker", 30_000), true);
+    "a notifier from the previous attempt cannot mark the resumed attempt's notice as delivered");
+  assert.equal(await runtime.claimNotification(submitted.id, "new-worker", 30_000), false,
+    "recovery notices cannot be claimed while the resumed job is running");
 });
