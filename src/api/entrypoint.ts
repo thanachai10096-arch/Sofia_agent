@@ -7,16 +7,26 @@ import { createDiscordInteractionTransport } from "../integrations/messaging/dis
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
-import { createTelegramMessagingRuntime, parseTelegramUserApiKeys } from "../integrations/messaging/telegram-runtime.js";
+import { createTelegramMessagingRuntime, parseTelegramUserAllowlist, parseTelegramUserApiKeys } from "../integrations/messaging/telegram-runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
 const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
-const telegramUserApiKeys = process.env.TELEGRAM_USER_API_KEYS?.trim()
-  ? parseTelegramUserApiKeys(process.env.TELEGRAM_USER_API_KEYS.trim())
-  : new Map<string, string>();
+let telegramUserApiKeys = new Map<string, string>();
+if (process.env.SOFIA_MESSAGING_ENABLED === "true" && process.env.TELEGRAM_USER_API_KEYS?.trim()) {
+  try {
+    const candidateKeys = parseTelegramUserApiKeys(process.env.TELEGRAM_USER_API_KEYS.trim());
+    const allowedUsers = parseTelegramUserAllowlist(process.env.TELEGRAM_ALLOWED_USER_IDS ?? "");
+    const mappingMatchesAllowlist = candidateKeys.size === allowedUsers.size &&
+      [...allowedUsers].every((userId) => candidateKeys.has(userId));
+    if (mappingMatchesAllowlist) telegramUserApiKeys = new Map(candidateKeys);
+  } catch {
+    // Invalid optional Telegram configuration must disable the bridge, not the core API.
+    // createTelegramMessagingRuntime emits the operator-facing redacted warning.
+  }
+}
 const apiKeys: Record<string, string[]> = { [apiKey]: scopes };
 for (const key of telegramUserApiKeys.values()) apiKeys[key] = scopes;
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
