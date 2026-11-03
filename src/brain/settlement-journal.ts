@@ -132,8 +132,9 @@ export class FileSettlementJournal {
         if (!releaseInFlight) {
           releaseInFlight = (async () => {
             let current: { token?: unknown };
+            let lockInfo: Awaited<ReturnType<typeof fs.lstat>>;
             try {
-              current = JSON.parse(await fs.readFile(lockFile, "utf8")) as { token?: unknown };
+              lockInfo = await fs.lstat(lockFile);
             } catch (error) {
               if ((error as NodeJS.ErrnoException).code === "ENOENT") {
                 released = true;
@@ -141,8 +142,30 @@ export class FileSettlementJournal {
               }
               throw error;
             }
+            if (lockInfo.isSymbolicLink() || !lockInfo.isFile()) {
+              throw new Error("Settlement run claim path is invalid; refusing to release it");
+            }
+            const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+            const lockHandle = await fs.open(lockFile, fsConstants.O_RDONLY | noFollow);
+            try {
+              const opened = await lockHandle.stat();
+              if (!opened.isFile() || opened.dev !== lockInfo.dev || opened.ino !== lockInfo.ino) {
+                throw new Error("Settlement run claim changed during release; refusing to release it");
+              }
+              current = JSON.parse(await lockHandle.readFile("utf8")) as { token?: unknown };
+            } finally {
+              await lockHandle.close();
+            }
             if (current.token !== token) {
               throw new Error("Settlement run claim ownership changed; refusing to release another worker's claim");
+            }
+            // Re-check the path identity immediately before unlink. The claim
+            // token alone is insufficient if the lock path was replaced by a
+            // symlink or another inode after it was read.
+            const beforeUnlink = await fs.lstat(lockFile);
+            if (beforeUnlink.isSymbolicLink() || !beforeUnlink.isFile() ||
+                beforeUnlink.dev !== lockInfo.dev || beforeUnlink.ino !== lockInfo.ino) {
+              throw new Error("Settlement run claim changed before release; refusing to unlink it");
             }
             await fs.unlink(lockFile);
             released = true;
