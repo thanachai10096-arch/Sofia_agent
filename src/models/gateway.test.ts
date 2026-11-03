@@ -90,6 +90,74 @@ test("Anthropic Messages adapter sends native tool schema and normalizes tool-us
   }
 });
 
+test("Anthropic adapter maps multiple prior tool calls and results across turns", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      content: [{ type: "text", text: "Both tools completed." }],
+      stop_reason: "end_turn",
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://api.anthropic.com/v1",
+        apiKey: "anthropic-secret",
+        model: "claude-test-model",
+        protocol: "anthropic-messages",
+      },
+    });
+    await gateway.generate({
+      task: "Continue after tools",
+      kind: "coding",
+      step: 2,
+      messages: [
+        { role: "system", content: "You are Sofia." },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            { id: "call_1", name: "workspace.read_file", arguments: "{\"path\":\"README.md\"}" },
+            { id: "call_2", name: "terminal.run", arguments: "{\"command\":\"pwd\"}" },
+          ],
+        },
+        { role: "tool", toolCallId: "call_1", content: "README contents" },
+        { role: "tool", toolCallId: "call_2", content: "/workspace" },
+      ],
+      tools: [
+        { type: "function", function: { name: "workspace.read_file", description: "Read a file", parameters: { type: "object" } } },
+        { type: "function", function: { name: "terminal.run", description: "Run a command", parameters: { type: "object" } } },
+      ],
+    }, route, { maxOutputTokens: 128 });
+
+    assert.deepEqual(requestedBody.tools, [
+      { name: "sofia_tool_0", description: "Read a file", input_schema: { type: "object" } },
+      { name: "sofia_tool_1", description: "Run a command", input_schema: { type: "object" } },
+    ]);
+    assert.deepEqual(requestedBody.messages, [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "call_1", name: "sofia_tool_0", input: { path: "README.md" } },
+          { type: "tool_use", id: "call_2", name: "sofia_tool_1", input: { command: "pwd" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "call_1", content: "README contents" },
+          { type: "tool_result", tool_use_id: "call_2", content: "/workspace" },
+        ],
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Anthropic adapter adds JSON-only instructions for structured Brain requests", async () => {
   const originalFetch = globalThis.fetch;
   let requestedBody: Record<string, unknown> = {};
