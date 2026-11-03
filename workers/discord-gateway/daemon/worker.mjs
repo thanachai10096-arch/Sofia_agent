@@ -36,6 +36,22 @@ function extractReply(payload) {
     ? "เสร็จแล้วครับ แต่ระบบยังไม่ได้ส่งข้อความสรุปผลกลับมา"
     : "รับคำขอแล้ว แต่ยังไม่สามารถอ่านผลลัพธ์ได้";
 }
+async function createDiscordDmChannel(token, userId) {
+  const response = await fetch(`${DISCORD_API_BASE}/users/@me/channels`, {
+    method: "POST",
+    headers: {
+      authorization: `Bot ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ recipient_id: userId }),
+  });
+  if (!response.ok) throw new Error(`Discord DM channel creation failed: HTTP ${response.status}`);
+  const data = await response.json();
+  if (typeof data.id !== "string" || !/^\\d{1,24}$/.test(data.id)) {
+    throw new Error("Discord returned an invalid DM channel.");
+  }
+  return data.id;
+}
 async function sendDiscordMessage(token, channelId, content, replyTo) {
   const chunks = [];
   for (let offset = 0; offset < content.length; offset += MAX_DISCORD_MESSAGE) {
@@ -151,6 +167,10 @@ async function main() {
   const bypass = process.env.VERCEL_PROTECTION_BYPASS?.trim();
   const allowedUsers = parseIds("DISCORD_ALLOWED_USER_IDS");
   const allowedChannels = parseIds("DISCORD_ALLOWED_CHANNEL_IDS");
+  const replyMode = (process.env.DISCORD_REPLY_MODE || "channel").trim().toLowerCase();
+  if (replyMode !== "channel" && replyMode !== "dm") {
+    throw new Error("DISCORD_REPLY_MODE must be either 'channel' or 'dm'.");
+  }
   const base = new URL(apiBase);
   const configuredHosts = (process.env.SOFIA_API_ALLOWED_HOSTS || "")
     .split(",").map((host) => host.trim().toLowerCase()).filter(Boolean);
@@ -195,7 +215,18 @@ async function main() {
     activeMessages += 1;
     try {
       const reply = await runSofia({ apiBase: base, apiKey, bypass, message });
-      if (reply) await sendDiscordMessage(token, message.channel_id, reply, message.id);
+      if (reply) {
+        // DM mode is privacy-preserving: never fall back to a shared channel on DM failure.
+        const destination = replyMode === "dm"
+          ? await createDiscordDmChannel(token, message.author.id)
+          : message.channel_id;
+        await sendDiscordMessage(
+          token,
+          destination,
+          reply,
+          replyMode === "dm" ? undefined : message.id,
+        );
+      }
       seen.set(message.id, Date.now());
       while (seen.size > 5000) seen.delete(seen.keys().next().value);
     } catch (error) {
