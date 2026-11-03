@@ -142,3 +142,36 @@ test("terminal outbox persistence rejects non-terminal records before querying",
   }, "job.running", {}), /terminal job status/);
   assert.equal(queried, false);
 });
+
+
+test("cancelWithOutbox atomically cancels a queued job and inserts a destination-scoped event", async () => {
+  let sql = "";
+  let values: unknown[] = [];
+  const db: PostgresExecutor = {
+    async query(statement, params = []) {
+      sql = statement;
+      values = params;
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const store = new PostgresJobStateStore(db);
+  assert.equal(await store.cancelWithOutbox("00000000-0000-4000-8000-000000000001", "principal-a"), undefined);
+  assert.match(sql, /WITH updated AS/);
+  assert.match(sql, /status='cancelled'/);
+  assert.match(sql, /INSERT INTO sofia_agent_outbox/);
+  assert.match(sql, /FROM updated u WHERE u.event_destination IS NOT NULL/);
+  assert.match(sql, /'job.cancelled'/);
+  assert.match(sql, /owner_key_id=\$2/);
+  assert.match(sql, /ON CONFLICT \(job_id,event_type,destination\) DO NOTHING/);
+  assert.equal(values[1], "principal-a");
+});
+
+test("cancelWithOutbox supports an unscoped internal cancellation without weakening owner-scoped callers", async () => {
+  let values: unknown[] = [];
+  const db: PostgresExecutor = {
+    async query(_statement, params = []) { values = params; return { rows: [], rowCount: 0 }; },
+  };
+  const store = new PostgresJobStateStore(db);
+  await store.cancelWithOutbox("00000000-0000-4000-8000-000000000001");
+  assert.equal(values[1], null);
+});
