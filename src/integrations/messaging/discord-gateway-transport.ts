@@ -28,19 +28,6 @@ const GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
 const GATEWAY_INTENTS = 1 | (1 << 9) | (1 << 12) | (1 << 15);
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
-function trustedResumeGatewayUrl(value: unknown): string | undefined {
-  if (typeof value !== "string" || value.length > 2_048) return undefined;
-  try {
-    const url = new URL(value);
-    const host = url.hostname.toLowerCase();
-    if (url.protocol !== "wss:" || url.username || url.password ||
-        (url.port !== "" && url.port !== "443") ||
-        !(host === "gateway.discord.gg" || /^gateway-[a-z0-9-]+\.discord\.gg$/.test(host))) return undefined;
-    return url.toString();
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * Discord Gateway transport for normal message events. Gateway session authentication
@@ -61,7 +48,6 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
   let generation = 0;
   let sequence: number | null = null;
   let sessionId: string | undefined;
-  let resumeUrl = GATEWAY_URL;
   let botId: string | undefined;
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -205,15 +191,11 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
     };
     try { await callback(event); } catch { notify("message_handler_failed"); }
   }
+  // Pin all WebSocket connections to Discord's official Gateway origin.
+  // Do not use a server-provided resume URL as a socket destination: this
+  // removes an SSRF-capable dynamic destination from the network boundary.
   function gatewayTargetUrl(): string {
-    try {
-      const target = new URL(resumeUrl || GATEWAY_URL);
-      target.searchParams.set("v", "10");
-      target.searchParams.set("encoding", "json");
-      return target.toString();
-    } catch {
-      return GATEWAY_URL;
-    }
+    return GATEWAY_URL;
   }
   function connect(): void {
     if (!running || controller?.signal.aborted) return;
@@ -244,8 +226,8 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
       if (payload.t === "READY") {
         const ready = payload.d as GatewayReady | undefined;
         if (ready?.session_id) sessionId = ready.session_id;
-        const trustedResumeUrl = trustedResumeGatewayUrl(ready?.resume_gateway_url);
-        if (trustedResumeUrl) resumeUrl = trustedResumeUrl;
+        // Discord's resume_gateway_url is intentionally ignored; connections
+        // remain pinned to the fixed official Gateway URL.
         if (ready?.user?.id) botId = ready.user.id;
         reconnectAttempt = 0;
       } else if (payload.t === "MESSAGE_CREATE" && payload.d && typeof payload.d === "object") {
