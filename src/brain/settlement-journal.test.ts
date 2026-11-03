@@ -528,6 +528,44 @@ test("journal never records unsafe aggregate token usage as known", async () => 
   }
 });
 
+test("recovery rejects started bounds whose combined token count is unsafe", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-start-overflow-"));
+  try {
+    const namespace = "workspace";
+    const runId = "start-overflow-run";
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    const at = new Date().toISOString();
+    const source = [
+      JSON.stringify({
+        version: 1, type: "started", attemptId: "attempt-1", at,
+        maxInputTokens: Number.MAX_SAFE_INTEGER,
+        maxOutputTokens: Number.MAX_SAFE_INTEGER,
+      }),
+      JSON.stringify({
+        version: 1, type: "settled", attemptId: "attempt-1", at,
+        usageKnown: true, usage: { inputTokens: 1, outputTokens: 1 },
+      }),
+    ].join("\n") + "\n";
+    await writeFile(journalFile, source, { mode: 0o600 });
+
+    const journal = new FileSettlementJournal(namespace, root);
+    assert.equal(await journal.hasUnresolved(runId), true,
+      "unsafe started bounds must block replay even when settlement usage is valid");
+    const inspection = await journal.inspectRun(runId);
+    assert.equal(inspection.journal, "corrupt",
+      "inspection must classify invalid reservation bounds as corrupt evidence");
+    assert.equal(inspection.unresolved, true);
+    await assert.rejects(journal.acknowledgeCheckpoint(runId), /corrupt|ambiguous|pending/,
+      "checkpoint admission must reject unsafe historical reservation bounds");
+    assert.equal(await readFile(journalFile, "utf8"), source,
+      "recovery must preserve invalid evidence without rewriting it");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("journal rejects known usage whose combined token count is unsafe", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-overflow-history-"));
   try {
