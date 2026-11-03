@@ -704,6 +704,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const jobId = jobMatch[1];
         const action = jobMatch[2];
         if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
+        if (config.requireOwnerScopedJobRuntime &&
+            (!deps.jobRuntime.getForOwner || !deps.jobRuntime.resumeForOwner || !deps.jobRuntime.cancelForOwner)) {
+          return json(res, 503, { error: "owner_scoped_job_runtime_required" }, origin, config);
+        }
         const job = deps.jobRuntime.getForOwner
           ? await deps.jobRuntime.getForOwner(jobId, auth.keyId)
           : await deps.jobRuntime.get(jobId).then((record) => record?.ownerKeyId === auth.keyId ? record : undefined);
@@ -733,6 +737,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       if (req.method === "GET" && req.url === "/v1/jobs") {
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+        if (config.requireOwnerScopedJobRuntime && !deps.jobRuntime.listForOwner) {
+          return json(res, 503, { error: "owner_scoped_job_runtime_required" }, origin, config);
+        }
         const jobs = deps.jobRuntime.listForOwner
           ? await deps.jobRuntime.listForOwner(auth.keyId, 100)
           : (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId).slice(0, 100);
