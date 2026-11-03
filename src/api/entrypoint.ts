@@ -35,6 +35,41 @@ let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | und
 const discordAbort = new AbortController();
 let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
 
+/**
+ * Serialize every Discord job-result/recovery notification through the same
+ * durable lease. This covers initial completion, resumed completion, and
+ * post-restart recovery so those paths cannot race each other on shared storage.
+ */
+async function sendClaimedDiscordNotification(jobId: string, channelId: string, message: string): Promise<boolean> {
+  if (!discordTransport || !deps.jobRuntime) return false;
+  const token = randomUUID();
+  let claimed = false;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  try {
+    if (deps.jobRuntime.claimNotification) {
+      claimed = await deps.jobRuntime.claimNotification(jobId, token, 60_000);
+      if (!claimed) return false;
+      if (deps.jobRuntime.renewNotificationClaim) {
+        heartbeat = setInterval(() => {
+          void deps.jobRuntime?.renewNotificationClaim?.(jobId, token, 60_000).catch(() => false);
+        }, 15_000);
+        heartbeat.unref?.();
+      }
+    } else {
+      // Compatibility for injected JobRuntime implementations without leases.
+      claimed = true;
+    }
+    await discordTransport.sendMessage(channelId, message);
+    await deps.jobRuntime.markNotificationDelivered?.(jobId, token);
+    return true;
+  } catch (error) {
+    if (claimed) await deps.jobRuntime.releaseNotificationClaim?.(jobId, token).catch(() => undefined);
+    throw error;
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+  }
+}
+
 if (discordConfigured) {
   if (!discordPublicKey || !discordBotToken) {
     throw new Error("Discord integration requires DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, DISCORD_ALLOWED_USER_IDS, and DISCORD_ALLOWED_CHANNEL_IDS.");
@@ -97,8 +132,7 @@ if (discordConfigured) {
           void deps.jobRuntime.resume(job.id).then(async (resumed) => {
             const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
-            await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
-            await deps.jobRuntime?.markNotificationDelivered?.(resumed.id);
+            await sendClaimedDiscordNotification(resumed.id, message.channelId, content.slice(0, 1700));
           }).catch(async () => {
             try {
               await discordTransport?.sendMessage(message.channelId, "Sofia could not resume job " + job.id + ". Check the job status and server logs.");
@@ -148,35 +182,8 @@ if (discordConfigured) {
         const prefix = result.status === "completed" ? "Sofia completed the task." : "Sofia job " + result.status + ".";
         const response = prefix + "\nJob ID: " + result.id + "\n" + result.summary;
         const safeResponse = response.length > 1700 ? response.slice(0, 1690) + "… (truncated)" : response;
-        // Live completion and post-restart recovery must share one durable
-        // notification lease. Otherwise a second API worker can observe the
-        // terminal job and send a recovery notice while this worker sends the
-        // full result, producing two messages for the same attempt.
-        const notificationToken = randomUUID();
-        let claimed = false;
-        let notificationHeartbeat: ReturnType<typeof setInterval> | undefined;
-        try {
-          if (deps.jobRuntime?.claimNotification) {
-            claimed = await deps.jobRuntime.claimNotification(result.id, notificationToken, 60_000);
-            if (!claimed) return;
-            if (deps.jobRuntime.renewNotificationClaim) {
-              notificationHeartbeat = setInterval(() => {
-                void deps.jobRuntime?.renewNotificationClaim?.(result.id, notificationToken, 60_000).catch(() => false);
-              }, 15_000);
-              notificationHeartbeat.unref?.();
-            }
-          } else {
-            // Compatibility for alternate JobRuntime implementations without leases.
-            claimed = true;
-          }
-          await discordTransport?.sendMessage(message.channelId, safeResponse);
-          await deps.jobRuntime?.markNotificationDelivered?.(result.id, notificationToken);
-        } catch (error) {
-          if (claimed) await deps.jobRuntime?.releaseNotificationClaim?.(result.id, notificationToken).catch(() => undefined);
-          throw error;
-        } finally {
-          if (notificationHeartbeat) clearInterval(notificationHeartbeat);
-        }
+        // Live completion and recovery use the same durable notification claim.
+        await sendClaimedDiscordNotification(result.id, message.channelId, safeResponse);
       }).catch(async () => {
         try {
           await discordTransport?.sendMessage(
@@ -215,39 +222,16 @@ if (discordConfigured) {
           job.notificationDelivered || job.status === "queued" || job.status === "running" ||
           Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
       notificationInFlight.add(job.id);
-      const notificationToken = randomUUID();
-      let claimed = false;
-      let notificationHeartbeat: ReturnType<typeof setInterval> | undefined;
       try {
-        // The durable claim serializes recovery delivery across workers sharing
-        // this local file store. A different-host shared store must provide its
-        // own transactional implementation; this file store fails closed there.
-        if (deps.jobRuntime.claimNotification) {
-          claimed = await deps.jobRuntime.claimNotification(job.id, notificationToken, 60_000);
-          if (!claimed) continue;
-          if (deps.jobRuntime.renewNotificationClaim) {
-            notificationHeartbeat = setInterval(() => {
-              void deps.jobRuntime?.renewNotificationClaim?.(job.id, notificationToken, 60_000).catch(() => false);
-            }, 15_000);
-            notificationHeartbeat.unref?.();
-          }
-        } else {
-          // Backward-compatible fallback for injected JobRuntime implementations
-          // that have not adopted the optional claim contract yet.
-          claimed = true;
-        }
         const message = job.status === "completed"
           ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
           : job.snapshot
             ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
             : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
-        await discordTransport.sendMessage(job.notificationChannelId, message);
-        await deps.jobRuntime.markNotificationDelivered?.(job.id, notificationToken);
+        await sendClaimedDiscordNotification(job.id, job.notificationChannelId, message);
       } catch {
-        // Keep the marker unset and release this worker's lease for a prompt retry.
-        if (claimed) await deps.jobRuntime.releaseNotificationClaim?.(job.id, notificationToken).catch(() => undefined);
+        // The shared helper releases its own lease after a failed send.
       } finally {
-        if (notificationHeartbeat) clearInterval(notificationHeartbeat);
         notificationInFlight.delete(job.id);
       }
     }
