@@ -132,25 +132,24 @@ export default async function discordInteractions(req: IncomingMessage, res: Ser
     return;
   }
 
-  let apiKey = process.env.SOFIA_API_KEY;
-  if (process.env.DISCORD_USER_API_KEYS?.trim()) {
-    try {
-      const userKeys = parseDiscordUserApiKeys(process.env.DISCORD_USER_API_KEYS.trim());
-      if (!matchDiscordUserApiKeys(userKeys, [...allowedUsers], process.env.SOFIA_API_KEY ? [process.env.SOFIA_API_KEY] : [])) {
-        reply(res, 503, { error: "discord_user_key_mapping_invalid" });
-        return;
-      }
-      apiKey = userKeys.get(user.id);
-    } catch {
+  let apiKey: string | undefined;
+  if (!process.env.DISCORD_USER_API_KEYS?.trim()) {
+    reply(res, 503, { error: "discord_user_api_keys_required" });
+    return;
+  }
+  try {
+    const userKeys = parseDiscordUserApiKeys(process.env.DISCORD_USER_API_KEYS.trim());
+    if (!matchDiscordUserApiKeys(
+      userKeys,
+      [...allowedUsers],
+      process.env.SOFIA_API_KEY ? [process.env.SOFIA_API_KEY] : [],
+    )) {
       reply(res, 503, { error: "discord_user_key_mapping_invalid" });
       return;
     }
-  } else if (allowedUsers.size !== 1) {
-    // A shared API key collapses all Discord users into one Sofia principal.
-    reply(res, 200, {
-      type: 4,
-      data: { content: "This Discord deployment requires a distinct Sofia API key for each allowed user.", flags: 64 },
-    });
+    apiKey = userKeys.get(user.id);
+  } catch {
+    reply(res, 503, { error: "discord_user_key_mapping_invalid" });
     return;
   }
   if (!apiKey) {
