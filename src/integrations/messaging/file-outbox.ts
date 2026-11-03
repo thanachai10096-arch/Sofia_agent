@@ -266,19 +266,32 @@ export async function flushMessagingOutbox(
       if (record.state === "dead_letter" || (record.nextAttemptAt !== undefined && record.nextAttemptAt > now())) continue;
       const lease = await outbox.claim(record.id);
       if (!lease) continue;
+      let delivered = false;
       try {
-        if (await send(record.platform, record.message)) {
-          if (await outbox.markSent(record.id, lease)) sent++;
-        } else {
-          await outbox.recordFailure(record.id, lease, now());
-          await outbox.releaseClaim(record.id, lease);
-          onFailure?.(record.platform);
-        }
+        delivered = await send(record.platform, record.message);
       } catch {
-        await outbox.recordFailure(record.id, lease, now()).catch(() => undefined);
-        await outbox.releaseClaim(record.id, lease);
-        onFailure?.(record.platform);
+        // Provider/network errors are ambiguous; retain the outbox record for retry.
       }
+
+      if (delivered) {
+        try {
+          if (await outbox.markSent(record.id, lease)) sent++;
+        } catch {
+          // Do not resend in this pass: the provider may already have accepted it.
+          await outbox.releaseClaim(record.id, lease);
+          try { onFailure?.(record.platform); } catch { /* Observability must not affect delivery state. */ }
+        }
+        continue;
+      }
+
+      try {
+        await outbox.recordFailure(record.id, lease, now());
+      } catch {
+        // Keep the original record; a later worker can retry metadata persistence.
+      } finally {
+        await outbox.releaseClaim(record.id, lease);
+      }
+      try { onFailure?.(record.platform); } catch { /* Observability must not affect delivery state. */ }
     }
     const pending = await outbox.pending();
     return { sent, pending: platformFilter ? pending.filter((item) => item.platform === platformFilter).length : pending.length };
