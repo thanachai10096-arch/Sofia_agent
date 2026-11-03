@@ -172,6 +172,57 @@ export class PostgresJobStateStore implements JobStateStore, OwnedJobStateStore 
     return (result.rowCount ?? result.rows.length) > 0;
   }
 
+
+  /**
+   * Atomically persists a terminal job transition and its notification event.
+   * The outbox row is inserted only when the job update passes the same lease,
+   * owner, and cancellation fences as save(). The executor executes this as one
+   * PostgreSQL statement, hence one database transaction.
+   */
+  async saveTerminalWithOutbox(
+    record: JobRecord,
+    eventType: string,
+    payload: unknown,
+  ): Promise<boolean> {
+    if (!["completed", "failed", "cancelled"].includes(record.status)) {
+      throw new Error("Atomic outbox persistence requires a terminal job status.");
+    }
+    const result = await this.db.query<{ id: string }>(
+      `WITH updated AS (
+        UPDATE sofia_agent_jobs SET
+          status=$2,updated_at=$4::timestamptz,task=$5,model_route_id=$6,
+          notification_channel_id=$8,session_key=$9,session_task=$10,
+          notification_delivered=$11,lease_owner_token=$12::uuid,
+          lease_expires_at=$13::timestamptz,heartbeat_at=$14::timestamptz,
+          resume_reservation_token=NULL,resume_reservation_expires_at=NULL,
+          snapshot=$17::jsonb,result=$18::jsonb,error=$19
+        WHERE id=$1::uuid
+          AND owner_key_id IS NOT DISTINCT FROM $7
+          AND lease_owner_token IS NOT DISTINCT FROM $12::uuid
+          AND (status <> 'running' OR lease_expires_at > now())
+          AND (status <> 'cancelled' OR $2='cancelled')
+        RETURNING id,owner_key_id,notification_channel_id
+      ), inserted AS (
+        INSERT INTO sofia_agent_outbox
+          (id,owner_key_id,job_id,event_type,destination,payload,available_at)
+        SELECT $3::uuid,u.owner_key_id,u.id,$20,u.notification_channel_id,$21::jsonb,now()
+        FROM updated u
+        WHERE u.notification_channel_id IS NOT NULL
+        ON CONFLICT (job_id,event_type,destination) DO NOTHING
+        RETURNING id
+      )
+      SELECT id FROM updated`,
+      [record.id,record.status,crypto.randomUUID(),record.updatedAt,record.task,
+       record.modelRouteId??null,record.ownerKeyId??null,record.notificationChannelId??null,
+       record.sessionKey??null,record.sessionTask??null,record.notificationDelivered??false,
+       record.leaseOwnerToken??null,record.leaseExpiresAt??null,record.heartbeatAt??null,
+       null,null,record.snapshot?JSON.stringify(record.snapshot):null,
+       record.result?JSON.stringify(record.result):null,record.error??null,
+       eventType,JSON.stringify(payload)],
+    );
+    return (result.rowCount ?? result.rows.length) > 0;
+  }
+
   async list(): Promise<JobRecord[]> {
     const result = await this.db.query<JobRow>(`SELECT ${COLUMNS} FROM sofia_agent_jobs ORDER BY created_at DESC LIMIT 500`);
     return result.rows.map(fromRow);
