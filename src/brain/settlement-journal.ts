@@ -291,9 +291,74 @@ export class FileSettlementJournal {
     return { id };
   }
 
+  private async assertPendingAttempt(runId: string, attemptId: string): Promise<void> {
+    const journalFile = this.file(runId);
+    let source: string;
+    const info = await fs.lstat(journalFile).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error("Cannot settle an attempt without durable Started evidence");
+      }
+      throw error;
+    });
+    if (info.isSymbolicLink() || !info.isFile()) {
+      throw new Error("Cannot settle an attempt from an invalid journal record");
+    }
+    const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+    const handle = await fs.open(journalFile, fsConstants.O_RDONLY | noFollow);
+    try {
+      const opened = await handle.stat();
+      if (!opened.isFile() || opened.dev !== info.dev || opened.ino !== info.ino) {
+        throw new Error("Settlement journal record changed during attempt validation");
+      }
+      source = await handle.readFile("utf8");
+    } finally {
+      await handle.close();
+    }
+
+    let started = 0;
+    let settled = 0;
+    for (const line of source.split("\\n")) {
+      if (!line) continue;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line) as unknown;
+      } catch {
+        throw new Error("Cannot settle an attempt from a corrupt journal");
+      }
+      if (!raw || typeof raw !== "object") {
+        throw new Error("Cannot settle an attempt from a corrupt journal");
+      }
+      const event = raw as Record<string, unknown>;
+      if (event.version !== 1 || typeof event.at !== "string" || !Number.isFinite(Date.parse(event.at))) {
+        throw new Error("Cannot settle an attempt from a corrupt journal");
+      }
+      if (event.type === "started") {
+        if (typeof event.attemptId !== "string" || !event.attemptId ||
+            !Number.isSafeInteger(event.maxInputTokens) || (event.maxInputTokens as number) < 0 ||
+            !Number.isSafeInteger(event.maxOutputTokens) || (event.maxOutputTokens as number) < 0) {
+          throw new Error("Cannot settle an attempt from a corrupt journal");
+        }
+        if (event.attemptId === attemptId) started += 1;
+      } else if (event.type === "settled") {
+        if (typeof event.attemptId !== "string" || !event.attemptId ||
+            typeof event.usageKnown !== "boolean") {
+          throw new Error("Cannot settle an attempt from a corrupt journal");
+        }
+        if (event.attemptId === attemptId) settled += 1;
+      } else if (event.type !== "checkpoint") {
+        throw new Error("Cannot settle an attempt from a corrupt journal");
+      }
+    }
+
+    if (started !== 1 || settled !== 0) {
+      throw new Error("Settlement requires exactly one pending Started event for this attempt");
+    }
+  }
+
   async settle(runId: string, attempt: SettlementAttempt, usage: TokenUsage | undefined, claim: SettlementRunClaim): Promise<void> {
     if (!runId || !attempt.id) throw new Error("Invalid settlement journal settlement");
     claim.assertRun(runId);
+    await this.assertPendingAttempt(runId, attempt.id);
     const usageKnown = usage !== undefined &&
       Number.isSafeInteger(usage.inputTokens) && usage.inputTokens >= 0 &&
       Number.isSafeInteger(usage.outputTokens) && usage.outputTokens >= 0;
