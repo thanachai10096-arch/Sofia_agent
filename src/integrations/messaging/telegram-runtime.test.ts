@@ -84,7 +84,7 @@ test("Telegram run completion sends the real completed output to the originating
   assert.deepEqual(warnings, []);
 });
 
-test("Telegram run completion reports failed runs without exposing internal error details", async () => {
+test("Telegram run completion does not expose internal provider or runtime errors", async () => {
   const sent: Array<{ conversationId: string; text: string }> = [];
   await reportTelegramRunCompletion({
     runId: "run-789",
@@ -96,6 +96,6 @@ test("Telegram run completion reports failed runs without exposing internal erro
     },
   });
   assert.match(sent[0]?.text ?? "", /task failed/i);
-  assert.match(sent[0]?.text ?? "", /Reason: provider_http_402_insufficient_credits/);
-  assert.doesNotMatch(sent[0]?.text ?? "", /Bearer secret-token/);
+  assert.match(sent[0]?.text ?? "", /could not complete this task/i);
+  assert.doesNotMatch(sent[0]?.text ?? "", /provider_http_402|insufficient_credits|Bearer secret-token/);
 });
