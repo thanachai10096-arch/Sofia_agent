@@ -315,6 +315,10 @@ export class FileSettlementJournal {
       await handle.close();
     }
 
+    if (source.length === 0 || !source.endsWith("\n")) {
+      throw new Error("Cannot settle an attempt from an incomplete journal record");
+    }
+
     let started = 0;
     let settled = 0;
     const seenAttemptIds = new Set<string>();
@@ -485,7 +489,10 @@ export class FileSettlementJournal {
     let settledAttempts = 0;
     let unknownUsageAttempts = 0;
     let checkpoints = 0;
-    let corrupt = false;
+    // Every append is a newline-terminated JSONL record. A valid JSON object
+    // without its final delimiter may be a process-crash partial write and is
+    // therefore ambiguous accounting evidence, not a complete event.
+    let corrupt = source.length === 0 || !source.endsWith("\n");
     for (const line of source.split("\n")) {
       if (!line) continue;
       let raw: unknown;
@@ -549,6 +556,8 @@ export class FileSettlementJournal {
       if ((error as NodeJS.ErrnoException).code === "ELOOP") return true;
       throw error;
     }
+
+    if (source.length === 0 || !source.endsWith("\n")) return true;
 
     // A checkpoint may acknowledge only known, matched settlements. It must
     // never erase an attempt whose provider outcome or usage is ambiguous.
@@ -642,6 +651,10 @@ export class FileSettlementJournal {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
+    }
+
+    if (source.length === 0 || !source.endsWith("\n")) {
+      throw new Error("Cannot checkpoint an incomplete settlement journal record");
     }
 
     const pending = new Set<string>();
