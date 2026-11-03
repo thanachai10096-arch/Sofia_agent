@@ -134,6 +134,7 @@ test("DurableJobRuntime resumes a saved checkpoint and passes it to the brain", 
 
   assert.equal(current?.status, "failed");
   assert.equal(current?.snapshot?.checkpointId, "checkpoint-1");
+  assert.equal(current?.snapshot?.usage.reservedOrUsedTokens, 0, "redaction must preserve numeric checkpoint budget counters");
 
   let resumed: Awaited<ReturnType<typeof runtime.resume>> | undefined;
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -149,6 +150,7 @@ test("DurableJobRuntime resumes a saved checkpoint and passes it to the brain", 
   assert.equal(resumed.status, "completed");
   assert.equal(calls, 2);
   assert.equal(receivedResume?.checkpointId, "checkpoint-1");
+  assert.equal(receivedResume?.usage.reservedOrUsedTokens, 0, "resume must retain the original token budget accounting");
   assert.equal((await runtime.get(submitted.id))?.status, "completed");
   assert.equal((await runtime.list()).find((item) => item.id === submitted.id)?.status, "completed");
 });
