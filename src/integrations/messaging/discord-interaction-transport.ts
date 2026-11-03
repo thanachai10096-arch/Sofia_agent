@@ -233,6 +233,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
             ...(replyToMessageId && /^\d{1,24}$/.test(replyToMessageId)
               ? { message_reference: { message_id: replyToMessageId, fail_if_not_exists: false } }
               : {}),
+            ...(nonce && /^[a-f0-9]{25}$/.test(nonce) ? { nonce, enforce_nonce: true } : {}),
           }),
           signal: controller.signal,
         });
