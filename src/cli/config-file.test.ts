@@ -51,3 +51,24 @@ test("config persistence replaces a symlink without modifying its target", async
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("config persistence refuses a symlinked config directory", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-config-dir-symlink-test-"));
+  const realDirectory = path.join(directory, "real");
+  const linkedDirectory = path.join(directory, ".sofia");
+  try {
+    await mkdir(realDirectory, { mode: 0o700 });
+    await symlink(realDirectory, linkedDirectory, "dir");
+    await assert.rejects(
+      writeSafeLocalConfig(path.join(linkedDirectory, "config.json"), {
+        provider: "ollama",
+        baseUrl: "http://127.0.0.1:11434/v1",
+        model: "llama3.2",
+      }),
+      /must be a real directory/i,
+    );
+    assert.deepEqual(await import("node:fs/promises").then(({ readdir }) => readdir(realDirectory)), []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
