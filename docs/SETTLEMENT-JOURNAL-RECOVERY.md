@@ -60,3 +60,6 @@ Journal inspection and unresolved-state checks reject symbolic links and non-reg
 The decision is advisory because inspection is a snapshot and is not atomic with later execution. It never authorizes claim removal, journal mutation, checkpoint acknowledgement, or provider replay. PID, hostname, lock age, and a clean-looking journal are not substitutes for an operator's provider reconciliation.
 
 Claim release also validates the lock path with `lstat`, opens with `O_NOFOLLOW` where available, checks the opened inode against the inspected inode, and re-checks the path identity before unlinking. If the claim path is replaced by a symlink, non-regular file, or different inode, release refuses to follow or remove it. The original claim may then require operator reconciliation; this is intentional fail-closed behavior.
+
+
+The decision helper also validates its input summary defensively: counters must be non-negative safe integers, settled attempts cannot exceed started attempts, unknown-usage settlements cannot exceed settled attempts, and a missing journal must have zero event counts. Any inconsistent summary or reported unknown usage requires operator reconciliation even if a caller supplies an otherwise-clean status flag. This guards callers that construct or transform inspection objects; it does not replace validation of the on-disk journal.
