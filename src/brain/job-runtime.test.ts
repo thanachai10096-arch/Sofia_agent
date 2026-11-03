@@ -1052,3 +1052,59 @@ test("DurableJobRuntime rebinds the authenticated owner principal when resuming 
   assert.equal(calls, 2);
   assert.deepEqual(observedPrincipals, [ownerKeyId, ownerKeyId]);
 });
+
+
+test("DurableJobRuntime ignores a RunStore checkpoint whose embedded runId does not match its lookup key", async () => {
+  const namespace = "job-runtime-checkpoint-identity-" + randomUUID();
+  const embedded = {
+    version: 1,
+    runId: "expected-run-" + randomUUID(),
+    task: "identity-checked checkpoint",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: ["safe-step"],
+    checkpointId: "embedded-trusted-checkpoint",
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const mismatched = {
+    ...embedded,
+    runId: "different-run-" + randomUUID(),
+    checkpointId: "mismatched-checkpoint-must-not-be-used",
+  };
+  let receivedResume: import("./run-state.js").BrainRunSnapshot | undefined;
+  const runStore = {
+    async save() {},
+    async load() { return mismatched as import("./run-state.js").BrainRunSnapshot; },
+    async delete() {},
+  };
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      if (input.resume) {
+        receivedResume = input.resume;
+        return { completed: true, state: "completed" };
+      }
+      await onRunSnapshot?.(embedded);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), runStore, namespace);
+
+  const submitted = await runtime.submit({ task: embedded.task });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "failed");
+  assert.equal(current?.snapshot?.checkpointId, embedded.checkpointId);
+  const resumed = await runtime.resume(submitted.id);
+  assert.equal(resumed.status, "completed");
+  assert.equal(receivedResume?.runId, embedded.runId);
+  assert.equal(receivedResume?.checkpointId, embedded.checkpointId);
+});
