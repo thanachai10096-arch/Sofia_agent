@@ -1,4 +1,4 @@
-"""Optional, isolated AI utility service for Sofia.
+""""Optional, isolated AI utility service for Sofia.
 
 The TypeScript control plane remains authoritative for identity, permissions,
 agent execution, tools, jobs, and billing. This service only returns data.
@@ -6,8 +6,12 @@ agent execution, tools, jobs, and billing. This service only returns data.
 from __future__ import annotations
 
 import hmac
+import json
+import logging
 import math
 import os
+import time
+import uuid
 from functools import lru_cache
 from typing import Annotated, Protocol
 
@@ -18,10 +22,66 @@ from starlette.responses import JSONResponse
 MAX_TEXT_CHARS = 20_000
 MAX_ITEMS = 64
 MAX_REQUEST_BYTES = 512 * 1024
+logger = logging.getLogger("sofia.ai_service")
 
 
 class _RequestBodyTooLarge(Exception):
     pass
+
+
+class RequestIdLoggingMiddleware:
+    """Attach a validated correlation ID and emit payload-free access logs."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        supplied_id = headers.get(b"x-request-id", b"").decode("ascii", errors="ignore")
+        try:
+            request_id = str(uuid.UUID(supplied_id))
+        except (ValueError, AttributeError):
+            request_id = str(uuid.uuid4())
+
+        started = time.perf_counter()
+        status_code = 500
+
+        async def correlated_send(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+                response_headers = [
+                    (key, value)
+                    for key, value in message.get("headers", [])
+                    if key.lower() != b"x-request-id"
+                ]
+                response_headers.append((b"x-request-id", request_id.encode("ascii")))
+                message = {**message, "headers": response_headers}
+            await send(message)
+
+        try:
+            await self.app(scope, receive, correlated_send)
+        finally:
+            # Never log authorization headers, request bodies, query strings,
+            # model output, or exception text. Keep this safe for user content.
+            logger.info(
+                json.dumps(
+                    {
+                        "event": "http_request",
+                        "request_id": request_id,
+                        "method": scope.get("method", ""),
+                        "path": scope.get("path", ""),
+                        "status_code": status_code,
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
 
 
 class RequestBodyLimitMiddleware:
@@ -178,6 +238,8 @@ def create_app(
         openapi_url=None,
     )
     app.add_middleware(RequestBodyLimitMiddleware)
+    # Add last so correlation headers/logging also cover body-limit responses.
+    app.add_middleware(RequestIdLoggingMiddleware)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -278,6 +340,7 @@ def create_app(
             ),
             results=ranked,
         )
+
 
     return app
 

@@ -1,3 +1,4 @@
+import json
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -41,6 +42,35 @@ def test_health_does_not_require_auth_or_load_models(monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert calls == {"embedder": 0, "reranker": 0}
+
+
+def test_request_id_is_validated_returned_and_logged_without_secrets(client, caplog):
+    request_id = "a9f0c7a2-91e4-4b1d-8b7e-0c1f4a9d6e21"
+    caplog.set_level("INFO", logger="sofia.ai_service")
+    response = client.post(
+        "/v1/embeddings",
+        json={"texts": ["private-user-text"]},
+        headers={**auth(), "X-Request-ID": request_id},
+    )
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] == request_id
+    records = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.name == "sofia.ai_service"
+    ]
+    assert records[-1]["request_id"] == request_id
+    assert records[-1]["status_code"] == 200
+    serialized = json.dumps(records)
+    assert "test-secret" not in serialized
+    assert "private-user-text" not in serialized
+
+
+def test_invalid_request_id_is_replaced_with_server_generated_uuid(client):
+    response = client.get("/health", headers={"X-Request-ID": "not-a-uuid"})
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] != "not-a-uuid"
+    assert len(response.headers["x-request-id"]) == 36
 
 
 @pytest.mark.parametrize(
@@ -163,7 +193,6 @@ def test_reranker_output_with_wrong_length_is_rejected(monkeypatch):
     assert response.status_code == 502
 
 
-
 def test_embedding_model_load_failure_returns_unavailable(monkeypatch):
     def broken_factory():
         raise RuntimeError("private model download details")
@@ -233,7 +262,6 @@ def test_reranker_malformed_model_output_returns_bad_gateway(monkeypatch):
     assert response.status_code == 502
 
 
-
 def test_ai_endpoints_reject_oversized_raw_json_body(client):
     body = b'{"texts":["ok"]}' + (b" " * MAX_REQUEST_BYTES)
     response = client.post(
@@ -243,3 +271,4 @@ def test_ai_endpoints_reject_oversized_raw_json_body(client):
     )
     assert response.status_code == 413
     assert response.json()["detail"] == "Request body exceeds the maximum byte limit."
+    assert "x-request-id" in response.headers
