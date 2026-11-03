@@ -65,6 +65,7 @@ The code outline above is not a claim that the repository's API server is alread
 - [ ] Standalone Discord deployment has explicit, non-empty user and channel allowlists; startup rejects missing, malformed, or duplicate IDs.
 - [ ] With `DISCORD_REPLY_MODE=dm`, both successful results and error notices are sent only to the requesting user's DM; DM creation/send failure never posts any content to the originating channel.
 - [ ] With `DISCORD_REPLY_MODE=channel` (or unset), legacy channel replies remain unchanged; invalid mode values fail startup.
+- [ ] The standalone direct Gateway worker derives a stable 25-character Discord nonce per source message and output chunk, sends `nonce` with `enforce_nonce: true`, and reuses the identical request body after HTTP 429. Treat this as bounded provider-side duplicate suppression, not permanent exactly-once delivery.
 - [ ] API keys and bot tokens never appear in logs, client assets, test snapshots, or error messages.
 - [ ] Graceful shutdown stops polling and rejects new dispatches.
 - [ ] Enable `discordInteractionRoute` only when a Discord transport is configured; expose it over HTTPS and keep the raw-body size limit enabled.
