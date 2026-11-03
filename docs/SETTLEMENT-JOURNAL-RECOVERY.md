@@ -91,3 +91,7 @@ An attempt ID is a one-time journal identity. The journal rejects a second `star
 ## Historical usage validation before settlement
 
 Before appending a new settlement, the journal validates every prior settled event. A `started` reservation and a record marked `usageKnown: true` must each contain non-negative safe-integer input and output token counts, and their combined total must also be a safe integer; a record marked `usageKnown: false` must not carry a usage payload. Malformed historical usage blocks further settlement appends and preserves the original evidence for operator reconciliation. This prevents a later valid attempt from extending an accounting log that already contains invalid billing evidence.
+
+## Refusing appends after a damaged tail
+
+Before appending to an existing JSONL record, the journal opens the record once with no-follow semantics, verifies the opened inode against the inspected path, and reads the existing bytes through that same descriptor. An empty record, a record without its final newline, or a line that is not valid JSON blocks the append. This applies to new `started` events as well as settlements and checkpoints. The original bytes are left unchanged so an interrupted write remains available for operator reconciliation; the journal does not truncate, repair, or silently continue after damaged evidence.
