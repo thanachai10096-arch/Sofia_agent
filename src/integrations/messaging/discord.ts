@@ -47,9 +47,16 @@ export function createDiscordAdapter(transport: DiscordTransport): MessagingAdap
     async send(message: OutboundMessage): Promise<DeliveryReceipt> {
       try {
         let lastId: string | undefined;
-        for (const chunk of splitMessage(message.text, 2000)) {
+        const chunks = splitMessage(message.text, 2000);
+        for (let index = 0; index < chunks.length; index += 1) {
+          const chunk = chunks[index]!;
+          // Discord accepts a bounded nonce for duplicate suppression on normal
+          // channel messages. Derive a distinct stable nonce for each chunk.
+          const nonce = message.deliveryId
+            ? createHash("sha256").update(`${message.deliveryId}:${index}`).digest("hex").slice(0, 25)
+            : undefined;
           const sent = await transport.sendMessage(message.conversationId, chunk,
-            message.replyToMessageId ?? lastId, message.interactionId);
+            message.replyToMessageId ?? lastId, message.interactionId, nonce);
           lastId = sent.messageId;
         }
         return { state: "sent", ...(lastId ? { providerMessageId: lastId } : {}) };
