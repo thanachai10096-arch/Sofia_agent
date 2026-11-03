@@ -168,5 +168,21 @@ export function sqliteFileBackupRestoreAdapter(
       await replaceDatabase(rawSnapshot.bytes);
       await reopenDatabase();
     },
+    serializeRollbackSnapshot(rawSnapshot) {
+      if (!rawSnapshot || typeof rawSnapshot !== "object" ||
+          !("bytes" in rawSnapshot) || !(rawSnapshot.bytes instanceof Uint8Array)) {
+        throw new Error("SQLite restore rollback snapshot is invalid.");
+      }
+      return new Uint8Array(rawSnapshot.bytes);
+    },
+    async rollbackFromSnapshotBytes(bytes) {
+      if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
+        throw new Error("Persisted SQLite rollback snapshot is invalid.");
+      }
+      await verifySqliteIntegrity(bytes);
+      await closeDatabase();
+      await replaceDatabase(bytes);
+      await reopenDatabase();
+    },
   };
 }
