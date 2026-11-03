@@ -1168,12 +1168,19 @@ test("DurableJobRuntime expires notification claims and fences stale owners", as
   assert.equal(await runtime.claimNotification(submitted.id, "expired-worker", 1), true);
   await new Promise<void>((resolve) => setTimeout(resolve, 10));
   assert.equal(await runtime.claimNotification(submitted.id, "current-worker", 30_000), true);
-  await runtime.releaseNotificationClaim(submitted.id, "expired-worker");
+  await runtime.markNotificationDelivered(submitted.id);
   assert.equal(
-    await runtime.markNotificationDelivered(submitted.id, "expired-worker"),
-    undefined,
+    (await runtime.get(submitted.id))?.notificationDelivered,
+    false,
+    "an ownerless legacy caller cannot bypass an active notification lease",
   );
-  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, false);
+  await runtime.releaseNotificationClaim(submitted.id, "expired-worker");
+  await runtime.markNotificationDelivered(submitted.id, "expired-worker");
+  assert.equal(
+    (await runtime.get(submitted.id))?.notificationDelivered,
+    false,
+    "an expired worker cannot mark delivery or clear the current owner's claim",
+  );
   await runtime.markNotificationDelivered(submitted.id, "current-worker");
   assert.equal((await runtime.get(submitted.id))?.notificationDelivered, true);
 });
