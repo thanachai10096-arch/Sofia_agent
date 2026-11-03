@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { MessagingAdapter, InboundMessage, DeliveryReceipt, OutboundMessage } from "./types.js";
 import { splitMessage } from "./format.js";
 
