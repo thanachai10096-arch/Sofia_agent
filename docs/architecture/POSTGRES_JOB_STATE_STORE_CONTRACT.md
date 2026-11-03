@@ -159,3 +159,21 @@ Required behavior:
 7. The adapter must verify that the returned owner matches the authenticated owner; a zero-row update is reported as unavailable, without revealing whether another owner owns the ID.
 
 A PostgreSQL implementation should use a single conditional `UPDATE ... WHERE ... AND (...reservation expired...) RETURNING *` (or an equivalent `SELECT FOR UPDATE` transaction). It must not perform an unscoped read first. Contract tests must race two independent connections and prove exactly one receives the reservation.
+
+
+## Implemented adapter entry point
+
+`src/brain/postgres-job-state-store.ts` now provides a driver-neutral `PostgresJobStateStore` implementing both `JobStateStore` and `OwnedJobStateStore`. It accepts a node-postgres-compatible executor with `query(sql, values)`; it does not add a database driver dependency to Sofia.
+
+The factory accepts an additive third argument:
+
+```ts
+const jobStateStore = new PostgresJobStateStore(pool);
+const deps = createSofiaAgentDependencies(workspace, approval, { jobStateStore });
+```
+
+The host must supply a configured PostgreSQL Pool, apply `db/migrations/0001_shared_job_runtime.sql` through its own migration process, and keep the connection string server-side. Do not pass database credentials to browser/mobile clients.
+
+The adapter uses conditional single-statement updates for claim, heartbeat, lease expiry recovery, cancellation, save fencing, and owner-scoped resume reservation. It implements owner-filtered get/list/cancel queries. SQL contract tests assert the critical predicates without requiring a live database.
+
+**Not yet production-ready:** this repository still has no PostgreSQL driver, migration runner, live PostgreSQL integration test, connection lifecycle/pool configuration, or Vercel environment wiring. The Vercel adapter continues to use local temporary storage until the deployment host injects a real Pool and the migration/integration gates pass. The local tests are not a substitute for two-connection PostgreSQL race tests.
