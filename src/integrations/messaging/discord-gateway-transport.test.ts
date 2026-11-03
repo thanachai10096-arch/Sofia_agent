@@ -93,6 +93,34 @@ test("Discord Gateway serializes messages per user and channel without blocking 
   await transport.stop();
 });
 
+test("Discord Gateway reports bounded per-session queue overflow without growing the queue", async () => {
+  const socket = new FakeSocket();
+  const errors: string[] = [];
+  let releaseFirst!: () => void;
+  const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const transport = createDiscordGatewayTransport({
+    botToken: "x".repeat(30),
+    socketFactory: () => socket,
+    onError: (event) => errors.push(event),
+  });
+  await transport.start(new AbortController().signal, async (message) => {
+    if (message.content === "first") await firstBlocked;
+  });
+  socket.gateway({ op: 10, d: { heartbeat_interval: 60_000 } });
+  socket.gateway({ op: 0, t: "READY", s: 1, d: { session_id: "session-1", user: { id: "999", username: "Sofia" } } });
+  const message = (id: number) => ({
+    op: 0, t: "MESSAGE_CREATE", s: id, d: {
+      id: String(1000 + id), channel_id: "202", guild_id: "303", content: id === 1 ? "first" : "queued",
+      author: { id: "404", username: "user", bot: false }, mentions: [{ id: "999" }],
+    },
+  });
+  for (let id = 1; id <= 33; id += 1) socket.gateway(message(id));
+  await tick();
+  assert.equal(errors.filter((event) => event === "message_queue_full").length, 1);
+  releaseFirst();
+  await transport.stop();
+});
+
 test("Discord Gateway marks only one-to-one DM channels as direct messages", async () => {
   const socket = new FakeSocket();
   const delivered: Array<{ directMessage?: boolean; addressedToBot?: boolean }> = [];
