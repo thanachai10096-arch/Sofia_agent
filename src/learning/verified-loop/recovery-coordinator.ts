@@ -83,6 +83,7 @@ export function createLearningRepairAuthorizationFromRecovery(
         binding.skillId !== assessment.skillId || !validRevision(binding.id) ||
         binding.policyRevision !== inspection.currentPolicyRevision ||
         assessment.currentPolicyRevision !== inspection.currentPolicyRevision ||
+        typeof assessment.learningPolicyRevision !== "string" ||
         assessment.learningPolicyRevision !== inspection.currentPolicyRevision ||
         !binding.scope || binding.scope.tenantId !== scope.tenantId ||
         binding.scope.principalId !== scope.principalId || binding.scope.projectId !== scope.projectId) {
