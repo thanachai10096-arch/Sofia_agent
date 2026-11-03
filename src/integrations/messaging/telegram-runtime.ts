@@ -188,6 +188,12 @@ export function createTelegramMessagingRuntime(
       onWarning("Telegram integration disabled: configure TELEGRAM_USER_API_KEYS with a separate API key for every allowed user, or allow exactly one user with SOFIA_API_KEY.");
       return undefined;
     }
+    // The API's core credential is a separate principal. Reusing it for a
+    // Telegram sender would silently share that sender's Memory identity with
+    // server-side callers that use SOFIA_API_KEY.
+    if (apiKey && [...userApiKeys.values()].includes(apiKey)) {
+      throw new Error("TELEGRAM_USER_API_KEYS must not reuse SOFIA_API_KEY.");
+    }
     const clientsByUser = new Map<string, SofiaClient>(
       [...userApiKeys].map(([userId, key]) => [
         userId,
@@ -262,6 +268,7 @@ export function createTelegramMessagingRuntime(
       "TELEGRAM_USER_API_KEYS must contain exactly one API key for every allowed Telegram user ID.",
       "TELEGRAM_USER_API_KEYS contains an invalid user ID or API key.",
       "TELEGRAM_USER_API_KEYS must use a distinct API key for every allowed Telegram user ID.",
+      "TELEGRAM_USER_API_KEYS must not reuse SOFIA_API_KEY.",
       "Telegram bot token has an invalid format.",
       "Telegram poll timeout must be an integer between 1 and 50 seconds.",
     ].includes(error.message) ? error.message : "Telegram configuration validation failed; check required variable values and API URL format.";
