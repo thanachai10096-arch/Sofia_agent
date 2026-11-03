@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, lstat, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -36,7 +36,7 @@ test("config persistence replaces a symlink without modifying its target", async
   const file = path.join(configDir, "config.json");
   const target = path.join(directory, "outside.json");
   try {
-    await import("node:fs/promises").then(({ mkdir }) => mkdir(configDir, { mode: 0o700 }));
+    await mkdir(configDir, { mode: 0o700 });
     await writeFile(target, "keep this external file unchanged", { mode: 0o600 });
     await symlink(target, file);
     await writeSafeLocalConfig(file, {
