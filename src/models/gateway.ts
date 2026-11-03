@@ -372,8 +372,9 @@ export class SofiaModelGateway implements ModelProvider {
           // those ambiguous outcomes can double-charge the user.
           const retryable = response.status === 429;
           retryableFailure = retryable;
-          const detail = await response.text();
-          lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
+          // Provider bodies are untrusted and may echo prompts, identifiers, or secrets.
+          // Keep diagnostics to the HTTP status; never forward raw provider payloads.
+          lastError = new Error(`Model gateway request failed (${response.status}).`);
           if (!retryable || attempt === maxAttempts || options.signal?.aborted) throw lastError;
           const retryAfter = Number(response.headers.get("retry-after") ?? "");
           const delay = Number.isFinite(retryAfter) && retryAfter > 0
@@ -408,10 +409,8 @@ export class SofiaModelGateway implements ModelProvider {
     }
 
     if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(
-        `Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`,
-      );
+      // Defensive guard for custom fetch implementations; never expose provider bodies.
+      throw new Error(`Model gateway request failed (${response.status}).`);
     }
 
     const failResponse = (message: string): never => {
