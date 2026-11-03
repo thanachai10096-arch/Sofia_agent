@@ -191,3 +191,18 @@ This is an architectural reuse decision based on the inspected implementation; i
 The SQLite checkpoint adapter now validates pending receipt identity uniqueness as well as sequence uniqueness. A single receipt ID cannot be persisted at two different pending sequence numbers within one scope. The reader also validates the persisted revision as a non-negative safe integer, rather than passing malformed revision metadata downstream.
 
 This is a checkpoint-integrity guard only. It does not arbitrate concurrent live side effects, prove that a receipt ID is globally authoritative, or replace the required scope lease/fencing and learning-store transaction boundary. The live-delivery race described above remains open.
+
+
+### 14. Atomic sequence identity arbitration at the learning side-effect boundary
+
+The verified-learning SQLite transaction now has an additive `learning_receipt_sequences` table, scoped by tenant/principal/project, with:
+- a primary key on (scope, sequence), so one sequence cannot bind to two receipt IDs;
+- a unique key on (scope, receipt_id), so one receipt cannot be reused at another sequence.
+
+`LearningTransaction.bindReceiptSequence` is an optional port capability for compatibility. When `VerifiedLearningLoop.recordVerifiedCompletion` receives an authoritative sequence, it requires this capability and calls it inside the same transaction as `insertExperienceIfAbsent`. The live self-improvement delivery path now passes the sequence through.
+
+For the SQLite adapter, the identity binding and learning experience commit or roll back together. This closes the specific read/checkpoint-CAS race where two workers could record different receipt IDs for one sequence before either checkpoint CAS won. A retry with the same (scope, sequence, receipt ID) is idempotent; a conflicting receipt ID or reuse of a receipt ID at another sequence is rejected before the learning experience is inserted. A crash before transaction commit rolls the identity claim back; a crash after commit can safely replay the same identity.
+
+This is a narrow durable arbitration guarantee, not a claim that the entire recovery pipeline is production multi-worker safe. It depends on all sequence-bearing production learning writes using the same durable learning transaction adapter. Legacy/custom transaction adapters remain compatible for calls without a sequence, but fail closed when a sequence is supplied and atomic binding is unavailable. It does not replace the still-required authoritative receipt store, stable high-water receipt listing, authenticated scope enumeration, or startup integration review.
+
+Regression coverage was added for two independent SQLite connections racing different receipt IDs for one sequence, idempotent replay of the winning identity, rejecting reuse at another sequence, and rollback of sequence binding together with experience writes. CI evidence must be checked on the exact resulting PR HEAD before claiming the tests pass.
