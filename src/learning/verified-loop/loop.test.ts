@@ -15,7 +15,20 @@ function makeHost() {
   const candidates = new Map<string, SkillCandidate>();
   const evaluations = new Map<string, SkillEvaluation>();
   const active: ActiveLearningSkill[] = [];
+  const receiptSequences = new Map<string, string>();
   const tx: LearningTransaction = {
+    async bindReceiptSequence(requestedScope, sequence, receiptId) {
+      const prefix = [requestedScope.tenantId, requestedScope.principalId, requestedScope.projectId].join(":");
+      const sequenceKey = prefix + ":" + sequence;
+      const receiptKey = prefix + ":receipt:" + receiptId;
+      const existingReceipt = receiptSequences.get(sequenceKey);
+      const existingSequence = [...receiptSequences.entries()].find(([key, value]) => key.startsWith(prefix + ":") && value === receiptId)?.[0];
+      if ((existingReceipt && existingReceipt !== receiptId) || (existingSequence && existingSequence !== sequenceKey)) {
+        throw new Error("Conflicting authoritative receipt identity for learning sequence");
+      }
+      receiptSequences.set(sequenceKey, receiptId);
+      void receiptKey;
+    },
     async insertExperienceIfAbsent(item) {
       if (experiences.some(old => old.scope.tenantId === item.scope.tenantId && old.scope.principalId === item.scope.principalId && old.scope.projectId === item.scope.projectId && old.receiptId === item.receiptId)) return false;
       experiences.push(item); return true;
@@ -90,6 +103,19 @@ test("does not learn from missing or cross-scope evidence and deduplicates recei
   assert.equal((await loop.recordVerifiedCompletion(scope, "r1", "task")).recorded, false);
   assert.equal(state.experiences.length, 1);
 });
+test("sequence-bound learning rejects a second receipt identity for the same authoritative sequence", async () => {
+  const state = makeHost();
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "sequence-r1", "run1");
+  addReceipt(state, "sequence-r2", "run2");
+  assert.equal((await loop.recordVerifiedCompletion(scope, "sequence-r1", "task one", 7)).recorded, true);
+  await assert.rejects(
+    () => loop.recordVerifiedCompletion(scope, "sequence-r2", "task two", 7),
+    /Conflicting authoritative receipt identity/,
+  );
+  assert.equal(state.experiences.some(item => item.receiptId === "sequence-r2"), false);
+});
+
 test("rejects stale policy receipts and untrusted evidence", async () => {
   const state = makeHost();
   const loop = new VerifiedLearningLoop(state.host);
