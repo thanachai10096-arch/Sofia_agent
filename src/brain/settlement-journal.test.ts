@@ -594,6 +594,10 @@ test("reused attempt IDs make settlement evidence corrupt and block checkpoint a
 
     assert.equal(await journal.hasUnresolved(runId), true,
       "reusing a previously settled attempt ID must be treated as ambiguous evidence");
+    const inspection = await journal.inspectRun(runId);
+    assert.equal(inspection.journal, "corrupt",
+      "recovery diagnostics must distinguish invalid attempt sequences from ordinary pending work");
+    assert.equal(inspection.unresolved, true);
     await assert.rejects(
       journal.acknowledgeCheckpoint(runId),
       /reused attempt IDs|corrupt or ambiguous/,
