@@ -318,7 +318,7 @@ test("SQLite durable startup recovery restores the prior database state after an
     const persisted = await snapshots.write(
       transactionId,
       "sessions",
-      adapter.serializeRollbackSnapshot!(rawSnapshot),
+      await adapter.serializeRollbackSnapshot!(rawSnapshot),
     );
     const prepared = createRestoreJournalRecord({
       transactionId,
