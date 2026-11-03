@@ -366,7 +366,11 @@ export class SofiaModelGateway implements ModelProvider {
             // Do not close a half-open circuit until the payload has been validated.
             return response;
           }
-          const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+          // A 429 is an explicit rejection and is safe to retry. A timeout,
+          // network disconnect, or 5xx can happen after a provider accepted and
+          // billed the request; without provider-supported idempotency, retrying
+          // those ambiguous outcomes can double-charge the user.
+          const retryable = response.status === 429;
           retryableFailure = retryable;
           const detail = await response.text();
           lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
@@ -379,8 +383,7 @@ export class SofiaModelGateway implements ModelProvider {
           await abortableDelay(delay, requestSignal);
         } catch (error) {
           lastError = error;
-          if (requestSignal.aborted || attempt === maxAttempts ||
-              (error instanceof Error && error.message.startsWith("Model gateway request failed (") && !retryableFailure)) {
+          if (requestSignal.aborted || attempt === maxAttempts || !retryableFailure) {
             throw requestSignal.aborted && requestSignal.reason instanceof Error ? requestSignal.reason : error;
           }
           await abortableDelay(Math.min(250 * 2 ** (attempt - 1), 2_000), requestSignal);
