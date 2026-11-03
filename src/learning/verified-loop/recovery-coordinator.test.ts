@@ -151,19 +151,28 @@ test("recovery inspection cannot create planner authorization without an eligibl
   assert.equal(createLearningRepairAuthorizationFromRecovery(inspection, "repair-plan-2"), undefined);
 });
 
-test("recovery authorization bridge rejects forged or mixed approval bindings", async () => {
+test("recovery authorization bridge rejects eligible assessments with mixed approval actors", async () => {
   const h = host();
   const inspection = await inspectLearningRecovery(scope, h.adapter);
   const assessment = inspection.assessments[0]!;
-  const forged = {
+  const mixed = {
     ...inspection,
-    assessments: [{
-      ...assessment,
-      approvalBinding: { ...assessment.approvalBinding!, actorId: "other-operator" },
-    }],
+    assessments: [
+      assessment,
+      {
+        ...assessment,
+        skillId: "skill-2",
+        approvalBinding: {
+          ...assessment.approvalBinding!,
+          id: "receipt-2",
+          actorId: "other-operator",
+          skillId: "skill-2",
+        },
+      },
+    ],
   };
   assert.throws(
-    () => createLearningRepairAuthorizationFromRecovery(forged, "repair-plan-3"),
+    () => createLearningRepairAuthorizationFromRecovery(mixed, "repair-plan-3"),
     /invalid approval binding/,
   );
 });
