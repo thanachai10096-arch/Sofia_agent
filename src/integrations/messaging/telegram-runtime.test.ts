@@ -5,6 +5,7 @@ import {
   reportTelegramRunCompletion,
   parseTelegramChatAllowlist,
   parseTelegramUserAllowlist,
+  parseTelegramUserApiKeys,
 } from "./telegram-runtime.js";
 
 test("Telegram allowlists accept numeric user IDs and signed chat IDs", () => {
@@ -17,6 +18,18 @@ test("Telegram allowlists reject empty, malformed and duplicate IDs", () => {
   assert.throws(() => parseTelegramUserAllowlist("123,abc"), /valid numeric IDs/);
   assert.throws(() => parseTelegramUserAllowlist("123,123"), /duplicate IDs/);
   assert.throws(() => parseTelegramChatAllowlist("-1, -1"), /duplicate IDs/);
+});
+
+test("Telegram per-user API key map requires an exact allowlist match and valid secrets", () => {
+  const allowed = new Set(["123", "456"]);
+  const parsed = parseTelegramUserApiKeys('{"123":"key-one","456":"key-two"}', allowed);
+  assert.deepEqual([...parsed], [["123", "key-one"], ["456", "key-two"]]);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one"}', allowed), /exactly one API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one","456":"key-two","789":"extra"}', allowed), /exactly one API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"","456":"key-two"}', allowed), /invalid user ID or API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one\\nleak","456":"key-two"}', allowed), /invalid user ID or API key/);
+  assert.throws(() => parseTelegramUserApiKeys("[]", allowed), /JSON object/);
+  assert.throws(() => parseTelegramUserApiKeys("{", allowed), /JSON object/);
 });
 
 test("Telegram integration remains disabled unless explicitly enabled", () => {
@@ -55,8 +68,39 @@ test("Telegram fails closed when multiple users would share one API-key memory o
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.equal(runtime, undefined);
   assert.equal(warnings.length, 1);
-  assert.match(warnings[0] ?? "", /one shared Sofia API key cannot safely serve multiple Telegram users/);
+  assert.match(warnings[0] ?? "", /TELEGRAM_USER_API_KEYS with a separate API key for every allowed user/);
   assert.doesNotMatch(warnings[0] ?? "", /shared-test-key/);
+});
+
+test("Telegram runtime accepts multiple users only with a complete per-user API key map", async () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123,-100456",
+    TELEGRAM_USER_API_KEYS: '{"123":"user-one-key","456":"user-two-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.ok(runtime);
+  await runtime.stop();
+  assert.deepEqual(warnings, []);
+});
+
+test("Telegram runtime rejects incomplete per-user API key maps without leaking secrets", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123,-100456",
+    TELEGRAM_USER_API_KEYS: '{"123":"user-one-secret"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /exactly one API key for every allowed Telegram user ID/);
+  assert.doesNotMatch(warnings[0] ?? "", /user-one-secret/);
 });
 
 test("complete Telegram configuration constructs a runtime without starting network polling", async () => {
