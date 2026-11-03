@@ -164,3 +164,6 @@ export type { VoicePreRollFrame, VoicePreRollOptions } from "./voice/pre-roll.js
 
 export { createVoiceUtteranceController } from "./voice/utterance-controller.js";
 export type { VoiceUtteranceController, VoiceUtteranceControllerOptions } from "./voice/utterance-controller.js";
+
+export { createVoicePlaybackController } from "./voice/playback.js";
+export type { VoicePlaybackAdapter, VoicePlaybackController } from "./voice/playback.js";
