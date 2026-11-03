@@ -56,7 +56,8 @@ function normalizeBaseUrl(value: string): string {
 function selectProvider(): ProviderSelection {
   const requested = process.env.SOFIA_MODEL_PROVIDER?.trim().toLowerCase();
   const customBaseUrl = firstEnv("SOFIA_BASE_URL", "BASE_URL");
-  const customApiKey = firstEnv("SOFIA_API_KEY", "API_KEY");
+  // Prefer a dedicated model credential. SOFIA_API_KEY and API_KEY remain legacy aliases.
+  const customApiKey = firstEnv("SOFIA_MODEL_API_KEY", "SOFIA_API_KEY", "API_KEY");
   const customModel = firstEnv("SOFIA_MODEL", "MODEL");
   const hasCustomConfig = Boolean(customBaseUrl || customApiKey || customModel);
 
