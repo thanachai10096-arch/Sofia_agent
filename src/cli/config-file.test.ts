@@ -159,3 +159,21 @@ test("empty local metadata does not erase existing environment configuration", (
   assert.equal(environment.SOFIA_MODEL_BASE_URL, "https://openrouter.ai/api/v1");
   assert.equal(environment.SOFIA_MODEL_NAME, "provider/model");
 });
+
+import { resolveCliInvocation } from "./commands.js";
+
+test("CLI argv resolves help and supported commands without side effects", () => {
+  assert.deepEqual(resolveCliInvocation([]), { command: "help" });
+  assert.deepEqual(resolveCliInvocation(["--help"]), { command: "help" });
+  for (const command of ["setup", "chat", "init", "status"] as const) {
+    assert.deepEqual(resolveCliInvocation([command]), { command });
+  }
+});
+
+test("CLI run combines task arguments and unknown commands resolve to help", () => {
+  assert.deepEqual(resolveCliInvocation(["run", "inspect", "workspace"]), {
+    command: "run",
+    task: "inspect workspace",
+  });
+  assert.deepEqual(resolveCliInvocation(["unsupported"]), { command: "help" });
+});
