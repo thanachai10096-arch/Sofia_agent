@@ -1203,4 +1203,5 @@ test("DurableJobRuntime rejects invalid notification lease durations", async () 
   }
   assert.equal(completed?.status, "completed");
   await assert.rejects(runtime.claimNotification(submitted.id, "worker", 0), /positive safe-integer/);
+  await assert.rejects(runtime.renewNotificationClaim(submitted.id, "worker", -1), /positive safe-integer/);
 });
