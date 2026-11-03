@@ -122,7 +122,7 @@ export class PostgresJobStateStore implements JobStateStore, OwnedJobStateStore 
         INSERT INTO sofia_agent_outbox
           (id,owner_key_id,job_id,event_type,destination,payload,available_at)
         SELECT $3::uuid,u.event_owner_key_id,u.id,'job.cancelled',u.event_destination,
-          jsonb_build_object('jobId',u.id,'status','cancelled'),now()
+          jsonb_build_object('jobId',u.id,'status','cancelled','text','Sofia: งานถูกยกเลิกแล้ว'),now()
         FROM updated u WHERE u.event_destination IS NOT NULL
         ON CONFLICT (job_id,event_type,destination) DO NOTHING
         RETURNING id
