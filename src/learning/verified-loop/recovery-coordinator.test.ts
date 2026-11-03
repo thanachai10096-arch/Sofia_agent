@@ -15,17 +15,19 @@ function host(overrides: Partial<{
   runtime: RuntimeLearningSkill[];
   policy: string;
   approved: boolean;
+  actorId: string;
   evidence: boolean;
   calls: string[];
   approvalBinding?: { id: string; actorId: string; skillId: string; scope: LearningScope; policyRevision: string; status: "approved" };
 }> = {}) {
-  const state = { learning: [skill], runtime: [] as RuntimeLearningSkill[], policy: "policy-1", approved: true, evidence: true, calls: [] as string[], approvalBinding: { id: "receipt-1", actorId: "operator-a", skillId: "skill-1", scope, policyRevision: "policy-1", status: "approved" as const }, ...overrides };
+  const state = { learning: [skill], runtime: [] as RuntimeLearningSkill[], policy: "policy-1", approved: true, actorId: "operator-a", evidence: true, calls: [] as string[], approvalBinding: { id: "receipt-1", actorId: "operator-a", skillId: "skill-1", scope, policyRevision: "policy-1", status: "approved" as const }, ...overrides };
   return {
     state,
     adapter: {
       async listActiveLearningSkills() { state.calls.push("learning"); return state.learning; },
       async listRuntimeSkills() { state.calls.push("runtime"); return state.runtime; },
       async currentPolicyRevision() { state.calls.push("policy"); return state.policy; },
+      async authenticatedActorId() { state.calls.push("actor"); return state.actorId; },
       async isExplicitlyApproved() { state.calls.push("approval"); return state.approved; },
       async resolveApprovalBinding() { state.calls.push("approval-receipt"); return state.approvalBinding; },
       async hasTrustedEvidence() { state.calls.push("evidence"); return state.evidence; },
@@ -49,7 +51,7 @@ test("coordinator marks only fully gated missing registration as eligible for re
   assert.equal(result.report.safe, false);
   assert.deepEqual(result.assessments.map(item => item.disposition), ["eligible-for-reviewed-repair"]);
   assert.equal(result.assessments[0]?.approvalBinding?.id, "receipt-1");
-  assert.deepEqual(h.state.calls, ["learning", "runtime", "policy", "approval", "approval-receipt", "evidence", "policy"]);
+  assert.deepEqual(h.state.calls, ["learning", "runtime", "policy", "approval", "actor", "approval-receipt", "evidence", "policy"]);
 });
 
 test("coordinator sends an existing inactive runtime entry to manual review", async () => {
