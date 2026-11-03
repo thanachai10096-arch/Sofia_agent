@@ -101,7 +101,7 @@ test("web.fetch decodes HTML entities once and strips script tags with spaced cl
     process.env.SOFIA_ALLOW_NETWORK = "true";
     process.env.SOFIA_ALLOWED_HOSTS = "example.com";
     globalThis.fetch = async () => new Response(
-      "<html><body>&amp;lt;safe&amp;gt;<script>alert(1)</script \\t\\n bar> visible text<style>secret css</style \\t\\n bar> after style</body></html>",
+      "<html><body>&amp;lt;safe&amp;gt;<script>alert(1)</script \t\n bar> visible text<style>secret css</style \t\n bar> after style</body></html>",
       { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
     );
     const fetchTool = createBuiltinTools().find((item) => item.name === "web.fetch");
