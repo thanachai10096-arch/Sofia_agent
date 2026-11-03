@@ -48,3 +48,13 @@ Never put prompts, user task text, credentials, provider replies, or API keys in
 ## Journal path integrity
 
 Journal inspection and unresolved-state checks reject symbolic links and non-regular journal records. Reads use `O_NOFOLLOW` where supported and verify that the opened file descriptor still refers to the inode observed by `lstat`. A symlinked or replaced record is treated as corrupt/unresolved evidence; it is never interpreted as an empty, resolved journal. This is a local filesystem hardening measure, not a substitute for a transactional shared store on multi-host deployments.
+
+## Read-only recovery decision classification
+
+`decideSettlementRecovery(inspection)` is a pure helper that interprets the output of `inspectRun(runId)` without changing files or claims. It returns one of three conservative classifications:
+
+- `hold_active_claim`: an active claim exists. Isolate workers and verify ownership; do not try to clear the claim automatically.
+- `operator_reconciliation_required`: claim metadata is invalid, journal evidence is corrupt, or settlement evidence remains unresolved. Preserve the original evidence and reconcile against provider-side usage/billing records.
+- `eligible_for_claim_recheck`: the snapshot shows no blocking evidence. This is **not** permission to replay. The caller must acquire the real per-run claim and inspect again while holding it before admitting provider work.
+
+The decision is advisory because inspection is a snapshot and is not atomic with later execution. It never authorizes claim removal, journal mutation, checkpoint acknowledgement, or provider replay. PID, hostname, lock age, and a clean-looking journal are not substitutes for an operator's provider reconciliation.
