@@ -91,7 +91,8 @@ export class PostgresOutboxStore implements OutboxStore {
          lease_owner_token=$1::uuid,
          lease_expires_at=now()+($3::text || ' milliseconds')::interval
        FROM candidates c WHERE o.id=c.id
-       RETURNING ${COLUMNS}`,
+       RETURNING o.id,o.owner_key_id,o.job_id,o.event_type,o.destination,o.payload,o.status,o.attempts,
+         o.available_at,o.lease_owner_token,o.lease_expires_at,o.last_error,o.created_at,o.delivered_at`,
       [workerToken,boundedLimit,boundedLease],
     );
     return result.rows.map(mapRow);
