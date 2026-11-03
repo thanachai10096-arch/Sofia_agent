@@ -7,11 +7,9 @@ import { SofiaAgent } from "../agent/core.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createCliSessionId } from "./session-id.js";
-import { resolveCliInvocation } from "./commands.js";
+import { isCliEntrypoint, resolveCliInvocation } from "./commands.js";
 import { applySafeLocalConfigEnvironment, assertNoLegacyPlaintextApiKey, readSafeLocalConfig, writeSafeLocalConfig } from "./config-file.js";
 
-const invocation = resolveCliInvocation(process.argv.slice(2));
-const command = invocation.command;
 const configDir = path.join(os.homedir(), ".sofia");
 const configPath = path.join(configDir, "config.json");
 const sessionPath = path.join(configDir, "sessions.sqlite");
@@ -151,8 +149,10 @@ async function chat() {
   }
 }
 
-async function main() {
-  if (!command || command === "help" || command === "--help") return help();
+export async function main(args: readonly string[] = process.argv.slice(2)) {
+  const invocation = resolveCliInvocation(args);
+  const command = invocation.command;
+  if (command === "help") return help();
   if (command === "setup") return setup();
   await loadLocalConfig();
 
@@ -185,7 +185,9 @@ async function main() {
   return help();
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+if (isCliEntrypoint(process.argv[1], import.meta.url)) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
+}
