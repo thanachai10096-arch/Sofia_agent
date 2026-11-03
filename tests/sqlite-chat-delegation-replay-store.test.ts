@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -72,6 +73,36 @@ test("SQLite replay store does not allow a second connection to reclaim the same
   } finally {
     first.close();
     second.close();
+    fs.rmSync(temp.directory, { recursive: true, force: true });
+  }
+});
+
+test("SQLite replay store allows only one claim across separate processes", { skip: !sqliteAvailable }, async () => {
+  const temp = tempDatabase();
+  const moduleUrl = new URL("../src/api/sqlite-chat-delegation-replay-store.js", import.meta.url).href;
+  const childScript = `
+    import { SqliteChatDelegationReplayStore } from ${JSON.stringify(moduleUrl)};
+    const store = await SqliteChatDelegationReplayStore.open(process.argv[1]);
+    try {
+      const claimed = await store.claim(${JSON.stringify(claim)});
+      process.stdout.write(JSON.stringify({ claimed }));
+    } finally {
+      store.close();
+    }
+  `;
+  const runClaim = async (): Promise<boolean> => {
+    const { stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      execFile(process.execPath, ["--import", "tsx", "--input-type=module", "-e", childScript, temp.filePath],
+        { timeout: 15_000, maxBuffer: 1024 * 1024 },
+        (error, stdout, stderr) => error ? reject(error) : resolve({ stdout, stderr }));
+    });
+    return (JSON.parse(stdout) as { claimed: boolean }).claimed;
+  };
+
+  try {
+    const results = await Promise.all([runClaim(), runClaim()]);
+    assert.equal(results.filter(Boolean).length, 1);
+  } finally {
     fs.rmSync(temp.directory, { recursive: true, force: true });
   }
 });
