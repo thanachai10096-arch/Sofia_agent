@@ -220,3 +220,73 @@ test("SQLite session storage rejects a directory as a database path", {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("transactional appends preserve turns from stale readers across SQLite connections", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-append-concurrent-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const first = await SqliteSessionStore.open(file);
+  const second = await SqliteSessionStore.open(file);
+  try {
+    first.save({ id: "shared", messages: ["initial"], updatedAt: 0 });
+    const staleFirst = first.get("shared");
+    const staleSecond = second.get("shared");
+    assert.deepEqual(staleFirst?.messages, ["initial"]);
+    assert.deepEqual(staleSecond?.messages, ["initial"]);
+
+    first.appendMessages("shared", ["worker-one"]);
+    second.appendMessages("shared", ["worker-two"]);
+
+    assert.deepEqual(first.get("shared")?.messages, ["initial", "worker-one", "worker-two"]);
+    assert.deepEqual(second.search("worker-two").map((session) => session.id), ["shared"]);
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("transactional append keeps only the newest bounded transcript turns", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-append-bound-"));
+  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  try {
+    store.save({ id: "bounded", messages: ["old-1", "old-2"], updatedAt: 0 });
+    const result = store.appendMessages("bounded", ["new-1", "new-2"], 3);
+    assert.deepEqual(result.messages, ["old-2", "new-1", "new-2"]);
+    assert.deepEqual(store.get("bounded")?.messages, ["old-2", "new-1", "new-2"]);
+    assert.deepEqual(store.search("old-1"), []);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("transactional append rolls back transcript and FTS changes when an insert fails", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-append-rollback-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(file);
+  const db = new DatabaseSync(file);
+  try {
+    store.save({ id: "append-rollback", messages: ["preserve this transcript"], updatedAt: 0 });
+    db.exec(`
+      CREATE TRIGGER reject_append_message
+      BEFORE INSERT ON session_messages
+      WHEN NEW.content = 'force-append-transaction-error'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced append transaction failure');
+      END;
+    `);
+    assert.throws(
+      () => store.appendMessages("append-rollback", ["replacement", "force-append-transaction-error"]),
+      /forced append transaction failure/,
+    );
+    assert.deepEqual(store.get("append-rollback")?.messages, ["preserve this transcript"]);
+    assert.equal(store.search("preserve this transcript").length, 1);
+    assert.deepEqual(store.search("replacement"), []);
+  } finally {
+    db.close();
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
