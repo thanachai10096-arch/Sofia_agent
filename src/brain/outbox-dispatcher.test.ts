@@ -84,6 +84,30 @@ test("dispatcher marks exhausted attempts failed through the store retry contrac
   assert.equal(calls[1]!.args[4], 8);
 });
 
+test("dispatcher dead-letters a repeatedly reclaimed message without sending past its attempt budget", async () => {
+  const reclaimed = { ...message, attempts: 9 };
+  let claimed = false;
+  let sends = 0;
+  const { store, calls } = fakeStore({
+    async claimBatch() {
+      if (claimed) return [];
+      claimed = true;
+      return [reclaimed];
+    },
+  });
+  const dispatcher = new OutboxDispatcher(store, async () => { sends += 1; }, {
+    workerToken: "worker-token", maxAttempts: 8,
+  });
+  const report = await dispatcher.dispatchOnce();
+  assert.equal(sends, 0);
+  assert.equal(report.failed, 1);
+  assert.equal(report.retried, 0);
+  assert.equal(calls[1]!.kind, "retry");
+  assert.equal(calls[1]!.args[2], "Maximum delivery attempts exceeded after repeated worker lease recovery.");
+  assert.equal(calls[1]!.args[3], 0);
+  assert.equal(calls[1]!.args[4], 8);
+});
+
 test("dispatcher reports a lost lease rather than claiming delivery", async () => {
   const { store } = fakeStore({ async markDelivered() { return false; } });
   const dispatcher = new OutboxDispatcher(store, async () => undefined, { workerToken: "stale-worker" });
