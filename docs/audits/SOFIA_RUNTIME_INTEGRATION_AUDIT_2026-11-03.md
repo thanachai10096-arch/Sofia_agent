@@ -450,3 +450,11 @@ Verified the current adapter bridge already forwards the stable outbox `messageI
 - Added three adapter tests for stable nonce, per-chunk uniqueness, and ordinary-message compatibility. The sender test now asserts that the durable outbox ID reaches the adapter.
 
 Important limitation: Discord nonce enforcement is a bounded recent-message deduplication mechanism, not an indefinite exactly-once guarantee. Retries outside the provider's deduplication window, or transports that do not honor `enforce_nonce=true`, may still duplicate. Telegram Bot API has no equivalent general send-message idempotency key in this adapter contract; its delivery remains at-least-once.
+
+## Follow-up verification: Discord nonce transport and outbox crash recovery
+
+- Verified `src/integrations/messaging/discord-interaction-transport.ts` maps a supplied 25-character hexadecimal nonce to both Discord `nonce` and `enforce_nonce: true` for normal channel-message POSTs. Its test asserts the exact JSON request body. This closes the adapter-to-transport contract gap for that transport implementation; interaction-webhook replies are a separate path and do not use this nonce flow.
+- The production `workers/discord-gateway/daemon/worker.mjs` remains a separate direct-send path. It does not use the durable outbox or the nonce contract, so its message retry/deduplication guarantees must not be conflated with the adapter-based outbox path.
+- Hardened `OutboxDispatcher` for repeated worker crashes: every reclaim increments attempts; if a reclaimed message is already beyond the configured attempt budget, the dispatcher now performs a lease-fenced terminal retry transition (which marks it `failed`) without attempting another external send.
+- Added a regression test proving a message reclaimed at attempt 9 with a budget of 8 is not sent and is moved to the failed/dead-letter state through the store's fenced retry contract.
+- Tests were added but not executed in this environment. No build/typecheck or live PostgreSQL test was run. No migration, deployment, merge, or production change was performed.
