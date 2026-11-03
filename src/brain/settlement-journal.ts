@@ -10,6 +10,16 @@ type JournalEvent =
   | { version: 1; type: "started"; attemptId: string; at: string; maxInputTokens: number; maxOutputTokens: number }
   | { version: 1; type: "settled"; attemptId: string; at: string; usageKnown: boolean; usage?: TokenUsage };
 
+function isValidJournalUsage(value: unknown): value is TokenUsage {
+  if (!value || typeof value !== "object") return false;
+  const usage = value as Record<string, unknown>;
+  const input = usage.inputTokens;
+  const output = usage.outputTokens;
+  return typeof input === "number" && Number.isSafeInteger(input) && input >= 0 &&
+    typeof output === "number" && Number.isSafeInteger(output) && output >= 0 &&
+    Number.isSafeInteger(input + output);
+}
+
 export interface SettlementAttempt {
   id: string;
 }
@@ -359,12 +369,7 @@ export class FileSettlementJournal {
         // checkpoint admission. Otherwise a new settle() could append after
         // malformed "known" usage and extend an already-corrupt accounting log.
         if (event.usageKnown) {
-          const usage = event.usage;
-          if (!usage || typeof usage !== "object" ||
-              !Number.isSafeInteger((usage as Record<string, unknown>).inputTokens) ||
-              ((usage as Record<string, number>).inputTokens < 0) ||
-              !Number.isSafeInteger((usage as Record<string, unknown>).outputTokens) ||
-              ((usage as Record<string, number>).outputTokens < 0)) {
+          if (!isValidJournalUsage(event.usage)) {
             throw new Error("Cannot settle an attempt from a journal with invalid usage evidence");
           }
         } else if (event.usage !== undefined) {
@@ -610,12 +615,7 @@ export class FileSettlementJournal {
           ambiguousEvidence = true;
           continue;
         }
-        const usage = event.usage;
-        if (!usage || typeof usage !== "object" ||
-            !Number.isSafeInteger((usage as Record<string, unknown>).inputTokens) ||
-            ((usage as Record<string, number>).inputTokens < 0) ||
-            !Number.isSafeInteger((usage as Record<string, unknown>).outputTokens) ||
-            ((usage as Record<string, number>).outputTokens < 0)) {
+        if (!isValidJournalUsage(event.usage)) {
           ambiguousEvidence = true;
           continue;
         }
@@ -689,10 +689,7 @@ export class FileSettlementJournal {
           throw new Error("Cannot checkpoint corrupt or unmatched settlement evidence");
         }
         pending.delete(event.attemptId);
-        const usage = event.usage as Record<string, unknown> | undefined;
-        if (!event.usageKnown || !usage ||
-            !Number.isSafeInteger(usage.inputTokens) || (usage.inputTokens as number) < 0 ||
-            !Number.isSafeInteger(usage.outputTokens) || (usage.outputTokens as number) < 0) {
+        if (!event.usageKnown || !isValidJournalUsage(event.usage)) {
           ambiguous = true;
         }
         continue;
