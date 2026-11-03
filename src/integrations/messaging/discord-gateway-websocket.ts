@@ -10,6 +10,10 @@ interface NodeWebSocketLike {
 }
 type WebSocketConstructor = new (url: string) => NodeWebSocketLike;
 
+export function isNodeDiscordGatewayAvailable(): boolean {
+  return typeof (globalThis as typeof globalThis & { WebSocket?: WebSocketConstructor }).WebSocket === "function";
+}
+
 /**
  * Uses Node's built-in WebSocket implementation (Node 22+). The wrapper keeps
  * the Gateway protocol independent from a particular socket library and avoids
