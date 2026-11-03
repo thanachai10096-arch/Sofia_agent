@@ -175,6 +175,31 @@ test("verified-completion recovery refuses malformed authoritative receipt seque
   assert.equal(checkpoint.getState().lastSequence, 0);
 });
 
+test("verified-completion recovery rejects missing sequence numbers before replay", async () => {
+  const checkpoint = checkpointFixture();
+  const replayed: string[] = [];
+  const handler = createVerifiedCompletionHandler({
+    loop: {
+      async recordVerifiedCompletion(_receivedScope: LearningScope, receiptId: string) {
+        replayed.push(receiptId);
+        return { recorded: true };
+      },
+    } as unknown as VerifiedLearningLoop,
+    resolveScope: async () => scope,
+    persistFinalizedReceipt: async () => ({ receiptId: "unused", sequence: 1 }),
+    listFinalizedReceipts: async () => [
+      { receiptId: "receipt-1", sequence: 1, summary: "First" },
+      { receiptId: "receipt-3", sequence: 3, summary: "Third" },
+    ],
+    checkpoints: checkpoint.checkpoints,
+    redact: value => value,
+  });
+
+  await assert.rejects(() => handler.recover(scope), /non-contiguous sequence/i);
+  assert.deepEqual(replayed, []);
+  assert.equal(checkpoint.getState().lastSequence, 0);
+});
+
 test("verified-completion recovery fails closed when authoritative receipt listing is absent", async () => {
   const checkpoint = checkpointFixture();
   const handler = createVerifiedCompletionHandler({
