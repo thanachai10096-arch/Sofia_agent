@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { JobRecord, JobStateStore, OwnedJobStateStore } from "./job-runtime.js";
 
 /**
@@ -195,7 +196,7 @@ export class PostgresJobStateStore implements JobStateStore, OwnedJobStateStore 
           notification_delivered=$11,lease_owner_token=$12::uuid,
           lease_expires_at=$13::timestamptz,heartbeat_at=$14::timestamptz,
           resume_reservation_token=NULL,resume_reservation_expires_at=NULL,
-          snapshot=$17::jsonb,result=$18::jsonb,error=$19
+          snapshot=$15::jsonb,result=$16::jsonb,error=$17
         WHERE id=$1::uuid
           AND owner_key_id IS NOT DISTINCT FROM $7
           AND lease_owner_token IS NOT DISTINCT FROM $12::uuid
@@ -205,7 +206,7 @@ export class PostgresJobStateStore implements JobStateStore, OwnedJobStateStore 
       ), inserted AS (
         INSERT INTO sofia_agent_outbox
           (id,owner_key_id,job_id,event_type,destination,payload,available_at)
-        SELECT $3::uuid,u.owner_key_id,u.id,$20,u.notification_channel_id,$21::jsonb,now()
+        SELECT $3::uuid,u.owner_key_id,u.id,$18,u.notification_channel_id,$19::jsonb,now()
         FROM updated u
         WHERE u.notification_channel_id IS NOT NULL
         ON CONFLICT (job_id,event_type,destination) DO NOTHING
@@ -216,7 +217,7 @@ export class PostgresJobStateStore implements JobStateStore, OwnedJobStateStore 
        record.modelRouteId??null,record.ownerKeyId??null,record.notificationChannelId??null,
        record.sessionKey??null,record.sessionTask??null,record.notificationDelivered??false,
        record.leaseOwnerToken??null,record.leaseExpiresAt??null,record.heartbeatAt??null,
-       null,null,record.snapshot?JSON.stringify(record.snapshot):null,
+       record.snapshot?JSON.stringify(record.snapshot):null,
        record.result?JSON.stringify(record.result):null,record.error??null,
        eventType,JSON.stringify(payload)],
     );
