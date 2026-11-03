@@ -43,6 +43,22 @@ test("incomplete Telegram configuration fails closed without stopping API startu
   assert.doesNotMatch(warnings[0]!, /configured/);
 });
 
+test("Telegram fails closed when multiple users would share one API-key memory owner", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123,-100456",
+    SOFIA_API_KEY: "shared-test-key",
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /one shared Sofia API key cannot safely serve multiple Telegram users/);
+  assert.doesNotMatch(warnings[0] ?? "", /shared-test-key/);
+});
+
 test("complete Telegram configuration constructs a runtime without starting network polling", async () => {
   const warnings: string[] = [];
   const runtime = createTelegramMessagingRuntime({
