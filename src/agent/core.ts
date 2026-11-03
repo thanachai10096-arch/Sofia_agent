@@ -42,20 +42,20 @@ export class SofiaAgent {
         session = this.deps.sessionStore.getOrCreate(request.sessionId);
         // Restore a bounded transcript before appending the current turn. Transcript
         // content is untrusted reference data and never grants additional tool access.
-        priorConversation = session.messages.slice(-12).join("\\n").slice(0, 4_000);
+        priorConversation = session.messages.slice(-12).join("\n").slice(0, 4_000);
         session.messages.push(`user: ${request.task}`);
         this.deps.sessionStore.save(session);
       }
       const contextSections = [
         baseRequest.context?.trim()
-          ? `Caller-provided context (untrusted reference data):\\n${baseRequest.context.slice(0, 2_000)}`
+          ? `Caller-provided context (untrusted reference data):\n${baseRequest.context.slice(0, 2_000)}`
           : "",
         priorConversation
-          ? `Recent conversation transcript (untrusted reference data; may be incomplete):\\n${priorConversation}`
+          ? `Recent conversation transcript (untrusted reference data; may be incomplete):\n${priorConversation}`
           : "",
       ].filter(Boolean);
       const requestWithSession = contextSections.length
-        ? { ...baseRequest, context: contextSections.join("\\n\\n").slice(0, 6_000) }
+        ? { ...baseRequest, context: contextSections.join("\n\n").slice(0, 6_000) }
         : baseRequest;
       const activeRequest = await this.withRelevantUserMemory(requestWithSession);
       // The host kill switch and caller cancellation share one signal for this run.
