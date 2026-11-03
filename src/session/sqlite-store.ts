@@ -176,6 +176,40 @@ export class SqliteSessionStore {
     restrictSqlitePermissions(this.filePath);
   }
 
+  /**
+   * Append one transcript message under a SQLite write transaction.
+   * BEGIN IMMEDIATE serializes read-position-write across independent store
+   * connections/processes, avoiding stale full-transcript replacement.
+   */
+  appendMessage(id: string, content: string): void {
+    if (!id) throw new Error("Session id must not be empty.");
+    if (typeof content !== "string") throw new TypeError("Session message must be a string.");
+    const updatedAt = Date.now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        "INSERT INTO sessions(id, updated_at) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
+      ).run(id, updatedAt);
+      const positionRow = this.db.prepare(
+        "SELECT COALESCE(MAX(position) + 1, 0) AS next_position FROM session_messages WHERE session_id = ?",
+      ).get(id) as { next_position: number };
+      const position = Number(positionRow.next_position);
+      this.db.prepare(
+        "INSERT INTO session_messages(session_id, position, content) VALUES (?, ?, ?)",
+      ).run(id, position, content);
+      if (this.ftsAvailable) {
+        this.db.prepare(
+          "INSERT INTO session_messages_fts(session_id, content) VALUES (?, ?)",
+        ).run(id, content);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    restrictSqlitePermissions(this.filePath);
+  }
+
   listMessages(id: string, options: { limit?: number; offset?: number } = {}): string[] {
     const limit = boundedInteger(options.limit, 50, 1, 500);
     const offset = boundedInteger(options.offset, 0, 0, Number.MAX_SAFE_INTEGER);
