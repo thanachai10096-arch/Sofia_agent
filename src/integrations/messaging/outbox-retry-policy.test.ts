@@ -25,6 +25,9 @@ test("messaging retry policy marks the configured final attempt for dead-letter 
 test("messaging retry policy rejects invalid inputs", () => {
   assert.throws(() => calculateMessagingRetry(-1, 1));
   assert.throws(() => calculateMessagingRetry(0, Number.NaN));
+  assert.throws(() => calculateMessagingRetry(0, -1));
+  assert.throws(() => calculateMessagingRetry(0, Number.MAX_SAFE_INTEGER));
+  assert.throws(() => calculateMessagingRetry(Number.MAX_SAFE_INTEGER, 1));
   assert.throws(() => calculateMessagingRetry(0, 1, {
     baseDelayMs: 60_000,
     maxDelayMs: 30_000,
