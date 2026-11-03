@@ -141,7 +141,13 @@ test("SDK lists configured model routes and forwards a user-selected route", asy
       if (String(input).endsWith("/v1/models")) {
         return response(200, {
           automaticSelection: true,
-          models: [{ id: "coding", model: "vendor/coder", capabilities: ["coding"], healthy: true }],
+          models: [{
+            id: "coding",
+            model: "vendor/coder",
+            capabilities: ["coding"],
+            healthy: true,
+            featureSupport: { toolCalling: true, vision: false, structuredOutput: true, contextWindow: 128_000 },
+          }],
         });
       }
       return response(200, { id: "run-1", status: "completed" });
@@ -151,6 +157,12 @@ test("SDK lists configured model routes and forwards a user-selected route", asy
   const available = await client.listModels();
   assert.equal(available.automaticSelection, true);
   assert.equal(available.models[0]?.model, "vendor/coder");
+  assert.deepEqual(available.models[0]?.featureSupport, {
+    toolCalling: true,
+    vision: false,
+    structuredOutput: true,
+    contextWindow: 128_000,
+  });
   await client.run({ task: "review code", modelRouteId: "coding" });
   assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), { task: "review code", modelRouteId: "coding" });
 });
