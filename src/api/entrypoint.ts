@@ -4,6 +4,9 @@ import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
+import { createNodeDiscordGatewaySocket, isNodeDiscordGatewayAvailable } from "../integrations/messaging/discord-gateway-websocket.js";
+import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { buildDiscordSessionContext, buildDiscordUserMemoryContext, saveExplicitDiscordUserMemory, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
@@ -31,6 +34,7 @@ if (discordRequested && !discordConfigured) {
   console.error("Discord integration disabled: required configuration is incomplete; API will continue without Discord.");
 }
 let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
+let discordGatewayTransport: ReturnType<typeof createDiscordGatewayTransport> | undefined;
 const discordAbort = new AbortController();
 let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -51,7 +55,7 @@ if (discordConfigured) {
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
   });
-  await discordTransport.start(discordAbort.signal, async (message) => {
+  const handleDiscordMessage = async (message: VerifiedDiscordMessage) => {
     try {
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
@@ -121,10 +125,18 @@ if (discordConfigured) {
         );
         return;
       }
-      const prefix = "/run";
-      const task = message.content.startsWith(prefix) ? message.content.slice(prefix.length).trim() : "";
+      const trimmedMessage = message.content.trim();
+      const isRunCommand = /^\/run(?:\\s+|$)/i.test(trimmedMessage);
+      const task = isRunCommand
+        ? trimmedMessage.replace(/^\/run\\s*/i, "").trim()
+        : trimmedMessage.startsWith("/")
+          ? ""
+          : trimmedMessage;
       if (!task) {
-        await discordTransport?.sendMessage(message.channelId, "Please provide a task using /run task:<description>.", undefined, message.id);
+        const reply = trimmedMessage.startsWith("/")
+          ? "Unsupported command. Use /run task:<description>, /status, /cancel, or /resume; ordinary messages are also accepted in Gateway chat."
+          : "Please provide a task or a natural-language message.";
+        await discordTransport?.sendMessage(message.channelId, reply, undefined, message.id);
         return;
       }
       const sessionKey = messagingSessionKey({
@@ -184,7 +196,25 @@ if (discordConfigured) {
         console.error("Discord command error reply delivery failed.");
       }
     }
-  });
+  };
+  await discordTransport.start(discordAbort.signal, handleDiscordMessage);
+
+  // Discord Gateway is an opt-in second ingress for ordinary channel messages.
+  // Slash Commands continue to use the signed HTTP Interactions route above.
+  if (process.env.DISCORD_GATEWAY_ENABLED?.trim().toLowerCase() === "true") {
+    if (!isNodeDiscordGatewayAvailable()) {
+      console.error("Discord Gateway disabled: Node.js built-in WebSocket requires Node.js 22 or newer.");
+    } else {
+      discordGatewayTransport = createDiscordGatewayTransport({
+        botToken: discordBotToken,
+        allowedUserIds: discordUserIds,
+        allowedChannelIds: discordChannelIds,
+        createSocket: createNodeDiscordGatewaySocket,
+        onError: (event, status) => console.error("Discord Gateway error:", event, status ?? ""),
+      });
+      await discordGatewayTransport.start(discordAbort.signal, handleDiscordMessage);
+    }
+  }
 
   // Retry recovery notifications while the process is alive. A crashed worker may
   // still have an unexpired lease at startup; periodic list() calls let the runtime
@@ -240,6 +270,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     discordAbort.abort();
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
+    void discordGatewayTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
     server.close();
   });
