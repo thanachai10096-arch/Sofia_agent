@@ -132,11 +132,22 @@ def create_app(
     )
     def embeddings(request: EmbeddingRequest) -> EmbeddingResponse:
         _validate_texts(request.texts)
-        model = embedder_factory()
-        vectors = model.encode(
-            request.texts, normalize_embeddings=request.normalize
-        )
-        result = [[float(value) for value in vector] for vector in vectors]
+        try:
+            model = embedder_factory()
+        except Exception as error:
+            raise HTTPException(
+                status_code=503, detail="Embedding model is unavailable."
+            ) from error
+
+        try:
+            vectors = model.encode(
+                request.texts, normalize_embeddings=request.normalize
+            )
+            result = [[float(value) for value in vector] for vector in vectors]
+        except Exception as error:
+            raise HTTPException(
+                status_code=502, detail="Embedding inference returned an invalid result."
+            ) from error
 
         if len(result) != len(request.texts) or not result or not result[0]:
             raise HTTPException(
@@ -169,10 +180,22 @@ def create_app(
     )
     def rerank(request: RerankRequest) -> RerankResponse:
         _validate_texts([request.query, *request.documents])
-        scores = reranker_factory().predict(
-            [(request.query, document) for document in request.documents]
-        )
-        values = [float(score) for score in scores]
+        try:
+            model = reranker_factory()
+        except Exception as error:
+            raise HTTPException(
+                status_code=503, detail="Reranker model is unavailable."
+            ) from error
+
+        try:
+            scores = model.predict(
+                [(request.query, document) for document in request.documents]
+            )
+            values = [float(score) for score in scores]
+        except Exception as error:
+            raise HTTPException(
+                status_code=502, detail="Reranker inference returned an invalid result."
+            ) from error
         if len(values) != len(request.documents) or any(
             not math.isfinite(score) for score in values
         ):
