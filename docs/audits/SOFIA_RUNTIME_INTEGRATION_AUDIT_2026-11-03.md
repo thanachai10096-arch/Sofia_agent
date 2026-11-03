@@ -356,3 +356,19 @@ Remaining limits:
 - Outbox delivery still requires a trusted worker and concrete platform sender implementations.
 - The dispatcher remains sequential with no lease renewal; configure bounded transport timeouts below the lease duration.
 - No build, typecheck, unit tests, deployment, or production change was performed.
+
+
+## Follow-up: atomic cancellation + managed outbox worker (2026-11-03)
+
+Added `PostgresJobStateStore.cancelWithOutbox()`. It atomically transitions a queued/running job to cancelled and inserts an owner- and destination-scoped `job.cancelled` event in the same PostgreSQL statement. Owner-scoped cancellation applies the owner predicate in the database update. No event is inserted without a configured notification channel. The unique outbox event key prevents duplicate logical cancellation events.
+
+Updated `DurableJobRuntime.cancel()` and `cancelForOwner()` to use the optional atomic capability when available; existing FileJobStateStore behavior remains unchanged.
+
+Added `OutboxWorker` as a host-managed polling lifecycle with single-loop protection, bounded polling, error callback isolation, and graceful shutdown after active dispatch. It is exported from the package and has lifecycle tests.
+
+Remaining limitations:
+- The worker is not wired into a Vercel Daemon or any deployment; host startup must explicitly start it.
+- No platform-specific sender is implemented, so this is still a transport-neutral worker.
+- Lease renewal is not implemented; send timeouts must remain below the outbox lease duration.
+- At-least-once delivery and crash-after-send duplicate risk remain.
+- PostgreSQL SQL and migration have not been exercised against a live database. Added tests have not been run; no typecheck, build, or deployment was performed.
