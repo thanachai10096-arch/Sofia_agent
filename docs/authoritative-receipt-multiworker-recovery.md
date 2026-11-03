@@ -184,3 +184,10 @@ The repository already has lease/ownership handling in `src/brain/job-runtime.ts
 Decision: keep using the existing DurableJobRuntime for Brain job execution and recovery notices. Do not add a parallel job runtime, and do not claim its lease protects learning delivery. The next learning-specific increment must be a narrow storage-port capability over the existing checkpoint/receipt identity boundary, with ownership/fencing validated by the same durable transaction that accepts the learning sequence identity. If that guarantee cannot be made atomic with the learning write, keep live multi-worker learning disabled rather than presenting a preflight check as fencing.
 
 This is an architectural reuse decision based on the inspected implementation; it does not change runtime behavior or claim that a production lease adapter exists.
+
+
+### 13. Pending receipt identity validation — implemented
+
+The SQLite checkpoint adapter now validates pending receipt identity uniqueness as well as sequence uniqueness. A single receipt ID cannot be persisted at two different pending sequence numbers within one scope. The reader also validates the persisted revision as a non-negative safe integer, rather than passing malformed revision metadata downstream.
+
+This is a checkpoint-integrity guard only. It does not arbitrate concurrent live side effects, prove that a receipt ID is globally authoritative, or replace the required scope lease/fencing and learning-store transaction boundary. The live-delivery race described above remains open.
