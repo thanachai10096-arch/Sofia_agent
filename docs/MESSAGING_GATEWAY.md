@@ -101,3 +101,11 @@ The transport treats HTTP 409 as terminal and emits `poll_conflict` rather than 
 - Channel diagnostics are optional and isolated: if the diagnostic callback throws, `/health` still returns HTTP 200 for the core API and omits the `channels` field.
 
 - Discord's HTTP interaction transport exposes a read-only `getStatus()` snapshot (`running` or `stopped`). The public health endpoint uses this live state rather than treating a configured transport as permanently running; a parent abort is reflected immediately.
+
+### Discord completion-notification recovery semantics
+
+- Job completion and the notification-delivered marker are persisted separately from Discord's message-send operation. A process can crash after Discord accepts a notification but before Sofia persists `notificationDelivered=true`; the recovery loop may then send the notice again. Recovery is therefore **at-least-once**, not exactly-once.
+- The in-memory `notificationInFlight` set prevents overlapping retries only inside one API process. It is not a cross-replica notification lease. Do not run multiple API replicas against the same job store and expect notification sends to be globally serialized.
+- A failed send leaves the durable marker unset so a later retry can deliver the notice. A successful send is followed by the marker update; operators should tolerate a rare duplicate after a crash in that interval.
+- Cross-replica exactly-once delivery cannot be guaranteed by a local marker alone. A future shared notification-outbox/lease design must use atomic claims and stable provider idempotency where available, and still document the provider/database transaction boundary.
+- Recovery notices intentionally contain only job ID, terminal status, and whether a checkpoint exists. They do not replay task text, model output, or historical chat content into a channel after restart.
