@@ -20,12 +20,16 @@ class FakeSocket implements DiscordGatewaySocket {
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const allowedUserIds = ["404"];
+const allowedChannelIds = ["202", "203", "204"];
 
 test("Discord Gateway identifies, passes unaddressed group chatter as unaddressed, and marks exact bot mentions", async () => {
   const socket = new FakeSocket();
   const delivered: Array<{ content: string; directMessage?: boolean; addressedToBot?: boolean; transportVerified?: true }> = [];
   const transport = createDiscordGatewayTransport({
     botToken: "x".repeat(30),
+    allowedUserIds,
+    allowedChannelIds,
     socketFactory: () => socket,
     fetchImpl: async () => new Response(JSON.stringify({ id: "outgoing-message" }), { status: 200 }),
   });
@@ -66,6 +70,8 @@ test("Discord Gateway serializes messages per user and channel without blocking 
   const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
   const transport = createDiscordGatewayTransport({
     botToken: "x".repeat(30),
+    allowedUserIds,
+    allowedChannelIds,
     socketFactory: () => socket,
     fetchImpl: async () => new Response(JSON.stringify({ id: "outgoing-message" }), { status: 200 }),
   });
@@ -100,6 +106,8 @@ test("Discord Gateway reports bounded per-session queue overflow without growing
   const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
   const transport = createDiscordGatewayTransport({
     botToken: "x".repeat(30),
+    allowedUserIds,
+    allowedChannelIds,
     socketFactory: () => socket,
     onError: (event) => errors.push(event),
   });
@@ -126,6 +134,8 @@ test("Discord Gateway marks only one-to-one DM channels as direct messages", asy
   const delivered: Array<{ directMessage?: boolean; addressedToBot?: boolean }> = [];
   const transport = createDiscordGatewayTransport({
     botToken: "x".repeat(30),
+    allowedUserIds,
+    allowedChannelIds,
     socketFactory: () => socket,
     fetchImpl: async (input) => {
       const url = String(input);
@@ -152,6 +162,8 @@ test("Discord Gateway ignores every server-provided resume URL and reconnects on
   const urls: string[] = [];
   const transport = createDiscordGatewayTransport({
     botToken: "x".repeat(30),
+    allowedUserIds,
+    allowedChannelIds,
     socketFactory: (url) => {
       urls.push(url);
       const socket = new FakeSocket();
@@ -182,6 +194,8 @@ test("Discord Gateway resumes the trusted session with the latest sequence after
   const urls: string[] = [];
   const transport = createDiscordGatewayTransport({
     botToken: "x".repeat(30),
+    allowedUserIds,
+    allowedChannelIds,
     socketFactory: (url) => {
       urls.push(url);
       const socket = new FakeSocket();
@@ -217,7 +231,7 @@ test("Discord Gateway resumes the trusted session with the latest sequence after
 
 test("Discord Gateway rejects malformed bot tokens before opening a socket", () => {
   assert.throws(
-    () => createDiscordGatewayTransport({ botToken: "not a valid token", socketFactory: () => new FakeSocket() }),
+    () => createDiscordGatewayTransport({ botToken: "not a valid token", allowedUserIds, allowedChannelIds, socketFactory: () => new FakeSocket() }),
     /invalid format/i,
   );
 });
@@ -228,6 +242,8 @@ test("Discord Gateway stops reconnecting after a fatal authentication close code
   const errors: Array<{ event: string; status?: number }> = [];
   const transport = createDiscordGatewayTransport({
     botToken: "x".repeat(30),
+    allowedUserIds,
+    allowedChannelIds,
     socketFactory: () => {
       const socket = new FakeSocket();
       sockets.push(socket);
@@ -251,6 +267,8 @@ test("Discord Gateway does not treat group DMs as private direct messages", asyn
   const delivered: Array<{ directMessage?: boolean; addressedToBot?: boolean }> = [];
   const transport = createDiscordGatewayTransport({
     botToken: "x".repeat(30),
+    allowedUserIds,
+    allowedChannelIds,
     socketFactory: () => socket,
   });
   await transport.start(new AbortController().signal, async (message) => {
@@ -273,6 +291,8 @@ test("Discord Gateway fails closed when the channel type lookup fails", async ()
   const delivered: Array<{ directMessage?: boolean; addressedToBot?: boolean }> = [];
   const transport = createDiscordGatewayTransport({
     botToken: "x".repeat(30),
+    allowedUserIds,
+    allowedChannelIds,
     socketFactory: () => socket,
     fetchImpl: async () => new Response("forbidden", { status: 403 }),
   });
@@ -287,5 +307,44 @@ test("Discord Gateway fails closed when the channel type lookup fails", async ()
   } });
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.deepEqual(delivered, [{ directMessage: false, addressedToBot: undefined }]);
+  await transport.stop();
+});
+
+
+test("Discord Gateway rejects missing or malformed allowlists and filters unauthorized messages before queue allocation", async () => {
+  assert.throws(() => createDiscordGatewayTransport({
+    botToken: "x".repeat(30),
+    allowedUserIds: [],
+    allowedChannelIds,
+    socketFactory: () => new FakeSocket(),
+  }), /allowlist/i);
+  assert.throws(() => createDiscordGatewayTransport({
+    botToken: "x".repeat(30),
+    allowedUserIds: ["404", "404"],
+    allowedChannelIds,
+    socketFactory: () => new FakeSocket(),
+  }), /allowlist/i);
+
+  const socket = new FakeSocket();
+  const delivered: string[] = [];
+  const transport = createDiscordGatewayTransport({
+    botToken: "x".repeat(30),
+    allowedUserIds,
+    allowedChannelIds,
+    socketFactory: () => socket,
+  });
+  await transport.start(new AbortController().signal, async (message) => { delivered.push(message.content); });
+  socket.gateway({ op: 10, d: { heartbeat_interval: 60000 } });
+  socket.gateway({ op: 0, t: "READY", s: 1, d: { session_id: "session-1", user: { id: "999" } } });
+  socket.gateway({ op: 0, t: "MESSAGE_CREATE", s: 2, d: {
+    id: "201", channel_id: "202", guild_id: "303", content: "unauthorized user",
+    author: { id: "405", bot: false }, mentions: [{ id: "999" }],
+  } });
+  socket.gateway({ op: 0, t: "MESSAGE_CREATE", s: 3, d: {
+    id: "202", channel_id: "205", guild_id: "303", content: "unauthorized channel",
+    author: { id: "404", bot: false }, mentions: [{ id: "999" }],
+  } });
+  await tick();
+  assert.deepEqual(delivered, []);
   await transport.stop();
 });
