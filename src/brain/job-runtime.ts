@@ -404,6 +404,12 @@ class FileJobStateStore implements JobStateStore {
       if (index >= 0) {
         const current = records[index]!;
         if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
+        // A matching token is not sufficient after its lease expires. A worker
+        // that wakes late must not commit before another worker happens to claim.
+        if (current.status === "running") {
+          const expiresAt = current.leaseExpiresAt ? Date.parse(current.leaseExpiresAt) : 0;
+          if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return false;
+        }
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
         records[index] = {
           ...record,
