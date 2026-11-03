@@ -58,3 +58,5 @@ Journal inspection and unresolved-state checks reject symbolic links and non-reg
 - `eligible_for_claim_recheck`: the snapshot shows no blocking evidence. This is **not** permission to replay. The caller must acquire the real per-run claim and inspect again while holding it before admitting provider work.
 
 The decision is advisory because inspection is a snapshot and is not atomic with later execution. It never authorizes claim removal, journal mutation, checkpoint acknowledgement, or provider replay. PID, hostname, lock age, and a clean-looking journal are not substitutes for an operator's provider reconciliation.
+
+Claim release also validates the lock path with `lstat`, opens with `O_NOFOLLOW` where available, checks the opened inode against the inspected inode, and re-checks the path identity before unlinking. If the claim path is replaced by a symlink, non-regular file, or different inode, release refuses to follow or remove it. The original claim may then require operator reconciliation; this is intentional fail-closed behavior.
