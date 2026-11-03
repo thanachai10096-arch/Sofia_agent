@@ -77,6 +77,33 @@ test("SofiaAgent keeps concurrent turns for one session in transcript order", as
 });
 
 
+test("separate SofiaAgent instances append concurrent turns without losing transcript updates", async () => {
+  const sessions = new MemorySessionStore();
+  const makeAgent = (label: string) => new SofiaAgent({
+    provider: {
+      generate: async ({ task }) => {
+        await new Promise((resolve) => setTimeout(resolve, label === "first" ? 15 : 5));
+        return { text: `Completed: ${task}` };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await Promise.all([
+    makeAgent("first").run({ task: "first worker task", sessionId: "multi-worker-session" }),
+    makeAgent("second").run({ task: "second worker task", sessionId: "multi-worker-session" }),
+  ]);
+
+  const messages = sessions.get("multi-worker-session")?.messages ?? [];
+  assert.ok(messages.includes("user: first worker task"));
+  assert.ok(messages.includes("user: second worker task"));
+  assert.ok(messages.includes("assistant: Completed: first worker task"));
+  assert.ok(messages.includes("assistant: Completed: second worker task"));
+  assert.equal(messages.length, 4);
+});
+
 test("SofiaAgent replays bounded prior turns as fenced untrusted context", async () => {
   const sessions = new MemorySessionStore();
   sessions.save({
