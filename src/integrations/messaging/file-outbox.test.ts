@@ -167,3 +167,30 @@ test("outbox does not send a record before its persisted retry time", async () =
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("outbox persists bounded metadata-only attempt history across restart and requeue", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-history-"));
+  try {
+    const outbox = new FileMessagingOutbox(root);
+    const id = await outbox.enqueue("line", { conversationId: "line-chat", text: "private result text" });
+    let now = 10_000;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await flushMessagingOutbox(outbox, async () => false, undefined, undefined, () => now);
+      now += 60 * 60_000;
+    }
+    const restarted = new FileMessagingOutbox(root);
+    const record = (await restarted.pending()).find((item) => item.id === id);
+    assert.equal(record?.attemptCount, 8);
+    assert.equal(record?.attemptHistory?.length, 8);
+    assert.ok(record?.attemptHistory?.every((entry) =>
+      entry.outcome === "failed" && entry.code === "provider_unavailable" && Number.isFinite(entry.at)));
+    assert.equal(JSON.stringify(record?.attemptHistory).includes("private result text"), false);
+    assert.equal(await restarted.requeue(id), true);
+    const requeued = (await restarted.pending()).find((item) => item.id === id);
+    assert.equal(requeued?.attemptCount, 0);
+    assert.equal(requeued?.attemptHistory?.length, 8, "manual requeue preserves prior audit history");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
