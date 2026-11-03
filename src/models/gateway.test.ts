@@ -615,3 +615,35 @@ test("Brain route adapter honors declared model context window and preserves leg
     else process.env.SOFIA_CODING_CONTEXT = originalContext;
   }
 });
+
+
+test("provider HTTP error bodies are not exposed in gateway errors", async () => {
+  const originalFetch = globalThis.fetch;
+  const sentinel = "provider-private-prompt-and-secret";
+  globalThis.fetch = async () => new Response(
+    JSON.stringify({ error: { message: sentinel, api_key: "provider-secret-value" } }),
+    { status: 400, headers: { "content-type": "application/json" } },
+  );
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    await assert.rejects(
+      gateway.generate({ task: "trigger provider error", kind: "general", step: 1 }, { ...route, healthy: true }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /Model gateway request failed \(400\)\./);
+        assert.equal(error.message.includes(sentinel), false);
+        assert.equal(error.message.includes("provider-secret-value"), false);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
