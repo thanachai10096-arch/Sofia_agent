@@ -324,3 +324,44 @@ test("OpenAI-compatible length finish reason is preserved for Brain truncation c
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("gateway rejects empty and duplicate tool-call IDs before returning executable calls", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const toolCalls of [
+      [{ id: "", function: { name: "workspace.read_file", arguments: "{\\"path\\":\\"README.md\\"}" } }],
+      [
+        { id: "same-call", function: { name: "workspace.read_file", arguments: "{\\"path\\":\\"README.md\\"}" } },
+        { id: "same-call", function: { name: "terminal.run", arguments: "{\\"command\\":\\"pwd\\"}" } },
+      ],
+    ]) {
+      globalThis.fetch = async () => new Response(JSON.stringify({
+        choices: [{ message: { content: null, tool_calls: toolCalls }, finish_reason: "tool_calls" }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+
+      const gateway = new SofiaModelGateway({
+        coding: {
+          baseUrl: "https://provider.example.test/v1",
+          apiKey: "provider-secret",
+          model: "test-model",
+        },
+      });
+      await assert.rejects(
+        gateway.generate({
+          task: "run a tool",
+          kind: "coding",
+          step: 3,
+          tools: [
+            { type: "function", function: { name: "workspace.read_file", description: "Read a file", parameters: { type: "object" } } },
+            { type: "function", function: { name: "terminal.run", description: "Run a command", parameters: { type: "object" } } },
+          ],
+        }, { ...route, healthy: true }),
+        /tool-call id/,
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
