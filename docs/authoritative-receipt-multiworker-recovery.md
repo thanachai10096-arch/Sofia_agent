@@ -75,7 +75,18 @@ Recovery must be bounded and observable. A failure must leave the cursor unchang
 
 No production learning activation is permitted merely because receipt replay succeeded. Existing policy assessment, trusted evidence revalidation, regression execution, lifecycle approval, and runtime postcondition checks remain mandatory.
 
-## 8. Required integration evidence before enablement
+## 8. Authorization time-of-check/time-of-use boundary
+
+A coordinator or executor read immediately before a side effect is still a read-then-act sequence. It narrows the race window but does not make approval revocation atomic with runtime mutation.
+
+The production lifecycle adapter must therefore enforce the approval gate at the mutation boundary using the authoritative approval service. It must either:
+
+- perform a transaction/conditional mutation that verifies the exact receipt ID, authenticated actor, skill, scope, policy revision, and approved status atomically with the lifecycle state change; or
+- consume a short-lived, single-use authorization capability issued by the authoritative approval service, with atomic replay prevention and revocation semantics defined by that service.
+
+A caller-provided boolean, cached binding, executor preflight result, or model-generated approval claim is insufficient. If the existing lifecycle/approval service cannot provide a mutation-boundary guarantee, automatic repair must remain disabled and the case must be sent for manual review. The executor's repeated revalidation is defense in depth, not a substitute for this atomic gate.
+
+## 9. Required integration evidence before enablement
 
 - Real adapter contract tests against the authoritative receipt store.
 - Two independent processes racing to claim the same scope: exactly one current fencing token.
