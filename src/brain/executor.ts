@@ -232,7 +232,11 @@ function priorReferenceContext(context?: string): { trust: "untrusted_reference_
 }
 
 export class SofiaBrain {
-  readonly runId = randomUUID();
+  private currentRunId = randomUUID();
+
+  get runId(): string {
+    return this.currentRunId;
+  }
 
   private state: BrainState = "idle";
   private started = false;
@@ -883,10 +887,19 @@ export class SofiaBrain {
     };
 
     try {
+      if (resumed) {
+        if (resumed.version !== 1) throw new Stop("Unsupported run snapshot version");
+        if (typeof resumed.runId !== "string" || !resumed.runId.trim()) {
+          throw new Stop("Run snapshot is missing its stable run ID");
+        }
+        // A resumed execution is the same logical run. Preserve its identity so
+        // traces, durable model-call keys, and downstream audit records remain linked.
+        this.currentRunId = resumed.runId;
+      }
+
       this.emit({ type: "brain.started", state: "idle" });
 
       if (resumed) {
-        if (resumed.version !== 1) throw new Stop("Unsupported run snapshot version");
         if (resumed.task !== input.task) throw new Stop("Run snapshot task mismatch");
         understanding = resumed.understanding;
         currentPlan = this.validatePlan(resumed.plan);
