@@ -126,6 +126,17 @@ test("custom OpenAI-compatible endpoint supports a dedicated provider key", () =
   assert.equal(config.providers.reasoning?.model, "vendor/model-default");
 });
 
+test("complete legacy custom-provider tuple remains backward compatible", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_BASE_URL = "https://legacy-llm.example.test/v1";
+  process.env.SOFIA_API_KEY = "legacy-provider-key";
+  process.env.SOFIA_MODEL = "legacy/model";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "legacy-provider-key");
+  assert.equal(config.providers.fast?.model, "legacy/model");
+});
+
 test("Sofia API authentication key does not become the model-provider credential", () => {
   clear();
   process.env.SOFIA_API_KEY = "sofia-api-auth-only";
