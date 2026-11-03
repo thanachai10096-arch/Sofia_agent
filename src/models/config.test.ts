@@ -28,6 +28,8 @@ const names = [
   "SOFIA_MODEL_PROVIDER",
   "SOFIA_BASE_URL",
   "SOFIA_API_KEY",
+  "SOFIA_MODEL_API_KEY",
+  "SOFIA_ALLOW_LEGACY_MODEL_KEY_ALIAS",
   "SOFIA_MODEL",
   "BASE_URL",
   "API_KEY",
@@ -110,9 +112,10 @@ test("explicit provider selection wins when multiple provider credentials are pr
   assert.equal(config.providers.fast?.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
 });
 
-test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL", () => {
+test("legacy SOFIA_API_KEY model alias works only with explicit compatibility opt-in", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_ALLOW_LEGACY_MODEL_KEY_ALIAS = "true";
   process.env.SOFIA_BASE_URL = "https://llm.example.test/v1/";
   process.env.SOFIA_API_KEY = "custom-provider-key";
   process.env.SOFIA_MODEL = "vendor/model-default";
@@ -123,6 +126,28 @@ test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, 
   assert.equal(config.providers.fast?.model, "vendor/model-default");
   assert.equal(config.providers.coding?.model, "vendor/model-code");
   assert.equal(config.providers.reasoning?.model, "vendor/model-default");
+});
+
+test("Sofia API authentication key is not accepted as a custom model credential by default", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_BASE_URL = "https://api.deepseek.com";
+  process.env.SOFIA_API_KEY = "sofia-api-auth-secret";
+  process.env.SOFIA_MODEL = "deepseek-chat";
+  assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_API_KEY/);
+});
+
+test("DeepSeek custom provider uses a dedicated model key without reusing Sofia API authentication", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_BASE_URL = "https://api.deepseek.com";
+  process.env.SOFIA_API_KEY = "sofia-api-auth-secret";
+  process.env.SOFIA_MODEL_API_KEY = "deepseek-provider-secret";
+  process.env.SOFIA_MODEL = "deepseek-flash";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.providers.fast?.apiKey, "deepseek-provider-secret");
+  assert.equal(config.providers.fast?.model, "deepseek-flash");
 });
 
 test("generic BASE_URL, API_KEY, and MODEL aliases are supported", () => {
@@ -140,21 +165,21 @@ test("partial custom provider configuration fails instead of silently switching 
   clear();
   process.env.SOFIA_BASE_URL = "https://llm.example.test/v1";
   process.env.OPENROUTER_API_KEY = "openrouter-test-key";
-  assert.throws(loadModelConfigFromEnv, /requires SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL/);
+  assert.throws(loadModelConfigFromEnv, /requires SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL/);
 });
 
 test("fails with actionable guidance when no supported provider is configured", () => {
   clear();
   process.env.SOFIA_AI_GATEWAY_API_KEY = "legacy-test-key";
   process.env.AI_GATEWAY_API_KEY = "legacy-test-key";
-  assert.throws(loadModelConfigFromEnv, /Configure SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL/);
+  assert.throws(loadModelConfigFromEnv, /Configure SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL/);
 });
 
 test("rejects malformed or credential-bearing custom base URLs", () => {
   clear();
   process.env.SOFIA_MODEL_PROVIDER = "custom";
   process.env.SOFIA_BASE_URL = "https://user:password@llm.example.test/v1";
-  process.env.SOFIA_API_KEY = "custom-provider-key";
+  process.env.SOFIA_MODEL_API_KEY = "custom-provider-key";
   process.env.SOFIA_MODEL = "vendor/model";
   assert.throws(loadModelConfigFromEnv, /must not contain credentials/);
 });
@@ -187,7 +212,7 @@ test("custom endpoints can opt into the Anthropic Messages protocol", () => {
   process.env.SOFIA_MODEL_PROVIDER = "custom";
   process.env.SOFIA_MODEL_PROTOCOL = "anthropic-messages";
   process.env.SOFIA_BASE_URL = "https://anthropic-proxy.example.test/v1";
-  process.env.SOFIA_API_KEY = "proxy-key";
+  process.env.SOFIA_MODEL_API_KEY = "proxy-key";
   process.env.SOFIA_MODEL = "claude-proxy-model";
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.protocol, "anthropic-messages");
