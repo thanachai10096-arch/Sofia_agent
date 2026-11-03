@@ -170,3 +170,17 @@ Required regression coverage:
 - Live delivery and recovery racing on the same scope share the same arbitration mechanism.
 
 Until this ordering/ownership gap is closed with deterministic multi-process tests, keep the recovery adapter unwired and automatic production learning disabled.
+
+
+### 12. Reuse boundary: existing DurableJobRuntime lease is not the learning lease
+
+The repository already has lease/ownership handling in `src/brain/job-runtime.ts`. It must not be treated as the recovery lease implementation or copied into a second learning-specific job runtime:
+
+- The inspected `FileJobStateStore` coordinates file writes with a lock file and process/host metadata. It explicitly fails closed when a lock belongs to another host; it is not a general shared multi-host lease service.
+- Its lease identity belongs to a Brain job record, not to the authenticated learning scope tuple or a finalized-receipt sequence.
+- Its durable job-state update is not transactionally coupled to `verified_learning_checkpoints` or `learning_experiences`. Acquiring a Brain job lease therefore cannot atomically arbitrate which receipt identity owns a learning sequence.
+- The learning delivery path also needs stale-worker rejection at the learning side-effect boundary. A check against a job lease immediately before calling `recordVerifiedCompletion` would still be a read-then-act race.
+
+Decision: keep using the existing DurableJobRuntime for Brain job execution and recovery notices. Do not add a parallel job runtime, and do not claim its lease protects learning delivery. The next learning-specific increment must be a narrow storage-port capability over the existing checkpoint/receipt identity boundary, with ownership/fencing validated by the same durable transaction that accepts the learning sequence identity. If that guarantee cannot be made atomic with the learning write, keep live multi-worker learning disabled rather than presenting a preflight check as fencing.
+
+This is an architectural reuse decision based on the inspected implementation; it does not change runtime behavior or claim that a production lease adapter exists.
