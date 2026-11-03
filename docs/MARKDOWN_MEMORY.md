@@ -21,7 +21,7 @@ Use the templates in `templates/memory/` when creating operator-managed Markdown
 - Keep project memory separate from user memory. A workspace must not be able to read another tenant's user memory.
 - Apply restrictive directory and file permissions, atomic writes, bounded file sizes, and safe path handling.
 - Back up private state securely; do not commit runtime memory files.
-- Runtime factories decorate the existing JSON stores with Markdown projections. JSON remains canonical; Markdown is a human-readable snapshot, not a second source of truth.
+- Runtime factories decorate the existing JSON stores with Markdown projections. JSON remains canonical; Markdown is a human-readable snapshot, not a second source of truth. If a snapshot write fails after a canonical mutation commits, the mutation remains successful and a scope-only diagnostic is emitted; the snapshot may remain stale until a later successful mutation. Operators should monitor these diagnostics and reconcile stale projections from the canonical store.
 - Set `SOFIA_STATE_DIR` to an absolute persistent private directory in production. The project-memory helper otherwise uses the OS temporary directory by design.
 
 ## Read lifecycle
