@@ -228,7 +228,7 @@ test("gateway classifies unknown provider errors without exposing their messages
 test("Brain adapter forwards truncated output status without parsing partial JSON", async () => {
   const budget = new TokenBudget(
     {
-      maxTokens: 1_000,
+      maxTokens: 10_000,
       maxCostNanoUsd: 1_000_000n,
       maxCalls: 10,
       maxInFlight: 1,
@@ -236,7 +236,7 @@ test("Brain adapter forwards truncated output status without parsing partial JSO
     [{
       key: "coding",
       limit: {
-        maxTokens: 1_000,
+        maxTokens: 10_000,
         maxCostNanoUsd: 1_000_000n,
         maxCalls: 10,
         maxInFlight: 1,
