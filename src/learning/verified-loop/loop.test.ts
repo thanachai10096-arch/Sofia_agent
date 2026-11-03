@@ -542,3 +542,48 @@ test("duplicate receipt cannot be reinterpreted with a different task summary", 
     "Deploy production",
   );
 });
+
+
+test("fails closed when receipt evidence adapter omits a requested evidence row", async () => {
+  const state = makeHost();
+  const getEvidence = state.host.verification.getEvidence;
+  state.host.verification.getEvidence = async (requestedScope, ids) => {
+    const rows = await getEvidence(requestedScope, ids);
+    return rows.slice(1);
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "missing-receipt-evidence", "run-missing");
+  const result = await loop.recordVerifiedCompletion(scope, "missing-receipt-evidence", "Fix TypeScript build");
+  assert.equal(result.recorded, false);
+  assert.equal(state.experiences.length, 0);
+});
+
+test("fails closed when receipt evidence adapter returns duplicate rows", async () => {
+  const state = makeHost();
+  const getEvidence = state.host.verification.getEvidence;
+  state.host.verification.getEvidence = async (requestedScope, ids) => {
+    const rows = await getEvidence(requestedScope, ids);
+    return rows.length ? [rows[0]!, rows[0]!] : [];
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "duplicate-receipt-evidence", "run-duplicate");
+  const result = await loop.recordVerifiedCompletion(scope, "duplicate-receipt-evidence", "Fix TypeScript build");
+  assert.equal(result.recorded, false);
+  assert.equal(state.experiences.length, 0);
+});
+
+test("fails closed when receipt evidence adapter returns an unrelated row", async () => {
+  const state = makeHost();
+  const getEvidence = state.host.verification.getEvidence;
+  state.host.verification.getEvidence = async (requestedScope, ids) => {
+    const rows = await getEvidence(requestedScope, ids);
+    return rows.length
+      ? [{ ...rows[0]!, id: "unrequested-receipt-evidence" }]
+      : [];
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "extra-receipt-evidence", "run-extra");
+  const result = await loop.recordVerifiedCompletion(scope, "extra-receipt-evidence", "Fix TypeScript build");
+  assert.equal(result.recorded, false);
+  assert.equal(state.experiences.length, 0);
+});
