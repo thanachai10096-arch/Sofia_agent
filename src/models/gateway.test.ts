@@ -124,3 +124,54 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("ambiguous network failure is never retried because the provider may have charged the request", async () => {
+  const originalFetch = globalThis.fetch;
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts += 1;
+    throw new Error("socket hang up after request upload");
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "test-key",
+        model: "test-model",
+      },
+    });
+    await assert.rejects(
+      gateway.generate({ task: "do work", kind: "coding", step: 1 }, route),
+      /socket hang up/,
+    );
+    assert.equal(attempts, 1, "one inference request must produce at most one provider POST");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("retryable provider HTTP responses are surfaced without replaying a billable inference POST", async () => {
+  const originalFetch = globalThis.fetch;
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return new Response("temporary provider failure", { status: 503 });
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "test-key",
+        model: "test-model",
+      },
+    });
+    await assert.rejects(
+      gateway.generate({ task: "do work", kind: "coding", step: 1 }, route),
+      /Model gateway request failed \(503\)/,
+    );
+    assert.equal(attempts, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

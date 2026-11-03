@@ -203,17 +203,6 @@ class ConcurrencyGate {
 
 interface CircuitState { failures: number; openedAt: number; probeInFlight?: boolean; }
 
-function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("Request aborted."));
-  return new Promise((resolve, reject) => {
-    const cleanup = () => signal?.removeEventListener("abort", onAbort);
-    const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
-    const onAbort = () => { clearTimeout(timer); cleanup(); reject(signal?.reason ?? new Error("Request aborted.")); };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    if (signal?.aborted) onAbort();
-  });
-}
-
 export class SofiaModelGateway implements ModelProvider {
   private readonly gates = new Map<string, ConcurrencyGate>();
   private readonly circuits = new Map<string, CircuitState>();
@@ -350,43 +339,23 @@ export class SofiaModelGateway implements ModelProvider {
       circuit.probeInFlight = true;
     }
 
-    const execute = async () => {
-      const maxAttempts = 3;
-      let lastError: unknown;
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        let retryableFailure = false;
-        try {
-          const response = await fetch(endpoint, {
-            method: "POST",
-            headers: requestHeaders,
-            body: JSON.stringify(body),
-            signal: requestSignal,
-          });
-          if (response.ok) {
-            // Do not close a half-open circuit until the payload has been validated.
-            return response;
-          }
-          const retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
-          retryableFailure = retryable;
-          const detail = await response.text();
-          lastError = new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
-          if (!retryable || attempt === maxAttempts || options.signal?.aborted) throw lastError;
-          const retryAfter = Number(response.headers.get("retry-after") ?? "");
-          const delay = Number.isFinite(retryAfter) && retryAfter > 0
-            ? Math.min(retryAfter * 1000, 5_000)
-            : Math.min(250 * 2 ** (attempt - 1), 2_000) + Math.floor(Math.random() * 100);
-          if (requestSignal.aborted) throw requestSignal.reason ?? new Error("Model gateway request timed out.");
-          await abortableDelay(delay, requestSignal);
-        } catch (error) {
-          lastError = error;
-          if (requestSignal.aborted || attempt === maxAttempts ||
-              (error instanceof Error && error.message.startsWith("Model gateway request failed (") && !retryableFailure)) {
-            throw requestSignal.aborted && requestSignal.reason instanceof Error ? requestSignal.reason : error;
-          }
-          await abortableDelay(Math.min(250 * 2 ** (attempt - 1), 2_000), requestSignal);
-        }
+    // Model inference is a billable POST. A timeout, connection reset, or
+    // retryable HTTP response can happen after the provider accepted and charged
+    // the request. Retrying here can therefore double-charge the user. Keep this
+    // boundary single-attempt; higher-level recovery must require explicit
+    // idempotency support before issuing another inference request.
+    const execute = async (): Promise<Response> => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: requestHeaders,
+        body: JSON.stringify(body),
+        signal: requestSignal,
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`Model gateway request failed (${response.status}): ${detail.slice(0, 500)}`);
       }
-      throw lastError instanceof Error ? lastError : new Error("Model provider request failed.");
+      return response;
     };
 
     let response: Response;
