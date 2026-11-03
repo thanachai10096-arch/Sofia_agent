@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
+import type { UserMemoryEntry, UserMemoryStore } from "../brain/user-memory.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
 
@@ -150,15 +151,15 @@ test("API rejects unknown model routes before starting a run", async () => {
 
 
 test("API personal memory is isolated by distinct authenticated per-user API keys", async () => {
-  const byPrincipal = new Map<string, Array<{ id: string; kind: string; content: string }>>();
-  const memoryStore = {
-    async save(principal: string, entry: { id: string; kind: string; content: string }) {
+  const byPrincipal = new Map<string, UserMemoryEntry[]>();
+  const memoryStore: UserMemoryStore = {
+    async save(principal: string, entry: UserMemoryEntry) {
       const entries = byPrincipal.get(principal) ?? [];
       entries.push(entry);
       byPrincipal.set(principal, entries);
     },
     async list(principal: string) { return byPrincipal.get(principal) ?? []; },
-    async find(principal: string, query: string) {
+    async find(principal: string, query: string, _limit?: number) {
       return (byPrincipal.get(principal) ?? []).filter((entry) => entry.content.includes(query));
     },
     async delete(principal: string, id: string) {
@@ -202,7 +203,7 @@ test("API personal memory is isolated by distinct authenticated per-user API key
     assert.equal(saved.status, 201);
 
     const ownerRead = await request("telegram-user-one-key");
-    const ownerPayload = await ownerRead.json() as { memories: Array<{ content: string }> };
+    const ownerPayload = await ownerRead.json() as { memories: UserMemoryEntry[] };
     assert.equal(ownerPayload.memories.length, 1);
     assert.match(ownerPayload.memories[0]?.content ?? "", /private project summaries/);
 
