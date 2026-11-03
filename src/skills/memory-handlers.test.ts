@@ -81,7 +81,7 @@ test("project memory retrieval filters instruction-like entries and redacts secr
       ];
     },
   };
-  const handler = createProjectMemoryRetrievalHandler(store);
+  const handler = createProjectMemoryRetrievalHandler(store, "demo");
   const result = await handler({ query: "server" }) as { count: number; entries: Array<{ id: string; content: string }> };
   assert.equal(result.count, 1);
   assert.equal(result.entries[0]?.id, "safe");
@@ -91,17 +91,35 @@ test("project memory retrieval filters instruction-like entries and redacts secr
 
 test("project memory retrieval validates query", async () => {
   const store: ProjectMemoryStore = { async save() {}, async list() { return []; }, async find() { return []; } };
-  await assert.rejects(createProjectMemoryRetrievalHandler(store)({ query: "" }), /query/);
+  await assert.rejects(createProjectMemoryRetrievalHandler(store, "demo")({ query: "" }), /query/);
 });
 
-test("verified memory handlers register through the guarded dispatcher", async () => {
+test("verified memory handlers register without exposing project retrieval when scope is absent", async () => {
   const store: ProjectMemoryStore = { async save() {}, async list() { return []; }, async find() { return []; } };
   const registry = new AdvancedSkillRegistry();
   const ids = registerVerifiedMemorySkills(registry, store);
-  assert.deepEqual(ids, ["conversation.02", "conversation.05", "conversation.09", "conversation.04"]);
+  assert.deepEqual(ids, ["conversation.02", "conversation.05", "conversation.09"]);
+  assert.equal(registry.has("conversation.04"), false);
   const result = await registry.execute("conversation.02", { text: "A. B. C.", maxSentences: 2 }, {
     principalId: "test-user",
     signal: new AbortController().signal,
   }) as { summary: string };
   assert.equal(result.summary, "A. C.");
+});
+
+test("project-memory retrieval skill is registered only for a trusted fixed project scope", async () => {
+  const requested: string[] = [];
+  const store: ProjectMemoryStore = {
+    async save() {},
+    async list() { return []; },
+    async find() {
+      return [entry("allowed", "Allowed project memory"), { ...entry("other", "Other project secret"), project: "other-project" }];
+    },
+  };
+  const handler = createProjectMemoryRetrievalHandler(store, "demo");
+  const result = await handler({ query: "project" }) as { entries: Array<{ id: string; project: string }> };
+  assert.deepEqual(result.entries.map((item) => item.id), ["allowed"]);
+
+  const noScope = await createProjectMemoryRetrievalHandler(store)({ query: "project" }) as { entries: unknown[] };
+  assert.deepEqual(noScope.entries, []);
 });
