@@ -398,3 +398,24 @@ Reviewed the lease-renewal path and tightened dispatcher ordering:
 Added regression tests for lost-renewal behavior and renewal/ACK ordering. Existing tests also cover renewal success and abort-aware senders.
 
 Not verified: tests/typecheck/build have not been executed in this environment; no live PostgreSQL race test or deployment has been performed.
+
+
+## Follow-up: messaging outbox adapter bridge (2026-11-03)
+
+Added `createMessagingOutboxSender()` as an additive bridge from the durable outbox dispatcher to the existing Telegram and Discord `MessagingAdapter` implementations.
+
+Safety and routing behavior:
+- Only explicit `telegram:<chatId>` and `discord:<channelId>` destinations are accepted; arbitrary URLs and unknown platform schemes are rejected.
+- Only terminal job events (`job.completed`, `job.failed`, `job.cancelled`) are accepted.
+- The payload must contain a non-empty text field bounded to 16,000 characters.
+- Only adapters passed to the factory are enabled; duplicate adapters for one platform are rejected.
+- Non-sent receipts (including unknown delivery state) throw so the durable dispatcher retries rather than recording false success.
+- An already-aborted delivery is rejected before calling the platform adapter.
+
+Added eight focused source-level tests and exported the sender from `src/index.ts`.
+
+Remaining limitations:
+- The adapter contract does not yet carry the outbox message ID to provider-level idempotency support. A remote acceptance followed by a lost acknowledgement can still produce duplicate notifications on retry.
+- The bridge is not wired into a running Vercel Daemon or deployment. The host must construct it with authenticated, allowlisted adapters and explicitly start the OutboxWorker.
+- Destination ownership must be enforced when trusted application code persists the job notification destination; the sender's platform allowlist is not a substitute for tenant authorization.
+- No tests, typecheck, or build have been executed in this environment. No live PostgreSQL migration, integration test, deployment, or production change was performed.
