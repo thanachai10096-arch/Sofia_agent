@@ -285,8 +285,7 @@ export class FileSettlementJournal {
   async begin(runId: string, maximum: TokenUsage, claim: SettlementRunClaim): Promise<SettlementAttempt> {
     if (!runId) throw new Error("Invalid settlement journal attempt");
     claim.assertRun(runId);
-    if (!Number.isSafeInteger(maximum.inputTokens) || maximum.inputTokens < 0 ||
-        !Number.isSafeInteger(maximum.outputTokens) || maximum.outputTokens < 0) {
+    if (!isValidJournalUsage(maximum)) {
       throw new Error("Invalid settlement journal attempt");
     }
     const id = randomUUID();
@@ -391,9 +390,7 @@ export class FileSettlementJournal {
     if (!runId || !attempt.id) throw new Error("Invalid settlement journal settlement");
     claim.assertRun(runId);
     await this.assertPendingAttempt(runId, attempt.id);
-    const usageKnown = usage !== undefined &&
-      Number.isSafeInteger(usage.inputTokens) && usage.inputTokens >= 0 &&
-      Number.isSafeInteger(usage.outputTokens) && usage.outputTokens >= 0;
+    const usageKnown = isValidJournalUsage(usage);
     await this.append(runId, {
       version: 1,
       type: "settled",
