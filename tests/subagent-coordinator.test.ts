@@ -117,3 +117,18 @@ test("coordinator removes cancelled tasks from the shared concurrency queue", as
   await first;
   assert.deepEqual(executed, ["first"]);
 });
+
+test("coordinator redacts credential values and bounds delegated error text", async () => {
+  const secret = "sk-" + "a".repeat(24);
+  const coordinator = new BoundedSubagentCoordinator(() => ({
+    async run() { throw new Error("provider failed API_KEY=super-secret Bearer " + secret + " " + "x".repeat(3000)); },
+  }));
+  const results = await coordinator.runMany([
+    { id: "private-error", role: "debugger", task: "inspect provider failure" },
+  ], new AbortController().signal);
+  const message = results[0]?.error ?? "";
+  assert.doesNotMatch(message, /super-secret/);
+  assert.doesNotMatch(message, new RegExp(secret));
+  assert.match(message, /API_KEY=\[REDACTED\]/);
+  assert.ok(message.length <= 2_000, "delegated error diagnostics must stay bounded");
+});
