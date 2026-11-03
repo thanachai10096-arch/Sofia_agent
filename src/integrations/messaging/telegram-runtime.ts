@@ -103,12 +103,18 @@ export function parseTelegramUserApiKeys(
     throw new Error("TELEGRAM_USER_API_KEYS must contain exactly one API key for every allowed Telegram user ID.");
   }
   const result = new Map<string, string>();
+  const uniqueKeys = new Set<string>();
   for (const [userId, candidate] of entries) {
     if (!/^\d{1,20}$/.test(userId) || typeof candidate !== "string" ||
         !candidate.trim() || candidate.length > 4_096 || /[\x00-\x1f\x7f]/.test(candidate)) {
       throw new Error("TELEGRAM_USER_API_KEYS contains an invalid user ID or API key.");
     }
-    result.set(userId, candidate.trim());
+    const apiKey = candidate.trim();
+    if (uniqueKeys.has(apiKey)) {
+      throw new Error("TELEGRAM_USER_API_KEYS must use a distinct API key for every allowed Telegram user ID.");
+    }
+    uniqueKeys.add(apiKey);
+    result.set(userId, apiKey);
   }
   return result;
 }
@@ -253,6 +259,7 @@ export function createTelegramMessagingRuntime(
       "TELEGRAM_USER_API_KEYS must be a JSON object mapping Telegram user IDs to API keys.",
       "TELEGRAM_USER_API_KEYS must contain exactly one API key for every allowed Telegram user ID.",
       "TELEGRAM_USER_API_KEYS contains an invalid user ID or API key.",
+      "TELEGRAM_USER_API_KEYS must use a distinct API key for every allowed Telegram user ID.",
       "Telegram bot token has an invalid format.",
       "Telegram poll timeout must be an integer between 1 and 50 seconds.",
     ].includes(error.message) ? error.message : "Telegram configuration validation failed; check required variable values and API URL format.";
