@@ -293,7 +293,12 @@ if (discordTransport || discordGatewayTransport) {
           job.notificationDelivered || job.status === "queued" || job.status === "running" ||
           Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
       notificationInFlight.add(job.id);
+      let deliveryClaimed = false;
       try {
+        if (deps.jobRuntime.claimNotificationDelivery) {
+          deliveryClaimed = await deps.jobRuntime.claimNotificationDelivery(job.id);
+          if (!deliveryClaimed) continue;
+        }
         const message = job.status === "completed"
           ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
           : job.snapshot
@@ -306,7 +311,10 @@ if (discordTransport || discordGatewayTransport) {
         }
         await deps.jobRuntime.markNotificationDelivered?.(job.id);
       } catch {
-        // Keep the marker unset so the next retry can attempt delivery again.
+        // Release a cross-process lease so a later poll can retry a failed send.
+        if (deliveryClaimed) {
+          await deps.jobRuntime.releaseNotificationDelivery?.(job.id).catch(() => undefined);
+        }
       } finally {
         notificationInFlight.delete(job.id);
       }
