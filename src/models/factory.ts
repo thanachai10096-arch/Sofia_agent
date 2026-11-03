@@ -22,7 +22,7 @@ import { discoverProjectContext } from "../brain/project-context.js";
 import { createSubagentRuntime } from "../brain/subagents.js";
 import { CoordinatedSubagentRuntime } from "../brain/coordinated-subagent-runtime.js";
 import { DurableCheckpointManager } from "../brain/durable-checkpoint.js";
-import { FileRunStore } from "../brain/run-store.js";
+import { FileRunStore, type RunStore } from "../brain/run-store.js";
 import { DurableJobRuntime, type JobStateStore } from "../brain/job-runtime.js";
 import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
@@ -43,10 +43,10 @@ function intEnv(name:string,fallback:number,minimum=0){const value=Number(proces
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink}):NonNullable<AgentDependencies["brainFactory"]>{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;runStore:RunStore}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
-  const runStore=new FileRunStore(workspace);
+  const runStore=dependencies.runStore;
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
   const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
@@ -97,14 +97,15 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   };
 }
 
-export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"],options?:{jobStateStore?:JobStateStore}):AgentDependencies{
+export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"],options?:{jobStateStore?:JobStateStore;runStore?:RunStore}):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   const browserTools=policy.allowBrowser?createBrowserTools(new PlaywrightBrowserRuntime()):[];
   const tools=createToolRegistry([...createBuiltinTools(),...browserTools]);
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
-  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
-  const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace,options?.jobStateStore);
+  const runStore=options?.runStore??new FileRunStore(workspace);
+  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,runStore});
+  const jobRuntime=new DurableJobRuntime(brainFactory,runStore,workspace,options?.jobStateStore);
   const userMemoryStore = new FileUserMemoryStore();
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
 }
