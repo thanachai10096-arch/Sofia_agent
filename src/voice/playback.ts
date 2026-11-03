@@ -46,7 +46,7 @@ export function createVoicePlaybackController(adapter: VoicePlaybackAdapter): Vo
     async play(audio) {
       if (state === "closed") throw new Error("Voice playback controller is closed");
       if (!audio || !(audio.bytes instanceof Uint8Array) || audio.bytes.byteLength === 0 ||
-          typeof audio.mimeType !== "string" || !/^audio\\/[a-z0-9.+-]{1,64}$/i.test(audio.mimeType)) {
+          typeof audio.mimeType !== "string" || !/^audio\/[a-z0-9.+-]{1,64}$/i.test(audio.mimeType)) {
         throw new Error("Voice playback audio is invalid");
       }
       const request = ++generation;
