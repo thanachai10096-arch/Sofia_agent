@@ -116,6 +116,49 @@ test("multiple store connections can persist sessions to the same database", asy
 });
 
 
+test("transactional appends preserve turns from stale readers across SQLite connections", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-append-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const first = await SqliteSessionStore.open(file);
+  const second = await SqliteSessionStore.open(file);
+  try {
+    first.save({ id: "shared", messages: ["user: existing"], updatedAt: 0 });
+
+    // Both workers observe the same old snapshot before either appends.
+    const staleFirst = first.getOrCreate("shared");
+    const staleSecond = second.getOrCreate("shared");
+    assert.deepEqual(staleFirst.messages, ["user: existing"]);
+    assert.deepEqual(staleSecond.messages, ["user: existing"]);
+
+    first.appendMessages("shared", ["user: worker one"], 200);
+    second.appendMessages("shared", ["user: worker two"], 200);
+
+    assert.deepEqual(first.get("shared")?.messages, [
+      "user: existing",
+      "user: worker one",
+      "user: worker two",
+    ]);
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("transactional appends retain only the newest bounded transcript turns", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-append-limit-"));
+  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  try {
+    store.appendMessages("bounded", ["one", "two", "three"], 2);
+    assert.deepEqual(store.get("bounded")?.messages, ["two", "three"]);
+    store.appendMessages("bounded", ["four"], 2);
+    assert.deepEqual(store.get("bounded")?.messages, ["three", "four"]);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("schema migration initializes version 1 and refuses unknown future schemas", async () => {
   const { DatabaseSync } = await import("node:sqlite");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-migration-"));
