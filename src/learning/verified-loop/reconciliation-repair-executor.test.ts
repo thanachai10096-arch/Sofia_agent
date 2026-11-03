@@ -391,3 +391,43 @@ test("revalidates approval after audit I/O and blocks mutation if receipt is rev
   assert.equal(registrations, 0);
   assert.equal(journal.entries.get(action.idempotencyKey)?.state, "failed");
 });
+
+
+test("an expired repair lease cannot be resurrected; takeover fences the old token", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-repair-expiry-"));
+  const file = path.join(dir, "repair.sqlite");
+  let clock = new Date("2026-11-03T10:00:00.000Z");
+  const first = await SqliteLearningRepairJournal.open(file, { leaseMs: 5_000, now: () => clock });
+  const second = await SqliteLearningRepairJournal.open(file, { leaseMs: 5_000, now: () => clock });
+  try {
+    const original = await first.begin({
+      key: action.idempotencyKey, scope, skillId: action.skillId,
+      policyRevision: action.expectedPolicyRevision, state: "running",
+      attempts: 0, updatedAt: clock.toISOString(),
+    });
+    assert.equal(original.claimed, true);
+    assert.ok(original.claimToken);
+    clock = new Date(clock.getTime() + 5_001);
+    assert.equal(await first.heartbeat(action.idempotencyKey, scope, original.claimToken!, clock.toISOString()), false);
+    const takeover = await second.begin({
+      key: action.idempotencyKey, scope, skillId: action.skillId,
+      policyRevision: action.expectedPolicyRevision, state: "running",
+      attempts: 0, updatedAt: clock.toISOString(),
+    });
+    assert.equal(takeover.claimed, true);
+    assert.ok(takeover.claimToken);
+    assert.notEqual(takeover.claimToken, original.claimToken);
+    assert.equal(await first.heartbeat(action.idempotencyKey, scope, original.claimToken!, clock.toISOString()), false);
+    await assert.rejects(
+      first.finish(action.idempotencyKey, scope, "succeeded", "stale completion", original.claimToken),
+      /claim lost|stale executor/i,
+    );
+    assert.equal(await second.heartbeat(action.idempotencyKey, scope, takeover.claimToken!, clock.toISOString()), true);
+    await second.finish(action.idempotencyKey, scope, "succeeded", "current owner completed", takeover.claimToken);
+    assert.equal((await second.get(action.idempotencyKey, scope))?.state, "succeeded");
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
