@@ -140,3 +140,33 @@ ScopedSelfImprovement uses this CAS path when the checkpoint adapter supports it
 Regression coverage now includes two independent SQLite connections reading the same revision, one winning the CAS, the stale writer being rejected, pending notification preservation, and migration of a legacy checkpoint table.
 
 This increment does not complete multi-worker safety. It prevents stale checkpoint overwrites but does not provide a scope lease/fencing token, does not make the receipt-store snapshot stable across pagination, and does not atomically couple learning transaction commit with checkpoint advancement. Recovery and live delivery must still be routed through a shared lease/CAS discipline before production enablement. The legacy write fallback must not be used by production multi-worker adapters.
+
+
+### 11. Live-delivery side-effect race found during review
+
+A further boundary exists in the current `ScopedSelfImprovement.process` ordering:
+
+- It reads the checkpoint and validates pending identities.
+- It calls `loop.recordVerifiedCompletion` for each contiguous notification.
+- Only after those learning side effects does it attempt checkpoint `compareAndSet`.
+
+Consequently, checkpoint CAS alone does **not** serialize the live learning side effect across independent workers. If two workers read the same cursor and concurrently receive different receipt IDs for the same next sequence, both can pass the pending-map checks and both can call `recordVerifiedCompletion` before either checkpoint CAS wins. The learning store's unique key is scoped by receipt ID, so two different IDs are not necessarily deduplicated. The losing worker may then reload after the winner advances the cursor and treat its sequence as already consumed. This can leave two distinct learning records associated with one authoritative sequence, even though the checkpoint has one winner.
+
+This is a code-ordering risk identified by inspection; it is not evidence that the current CI failed.
+
+Before describing live delivery as multi-worker safe, the next implementation must prevent side effects until delivery identity is durably arbitrated. Acceptable designs include:
+
+1. A scope-bound distributed lease/fencing token shared by live delivery and recovery, held across identity validation, learning, and checkpoint advancement; or
+2. A durable per-scope sequence reservation/claim committed with CAS before learning, with explicit pending/claimed/committed states, lease expiry/fencing for crash recovery, and idempotent replay after a crash.
+
+A reservation-only CAS without ownership/expiry is insufficient: a crashed claimant could strand a sequence indefinitely. Do not merely move the existing CAS earlier without defining crash recovery and stale-worker fencing.
+
+Required regression coverage:
+- Two independent processes deliver different receipt IDs for the same next sequence; at most one identity may reach the learning loop.
+- Two processes deliver the same receipt ID concurrently; learning remains idempotent and cursor advances once.
+- Crash after reservation but before learning; a later worker safely takes over.
+- Crash after learning but before cursor commit; replay does not duplicate the learning effect.
+- Stale claimant resumes after takeover; it cannot learn, advance, or release the current claim.
+- Live delivery and recovery racing on the same scope share the same arbitration mechanism.
+
+Until this ordering/ownership gap is closed with deterministic multi-process tests, keep the recovery adapter unwired and automatic production learning disabled.
