@@ -152,20 +152,36 @@ export class FileMessagingOutbox {
 
   async requeue(id: string): Promise<boolean> {
     const target = this.file(id);
-    try {
-      await stat(this.lockDirectory(id));
-      return false;
-    } catch { /* no active lease */ }
+    // Requeue must participate in the same cross-process lease protocol as delivery.
+    // A check-then-write based only on stat(lock) races with a worker claiming immediately
+    // after the check and can reset retry metadata while that worker is sending.
+    const lease = await this.claim(id);
+    if (!lease) return false;
+    const temporary = target + "." + process.pid + "." + randomUUID() + ".tmp";
     try {
       const record = JSON.parse(await readFile(target, "utf8")) as MessagingOutboxRecord;
-      const updated = { ...record, attemptCount: 0, nextAttemptAt: undefined, lastErrorCode: undefined, state: "pending" as const };
-      const temporary = target + "." + process.pid + "." + randomUUID() + ".tmp";
+      const updated: MessagingOutboxRecord = {
+        ...record,
+        attemptCount: 0,
+        nextAttemptAt: undefined,
+        lastErrorCode: undefined,
+        state: "pending",
+      };
       const handle = await open(temporary, "wx", 0o600);
-      try { await handle.writeFile(JSON.stringify(updated), "utf8"); await handle.sync(); }
-      finally { await handle.close(); }
+      try {
+        await handle.writeFile(JSON.stringify(updated), "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
       await rename(temporary, target);
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    } finally {
+      await unlink(temporary).catch(() => undefined);
+      await this.releaseClaim(id, lease);
+    }
   }
 
   async releaseClaim(id: string, token: string): Promise<void> {
