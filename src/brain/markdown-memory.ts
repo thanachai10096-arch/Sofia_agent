@@ -22,6 +22,27 @@ function markdownFile(root: string, scope: string, key: string, filename: string
   return path.join(root, scope, key, filename);
 }
 
+// User projections are serialized per principal so save/delete/clear and the
+// subsequent snapshot write cannot race each other.
+const USER_MARKDOWN_SYNC = new Map<string, Promise<void>>();
+
+async function withUserMarkdownSyncLock<T>(root: string, userId: string, operation: () => Promise<T>): Promise<T> {
+  const identity = createHash("sha256").update(userId.trim()).digest("hex");
+  const key = path.resolve(root) + ":" + identity;
+  const previous = USER_MARKDOWN_SYNC.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const tail = previous.then(() => gate);
+  USER_MARKDOWN_SYNC.set(key, tail);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (USER_MARKDOWN_SYNC.get(key) === tail) USER_MARKDOWN_SYNC.delete(key);
+  }
+}
+
 // Project projections share one directory across store instances. Serialize the
 // complete read-and-write cycle so an older snapshot cannot finish after a newer one.
 const PROJECT_MARKDOWN_SYNC = new Map<string, Promise<void>>();
@@ -139,8 +160,10 @@ export class MarkdownUserMemoryStore implements UserMemoryStore {
   }
 
   async save(userId: string, entry: UserMemoryEntry): Promise<void> {
-    await this.store.save(userId, entry);
-    await this.sync(userId);
+    await withUserMarkdownSyncLock(this.root, userId, async () => {
+      await this.store.save(userId, entry);
+      await this.sync(userId);
+    });
   }
 
   list(userId: string): Promise<UserMemoryEntry[]> {
@@ -152,14 +175,18 @@ export class MarkdownUserMemoryStore implements UserMemoryStore {
   }
 
   async delete(userId: string, id: string): Promise<boolean> {
-    const deleted = await this.store.delete(userId, id);
-    if (deleted) await this.sync(userId);
-    return deleted;
+    return withUserMarkdownSyncLock(this.root, userId, async () => {
+      const deleted = await this.store.delete(userId, id);
+      if (deleted) await this.sync(userId);
+      return deleted;
+    });
   }
 
   async clear(userId: string): Promise<void> {
-    await this.store.clear(userId);
-    await fs.rm(this.fileFor(userId), { force: true });
+    await withUserMarkdownSyncLock(this.root, userId, async () => {
+      await this.store.clear(userId);
+      await fs.rm(this.fileFor(userId), { force: true });
+    });
   }
 }
 
