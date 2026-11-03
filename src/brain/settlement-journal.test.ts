@@ -7,6 +7,61 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { FileSettlementJournal } from "./settlement-journal.js";
 
+
+
+class FailingDirectorySyncJournal extends FileSettlementJournal {
+  failNextSync = false;
+
+  protected override async syncDirectory(): Promise<void> {
+    if (this.failNextSync) {
+      this.failNextSync = false;
+      throw new Error("injected directory sync failure");
+    }
+    await super.syncDirectory();
+  }
+}
+
+test("claim directory-sync failure preserves the claim and blocks another worker", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-claim-sync-failure-"));
+  try {
+    const failing = new FailingDirectorySyncJournal("workspace", root);
+    failing.failNextSync = true;
+    await assert.rejects(failing.claimRun("claim-sync-failure"), /injected directory sync failure/);
+
+    const otherWorker = new FileSettlementJournal("workspace", root);
+    await assert.rejects(otherWorker.claimRun("claim-sync-failure"), /already claimed/,
+      "a claim with uncertain directory durability must remain fail-closed");
+    const inspection = await otherWorker.inspectRun("claim-sync-failure");
+    assert.equal(inspection.claim, "active");
+    assert.equal(inspection.unresolved, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("new journal directory-sync failure keeps evidence and does not release its claim", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-journal-sync-failure-"));
+  try {
+    const journal = new FailingDirectorySyncJournal("workspace", root);
+    const claim = await journal.claimRun("journal-sync-failure");
+    journal.failNextSync = true;
+
+    await assert.rejects(
+      journal.begin("journal-sync-failure", { inputTokens: 3, outputTokens: 4 }, claim),
+      /injected directory sync failure/,
+    );
+    assert.equal(await journal.hasUnresolved("journal-sync-failure"), true,
+      "the started-attempt evidence must remain unresolved after sync failure");
+    await assert.rejects(
+      new FileSettlementJournal("workspace", root).claimRun("journal-sync-failure"),
+      /already claimed/,
+      "the caller's claim remains held until explicit reconciliation");
+    await assert.rejects(claim.release(), /injected directory sync failure/).catch(() => undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("settlement journal records only bounded accounting metadata", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-"));
   try {
