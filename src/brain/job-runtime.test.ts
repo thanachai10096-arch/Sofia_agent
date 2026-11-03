@@ -1110,3 +1110,65 @@ test("DurableJobRuntime ignores a RunStore checkpoint whose embedded runId does 
   assert.equal(receivedResume?.runId, embedded.runId);
   assert.equal(receivedResume?.checkpointId, embedded.checkpointId);
 });
+
+
+test("DurableJobRuntime fences duplicate checkpoint resumes across independent runtime instances", async () => {
+  const namespace = "job-runtime-cross-instance-resume-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "cross-instance-" + randomUUID(),
+    task: "resume across independent workers",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "cross-instance-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  let brainCalls = 0;
+  let resumedStarted!: () => void;
+  const resumeStarted = new Promise<void>((resolve) => { resumedStarted = resolve; });
+  let release!: () => void;
+  const releaseResume = new Promise<void>((resolve) => { release = resolve; });
+  const factory = ({ onRunSnapshot }: { onRunSnapshot?: (value: import("./run-state.js").BrainRunSnapshot) => void | Promise<void> }) => ({
+    run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      brainCalls += 1;
+      if (!input.resume) {
+        await onRunSnapshot?.(snapshot);
+        return { completed: false, state: "failed" };
+      }
+      resumedStarted();
+      await releaseResume;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain);
+
+  const creator = new DurableJobRuntime(factory, undefined, namespace);
+  const firstWorker = new DurableJobRuntime(factory, undefined, namespace);
+  const secondWorker = new DurableJobRuntime(factory, undefined, namespace);
+  const submitted = await creator.submit({ task: snapshot.task });
+  let current = await creator.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await creator.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+  assert.equal(current?.snapshot?.checkpointId, snapshot.checkpointId);
+
+  const firstResume = firstWorker.resume(submitted.id);
+  const secondResume = secondWorker.resume(submitted.id);
+  await resumeStarted;
+  await new Promise<void>((resolve) => setTimeout(resolve, 30));
+  assert.equal(brainCalls, 2, "only one worker may enter resumed Brain execution");
+  release();
+  const results = await Promise.all([firstResume, secondResume]);
+  assert.equal(brainCalls, 2);
+  assert.equal(results.filter((result) => result.status === "completed").length, 1);
+  assert.equal((await creator.get(submitted.id))?.status, "completed");
+});
