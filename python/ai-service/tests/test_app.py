@@ -1,10 +1,17 @@
+import asyncio
 import json
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import MAX_REQUEST_BYTES, _authorize, create_app
+from app import (
+    MAX_REQUEST_BYTES,
+    RequestBodyLimitMiddleware,
+    RequestIdLoggingMiddleware,
+    _authorize,
+    create_app,
+)
 
 
 class FakeEmbedder:
@@ -273,3 +280,66 @@ def test_ai_endpoints_reject_oversized_raw_json_body(client):
     assert response.status_code == 413
     assert response.json()["detail"] == "Request body exceeds the maximum byte limit."
     assert "x-request-id" in response.headers
+
+
+
+def test_body_limit_rejects_chunked_request_without_content_length():
+    async def run_request():
+        messages = [
+            {"type": "http.request", "body": b"123", "more_body": True},
+            {"type": "http.request", "body": b"456", "more_body": False},
+        ]
+        sent = []
+
+        async def receive():
+            return messages.pop(0)
+
+        async def send(message):
+            sent.append(message)
+
+        async def downstream(scope, receive, send):
+            while True:
+                message = await receive()
+                if not message.get("more_body", False):
+                    break
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [],
+                }
+            )
+            await send(
+                {"type": "http.response.body", "body": b"unexpected success"}
+            )
+
+        app = RequestIdLoggingMiddleware(
+            RequestBodyLimitMiddleware(downstream, max_bytes=5)
+        )
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/v1/embeddings",
+            "raw_path": b"/v1/embeddings",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"x-request-id", b"a9f0c7a2-91e4-4b1d-8b7e-0c1f4a9d6e21")
+            ],
+            "server": ("testserver", 80),
+            "client": ("testclient", 123),
+        }
+
+        await app(scope, receive, send)
+
+        start = next(item for item in sent if item["type"] == "http.response.start")
+        body = next(item for item in sent if item["type"] == "http.response.body")
+        headers = dict(start["headers"])
+        assert start["status"] == 413
+        assert headers[b"x-request-id"] == b"a9f0c7a2-91e4-4b1d-8b7e-0c1f4a9d6e21"
+        assert b"maximum byte limit" in body["body"]
+
+    asyncio.run(run_request())
