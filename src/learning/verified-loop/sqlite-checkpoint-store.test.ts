@@ -21,17 +21,19 @@ test("SQLite checkpoint store persists ordered pending events and isolates scope
       ],
     });
     assert.deepEqual(await store.read(scope), {
+      revision: 1,
       lastSequence: 4,
       pending: [
         { sequence: 5, receiptId: "receipt-5", summary: "fifth" },
         { sequence: 7, receiptId: "receipt-7", summary: "seventh" },
       ],
     });
-    assert.deepEqual(await store.read({ ...scope, projectId: "project-b" }), { lastSequence: 0, pending: [] });
+    assert.deepEqual(await store.read({ ...scope, projectId: "project-b" }), { lastSequence: 0, pending: [], revision: 0 });
     store.close();
 
     const reopened = await SqliteSelfImprovementCheckpointStore.open(file);
     assert.deepEqual(await reopened.read(scope), {
+      revision: 1,
       lastSequence: 4,
       pending: [
         { sequence: 5, receiptId: "receipt-5", summary: "fifth" },
