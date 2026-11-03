@@ -2,7 +2,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import _authorize, create_app
+from app import MAX_REQUEST_BYTES, _authorize, create_app
 
 
 class FakeEmbedder:
@@ -231,3 +231,15 @@ def test_reranker_malformed_model_output_returns_bad_gateway(monkeypatch):
         "/v1/rerank", json={"query": "q", "documents": ["doc"]}, headers=auth()
     )
     assert response.status_code == 502
+
+
+
+def test_ai_endpoints_reject_oversized_raw_json_body(client):
+    body = b'{"texts":["ok"]}' + (b" " * MAX_REQUEST_BYTES)
+    response = client.post(
+        "/v1/embeddings",
+        content=body,
+        headers={**auth(), "Content-Type": "application/json"},
+    )
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Request body exceeds the maximum byte limit."
