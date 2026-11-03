@@ -592,9 +592,10 @@ export class DurableJobRuntime implements JobRuntime {
   }
 
   async markNotificationDelivered(id: string, ownerToken?: string): Promise<void> {
-    await this.state.markNotificationDelivered(id, ownerToken);
+    const delivered = await this.state.markNotificationDelivered(id, ownerToken);
+    if (!delivered) return;
     const canonical = this.jobs.get(id);
-    if (canonical && (!ownerToken || canonical.notificationLeaseOwnerToken === ownerToken)) {
+    if (canonical) {
       canonical.notificationDelivered = true;
       delete canonical.notificationLeaseOwnerToken;
       delete canonical.notificationLeaseExpiresAt;
