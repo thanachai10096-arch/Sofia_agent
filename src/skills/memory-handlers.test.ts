@@ -108,7 +108,6 @@ test("verified memory handlers register without exposing project retrieval when 
 });
 
 test("project-memory retrieval skill is registered only for a trusted fixed project scope", async () => {
-  const requested: string[] = [];
   const store: ProjectMemoryStore = {
     async save() {},
     async list() { return []; },
