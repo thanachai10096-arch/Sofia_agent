@@ -126,3 +126,64 @@ test("verified-completion bridge rejects malformed authoritative receipt metadat
   await assert.rejects(() => handler(completion()), /invalid sequence or receipt id/i);
   assert.equal(checkpoint.getState().lastSequence, 0);
 });
+
+
+test("verified-completion recovery replays durable receipts missed by a crashed process", async () => {
+  const checkpoint = checkpointFixture();
+  const replayed: string[] = [];
+  const handler = createVerifiedCompletionHandler({
+    loop: {
+      async recordVerifiedCompletion(_receivedScope: LearningScope, receiptId: string) {
+        replayed.push(receiptId);
+        return { recorded: true };
+      },
+    } as unknown as VerifiedLearningLoop,
+    resolveScope: async () => scope,
+    persistFinalizedReceipt: async () => ({ receiptId: "unused", sequence: 1 }),
+    listFinalizedReceipts: async (receivedScope, afterSequence) => {
+      assert.deepEqual(receivedScope, scope);
+      assert.equal(afterSequence, 0);
+      return [
+        { receiptId: "receipt-1", sequence: 1, summary: "First verified task" },
+        { receiptId: "receipt-2", sequence: 2, summary: "Second verified task" },
+      ];
+    },
+    checkpoints: checkpoint.checkpoints,
+    redact: value => value,
+  });
+
+  assert.equal(await handler.recover(scope), 2);
+  assert.deepEqual(replayed, ["receipt-1", "receipt-2"]);
+  assert.equal(checkpoint.getState().lastSequence, 2);
+});
+
+test("verified-completion recovery refuses malformed authoritative receipt sequences", async () => {
+  const checkpoint = checkpointFixture();
+  const handler = createVerifiedCompletionHandler({
+    loop: { async recordVerifiedCompletion() { assert.fail("malformed receipt must not enter learning"); } } as unknown as VerifiedLearningLoop,
+    resolveScope: async () => scope,
+    persistFinalizedReceipt: async () => ({ receiptId: "unused", sequence: 1 }),
+    listFinalizedReceipts: async () => [
+      { receiptId: "receipt-2", sequence: 2, summary: "Second" },
+      { receiptId: "receipt-1", sequence: 1, summary: "First" },
+    ],
+    checkpoints: checkpoint.checkpoints,
+    redact: value => value,
+  });
+
+  await assert.rejects(() => handler.recover(scope), /malformed or duplicate sequence/i);
+  assert.equal(checkpoint.getState().lastSequence, 0);
+});
+
+test("verified-completion recovery fails closed when authoritative receipt listing is absent", async () => {
+  const checkpoint = checkpointFixture();
+  const handler = createVerifiedCompletionHandler({
+    loop: { async recordVerifiedCompletion() { return { recorded: true }; } } as unknown as VerifiedLearningLoop,
+    resolveScope: async () => scope,
+    persistFinalizedReceipt: async () => ({ receiptId: "unused", sequence: 1 }),
+    checkpoints: checkpoint.checkpoints,
+    redact: value => value,
+  });
+
+  await assert.rejects(() => handler.recover(scope), /recovery is not configured/i);
+});
