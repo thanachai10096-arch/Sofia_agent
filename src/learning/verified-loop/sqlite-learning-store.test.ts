@@ -69,6 +69,64 @@ test("SQLite learning stores enforce receipt uniqueness across independent conne
   }
 });
 
+test("SQLite learning stores arbitrate receipt sequence identity across independent connections", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-learning-sequence-race-"));
+  const file = path.join(directory, "learning.sqlite");
+  let first: SqliteLearningTransactionStore | undefined;
+  let second: SqliteLearningTransactionStore | undefined;
+  try {
+    first = await SqliteLearningTransactionStore.open(file);
+    second = await SqliteLearningTransactionStore.open(file);
+    const results = await Promise.allSettled([
+      first.transaction(scope, async tx => {
+        await tx.bindReceiptSequence!(scope, 11, "receipt-a");
+        return tx.insertExperienceIfAbsent(experience("receipt-a"));
+      }),
+      second.transaction(scope, async tx => {
+        await tx.bindReceiptSequence!(scope, 11, "receipt-b");
+        return tx.insertExperienceIfAbsent(experience("receipt-b"));
+      }),
+    ]);
+    assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+    assert.equal(results.filter(result => result.status === "rejected").length, 1);
+    await first.transaction(scope, async tx => {
+      const rows = await tx.listExperiences(scope, 10);
+      assert.equal(rows.length, 1);
+      assert.ok(["receipt-a", "receipt-b"].includes(rows[0]!.receiptId));
+      // The winning identity is idempotent on replay, while a different sequence
+      // cannot reuse that same receipt ID.
+      const winner = rows[0]!.receiptId;
+      await tx.bindReceiptSequence!(scope, 11, winner);
+      await assert.rejects(
+        () => tx.bindReceiptSequence!(scope, 12, winner),
+        /Conflicting authoritative receipt identity/,
+      );
+    });
+  } finally {
+    first?.close();
+    second?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("SQLite learning transaction rolls back sequence binding with experience writes", async () => {
+  const store = await SqliteLearningTransactionStore.open(":memory:");
+  try {
+    await assert.rejects(store.transaction(scope, async tx => {
+      await tx.bindReceiptSequence!(scope, 21, "rolled-back-receipt");
+      await tx.insertExperienceIfAbsent(experience("rolled-back-receipt"));
+      throw new Error("simulated crash before commit");
+    }), /simulated crash before commit/);
+    await store.transaction(scope, async tx => {
+      // The rolled-back identity can be safely claimed by a retry.
+      await tx.bindReceiptSequence!(scope, 21, "retry-receipt");
+      assert.equal(await tx.insertExperienceIfAbsent(experience("retry-receipt")), true);
+    });
+  } finally {
+    store.close();
+  }
+});
+
 test("SQLite learning transaction rolls back all writes when the operation fails", async () => {
   const store = await SqliteLearningTransactionStore.open(":memory:");
   try {
