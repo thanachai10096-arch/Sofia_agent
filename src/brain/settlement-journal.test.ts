@@ -118,6 +118,30 @@ test("settlement rejects fabricated and duplicate attempt IDs", async () => {
   }
 });
 
+test("settlement validates attempts across multiple JSONL events", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-multi-attempt-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+    const claim = await journal.claimRun("multi-attempt-run");
+
+    const first = await journal.begin("multi-attempt-run", { inputTokens: 5, outputTokens: 7 }, claim);
+    await journal.settle("multi-attempt-run", first, { inputTokens: 4, outputTokens: 3 }, claim);
+
+    const second = await journal.begin("multi-attempt-run", { inputTokens: 6, outputTokens: 8 }, claim);
+    await journal.settle("multi-attempt-run", second, { inputTokens: 5, outputTokens: 4 }, claim);
+
+    const inspection = await journal.inspectRun("multi-attempt-run");
+    assert.equal(inspection.startedAttempts, 2);
+    assert.equal(inspection.settledAttempts, 2);
+    assert.equal(inspection.journal, "unresolved",
+      "known settlements remain unresolved until a durable checkpoint is acknowledged");
+    assert.equal(inspection.unresolved, true);
+    await claim.release();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("settlement recovery inspection is read-only and reports active claims", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-inspect-"));
   try {
