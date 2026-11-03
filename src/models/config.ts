@@ -59,9 +59,9 @@ function selectProvider(): ProviderSelection {
   // SOFIA_API_KEY authenticates clients to the Sofia API. Keep model-provider
   // credentials separate; accept the old SOFIA_API_KEY alias only for a fully
   // specified legacy custom-provider tuple to avoid breaking existing installs.
+  const customModel = firstEnv("SOFIA_MODEL", "MODEL");
   const legacyCustomApiKey = customBaseUrl && customModel ? firstEnv("SOFIA_API_KEY") : "";
   const customApiKey = firstEnv("SOFIA_PROVIDER_API_KEY", "API_KEY") || legacyCustomApiKey;
-  const customModel = firstEnv("SOFIA_MODEL", "MODEL");
   const hasCustomConfig = Boolean(customBaseUrl || customApiKey || customModel);
 
   const openRouterKey = process.env.OPENROUTER_API_KEY?.trim() ?? "";
