@@ -87,7 +87,6 @@ export interface JobRuntime {
   list(): Promise<JobRecord[]>;
   claimNotification?(id: string, ownerToken: string, leaseMs?: number): Promise<boolean>;
   renewNotificationClaim?(id: string, ownerToken: string, leaseMs?: number): Promise<boolean>;
-  resetNotificationDelivery?(id: string): Promise<boolean>;
   releaseNotificationClaim?(id: string, ownerToken: string): Promise<void>;
   markNotificationDelivered?(id: string, ownerToken?: string): Promise<void>;
 }
@@ -316,9 +315,18 @@ class FileJobStateStore {
       const record = records.find((item) => item.id === id);
       if (!record || record.status === "completed" || record.status === "cancelled") return undefined;
       const now = Date.now();
+      const wasFailed = record.status === "failed";
       const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
       if (record.status === "running" && Number.isFinite(expires) && expires > now) return undefined;
       record.status = "running";
+      if (wasFailed) {
+        // Resuming a failed attempt and invalidating its old recovery notice must
+        // be one atomic state transition; otherwise a notifier can claim between
+        // a separate reset and the new execution lease.
+        record.notificationDelivered = false;
+        delete record.notificationLeaseOwnerToken;
+        delete record.notificationLeaseExpiresAt;
+      }
       record.leaseOwnerToken = ownerToken;
       record.heartbeatAt = new Date(now).toISOString();
       record.leaseExpiresAt = new Date(now + leaseMs).toISOString();
@@ -368,20 +376,6 @@ class FileJobStateStore {
       delete record.notificationLeaseExpiresAt;
       record.updatedAt = new Date().toISOString();
       await this.write(records);
-    });
-  }
-
-  async resetNotificationDelivery(id: string): Promise<boolean> {
-    return this.withFileLock(async () => {
-      const records = await this.read();
-      const record = records.find((item) => item.id === id);
-      if (!record || record.status !== "failed") return false;
-      record.notificationDelivered = false;
-      delete record.notificationLeaseOwnerToken;
-      delete record.notificationLeaseExpiresAt;
-      record.updatedAt = new Date().toISOString();
-      await this.write(records);
-      return true;
     });
   }
 
@@ -582,10 +576,6 @@ export class DurableJobRuntime implements JobRuntime {
     return this.state.renewNotificationClaim(id, ownerToken, leaseMs);
   }
 
-  async resetNotificationDelivery(id: string): Promise<boolean> {
-    return this.state.resetNotificationDelivery(id);
-  }
-
   async releaseNotificationClaim(id: string, ownerToken: string): Promise<void> {
     await this.state.releaseNotificationClaim(id, ownerToken);
   }
@@ -633,12 +623,8 @@ export class DurableJobRuntime implements JobRuntime {
       // A terminal status may be persisted just before the previous worker's finally block
       // removes its controller. Only the canonical status determines whether resume is blocked.
       if (record.status === "running") throw new Error("Job is already running");
-      // A resumed attempt needs its own recovery notice. Atomically clear any
-      // previous delivery marker/lease so an old notifier cannot mark this attempt.
-      if (!(await this.state.resetNotificationDelivery(id))) {
-        throw new Error("Job state changed before notification delivery could be reset");
-      }
-      record.notificationDelivered = false;
+      // The atomic failed->running claim inside execute() resets the previous
+      // attempt's notification marker and invalidates its lease together.
       const saved = await this.state.save(record);
       if (!saved) throw new Error("Job state changed before resume could be scheduled");
       await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
