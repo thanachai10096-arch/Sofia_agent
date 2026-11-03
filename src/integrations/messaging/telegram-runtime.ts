@@ -101,8 +101,8 @@ export function parseTelegramUserApiKeys(value: string): ReadonlyMap<string, str
   }
   const entries = Object.entries(parsed as Record<string, unknown>);
   if (entries.length === 0 || entries.some(([userId, key]) =>
-    !/^\\d{1,20}$/.test(userId) || typeof key !== "string" || !key.trim() ||
-    key.length > 4096 || /[\\r\\n\\0]/.test(key))) {
+    !/^\d{1,20}$/.test(userId) || typeof key !== "string" || !key.trim() ||
+    key.length > 4096 || /[\r\n\0]/.test(key))) {
     throw new Error("TELEGRAM_USER_API_KEYS contains an invalid user ID or API key.");
   }
   const keys = entries.map(([, key]) => (key as string).trim());
