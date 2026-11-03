@@ -29,7 +29,7 @@ function safeSubagentError(error: unknown): string {
     message = "Subagent failed with an unreadable error";
   }
   const redacted = redactSecrets(message);
-  return (typeof redacted === "string" ? redacted : "Subagent failed") .slice(0, 2_000);
+  return (typeof redacted === "string" ? redacted : "Subagent failed").slice(0, 2_000);
 }
 
 function cloneBoundedContext(context: Record<string, unknown> | undefined, maxBytes: number): Record<string, unknown> {
