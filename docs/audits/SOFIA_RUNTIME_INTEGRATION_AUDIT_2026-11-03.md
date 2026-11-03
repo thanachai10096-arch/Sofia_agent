@@ -467,3 +467,27 @@ Important limitation: Discord nonce enforcement is a bounded recent-message dedu
 - Added source-level regression assertions for the cancellation text field and malformed Telegram/Discord destination values.
 - Ownership boundary remains a host responsibility: the trusted job-submission path must derive `notificationChannelId` from the authenticated messaging identity/allowlist, not from arbitrary user task text or an untrusted request field. The outbox sender's platform allowlist and numeric ID validation do not prove that the destination belongs to the row owner.
 - Tests/typecheck/build and live PostgreSQL validation have not been run. No database migration, merge, deployment, or production change was performed.
+
+
+## Follow-up: Discord reply privacy mode and owner-scoped job actions
+
+Reviewed the standalone Discord Gateway worker and the API job-action boundary.
+
+Implemented additively:
+- Added `DISCORD_REPLY_MODE=dm|channel` to the direct Gateway worker. The default remains `channel` for backward compatibility; `dm` creates/uses the requesting user's DM channel for successful replies.
+- In DM mode, error notices follow the same DM-only route. A DM creation or delivery failure is logged without posting the result or error text to the originating shared channel.
+- Invalid reply-mode values fail startup rather than silently selecting a destination.
+- Updated the messaging gateway guide with configuration semantics and explicit privacy acceptance checks.
+
+Owner-scoped action review:
+- `POST /v1/jobs/:id/resume|cancel` requires `getForOwner`, `resumeForOwner`, and `cancelForOwner` when `requireOwnerScopedJobRuntime` is enabled; otherwise the API returns 503 before invoking an unscoped operation.
+- `DurableJobRuntime.resumeForOwner` reserves through the storage-level `reserveResumeForOwner` capability before dispatch; shared stores without that atomic capability fail closed.
+- `DurableJobRuntime.cancelForOwner` uses the owner-scoped store operation (or the atomic owner-aware cancellation/outbox capability). The PostgreSQL implementation applies owner identity in the mutation predicate.
+- The Vercel candidate enables strict owner-scoped runtime mode. The separate Discord daemon still requires its internal API key to be configured against that strict runtime.
+
+Verification and remaining limits:
+- GitHub source review confirms the DM routing and API owner-scoped guards are present on this branch.
+- No Node syntax check, test suite, typecheck, build, Discord live DM test, or shared-database integration test was executed in this environment.
+- `channel` remains the compatibility default; deployments handling personal/sensitive tasks must explicitly configure `DISCORD_REPLY_MODE=dm` until a product-wide private-delivery policy is approved.
+- DM mode cannot guarantee delivery when the user has disabled DMs or Discord rejects DM creation; it intentionally fails closed rather than leaking to a shared channel.
+- This does not make the worker's process-local `seen`/inflight state durable and does not add provider-level idempotency to its direct-send path.
