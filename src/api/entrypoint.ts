@@ -17,6 +17,8 @@ const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",
 const telegramUserApiKeys = process.env.TELEGRAM_USER_API_KEYS?.trim()
   ? parseTelegramUserApiKeys(process.env.TELEGRAM_USER_API_KEYS.trim())
   : new Map<string, string>();
+const apiKeys: Record<string, string[]> = { [apiKey]: scopes };
+for (const key of telegramUserApiKeys.values()) apiKeys[key] = scopes;
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
 const deps = createSofiaAgentDependencies(workspace);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
@@ -213,7 +215,7 @@ if (discordConfigured) {
 }
 
 const server = createSofiaApi(deps, {
-  apiKeys: Object.fromEntries([[apiKey, scopes], ...[...telegramUserApiKeys.values()].map((key) => [key, scopes] as const)]),
+  apiKeys,
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(path.join(workspace, ".sofia", "api-runs")),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
