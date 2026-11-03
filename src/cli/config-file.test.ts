@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -67,7 +67,7 @@ test("config persistence refuses a symlinked config directory", async () => {
       }),
       /must be a real directory/i,
     );
-    assert.deepEqual(await import("node:fs/promises").then(({ readdir }) => readdir(realDirectory)), []);
+    assert.deepEqual(await readdir(realDirectory), []);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
