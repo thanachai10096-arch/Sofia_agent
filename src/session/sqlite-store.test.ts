@@ -220,3 +220,24 @@ test("SQLite session storage rejects a directory as a database path", {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("SQLite append is atomic, ordered, and bounds retained conversation history", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-append-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const first = await SqliteSessionStore.open(file);
+  const second = await SqliteSessionStore.open(file);
+  try {
+    first.append("telegram:private-session", "user: first", 3);
+    second.append("telegram:private-session", "assistant: first reply", 3);
+    first.append("telegram:private-session", "user: second", 3);
+    second.append("telegram:private-session", "assistant: second reply", 3);
+    assert.deepEqual(first.get("telegram:private-session")?.messages, [
+      "assistant: first reply", "user: second", "assistant: second reply",
+    ]);
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
