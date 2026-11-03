@@ -40,6 +40,10 @@ export interface CronExecution {
   jobId?: string;
   attempt: number;
   error?: string;
+  /** Opaque owner token for the cross-instance recovery monitor lease. */
+  recoveryLeaseOwnerToken?: string;
+  /** Lease deadline; expired leases may be claimed by another scheduler. */
+  recoveryLeaseExpiresAt?: string;
 }
 export interface CronAuditEvent {
   at: string;
@@ -62,6 +66,7 @@ export interface CronSchedulerOptions {
   authorize?: (actor: string, action: "create" | "update" | "cancel" | "run", schedule?: CronSchedule) => Promise<boolean> | boolean;
   maxConcurrent?: number;
   maxSchedulesPerOwner?: number;
+  recoveryLeaseMs?: number;
   audit?: (event: CronAuditEvent) => void | Promise<void>;
 }
 
@@ -203,6 +208,7 @@ export class CronScheduler {
   private readonly authorize: NonNullable<CronSchedulerOptions["authorize"]>;
   private readonly maxConcurrent: number;
   private readonly maxSchedulesPerOwner: number;
+  private readonly recoveryLeaseMs: number;
   private readonly auditCallback?: CronSchedulerOptions["audit"];
   private ticking = false;
   private readonly active = new Map<string, AbortController>();
@@ -213,6 +219,7 @@ export class CronScheduler {
     this.authorize = options.authorize ?? ((actor, _action, schedule) => !!actor && (!schedule || actor === schedule.ownerKeyId));
     this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
     this.maxSchedulesPerOwner = Math.max(1, Math.min(10_000, Math.floor(options.maxSchedulesPerOwner ?? 100)));
+    this.recoveryLeaseMs = Math.max(3_000, Math.min(300_000, Math.floor(options.recoveryLeaseMs ?? 30_000)));
     this.auditCallback = options.audit;
   }
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
@@ -492,22 +499,56 @@ export class CronScheduler {
       }
 
       if (!this.active.has(schedule.id)) {
-        const controller = new AbortController();
-        this.active.set(schedule.id, controller);
-        void this.monitorRecovered(schedule, execution.id, execution.jobId, controller);
-        monitoring++;
+        const leaseToken = randomUUID();
+        const leaseAcquired = await this.store.transact(state => {
+          const current = state.history.find(item => item.id === execution.id);
+          if (!current || (current.status !== "claimed" && current.status !== "running")) return false;
+          const expiresAt = current.recoveryLeaseExpiresAt ? Date.parse(current.recoveryLeaseExpiresAt) : 0;
+          if (current.recoveryLeaseOwnerToken && Number.isFinite(expiresAt) && expiresAt > this.now().getTime()) return false;
+          current.recoveryLeaseOwnerToken = leaseToken;
+          current.recoveryLeaseExpiresAt = new Date(this.now().getTime() + this.recoveryLeaseMs).toISOString();
+          return true;
+        });
+        if (leaseAcquired) {
+          const controller = new AbortController();
+          this.active.set(schedule.id, controller);
+          void this.monitorRecovered(schedule, execution.id, execution.jobId, leaseToken, controller);
+          monitoring++;
+        }
       }
     }
     return { reconciled, monitoring, indeterminate };
   }
 
-  private async monitorRecovered(schedule: CronSchedule, executionId: string, jobId: string, controller: AbortController): Promise<void> {
+  private async monitorRecovered(schedule: CronSchedule, executionId: string, jobId: string, leaseToken: string, controller: AbortController): Promise<void> {
     let status: CronExecution["status"] = "failed";
     let errorText: string | undefined;
     const timeout = new AbortController();
     const timeoutId = setTimeout(() => timeout.abort(new Error("Recovered scheduled task timed out")), schedule.timeoutMs);
     const onAbort = () => timeout.abort(controller.signal.reason ?? new Error("Recovered scheduled execution cancelled"));
     controller.signal.addEventListener("abort", onAbort, { once: true });
+    let leaseLost = false;
+    const renewLease = async (): Promise<void> => {
+      const renewed = await this.store.transact(state => {
+        const current = state.history.find(item => item.id === executionId);
+        if (!current || (current.status !== "claimed" && current.status !== "running") ||
+            current.recoveryLeaseOwnerToken !== leaseToken) return false;
+        const expiresAt = current.recoveryLeaseExpiresAt ? Date.parse(current.recoveryLeaseExpiresAt) : 0;
+        if (!Number.isFinite(expiresAt) || expiresAt <= this.now().getTime()) return false;
+        current.recoveryLeaseExpiresAt = new Date(this.now().getTime() + this.recoveryLeaseMs).toISOString();
+        return true;
+      });
+      if (!renewed) {
+        leaseLost = true;
+        timeout.abort(new Error("Recovered scheduler monitor lease was lost"));
+      }
+    };
+    const heartbeat = setInterval(() => {
+      void renewLease().catch(() => {
+        // A transient store failure is not proof of lease loss; retry on the next heartbeat.
+      });
+    }, Math.max(1_000, Math.floor(this.recoveryLeaseMs / 3)));
+    heartbeat.unref?.();
     try {
       const job = await this.waitForJob(jobId, timeout.signal);
       status = job.status === "completed" ? "completed" : job.status === "cancelled" ? "cancelled" : "failed";
@@ -518,13 +559,16 @@ export class CronScheduler {
       errorText = error instanceof Error ? error.message : String(error);
     } finally {
       clearTimeout(timeoutId);
+      clearInterval(heartbeat);
       controller.signal.removeEventListener("abort", onAbort);
     }
     await this.store.transact(async state => {
       const execution = state.history.find(item => item.id === executionId);
       const current = state.schedules.find(item => item.id === schedule.id);
       const stillActive = !!execution && (execution.status === "claimed" || execution.status === "running");
-      if (stillActive) {
+      const ownsLiveLease = stillActive && execution.recoveryLeaseOwnerToken === leaseToken &&
+        !!execution.recoveryLeaseExpiresAt && Date.parse(execution.recoveryLeaseExpiresAt) > this.now().getTime();
+      if (ownsLiveLease) {
         execution.status = status;
         execution.finishedAt = this.now().toISOString();
         if (errorText) execution.error = errorText;
@@ -537,7 +581,9 @@ export class CronScheduler {
       }
       // Multiple scheduler instances may observe the same recovered job. Only
       // the instance that wins the active -> terminal transition owns this audit.
-      if (stillActive) {
+      if (ownsLiveLease) {
+        execution!.recoveryLeaseOwnerToken = undefined;
+        execution!.recoveryLeaseExpiresAt = undefined;
         await this.recordAudit(state, {
           at: this.now().toISOString(), actor: "scheduler", action: "schedule.recovery.finished",
           scheduleId: schedule.id, detail: status,
