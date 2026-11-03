@@ -525,6 +525,7 @@ test("Brain retrieves project memory using the current task and avoids listing u
   const brain = createSofiaBrain({
     dependencies: {
       reasoner: makeReasoner(), tools: makeTools(), allowShell: false, allowNetwork: false,
+      projectContext: { root: "/workspace/project", files: [], summary: "" },
       projectMemory: {
         async save() {},
         async list() { listCalls += 1; return []; },
@@ -558,6 +559,7 @@ test("Brain falls back to listing project memory when relevance search fails", a
   const brain = createSofiaBrain({
     dependencies: {
       reasoner: makeReasoner(), tools: makeTools(), allowShell: false, allowNetwork: false,
+      projectContext: { root: "/workspace/project", files: [], summary: "" },
       projectMemory: {
         async save() {},
         async list() { listCalls += 1; return []; },
@@ -597,6 +599,7 @@ test("Brain preserves the highest-ranked project memories when limiting context"
         if (parsed.memory?.projectMemory) selected = parsed.memory.projectMemory;
       }),
       tools: makeTools(), allowShell: false, allowNetwork: false,
+      projectContext: { root: "test", files: [], summary: "" },
       projectMemory: { async save() {}, async list() { return memories; }, async find() { return memories; } },
     },
     limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
@@ -621,6 +624,128 @@ test("Brain preserves the highest-ranked project memories when limiting context"
   assert.equal(selected[11]?.content, "ranked-memory-11");
 });
 
+
+
+test("Brain never injects project memory belonging to another project in a shared store", async () => {
+  let selected: Array<{ content: string }> = [];
+  const memories = [
+    { id: "a", project: "/workspace/project-a", kind: "decision" as const, content: "Project A private decision", confidence: 0.9, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", uses: 0 },
+    { id: "b", project: "/workspace/project-b", kind: "decision" as const, content: "Project B secret decision", confidence: 0.9, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", uses: 0 },
+  ];
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner((request) => {
+        const parsed = JSON.parse(request) as { memory?: { projectMemory?: Array<{ content: string }> } };
+        if (parsed.memory?.projectMemory) selected = parsed.memory.projectMemory;
+      }),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      projectContext: { root: "/workspace/project-a", files: [], summary: "" },
+      projectMemory: {
+        async save() {},
+        async list() { return memories; },
+        async find() { return memories; },
+      },
+    },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.deepEqual(selected.map((entry) => entry.content), ["Project A private decision"]);
+});
+
+test("Brain applies project isolation to the list fallback when search fails", async () => {
+  let selected: Array<{ content: string }> = [];
+  const memories = [
+    { id: "a", project: "/workspace/project-a", kind: "decision" as const, content: "Project A fallback memory", confidence: 0.9, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", uses: 0 },
+    { id: "b", project: "/workspace/project-b", kind: "decision" as const, content: "Project B fallback secret", confidence: 0.9, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", uses: 0 },
+  ];
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner((request) => {
+        const parsed = JSON.parse(request) as { memory?: { projectMemory?: Array<{ content: string }> } };
+        if (parsed.memory?.projectMemory) selected = parsed.memory.projectMemory;
+      }),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      projectContext: { root: "/workspace/project-a", files: [], summary: "" },
+      projectMemory: {
+        async save() {},
+        async list() { return memories; },
+        async find() { throw new Error("search unavailable"); },
+      },
+    },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.deepEqual(selected.map((entry) => entry.content), ["Project A fallback memory"]);
+});
+
+test("Brain does not inject project memory when no trusted project root is available", async () => {
+  let selected: Array<{ content: string }> = [];
+  const memories = [
+    { id: "a", project: "/workspace/project-a", kind: "decision" as const, content: "Do not expose without project identity", confidence: 0.9, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", uses: 0 },
+  ];
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner((request) => {
+        const parsed = JSON.parse(request) as { memory?: { projectMemory?: Array<{ content: string }> } };
+        if (parsed.memory?.projectMemory) selected = parsed.memory.projectMemory;
+      }),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      projectMemory: {
+        async save() {},
+        async list() { return memories; },
+        async find() { return memories; },
+      },
+    },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.deepEqual(selected, []);
+});
 
 test("Brain includes prior context as bounded untrusted reference data in understand and plan prompts", async () => {
   const prompts: Array<{ phase: string; payload: { referenceContext?: { trust: string; content: string } } }> = [];

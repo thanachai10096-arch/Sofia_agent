@@ -384,13 +384,27 @@ export class SofiaBrain {
             ? value.filter((item) => typeof item === "string").join(" ")
             : "",
       ).filter(Boolean).join("\n").slice(0, 4000);
-      try {
-        this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.find(memoryQuery));
-      } catch {
-        // Preserve compatibility with stores whose search backend is temporarily
-        // unavailable; list() is the existing best-effort fallback.
-        try { this.projectMemory = await this.wait(() => this.dependencies.projectMemory!.list()); }
-        catch { this.projectMemory = []; }
+      // A workspace-backed store may contain records for multiple projects.
+      // Never inject records until the current project identity is known, and
+      // always enforce the project boundary here even if the backing store is shared.
+      const projectRoot = this.projectContext?.root;
+      if (projectRoot) {
+        try {
+          const matches = await this.wait(() => this.dependencies.projectMemory!.find(memoryQuery));
+          this.projectMemory = matches.filter((entry) => entry.project === projectRoot);
+        } catch {
+          // Preserve best-effort retrieval, but apply the identical scope check
+          // to the list fallback so a failed search cannot widen access.
+          try {
+            const entries = await this.wait(() => this.dependencies.projectMemory!.list());
+            this.projectMemory = entries.filter((entry) => entry.project === projectRoot);
+          } catch {
+            this.projectMemory = [];
+          }
+        }
+      } else {
+        // No trusted project root means there is no safe project-memory scope.
+        this.projectMemory = [];
       }
     }
 
