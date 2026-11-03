@@ -27,10 +27,27 @@ export interface ProjectMemoryStore {
   find(query: string): Promise<ProjectMemoryEntry[]>;
 }
 
+const PROJECT_MEMORY_WRITES = new Map<string, Promise<void>>();
+
 export class FileProjectMemoryStore implements ProjectMemoryStore {
   private readonly file: string;
   constructor(project: string, root = sofiaStateDirectory("memory")) {
     const key = createHash("sha256").update(project).digest("hex"); this.file = path.join(root, key + ".json");
+  }
+  private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+    const key = path.resolve(this.file);
+    const previous = PROJECT_MEMORY_WRITES.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.then(() => gate);
+    PROJECT_MEMORY_WRITES.set(key, tail);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (PROJECT_MEMORY_WRITES.get(key) === tail) PROJECT_MEMORY_WRITES.delete(key);
+    }
   }
   private async read(): Promise<ProjectMemoryEntry[]> {
     try { return JSON.parse(await fs.readFile(this.file, "utf8")) as ProjectMemoryEntry[]; }
@@ -39,17 +56,23 @@ export class FileProjectMemoryStore implements ProjectMemoryStore {
   async save(entry: ProjectMemoryEntry): Promise<void> {
     if (containsPromptInjection(entry.content)) throw new Error("Memory entry rejected by prompt-injection guard.");
     const safeEntry = { ...entry, content: String(redactSecrets(entry.content)).slice(0, entry.kind === "version" ? 12_000 : 4_000) };
-    const entries=await this.read(); const i=entries.findIndex(x=>x.id===safeEntry.id && x.project===safeEntry.project); if(i>=0) entries[i]=safeEntry; else entries.push(safeEntry);
-    const directory = path.dirname(this.file);
-    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-    await fs.chmod(directory, 0o700);
-    const temporary = this.file + "." + randomUUID() + ".tmp";
-    try {
-      await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600 });
-      await fs.rename(temporary, this.file);
-    } finally {
-      await fs.rm(temporary, { force: true });
-    }
+    await this.withWriteLock(async () => {
+      const entries = await this.read();
+      const index = entries.findIndex((item) => item.id === safeEntry.id && item.project === safeEntry.project);
+      if (index >= 0) entries[index] = safeEntry;
+      else entries.push(safeEntry);
+      const directory = path.dirname(this.file);
+      await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      await fs.chmod(directory, 0o700);
+      const temporary = this.file + "." + randomUUID() + ".tmp";
+      try {
+        await fs.writeFile(temporary, JSON.stringify(entries, null, 2), { encoding: "utf8", mode: 0o600, flag: "wx" });
+        await fs.chmod(temporary, 0o600);
+        await fs.rename(temporary, this.file);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+    });
   }
   async list(){return (await this.read()).filter(entry=>!containsPromptInjection(entry.content));}
   async find(query: string) {
