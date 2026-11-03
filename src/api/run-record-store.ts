@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, lstatSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -28,14 +28,14 @@ function validResult(value:unknown):value is AgentResult {
  if(typeof r.runId!=="string"||!SAFE_ID.test(r.runId)||typeof r.output!=="string"||r.output.length>1_000_000||typeof r.kind!=="string"||!KINDS.has(r.kind)||!Number.isSafeInteger(r.steps)||((r.steps??-1)<0)||!Array.isArray(r.events)||r.events.length>20_000)return false;
  return r.events.every((event)=>!!event&&typeof event==="object"&&!Array.isArray(event)&&typeof event.type==="string"&&EVENT_TYPES.has(event.type)&&typeof event.message==="string"&&event.message.length<=20_000&&(event.step===undefined||Number.isSafeInteger(event.step))&&(event.metadata===undefined||(!!event.metadata&&typeof event.metadata==="object"&&!Array.isArray(event.metadata))));
 }
-function quarantineInvalidRecord(directory: string, filename: string, fullPath: string): void {
+function quarantineInvalidRecord(directory: string, filename: string, fullPath: string, isSymlink = false): void {
  try {
   const quarantineDirectory = path.join(directory, "quarantine");
   mkdirSync(quarantineDirectory, { recursive: true, mode: 0o700 });
-  try { chmodSync(quarantineDirectory, 0o700); } catch {}
+  const quarantineStat = lstatSync(quarantineDirectory);\n  if (quarantineStat.isSymbolicLink() || !quarantineStat.isDirectory()) return;\n  try { chmodSync(quarantineDirectory, 0o700); } catch {}
   const destination = path.join(quarantineDirectory, filename + "." + Date.now() + "." + randomUUID() + ".invalid");
   renameSync(fullPath, destination);
-  try { chmodSync(destination, 0o600); } catch {}
+  if (!isSymlink) { try { chmodSync(destination, 0o600); } catch {} }
  } catch {
   // Preserve the original in place when quarantine is unavailable; never delete malformed records.
  }
