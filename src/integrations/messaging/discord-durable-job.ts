@@ -34,6 +34,18 @@ export async function submitDiscordTask(
   return { id: submitted.id, runtime };
 }
 
+/** Resolve a job only for its immutable Discord owner; invalid IDs fail closed. */
+export async function getDiscordOwnedJob(
+  runtime: JobRuntime,
+  jobId: string,
+  principalId: string,
+): Promise<JobRecord | undefined> {
+  if (!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(jobId) ||
+      !/^discord:\d{1,24}$/.test(principalId)) return undefined;
+  const job = await runtime.get(jobId);
+  return job?.ownerKeyId === principalId ? job : undefined;
+}
+
 /** Poll durable state independently of the short-lived Discord interaction token. */
 export async function waitForDiscordTask(
   handle: DiscordDurableJobHandle,
