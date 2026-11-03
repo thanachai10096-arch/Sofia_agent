@@ -51,3 +51,36 @@ test("PostgresJobStateStore fails closed when a save is rejected by lease or own
   });
   assert.equal(accepted, false);
 });
+
+test("PostgresJobStateStore rejects corrupt persisted JSON instead of treating it as a missing snapshot", async () => {
+  const db: PostgresExecutor = {
+    async query() {
+      return {
+        rows: [{
+          id: "00000000-0000-4000-8000-000000000001",
+          status: "failed",
+          created_at: new Date(),
+          updated_at: new Date(),
+          task: "test",
+          model_route_id: null,
+          owner_key_id: "principal-a",
+          notification_channel_id: null,
+          session_key: null,
+          session_task: null,
+          notification_delivered: false,
+          lease_owner_token: null,
+          lease_expires_at: null,
+          heartbeat_at: null,
+          resume_reservation_token: null,
+          resume_reservation_expires_at: null,
+          snapshot: "{broken",
+          result: null,
+          error: null,
+        } as never],
+        rowCount: 1,
+      };
+    },
+  };
+  const store = new PostgresJobStateStore(db);
+  await assert.rejects(() => store.get("00000000-0000-4000-8000-000000000001"), SyntaxError);
+});
