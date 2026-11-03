@@ -503,7 +503,9 @@ export class DurableJobRuntime implements JobRuntime {
     // validate its identity and minimum checkpoint structure before hydration.
     const loadedIsValid = expectedRunId && isValidSnapshotForRun(loadedSnapshot, expectedRunId);
     const embeddedIsValid = expectedRunId && isValidSnapshotForRun(stored.snapshot, expectedRunId);
-    const candidate = loadedIsValid ? loadedSnapshot : embeddedIsValid ? stored.snapshot : undefined;
+    // The job record is the lease-fenced source of truth. RunStore is a secondary
+    // snapshot cache and may contain a late write from a worker whose lease expired.
+    const candidate = embeddedIsValid ? stored.snapshot : loadedIsValid ? loadedSnapshot : undefined;
     // Older versions may have persisted snapshots before job-level redaction was
     // added. Sanitize on read too, before returning or resuming historical state.
     const snapshot = candidate ? redactSecrets(candidate) as BrainRunSnapshot : undefined;
@@ -534,7 +536,9 @@ export class DurableJobRuntime implements JobRuntime {
       // Listing and resume share the same checkpoint identity/shape validation.
       const loadedIsValid = expectedRunId && isValidSnapshotForRun(loadedSnapshot, expectedRunId);
       const embeddedIsValid = expectedRunId && isValidSnapshotForRun(persisted.snapshot, expectedRunId);
-      const candidate = loadedIsValid ? loadedSnapshot : embeddedIsValid ? persisted.snapshot : undefined;
+      // Prefer the lease-fenced embedded snapshot over the secondary RunStore cache.
+      // A stale worker can finish a cache write after losing its lease.
+      const candidate = embeddedIsValid ? persisted.snapshot : loadedIsValid ? loadedSnapshot : undefined;
       const snapshot = candidate ? redactSecrets(candidate) as BrainRunSnapshot : undefined;
       const { snapshot: _untrustedSnapshot, ...persistedWithoutSnapshot } = persisted;
       const hydrated = { ...persistedWithoutSnapshot, ...(snapshot ? { snapshot } : {}) };
@@ -643,13 +647,17 @@ export class DurableJobRuntime implements JobRuntime {
       const safeSnapshot = redactSecrets(snapshot) as BrainRunSnapshot;
       record.snapshot = safeSnapshot;
       record.updatedAt = new Date().toISOString();
+      // Persist the lease-fenced JobRecord first. A rejected stale-worker write
+      // must never be allowed to publish its checkpoint into the secondary RunStore.
+      const persisted = await persistOwnedRecord();
+      if (!persisted) return;
       try {
+        // RunStore is a secondary cache. A lease can change after the fenced job
+        // write, so get()/list() always prefer the embedded canonical snapshot.
         await this.runStore?.save(safeSnapshot);
       } catch {
-        // The job record also embeds its snapshot. Persist that fallback even when
-        // the dedicated snapshot store is temporarily unavailable.
+        // The job record already contains the checkpoint and remains resumable.
       }
-      await persistOwnedRecord();
     };
 
     try {
