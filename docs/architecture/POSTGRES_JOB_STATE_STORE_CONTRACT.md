@@ -220,3 +220,18 @@ Operational requirements:
 - The dispatcher currently processes each claimed batch sequentially and does not renew leases. Use bounded sender timeouts; add renewal before introducing slow or unbounded delivery handlers.
 
 The dispatcher unit tests are source additions only until typecheck and test commands execute in CI or a local environment.
+
+
+## Atomic terminal job + outbox transition
+
+The PostgreSQL adapter now exposes `saveTerminalWithOutbox(record, eventType, payload)`. It uses one PostgreSQL statement with data-modifying CTEs:
+
+1. Update the terminal job row only when the owner identity and lease token still match and a running lease is unexpired.
+2. Insert the corresponding outbox row from the successfully updated row, using the job's persisted owner and notification channel.
+3. Apply the existing unique key `(job_id,event_type,destination)` so retries of the same terminal event do not create a second logical notification.
+
+The method rejects non-terminal statuses before issuing SQL. If the job update affects no row, no outbox row is inserted. Because both writes are part of one SQL statement on one PostgreSQL connection, PostgreSQL commits or rolls back both together.
+
+`DurableJobRuntime` detects this optional capability and uses it for completed, failed, and cancelled terminal persistence when present. Local/file stores retain their existing save behavior. The event payload is secret-redacted and intentionally contains only job ID, terminal status, and the available result/error fields; the destination and owner are sourced from the persisted job row, not from the event payload.
+
+Important boundary: this closes the terminal-transition/outbox gap only for hosts that inject `PostgresJobStateStore`. The current Vercel runtime is not wired to PostgreSQL, and no live database test has verified this statement. The dispatcher still needs a trusted worker and platform-specific senders. The notification payload contract must be reviewed by each sender before exposing result content to a chat destination.
