@@ -277,11 +277,48 @@ export class FileSettlementJournal {
         if (existing.length === 0 || !existing.endsWith("\n")) {
           throw new Error("Cannot append to an incomplete settlement journal record");
         }
+        const seenAttemptIds = new Set<string>();
+        const pendingAttemptIds = new Set<string>();
+        let ambiguousUsage = false;
         for (const line of existing.split("\n")) {
           if (!line) continue;
+          let raw: unknown;
           try {
-            JSON.parse(line);
+            raw = JSON.parse(line) as unknown;
           } catch {
+            throw new Error("Cannot append to a corrupt settlement journal record");
+          }
+          if (!raw || typeof raw !== "object") {
+            throw new Error("Cannot append to a corrupt settlement journal record");
+          }
+          const historical = raw as Record<string, unknown>;
+          if (historical.version !== 1 || typeof historical.at !== "string" ||
+              !Number.isFinite(Date.parse(historical.at))) {
+            throw new Error("Cannot append to a corrupt settlement journal record");
+          }
+          if (historical.type === "started") {
+            if (typeof historical.attemptId !== "string" || !historical.attemptId ||
+                !Number.isSafeInteger(historical.maxInputTokens) || (historical.maxInputTokens as number) < 0 ||
+                !Number.isSafeInteger(historical.maxOutputTokens) || (historical.maxOutputTokens as number) < 0 ||
+                seenAttemptIds.has(historical.attemptId)) {
+              throw new Error("Cannot append to a corrupt settlement journal record");
+            }
+            seenAttemptIds.add(historical.attemptId);
+            pendingAttemptIds.add(historical.attemptId);
+          } else if (historical.type === "settled") {
+            if (typeof historical.attemptId !== "string" || !historical.attemptId ||
+                typeof historical.usageKnown !== "boolean" || !pendingAttemptIds.has(historical.attemptId) ||
+                (historical.usageKnown && !isValidJournalUsage(historical.usage)) ||
+                (!historical.usageKnown && historical.usage !== undefined)) {
+              throw new Error("Cannot append to a corrupt settlement journal record");
+            }
+            pendingAttemptIds.delete(historical.attemptId);
+            if (!historical.usageKnown) ambiguousUsage = true;
+          } else if (historical.type === "checkpoint") {
+            if (pendingAttemptIds.size > 0 || ambiguousUsage) {
+              throw new Error("Cannot append to a corrupt settlement journal record");
+            }
+          } else {
             throw new Error("Cannot append to a corrupt settlement journal record");
           }
         }
