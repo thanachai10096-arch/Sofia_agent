@@ -104,8 +104,8 @@ export function parseTelegramUserApiKeys(
   }
   const result = new Map<string, string>();
   for (const [userId, candidate] of entries) {
-    if (!/^\\d{1,20}$/.test(userId) || typeof candidate !== "string" ||
-        !candidate.trim() || candidate.length > 4_096 || /[\\x00-\\x1f\\x7f]/.test(candidate)) {
+    if (!/^\d{1,20}$/.test(userId) || typeof candidate !== "string" ||
+        !candidate.trim() || candidate.length > 4_096 || /[\x00-\x1f\x7f]/.test(candidate)) {
       throw new Error("TELEGRAM_USER_API_KEYS contains an invalid user ID or API key.");
     }
     result.set(userId, candidate.trim());
