@@ -85,15 +85,25 @@ export class OutboxDispatcher {
     const controller = new AbortController();
     let stopRenewal = false;
     let renewalTimer: ReturnType<typeof setTimeout> | undefined;
+    let stopRenewalWait: (() => void) | undefined;
     let leaseLost = false;
     const renew = this.store.renewLease;
     const renewalTask = renew ? (async () => {
       const intervalMs = Math.max(500, Math.floor(this.leaseMs / 3));
       while (!stopRenewal) {
         await new Promise<void>((resolve) => {
-          renewalTimer = setTimeout(resolve, intervalMs);
+          renewalTimer = setTimeout(() => {
+            renewalTimer = undefined;
+            stopRenewalWait = undefined;
+            resolve();
+          }, intervalMs);
+          stopRenewalWait = () => {
+            if (renewalTimer) clearTimeout(renewalTimer);
+            renewalTimer = undefined;
+            stopRenewalWait = undefined;
+            resolve();
+          };
         });
-        renewalTimer = undefined;
         if (stopRenewal) return;
         try {
           const renewed = await renew.call(this.store, message.id, this.workerToken, this.leaseMs);
@@ -133,7 +143,7 @@ export class OutboxDispatcher {
       else report.retried += 1;
     } finally {
       stopRenewal = true;
-      if (renewalTimer) clearTimeout(renewalTimer);
+      stopRenewalWait?.();
       await renewalTask;
     }
   }
