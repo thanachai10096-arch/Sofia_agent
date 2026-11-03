@@ -105,12 +105,21 @@ export function createInternalRoute(
             throw new Error("Provider did not return token usage");
           }
 
+          // Check provider truncation before parsing JSON: a partial JSON body is
+          // expected when max output tokens are exhausted and must be classified
+          // as incomplete output, not misreported as malformed provider JSON.
+          if (response.finishReason === "length" || response.finishReason === "max_tokens") {
+            return {
+              value: null,
+              usage: response.usage,
+              finishReason: "length",
+            };
+          }
+
           return {
             value: parseStructured(response.text),
             usage: response.usage,
-            finishReason: response.finishReason === "length" || response.finishReason === "max_tokens"
-              ? "length"
-              : "complete",
+            finishReason: "complete",
           };
         },
       };
