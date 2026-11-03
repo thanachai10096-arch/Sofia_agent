@@ -588,7 +588,13 @@ export async function executeBackupRestoreTransaction(
 
   const applied: string[] = [];
   let journalTargets: RestoreJournalTarget[] = plan.targets.map(({ name, paths }) => ({
-    name, paths: [...paths], phase: "pending",
+    name,
+    paths: [...paths],
+    phase: "pending",
+    ...(durableSnapshots.has(name) ? {
+      rollbackSnapshotRef: durableSnapshots.get(name)!.ref,
+      rollbackSnapshotSha256: durableSnapshots.get(name)!.sha256,
+    } : {}),
   }));
   try {
     for (const target of plan.targets) {
