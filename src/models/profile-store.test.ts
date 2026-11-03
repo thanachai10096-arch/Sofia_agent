@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -96,6 +96,25 @@ test("model profile store refuses symlinked credential files", { skip: process.p
     }), /unavailable or corrupt/i);
     assert.equal((await ownerStore.get("alice"))?.apiKey, "alice-provider-secret-12345");
     assert.equal(await ownerStore.get("bob"), undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("model profile store tightens existing credential file permissions", { skip: process.platform === "win32" }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-model-profile-permissions-test-"));
+  const file = path.join(directory, "profiles.json");
+  const store = new EncryptedUserModelProfileStore(file, Buffer.alloc(32, 4).toString("base64"));
+  try {
+    await store.set("alice", {
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      apiKey: "alice-provider-secret-12345",
+    });
+    await chmod(file, 0o644);
+    assert.equal((await stat(file)).mode & 0o777, 0o644);
+    assert.equal((await store.get("alice"))?.apiKey, "alice-provider-secret-12345");
+    assert.equal((await stat(file)).mode & 0o777, 0o600);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
