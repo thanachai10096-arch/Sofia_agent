@@ -74,6 +74,8 @@ function publicJobRecord(record: JobRecord): JobRecord {
 }
 
 
+export type RunStoreResolver = RunStore | ((ownerKeyId?: string) => RunStore | undefined);
+
 export interface JobRuntime {
   submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
   /** Optional owner scope is enforced inside the runtime, not only by HTTP handlers. */
@@ -454,11 +456,15 @@ export class DurableJobRuntime implements JobRuntime {
       budgetSnapshot?: BrainRunSnapshot["budget"];
       modelRouteId?: string;
     }) => SofiaBrain,
-    private readonly runStore?: RunStore,
+    private readonly runStore?: RunStoreResolver,
     namespace = process.cwd(),
-    private readonly deleteSettlementRun?: (runId: string) => Promise<void>,
+    private readonly deleteSettlementRun?: (runId: string, ownerKeyId?: string) => Promise<void>,
   ) {
     this.state = new FileJobStateStore(namespace);
+  }
+
+  private runStoreFor(ownerKeyId?: string): RunStore | undefined {
+    return typeof this.runStore === "function" ? this.runStore(ownerKeyId) : this.runStore;
   }
 
   async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
@@ -502,7 +508,7 @@ export class DurableJobRuntime implements JobRuntime {
     if (!stored) return existing ? publicJobRecord(existing) : undefined;
     if (ownerKeyId !== undefined && stored.ownerKeyId !== ownerKeyId) return undefined;
     const loadedSnapshot = stored.snapshot?.runId && this.runStore
-      ? await this.runStore.load(stored.snapshot.runId)
+      ? await this.runStoreFor(stored.ownerKeyId)?.load(stored.snapshot.runId)
       : undefined;
     // Older versions may have persisted snapshots before job-level redaction was
     // added. Sanitize on read too, before returning or resuming historical state.
@@ -533,8 +539,8 @@ export class DurableJobRuntime implements JobRuntime {
       async (record) => {
         const runId = record.snapshot?.runId;
         if (runId) {
-          await this.runStore?.delete(runId);
-          await this.deleteSettlementRun?.(runId);
+          await this.runStoreFor(record.ownerKeyId)?.delete(runId);
+          await this.deleteSettlementRun?.(runId, record.ownerKeyId);
         }
       },
     );
@@ -551,7 +557,7 @@ export class DurableJobRuntime implements JobRuntime {
     for (const persisted of stored) {
       if (this.controllers.has(persisted.id) || this.starting.has(persisted.id)) continue;
       const loadedSnapshot = persisted.snapshot?.runId && this.runStore
-        ? await this.runStore.load(persisted.snapshot.runId)
+        ? await this.runStoreFor(persisted.ownerKeyId)?.load(persisted.snapshot.runId)
         : undefined;
       // Keep legacy snapshots from bypassing redaction when listing persisted jobs.
       const snapshot = loadedSnapshot ? redactSecrets(loadedSnapshot) as BrainRunSnapshot : undefined;
@@ -653,7 +659,7 @@ export class DurableJobRuntime implements JobRuntime {
       record.snapshot = safeSnapshot;
       record.updatedAt = new Date().toISOString();
       try {
-        await this.runStore?.save(safeSnapshot);
+        await this.runStoreFor(record.ownerKeyId)?.save(safeSnapshot);
       } catch {
         // The job record also embeds its snapshot. Persist that fallback even when
         // the dedicated snapshot store is temporarily unavailable.
