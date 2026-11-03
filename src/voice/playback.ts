@@ -33,6 +33,13 @@ export function createVoicePlaybackController(adapter: VoicePlaybackAdapter): Vo
     const current = active;
     active = undefined;
     current?.abort(new Error("Voice playback interrupted"));
+    if (!current) {
+      // Do not call a host player when there is no active playback. Still wait
+      // for an earlier stop to settle so concurrent replacements stay ordered.
+      await stopBarrier;
+      if (!isClosed() && !active) state = "idle";
+      return;
+    }
     const stopping = stopBarrier.then(() => adapter.stop()).then(() => undefined);
     stopBarrier = stopping.catch(() => undefined);
     try {
