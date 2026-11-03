@@ -224,3 +224,14 @@ test("DeepSeek can be auto-selected when it is the only configured built-in prov
   assert.equal(config.providers.fast?.baseUrl, "https://api.deepseek.com");
   assert.equal(config.providers.fast?.model, "deepseek-v4-pro");
 });
+
+
+test("DeepSeek requires explicit selection when another built-in provider is also configured", () => {
+  clear();
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  process.env.OPENROUTER_API_KEY = "openrouter-test-key";
+  assert.throws(loadModelConfigFromEnv, /set SOFIA_MODEL_PROVIDER to choose explicitly/);
+  process.env.SOFIA_MODEL_PROVIDER = "deepseek";
+  const config = loadModelConfigFromEnv();
+  assert.equal(config.providers.fast?.apiKey, "deepseek-test-key");
+});
