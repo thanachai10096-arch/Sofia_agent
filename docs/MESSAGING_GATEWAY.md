@@ -20,7 +20,7 @@ Status: opt-in gateway, command bridge, Telegram Bot API long polling transport,
 
 ## Standalone Telegram runtime configuration
 
-The API entrypoint now wires the existing Telegram long-polling adapter into the same Sofia API/Core when explicitly enabled. Configure these variables on the intended service (start with the Test service, not Production):
+The API entrypoint wires the existing Telegram long-polling adapter into the same Sofia API/Core when explicitly enabled. `createSofiaMessagingHandler` defaults `naturalLanguageEnabled` to `true`, and the Telegram runtime does not override it: ordinary Telegram text is therefore dispatched as a task; `/run <task>` remains supported. Configure these variables on the intended service (start with the Test service, not Production):
 
 - `SOFIA_MESSAGING_ENABLED=true` — opt in; otherwise Telegram remains off.
 - `TELEGRAM_BOT_TOKEN` — BotFather token, stored only as a server-side secret.
@@ -28,7 +28,7 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Only explicit `/run <task>` commands dispatch work; ordinary messages do not start runs. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Ordinary Telegram text and explicit `/run <task>` commands dispatch work by default; other slash commands and attachment-only messages do not. This behavior still passes through the existing authorization, task-size validation, rate limiting, and message deduplication. The Discord HTTP-interactions adapter is separate and supports registered slash commands only; it cannot receive arbitrary channel messages. Do not expose the bot token or API key in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
