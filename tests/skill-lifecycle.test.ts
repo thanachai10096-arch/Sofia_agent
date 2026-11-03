@@ -16,6 +16,27 @@ function pkg(version: string): SkillPackage {
 function dir(): string { return mkdtempSync(path.join(os.tmpdir(), "sofia-skill-life-")); }
 const passing = async () => ({ passed: true, checks: [{ name: "regression", passed: true }, { name: "policy", passed: true }] });
 
+test("skill lifecycle rejects missing, blank, duplicate, or oversized provenance evidence", () => {
+  const root = dir();
+  try {
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file: path.join(root, "lifecycle.json") });
+    const invalid = [
+      [],
+      [""],
+      ["   "],
+      ["evidence-1", "evidence-1"],
+      ["e".repeat(501)],
+    ];
+    for (const evidenceIds of invalid) {
+      assert.throws(
+        () => lifecycle.propose(pkg("1.0.0"), { source: "repair", evidenceIds, confidence: 0.9 }),
+        /Invalid skill provenance/,
+      );
+    }
+    assert.equal(lifecycle.list().length, 0, "invalid provenance must not create persisted candidates");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill lifecycle requires evaluation and confidence before promotion", async () => {
   const root = dir();
   try {
