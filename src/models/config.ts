@@ -154,7 +154,7 @@ function selectProvider(): ProviderSelection {
   if (deepseekKey) return chooseDeepseek();
 
   throw new Error(
-    "Configure SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL for an OpenAI-compatible endpoint, " +
+    "Configure SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL for an OpenAI-compatible endpoint (SOFIA_API_KEY remains a legacy fallback), " +
     "or set OPENROUTER_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, or DEEPSEEK_API_KEY.",
   );
 }
