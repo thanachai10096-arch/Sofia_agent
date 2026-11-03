@@ -396,11 +396,9 @@ test("fails closed when the host cannot pin policy during activation persistence
 test("does not persist activation when the authoritative policy guard reports a stale revision", async () => {
   const state = makeHost();
   let guardCalled = false;
-  let operationCalled = false;
   state.host.withCurrentPolicyRevision = async (_scope, expectedRevision, _operation) => {
     guardCalled = true;
     assert.equal(expectedRevision, "policy-1");
-    operationCalled = true;
     return { matched: false };
   };
   const loop = new VerifiedLearningLoop(state.host);
@@ -413,7 +411,6 @@ test("does not persist activation when the authoritative policy guard reports a 
   const result = await loop.recordVerifiedCompletion(scope, "stale-guard-3", "Fix TypeScript build");
 
   assert.equal(guardCalled, true);
-  assert.equal(operationCalled, false);
   assert.equal(result.skillActivated, undefined);
   assert.equal(state.active.length, 0);
 });
