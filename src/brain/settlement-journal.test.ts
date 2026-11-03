@@ -494,6 +494,43 @@ test("journal cleanup refuses to erase corrupt settlement evidence", async () =>
   }
 });
 
+test("journal rejects known usage whose combined token count is unsafe", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-overflow-history-"));
+  try {
+    const namespace = "workspace";
+    const runId = "overflow-history-run";
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    const at = new Date().toISOString();
+    const source = [
+      JSON.stringify({ version: 1, type: "started", attemptId: "attempt-1", at, maxInputTokens: 10, maxOutputTokens: 10 }),
+      JSON.stringify({ version: 1, type: "settled", attemptId: "attempt-1", at, usageKnown: true,
+        usage: { inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: Number.MAX_SAFE_INTEGER } }),
+      JSON.stringify({ version: 1, type: "started", attemptId: "attempt-2", at, maxInputTokens: 10, maxOutputTokens: 10 }),
+    ].join("\n") + "\n";
+    await writeFile(journalFile, source, { mode: 0o600 });
+
+    const journal = new FileSettlementJournal(namespace, root);
+    assert.equal(await journal.hasUnresolved(runId), true,
+      "overflowing combined usage must be treated as ambiguous evidence");
+    const claim = await journal.claimRun(runId);
+    try {
+      await assert.rejects(
+        journal.settle(runId, { id: "attempt-2" }, { inputTokens: 1, outputTokens: 1 }, claim),
+        /invalid usage evidence/,
+      );
+      await assert.rejects(journal.acknowledgeCheckpoint(runId), /corrupt or ambiguous|pending or ambiguous/);
+    } finally {
+      await claim.release();
+    }
+    assert.equal(await readFile(journalFile, "utf8"), source,
+      "invalid historical usage must remain unchanged for reconciliation");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("settlement validation rejects malformed historical known-usage evidence", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-invalid-history-"));
   try {
