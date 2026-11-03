@@ -334,3 +334,25 @@ Added `src/brain/outbox-dispatcher.ts` and unit tests. The dispatcher:
 Added package exports and documented delivery constraints. Delivery is at-least-once: a crash after remote acceptance and before acknowledgement can cause duplicates, so receivers should deduplicate with the stable outbox message ID. The dispatcher is sequential and does not renew leases; sender timeouts must be shorter than the configured lease.
 
 Important remaining integration gap: `DurableJobRuntime` terminal job persistence is not transactionally coupled to outbox enqueue, and no Discord/Telegram sender is wired. A same-transaction terminal transition + outbox insert (or durable reconciliation) is required before claiming reliable terminal notifications. No database driver, live DB, migration execution, typecheck, test run, build, or deployment was performed for this change.
+
+
+## Follow-up: atomic terminal job + notification enqueue (2026-11-03)
+
+Added `PostgresJobStateStore.saveTerminalWithOutbox()`. A single PostgreSQL statement:
+- Conditionally updates the terminal job only when owner identity and lease fencing still match.
+- Inserts the corresponding outbox event from the successfully updated row, inheriting owner and notification destination from persisted job data.
+- Uses the existing unique event key to make repeated terminal persistence idempotent.
+- Inserts no notification when the job has no configured notification channel.
+- Rejects non-terminal records before issuing SQL.
+
+Updated `DurableJobRuntime` to detect this optional storage capability and use it for completed, failed, and cancelled terminal persistence. Existing local/file stores continue using their existing save path. The event payload is secret-redacted.
+
+Added SQL-contract tests for atomic update+insert structure, owner/destination binding, lease fencing, unique event conflict handling, and rejection of non-terminal records. These are source-level tests only; they have not been executed.
+
+Remaining limits:
+- This capability only activates when the host injects `PostgresJobStateStore`; Vercel is not yet wired to PostgreSQL.
+- No live PostgreSQL migration or integration test has run, so SQL dialect/runtime behavior is not yet proven.
+- Cancellation requested for a queued job without an active worker still follows the direct cancellation path and does not yet guarantee an outbox event.
+- Outbox delivery still requires a trusted worker and concrete platform sender implementations.
+- The dispatcher remains sequential with no lease renewal; configure bounded transport timeouts below the lease duration.
+- No build, typecheck, unit tests, deployment, or production change was performed.
