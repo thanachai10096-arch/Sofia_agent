@@ -45,6 +45,43 @@ test("ordinary natural-language messages start Sofia without /run by default", a
   assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
 });
 
+test("per-message client resolver routes each immutable sender to its own API identity", async () => {
+  const h = harness();
+  const startsByUser = new Map<string, string[]>();
+  const clients = new Map<string, ChatRunStarter>();
+  for (const userId of ["user-1", "user-2"]) {
+    clients.set(userId, {
+      async start(input) {
+        const tasks = startsByUser.get(userId) ?? [];
+        tasks.push(input.task);
+        startsByUser.set(userId, tasks);
+        return { id: "run-" + userId, status: "queued" };
+      },
+    });
+  }
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    clientForMessage: (message) => clients.get(message.identity.userId),
+  });
+  await handle(inbound("private task one"));
+  await handle(inbound("private task two", {
+    messageId: "message-2",
+    identity: { platform: "telegram", userId: "user-2", channelId: "chat-2", conversationId: "chat-2" },
+  }));
+  assert.deepEqual(startsByUser.get("user-1"), ["private task one"]);
+  assert.deepEqual(startsByUser.get("user-2"), ["private task two"]);
+});
+
+test("per-message client resolver never falls back to shared client for unknown sender", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    clientForMessage: () => undefined,
+  });
+  assert.equal(await handle(inbound("do not run this")), "Access denied.");
+  assert.equal(h.starts.length, 0);
+});
+
 test("command-only mode can be enabled for deployments that require it", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, naturalLanguageEnabled: false });
