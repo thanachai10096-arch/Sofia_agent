@@ -19,6 +19,9 @@ export interface DiscordGatewaySocket {
 export type DiscordGatewaySocketFactory = (url: string) => DiscordGatewaySocket;
 export interface DiscordGatewayTransportOptions {
   botToken: string;
+  /** Mandatory numeric allowlists are applied before inbound events enter per-session queues. */
+  allowedUserIds: readonly string[];
+  allowedChannelIds: readonly string[];
   /** Inject a WebSocket factory for Node runtimes without a global WebSocket. */
   socketFactory?: DiscordGatewaySocketFactory;
   fetchImpl?: typeof fetch;
@@ -35,6 +38,15 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
  */
 export function createDiscordGatewayTransport(options: DiscordGatewayTransportOptions): DiscordTransport {
   if (!/^[A-Za-z0-9._-]{20,256}$/.test(options.botToken)) throw new Error("Discord bot token has an invalid format.");
+  for (const [name, values] of [["allowedUserIds", options.allowedUserIds], ["allowedChannelIds", options.allowedChannelIds]] as const) {
+    if (!Array.isArray(values) || values.length === 0 ||
+        values.some((value) => typeof value !== "string" || !/^\d{1,24}$/.test(value)) ||
+        new Set(values).size !== values.length) {
+      throw new Error("Discord Gateway requires a non-empty, unique numeric " + name + " allowlist.");
+    }
+  }
+  const allowedUsers = new Set(options.allowedUserIds);
+  const allowedChannels = new Set(options.allowedChannelIds);
   const fetchImpl = options.fetchImpl ?? fetch;
   const globalWebSocket = (globalThis as unknown as { WebSocket?: new (target: string) => DiscordGatewaySocket }).WebSocket;
   if (!options.socketFactory && !globalWebSocket) {
@@ -65,6 +77,8 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
     const userId = raw.author?.id;
     const channelId = raw.channel_id;
     if (!userId || !channelId || !/^\d{1,24}$/.test(userId) || !/^\d{1,24}$/.test(channelId)) return;
+    // Reject unauthorized identities before allocating queue/session state.
+    if (!allowedUsers.has(userId) || !allowedChannels.has(channelId)) return;
     const key = JSON.stringify([userId, channelId]);
     const queued = queuedMessageCounts.get(key) ?? 0;
     if (queued >= MAX_QUEUED_MESSAGES_PER_SESSION) {
