@@ -159,3 +159,20 @@ test("Telegram per-user credentials reject keys for users outside the allowlist"
   assert.equal(warnings.length, 1);
   assert.doesNotMatch(warnings[0] ?? "", /user-one-key|unlisted-user-key|123|999/);
 });
+
+
+test("Telegram per-user credentials reject reuse of the primary API key", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    SOFIA_API_KEY: "shared-primary-key",
+    TELEGRAM_USER_API_KEYS: '{"123":"shared-primary-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0] ?? "", /shared-primary-key|123/);
+});
