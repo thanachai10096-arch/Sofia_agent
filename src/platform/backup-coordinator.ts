@@ -18,6 +18,7 @@ import {
   type BackupManifest,
   type BackupVerificationResult,
 } from "./backup-manifest.js";
+import type { RestoreSnapshotStore } from "./restore-snapshot-store.js";
 import {
   advanceRestoreJournal,
   createRestoreJournalRecord,
@@ -445,6 +446,10 @@ export interface BackupRestoreTargetAdapter {
   apply(bundle: BackupBundle, paths: readonly string[]): Promise<void>;
   /** Restore the snapshot returned by captureRollback(). */
   rollback(snapshot: unknown): Promise<void>;
+  /** Encode rollback state for durable storage; required when snapshotStore is configured. */
+  serializeRollbackSnapshot?(snapshot: unknown): Promise<Uint8Array> | Uint8Array;
+  /** Restore directly from verified durable snapshot bytes after process restart. */
+  rollbackFromSnapshotBytes?(bytes: Uint8Array): Promise<void>;
 }
 
 export interface BackupRestoreTransactionResult {
@@ -469,6 +474,8 @@ export interface BackupRestoreTransactionOptions {
   journal?: RestoreJournalStore;
   /** Optional stable transaction ID for correlation; generated when omitted. */
   transactionId?: string;
+  /** Optional durable rollback storage. Requires journal and durable codecs on every adapter. */
+  snapshotStore?: RestoreSnapshotStore;
 }
 
 export async function executeBackupRestoreTransaction(
@@ -510,10 +517,34 @@ export async function executeBackupRestoreTransaction(
     await adapter.preflight(record, target.paths);
   }
 
+  if (options.snapshotStore && !options.journal) {
+    throw new Error("Durable restore snapshots require an intent journal.");
+  }
+  if (options.snapshotStore) {
+    for (const target of plan.targets) {
+      const adapter = byName.get(target.name)!;
+      if (typeof adapter.serializeRollbackSnapshot !== "function" ||
+          typeof adapter.rollbackFromSnapshotBytes !== "function") {
+        throw new Error(`Restore adapter ${target.name} does not support durable rollback snapshots.`);
+      }
+    }
+  }
+
+  const transactionId = options.transactionId ?? randomUUID();
   const rollbackSnapshots = new Map<string, unknown>();
+  const durableSnapshots = new Map<string, { ref: string; sha256: string }>();
   for (const target of plan.targets) {
     const adapter = byName.get(target.name)!;
-    rollbackSnapshots.set(target.name, await adapter.captureRollback());
+    const snapshot = await adapter.captureRollback();
+    rollbackSnapshots.set(target.name, snapshot);
+    if (options.snapshotStore) {
+      const encoded = await adapter.serializeRollbackSnapshot!(snapshot);
+      if (!(encoded instanceof Uint8Array)) {
+        throw new Error(`Restore adapter ${target.name} returned invalid serialized rollback bytes.`);
+      }
+      const persisted = await options.snapshotStore.write(transactionId, target.name, encoded);
+      durableSnapshots.set(target.name, { ref: persisted.ref, sha256: persisted.sha256 });
+    }
   }
 
   let journalRecord: RestoreJournalRecord | undefined;
@@ -534,7 +565,6 @@ export async function executeBackupRestoreTransaction(
   };
 
   if (options.journal) {
-    const transactionId = options.transactionId ?? randomUUID();
     const manifestSha256 = createHash("sha256")
       .update(serializeBackupManifest(record.manifest), "utf8")
       .digest("hex");
@@ -542,7 +572,14 @@ export async function executeBackupRestoreTransaction(
       transactionId,
       createdAt: new Date().toISOString(),
       manifestSha256,
-      targets: plan.targets.map(({ name, paths }) => ({ name, paths: [...paths] })),
+      targets: plan.targets.map(({ name, paths }) => ({
+        name,
+        paths: [...paths],
+        ...(durableSnapshots.has(name) ? {
+          rollbackSnapshotRef: durableSnapshots.get(name)!.ref,
+          rollbackSnapshotSha256: durableSnapshots.get(name)!.sha256,
+        } : {}),
+      })),
     });
     // Journal creation is a hard gate: no live mutation may start unless the
     // initial intent is durably acknowledged by the configured store.
