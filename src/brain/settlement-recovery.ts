@@ -56,6 +56,10 @@ export function decideSettlementRecovery(
     (inspection.journal !== "missing" || counts.every((count) => count === 0));
   if (!countsValid) reasons.push("inspection_counts_invalid");
   if (inspection.unknownUsageAttempts > 0) reasons.push("unknown_usage_reported");
+  if (inspection.journal === "resolved" &&
+      inspection.startedAttempts !== inspection.settledAttempts) {
+    reasons.push("resolved_journal_has_unmatched_attempts");
+  }
   if (inspection.claim === "invalid") reasons.push("claim_invalid");
   if (inspection.journal === "corrupt") reasons.push("journal_corrupt");
   if (inspection.journal === "unresolved" || inspection.unresolved) {
