@@ -56,7 +56,8 @@ function normalizeBaseUrl(value: string): string {
 function selectProvider(): ProviderSelection {
   const requested = process.env.SOFIA_MODEL_PROVIDER?.trim().toLowerCase();
   const customBaseUrl = firstEnv("SOFIA_BASE_URL", "BASE_URL");
-  const customApiKey = firstEnv("SOFIA_API_KEY", "API_KEY");
+  // Prefer the provider-specific secret; SOFIA_API_KEY remains a legacy fallback for local setups.
+  const customApiKey = firstEnv("SOFIA_MODEL_API_KEY", "SOFIA_API_KEY", "API_KEY");
   const customModel = firstEnv("SOFIA_MODEL", "MODEL");
   const hasCustomConfig = Boolean(customBaseUrl || customApiKey || customModel);
 
@@ -71,7 +72,7 @@ function selectProvider(): ProviderSelection {
 
   const chooseCustom = (): ProviderSelection => {
     if (!customBaseUrl || !customApiKey || !customModel) {
-      throw new Error("Custom model configuration requires SOFIA_BASE_URL, SOFIA_API_KEY, and SOFIA_MODEL (or BASE_URL, API_KEY, and MODEL).");
+      throw new Error("Custom model configuration requires SOFIA_BASE_URL, SOFIA_MODEL_API_KEY, and SOFIA_MODEL (SOFIA_API_KEY remains a legacy fallback; generic BASE_URL, API_KEY, and MODEL aliases are also supported).");
     }
     const protocol = firstEnv("SOFIA_MODEL_PROTOCOL") || "openai-compatible";
     if (protocol !== "openai-compatible" && protocol !== "anthropic-messages") {
