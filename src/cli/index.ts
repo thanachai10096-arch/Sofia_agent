@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { lstat, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -24,20 +23,11 @@ type LocalConfig = {
 };
 
 async function loadLocalConfig(): Promise<LocalConfig> {
-  try {
-    const configStat = await lstat(configPath);
-    if (!configStat.isFile() || configStat.isSymbolicLink()) {
-      throw new Error("Sofia config must be a regular file, not a symbolic link.");
-    }
-    const parsed: unknown = JSON.parse(await readFile(configPath, "utf8"));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const config = parsed as LocalConfig;
-    applySafeLocalConfigEnvironment(config, process.env);
-    return config;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return {};
-  }
+  const config = await readSafeLocalConfig(configPath);
+  if (!process.env.SOFIA_MODEL_PROVIDER && config.provider) process.env.SOFIA_MODEL_PROVIDER = config.provider;
+  if (!process.env.SOFIA_MODEL_BASE_URL && config.baseUrl) process.env.SOFIA_MODEL_BASE_URL = config.baseUrl;
+  if (!process.env.SOFIA_MODEL_NAME && config.model) process.env.SOFIA_MODEL_NAME = config.model;
+  return config as LocalConfig;
 }
 
 function help() {
