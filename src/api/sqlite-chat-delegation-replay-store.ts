@@ -7,6 +7,15 @@ type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
 const PLATFORM_VALUES = new Set<DelegatedChatPlatform>(["telegram", "discord", "slack"]);
 
+function ensurePrivateDirectory(directoryPath: string): void {
+  if (process.platform === "win32") return;
+  const stat = fs.lstatSync(directoryPath);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error("Chat delegation replay storage directory must be a real directory, not a symbolic link.");
+  }
+  if ((stat.mode & 0o777) !== 0o700) fs.chmodSync(directoryPath, 0o700);
+}
+
 function ensurePrivateRegularFile(filePath: string): void {
   if (process.platform === "win32") return;
   try {
@@ -14,9 +23,9 @@ function ensurePrivateRegularFile(filePath: string): void {
     if (!stat.isFile() || stat.isSymbolicLink()) {
       throw new Error("Chat delegation replay storage must be a regular file, not a symbolic link.");
     }
-    const mode = stat.mode & 0o777;
-    const privateMode = mode & 0o600;
-    if (privateMode !== mode) fs.chmodSync(filePath, privateMode);
+    // Set the exact owner-only mode. Masking the existing mode can preserve
+    // read-only permissions (for example 0400), preventing future SQLite writes.
+    if ((stat.mode & 0o777) !== 0o600) fs.chmodSync(filePath, 0o600);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
@@ -46,7 +55,9 @@ export class SqliteChatDelegationReplayStore implements ChatDelegationReplayStor
   ): Promise<SqliteChatDelegationReplayStore> {
     const absolutePath = filePath === ":memory:" ? filePath : path.resolve(filePath);
     if (absolutePath !== ":memory:") {
-      fs.mkdirSync(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
+      const directoryPath = path.dirname(absolutePath);
+      fs.mkdirSync(directoryPath, { recursive: true, mode: 0o700 });
+      ensurePrivateDirectory(directoryPath);
       try {
         const fd = fs.openSync(absolutePath, "wx", 0o600);
         fs.closeSync(fd);
