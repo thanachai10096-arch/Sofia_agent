@@ -104,18 +104,29 @@ export class FileUserMemoryStore implements UserMemoryStore {
   }
 
   private async read(userId: string): Promise<UserMemoryEntry[]> {
+    let source: string;
     try {
-      const raw: unknown = JSON.parse(await fs.readFile(this.fileFor(userId), "utf8"));
-      if (!Array.isArray(raw)) return [];
-      return raw.filter(validEntry)
-        .filter((entry) => !containsPromptInjection(entry.content))
-        .slice(-MAX_ENTRIES)
-        .map((entry) => ({ ...entry, content: entry.content.slice(0, MAX_CONTENT_CHARS) }));
+      source = await fs.readFile(this.fileFor(userId), "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      // Corrupt or unreadable memory must not stop an agent run.
-      return [];
+      throw error;
     }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(source) as unknown;
+    } catch {
+      // Never turn a damaged memory file into an empty collection: a later
+      // save/delete would otherwise overwrite the only surviving copy.
+      throw new Error("User memory file is corrupt; refusing to modify it.");
+    }
+    if (!Array.isArray(raw) || !raw.every(validEntry) ||
+        raw.some((entry) => containsPromptInjection(entry.content))) {
+      throw new Error("User memory file contains invalid or unsafe records; refusing to modify it.");
+    }
+
+    return raw.slice(-MAX_ENTRIES)
+      .map((entry) => ({ ...entry, content: entry.content.slice(0, MAX_CONTENT_CHARS) }));
   }
 
   async save(userId: string, entry: UserMemoryEntry): Promise<void> {
