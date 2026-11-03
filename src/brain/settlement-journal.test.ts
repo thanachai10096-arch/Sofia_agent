@@ -201,6 +201,40 @@ test("settlement recovery inspection classifies malformed journal evidence as co
   }
 });
 
+test("truncated trailing JSONL write is corrupt and cannot be checkpointed or deleted", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-truncated-tail-"));
+  try {
+    const namespace = "workspace";
+    const runId = "truncated-tail-run";
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    const validStarted = JSON.stringify({
+      version: 1, type: "started", attemptId: "attempt-1",
+      at: new Date().toISOString(), maxInputTokens: 10, maxOutputTokens: 10,
+    });
+    const validSettled = JSON.stringify({
+      version: 1, type: "settled", attemptId: "attempt-1",
+      at: new Date().toISOString(), usageKnown: true,
+      usage: { inputTokens: 4, outputTokens: 3 },
+    });
+    // Simulate process termination while appending the next JSONL event.
+    await writeFile(journalFile, validStarted + "\\n" + validSettled + "\\n" + '{"version":1,"type":"checkpoint"', { mode: 0o600 });
+
+    const journal = new FileSettlementJournal(namespace, root);
+    const inspection = await journal.inspectRun(runId);
+    assert.equal(inspection.journal, "corrupt");
+    assert.equal(inspection.unresolved, true);
+    assert.equal(await journal.hasUnresolved(runId), true);
+    await assert.rejects(journal.acknowledgeCheckpoint(runId), /corrupt settlement evidence/);
+    await assert.rejects(journal.deleteRun(runId), /Cannot delete unresolved settlement evidence/);
+    assert.equal(await readFile(journalFile, "utf8"), validStarted + "\\n" + validSettled + "\\n" + '{"version":1,"type":"checkpoint"',
+      "recovery checks must preserve the original partial-write evidence");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("unresolved or corrupt settlement records fail closed", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-"));
   try {
