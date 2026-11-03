@@ -115,8 +115,8 @@ export class SqliteSelfImprovementCheckpointStore implements SelfImprovementChec
     try {
       this.db.prepare(`
         INSERT INTO verified_learning_checkpoints
-          (tenant_id, principal_id, project_id, last_sequence, pending_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+          (tenant_id, principal_id, project_id, last_sequence, pending_json, updated_at, revision)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
         ON CONFLICT (tenant_id, principal_id, project_id) DO UPDATE SET
           last_sequence = excluded.last_sequence,
           pending_json = excluded.pending_json,
