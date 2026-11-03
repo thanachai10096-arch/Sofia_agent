@@ -48,3 +48,33 @@ test("subagent runtime fences delegated task and context as untrusted reference 
   assert.match(prompt.payload.referenceTrust, /untrusted reference data/);
   assert.match(prompt.payload.roleInstructions, /Do not modify files/);
 });
+
+
+test("subagent runtime degrades safely when direct callers pass circular context", async () => {
+  let preparedPrompt = "";
+  const runtime = createSubagentRuntime({
+    async prepare(prompt) {
+      preparedPrompt = prompt;
+      return {
+        inputTokens: 10,
+        async invoke() {
+          return {
+            value: { finding: "context was safely omitted" },
+            usage: { inputTokens: 10, outputTokens: 20 },
+          };
+        },
+      };
+    },
+  });
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  await runtime.run({
+    role: "reviewer",
+    task: "review the supplied context safely",
+    context: circular,
+    signal: new AbortController().signal,
+  });
+  const prompt = JSON.parse(preparedPrompt) as { payload: { context: string } };
+  assert.match(prompt.payload.context, /reference omitted: value is not JSON-serializable/);
+  assert.match(prompt.payload.context, /UNTRUSTED_TOOL_OUTPUT/);
+});
