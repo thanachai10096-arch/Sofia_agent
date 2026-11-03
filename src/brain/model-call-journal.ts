@@ -100,8 +100,13 @@ export class SqliteModelCallJournal {
       if (process.platform !== "win32") fs.chmodSync(absolutePath, stat.mode & 0o600);
     }
 
-    const { DatabaseSync } = await import("node:sqlite");
-    const db = new DatabaseSync(absolutePath);
+    let sqlite: typeof import("node:sqlite");
+    try {
+      sqlite = await import("node:sqlite");
+    } catch {
+      throw new Error("SQLite model call journal requires Node.js 22.5 or newer (node:sqlite)");
+    }
+    const db = new sqlite.DatabaseSync(absolutePath);
     try {
       db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
       db.exec("BEGIN IMMEDIATE");
