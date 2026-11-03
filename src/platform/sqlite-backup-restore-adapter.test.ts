@@ -7,6 +7,9 @@ import os from "node:os";
 import path from "node:path";
 import { createBackupBundle } from "./backup-coordinator.js";
 import { sqliteFileBackupRestoreAdapter } from "./sqlite-backup-restore-adapter.js";
+import { FileRestoreJournalStore, createRestoreJournalRecord, advanceRestoreJournal } from "./restore-journal.js";
+import { FileRestoreSnapshotStore } from "./restore-snapshot-store.js";
+import { recoverInterruptedRestoreTransaction } from "./restore-recovery.js";
 
 const createdAt = "2026-10-29T04:00:00.000Z";
 const sqliteBytes = (suffix: string) => Buffer.concat([Buffer.from("SQLite format 3\0", "ascii"), Buffer.from(suffix)]);
@@ -292,6 +295,76 @@ test("SQLite restore adapter can roll back when reopening the restored database 
   } finally {
     try { live.close(); } catch { /* store may be closed after injected failure */ }
     if (backup) backup.close();
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+
+test("SQLite durable startup recovery restores the prior database state after an interrupted apply", async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-sqlite-durable-recovery-"));
+  const livePath = path.join(parent, "live.sqlite");
+  const transactionId = "efefefef-efef-efef-efef-efefefefefef";
+  const journal = new FileRestoreJournalStore(path.join(parent, "journal"));
+  const snapshots = new FileRestoreSnapshotStore(path.join(parent, "snapshots"));
+  let live = await SqliteSessionStore.open(livePath);
+  try {
+    live.save({ id: "session-1", messages: ["before"], updatedAt: 1 });
+    const adapter = sqliteFileBackupRestoreAdapter("sessions", livePath, "sessions/live.sqlite", {
+      getOpenStore() { return live; },
+      async close() { live.close(); },
+      async reopen() { live = await SqliteSessionStore.open(livePath); },
+    });
+    const rawSnapshot = await adapter.captureRollback();
+    const persisted = await snapshots.write(
+      transactionId,
+      "sessions",
+      adapter.serializeRollbackSnapshot!(rawSnapshot),
+    );
+    const prepared = createRestoreJournalRecord({
+      transactionId,
+      createdAt,
+      manifestSha256: "c".repeat(64),
+      targets: [{
+        name: "sessions",
+        paths: ["sessions/live.sqlite"],
+        rollbackSnapshotRef: persisted.ref,
+        rollbackSnapshotSha256: persisted.sha256,
+      }],
+    });
+    await journal.create(prepared);
+    const applying = advanceRestoreJournal(prepared, {
+      phase: "applying",
+      updatedAt: "2026-10-29T04:00:01.000Z",
+      targets: prepared.targets.map((target) => ({ ...target, phase: "applied" })),
+    });
+    await journal.append(applying, prepared.revision);
+
+    // Model an interrupted apply that changed the live database before restart.
+    live.save({ id: "session-1", messages: ["partially-restored"], updatedAt: 2 });
+    live.close();
+    live = await SqliteSessionStore.open(livePath);
+
+    const recoveryAdapter = sqliteFileBackupRestoreAdapter("sessions", livePath, "sessions/live.sqlite", {
+      getOpenStore() { return live; },
+      async close() { live.close(); },
+      async reopen() { live = await SqliteSessionStore.open(livePath); },
+    });
+    const recovered = await recoverInterruptedRestoreTransaction({
+      transactionId,
+      journal,
+      snapshotStore: snapshots,
+      adapters: [{
+        name: recoveryAdapter.name,
+        paths: recoveryAdapter.paths,
+        rollbackFromSnapshotBytes: recoveryAdapter.rollbackFromSnapshotBytes!,
+      }],
+      async withExclusiveLock(_id, operation) { return operation(); },
+    });
+
+    assert.equal(recovered.phase, "rolled_back");
+    assert.deepEqual(live.get("session-1")?.messages, ["before"]);
+  } finally {
+    try { live.close(); } catch { /* already closed during simulated restart */ }
     await rm(parent, { recursive: true, force: true });
   }
 });
