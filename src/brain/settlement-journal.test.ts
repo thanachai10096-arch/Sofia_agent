@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -380,6 +380,34 @@ test("settlement journal treats symlinked evidence as unresolved", async () => {
     const inspection = await journal.inspectRun(runId);
     assert.equal(inspection.journal, "corrupt");
     assert.equal(inspection.unresolved, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("settlement claim release refuses to follow a replacement symlink", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-claim-symlink-"));
+  try {
+    const namespace = "workspace";
+    const runId = "claim-symlink-run";
+    const journal = new FileSettlementJournal(namespace, root);
+    const claim = await journal.claimRun(runId);
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    const lockFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl.lock");
+    const target = path.join(root, "external-lock-target");
+    await writeFile(target, JSON.stringify({
+      version: 1, token: "replacement-owner-token", pid: process.pid,
+      hostname: os.hostname(), createdAt: new Date().toISOString(),
+    }) + "\n", "utf8");
+    await rm(lockFile);
+    await symlink(target, lockFile);
+
+    await assert.rejects(claim.release(), /path is invalid/);
+    assert.equal(await readlink(lockFile), target,
+      "release must preserve the replacement symlink rather than follow or unlink it");
+    assert.match(await readFile(target, "utf8"), /replacement-owner-token/);
+    const inspection = await journal.inspectRun(runId);
+    assert.equal(inspection.claim, "invalid");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
