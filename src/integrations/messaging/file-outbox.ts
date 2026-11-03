@@ -57,8 +57,9 @@ export class FileMessagingOutbox {
 
   /** Atomically claim one record across processes using an exclusive lock directory. */
   async claim(id: string, leaseMs = DEFAULT_LEASE_MS, now = Date.now()): Promise<string | undefined> {
-    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1_000 || leaseMs > 60 * 60_000) {
-      throw new Error("Invalid messaging outbox lease duration.");
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1_000 || leaseMs > 60 * 60_000 ||
+        !Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + leaseMs)) {
+      throw new Error("Invalid messaging outbox lease duration or timestamp.");
     }
     await this.ensureDirectory();
     const lock = this.lockDirectory(id);
