@@ -344,3 +344,43 @@ test("execution timeout cancels the runtime job and records failure", async () =
   assert.equal(state.history[0].status, "failed");
   assert.match(state.history[0].error, /timed out/i);
 });
+
+
+test("schedule creation rejects malformed runtime input instead of persisting NaN limits", async () => {
+  const store: CronStore = { async transact(fn) { return fn({ schedules: [], history: [], audit: [] }); } };
+  const scheduler = new CronScheduler({ async submit() { throw new Error("unused"); } } as unknown as JobRuntime, { store });
+  const base = { name: "validated", task: "task", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice" };
+  await assert.rejects(() => scheduler.create({ ...base, maxRetries: Number.NaN }, "alice"), /maxRetries must be/i);
+  await assert.rejects(() => scheduler.create({ ...base, timeoutMs: Number.NaN }, "alice"), /timeoutMs must be/i);
+  await assert.rejects(() => scheduler.create({ ...base, misfirePolicy: "retry" as never }, "alice"), /misfire policy/i);
+  await assert.rejects(() => scheduler.create({ ...base, enabled: "false" as never }, "alice"), /enabled must be a boolean/i);
+  await assert.rejects(() => scheduler.create({ ...base, task: undefined as never }, "alice"), /task.*required/i);
+});
+
+
+test("recovery defers reconciliation when runtime lookup errors transiently", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  const runtime = {
+    async submit() { submitted++; throw new Error("recovery must not resubmit"); },
+    async get() { throw new Error("temporary runtime database outage"); },
+    async cancel() { return true; }, async list() { return []; },
+    async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, now: () => new Date("2026-10-17T00:00:00.000Z") });
+  const schedule = await scheduler.create({
+    name: "defer-recovery", task: "recover later", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "runtime-read-outage", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z", startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "job-temporarily-unreadable", attempt: 1,
+  });
+  const result = await scheduler.recover();
+  assert.deepEqual(result, { reconciled: 0, monitoring: 0, indeterminate: 0 });
+  assert.equal(submitted, 0);
+  assert.equal(state.history[0].status, "running");
+  assert.equal(state.history[0].jobId, "job-temporarily-unreadable");
+});

@@ -89,10 +89,17 @@ export class FileCronStore implements CronStore {
     let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
     while (!handle) {
       try {
+        // Keep acquisition errors separate from lock initialization errors. If opening
+        // succeeds but writing the owner record fails, that is not lock contention.
         handle = await fs.open(this.lock, "wx", 0o600);
-        await handle.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }));
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const openCode = (error as NodeJS.ErrnoException).code;
+        // Windows may report EPERM/EACCES/EBUSY when concurrent exclusive opens
+        // contend for a lock file. Treat these as contention only on Windows, then
+        // follow the same owner-read/wait path as EEXIST; never enter without a lock.
+        const transientOpenError = process.platform === "win32" &&
+          (openCode === "EPERM" || openCode === "EACCES" || openCode === "EBUSY");
+        if (openCode !== "EEXIST" && !transientOpenError) throw error;
         try {
           const owner = JSON.parse(await fs.readFile(this.lock, "utf8")) as { pid?: number };
           if (!Number.isInteger(owner.pid) || (owner.pid ?? 0) < 1) {
@@ -110,13 +117,29 @@ export class FileCronStore implements CronStore {
             }
           }
         } catch (statError) {
-          if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
-          if (!(statError instanceof SyntaxError)) throw statError;
+          const code = (statError as NodeJS.ErrnoException).code;
+          if (code === "ENOENT") continue;
+          // On Windows, another process may briefly hold an incompatible file handle
+          // while the exclusive lock owner is writing its PID. Treat only these
+          // transient sharing/permission errors like an incomplete lock read; keep
+          // waiting within the existing deadline and never delete or bypass the lock.
+          const transientReadError = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+          if (!(statError instanceof SyntaxError) && !transientReadError) throw statError;
           if (Date.now() >= deadline) throw new Error("Cron scheduler state lock owner could not be read");
         }
         if (Date.now() >= deadline) throw new Error("Timed out waiting for cron scheduler state lock");
         await new Promise(resolve => setTimeout(resolve, 15));
       }
+    }
+    try {
+      await handle.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }));
+    } catch (error) {
+      // We created the exclusive lock but could not durably identify its owner.
+      // Close our descriptor and fail closed; do not unlink a path that may have
+      // been replaced by another process or silently proceed with an unowned lock.
+      await handle.close();
+      handle = undefined;
+      throw new Error("Failed to initialize cron scheduler lock; manual recovery may be required: " + this.lock, { cause: error });
     }
     try {
       const state = await this.read();
@@ -211,8 +234,12 @@ export class CronScheduler {
     this.store = options.store ?? new FileCronStore();
     this.now = options.now ?? (() => new Date());
     this.authorize = options.authorize ?? ((actor, _action, schedule) => !!actor && (!schedule || actor === schedule.ownerKeyId));
-    this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
-    this.maxSchedulesPerOwner = Math.max(1, Math.min(10_000, Math.floor(options.maxSchedulesPerOwner ?? 100)));
+    const configuredConcurrency = options.maxConcurrent ?? 2;
+    this.maxConcurrent = Number.isFinite(configuredConcurrency)
+      ? Math.max(1, Math.min(100, Math.floor(configuredConcurrency))) : 2;
+    const configuredOwnerLimit = options.maxSchedulesPerOwner ?? 100;
+    this.maxSchedulesPerOwner = Number.isFinite(configuredOwnerLimit)
+      ? Math.max(1, Math.min(10_000, Math.floor(configuredOwnerLimit))) : 100;
     this.auditCallback = options.audit;
   }
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
@@ -238,8 +265,26 @@ export class CronScheduler {
   }
   async create(input: CronScheduleInput, actor: string): Promise<CronSchedule> {
     if (!await this.authorize(actor, "create")) throw new Error("Not authorized to create cron schedule");
+    if (!input || typeof input !== "object") throw new Error("Cron schedule input is required");
+    if (typeof actor !== "string" || !actor.trim()) throw new Error("Authenticated actor is required");
+    if (typeof input.name !== "string" || typeof input.task !== "string" ||
+        typeof input.ownerKeyId !== "string" || typeof input.timeZone !== "string" ||
+        !input.name.trim() || !input.task.trim() || !input.ownerKeyId.trim() || !input.timeZone.trim()) {
+      throw new Error("name, task, ownerKeyId and timeZone are required");
+    }
+    if (input.enabled !== undefined && typeof input.enabled !== "boolean") throw new Error("enabled must be a boolean");
+    if (input.misfirePolicy !== undefined && input.misfirePolicy !== "skip" && input.misfirePolicy !== "run-once") {
+      throw new Error("Invalid misfire policy");
+    }
+    if (input.maxRetries !== undefined && (!Number.isSafeInteger(input.maxRetries) || input.maxRetries < 0)) {
+      throw new Error("maxRetries must be a non-negative safe integer");
+    }
+    if (input.timeoutMs !== undefined && (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1)) {
+      throw new Error("timeoutMs must be a positive safe integer");
+    }
+    if (input.cron !== undefined && typeof input.cron !== "string") throw new Error("cron must be a string");
+    if (input.runAt !== undefined && typeof input.runAt !== "string") throw new Error("runAt must be a string");
     if (input.ownerKeyId !== actor) throw new Error("Schedule owner must match the authenticated API key");
-    if (!input.name.trim() || !input.task.trim() || !input.ownerKeyId.trim()) throw new Error("name, task and ownerKeyId are required");
     const hasCron = input.cron !== undefined;
     const hasRunAt = input.runAt !== undefined;
     if (hasCron === hasRunAt) throw new Error("Provide exactly one of cron or runAt");
@@ -415,7 +460,10 @@ export class CronScheduler {
       try {
         job = await this.runtime.get(execution.jobId);
       } catch {
-        job = undefined;
+        // A transient runtime/storage outage is not proof that the job is missing.
+        // Leave the durable execution pending so a later recovery pass can retry
+        // reconciliation; never turn an unreadable job into a terminal record.
+        continue;
       }
       if (!job) {
         await this.store.transact(async state => {
