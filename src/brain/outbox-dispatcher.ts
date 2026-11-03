@@ -89,7 +89,7 @@ export class OutboxDispatcher {
     let leaseLost = false;
     const renew = this.store.renewLease;
     const renewalTask = renew ? (async () => {
-      const intervalMs = Math.max(500, Math.floor(this.leaseMs / 3));
+      const intervalMs = Math.max(250, Math.floor(this.leaseMs / 3));
       while (!stopRenewal) {
         await new Promise<void>((resolve) => {
           renewalTimer = setTimeout(() => {
@@ -120,6 +120,7 @@ export class OutboxDispatcher {
       }
     })() : Promise.resolve();
 
+    let sendError: unknown;
     try {
       await this.send({
         messageId: message.id,
@@ -130,21 +131,33 @@ export class OutboxDispatcher {
         payload: message.payload,
         signal: controller.signal,
       });
-      const acknowledged = await this.store.markDelivered(message.id, this.workerToken);
-      if (acknowledged) report.delivered += 1;
-      else report.leaseLost += 1;
     } catch (error) {
-      const delay = retryDelay(message.attempts, this.baseRetryDelayMs, this.maxRetryDelayMs);
-      const updated = await this.store.retry(
-        message.id, this.workerToken, safeError(error), delay, this.maxAttempts,
-      );
-      if (!updated || leaseLost) report.leaseLost += 1;
-      else if (message.attempts >= this.maxAttempts) report.failed += 1;
-      else report.retried += 1;
+      sendError = error;
     } finally {
+      // Stop and join renewal before ACK/retry. This prevents a late heartbeat
+      // racing with terminal acknowledgement or extending an already-finished lease.
       stopRenewal = true;
       stopRenewalWait?.();
       await renewalTask;
     }
+
+    if (leaseLost) {
+      report.leaseLost += 1;
+      return;
+    }
+    if (sendError === undefined) {
+      const acknowledged = await this.store.markDelivered(message.id, this.workerToken);
+      if (acknowledged) report.delivered += 1;
+      else report.leaseLost += 1;
+      return;
+    }
+
+    const delay = retryDelay(message.attempts, this.baseRetryDelayMs, this.maxRetryDelayMs);
+    const updated = await this.store.retry(
+      message.id, this.workerToken, safeError(sendError), delay, this.maxAttempts,
+    );
+    if (!updated) report.leaseLost += 1;
+    else if (message.attempts >= this.maxAttempts) report.failed += 1;
+    else report.retried += 1;
   }
 }
