@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export type UserModelProvider = "openai-compatible" | "gemini" | "openrouter";
@@ -214,6 +214,12 @@ export class EncryptedUserModelProfileStore implements UserModelProfileStore {
 
   private async readState(): Promise<ProfileState> {
     try {
+      // Refuse symlinked or non-regular profile paths before reading credentials.
+      // This mirrors the SQLite session-store path hardening and fails closed.
+      const fileStat = await lstat(this.filePath);
+      if (!fileStat.isFile() || fileStat.isSymbolicLink()) {
+        throw new Error("Model profile storage path must be a regular file, not a symbolic link.");
+      }
       const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as Partial<ProfileState>;
       if (parsed.version !== 1 || !parsed.profiles || typeof parsed.profiles !== "object" || Array.isArray(parsed.profiles)) {
         throw new Error("unsupported profile store format");
