@@ -342,7 +342,10 @@ export function startMessagingOutboxRetryWorker(
   const timer = setInterval(() => {
     if (stopped || inFlight) return;
     inFlight = flushMessagingOutbox(outbox, options.send, options.onFailure, options.platform)
-      .catch(() => options.onFailure?.(options.platform))
+      .catch(() => {
+        // A failing observability callback must never create an unhandled rejection.
+        try { options.onFailure?.(options.platform); } catch { /* Best-effort notification only. */ }
+      })
       .finally(() => { inFlight = undefined; });
   }, intervalMs);
   timer.unref?.();
