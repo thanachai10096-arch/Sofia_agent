@@ -14,7 +14,7 @@ export interface VerifiedDiscordMessage {
 }
 export interface DiscordTransport {
   start(signal: AbortSignal, onMessage: (message: VerifiedDiscordMessage) => Promise<void>): Promise<void>;
-  sendMessage(channelId: string, text: string, replyToMessageId?: string, interactionId?: string): Promise<{ messageId: string }>;
+  sendMessage(channelId: string, text: string, replyToMessageId?: string, interactionId?: string, nonce?: string): Promise<{ messageId: string }>;
   stop(): Promise<void>;
 }
 /** Adapter for a Discord transport that verifies the provider request before emitting events. */
