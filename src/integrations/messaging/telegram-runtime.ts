@@ -155,8 +155,11 @@ export function createTelegramMessagingRuntime(
     const allowedUsers = parseTelegramUserAllowlist(rawUsers);
     const allowedChats = parseTelegramChatAllowlist(rawChats);
     const userApiKeys = rawUserApiKeys ? parseTelegramUserApiKeys(rawUserApiKeys) : undefined;
-    if (userApiKeys && [...allowedUsers].some((userId) => !userApiKeys.has(userId))) {
-      throw new Error("TELEGRAM_USER_API_KEYS must include every allowed Telegram user ID.");
+    if (userApiKeys && (
+      [...allowedUsers].some((userId) => !userApiKeys.has(userId)) ||
+      [...userApiKeys.keys()].some((userId) => !allowedUsers.has(userId))
+    )) {
+      throw new Error("TELEGRAM_USER_API_KEYS must match the allowed Telegram user IDs exactly.");
     }
     const clientCache = new Map<string, SofiaClient>();
     const clientForUser = (userId: string): SofiaClient => {
