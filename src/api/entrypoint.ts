@@ -29,7 +29,8 @@ if (process.env.SOFIA_MESSAGING_ENABLED === "true" && process.env.TELEGRAM_USER_
     const candidateKeys = parseTelegramUserApiKeys(process.env.TELEGRAM_USER_API_KEYS.trim());
     const allowedUsers = parseTelegramUserAllowlist(process.env.TELEGRAM_ALLOWED_USER_IDS ?? "");
     const mappingMatchesAllowlist = candidateKeys.size === allowedUsers.size &&
-      [...allowedUsers].every((userId) => candidateKeys.has(userId));
+      [...allowedUsers].every((userId) => candidateKeys.has(userId)) &&
+      [...candidateKeys.values()].every((key) => key !== apiKey);
     if (mappingMatchesAllowlist) telegramUserApiKeys = new Map(candidateKeys);
   } catch {
     // Invalid optional Telegram configuration must disable the bridge, not the core API.
