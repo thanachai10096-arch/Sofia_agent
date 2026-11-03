@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { TokenBudget } from "./token-budget.js";
+import { createInternalRoute } from "./model-route-adapter.js";
+import type { ModelRoute } from "../models/types.js";
 import {
   GatewayError,
   TokenAwareGateway,
@@ -221,4 +223,48 @@ test("gateway classifies unknown provider errors without exposing their messages
     assert.doesNotMatch(error.message, /private-token/);
     return true;
   });
+});
+
+
+test("internal route converts provider max_tokens into incomplete Brain output", async () => {
+  const modelRoute: ModelRoute = {
+    id: "test-route",
+    providerId: "test-provider",
+    model: "test-model",
+    capabilities: ["reasoning"],
+    costWeight: 1,
+    latencyWeight: 1,
+    qualityWeight: 1,
+    healthy: true,
+  };
+  const internal = createInternalRoute({
+    route: modelRoute,
+    modelProvider: {
+      async generate() {
+        return {
+          text: '{"partial":',
+          usage: { inputTokens: 10, outputTokens: 5 },
+          finishReason: "max_tokens",
+        };
+      },
+    },
+  });
+  const prepared = internal.prepare({
+    core: {
+      instructions: "Return JSON only.",
+      task: "Create a plan.",
+      acceptanceCriteria: [],
+      state: {},
+      toolSchemas: [],
+    },
+    evidence: [],
+  });
+  const reply = await prepared.invoke({
+    signal: new AbortController().signal,
+    maxOutputTokens: 50,
+    requestId: "test-request",
+    maxAttempts: 1,
+  });
+
+  assert.equal(reply.finishReason, "length");
 });
