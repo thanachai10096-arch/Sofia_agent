@@ -31,7 +31,7 @@ test("configured project-memory store makes the verified retrieval skill availab
       return [];
     },
   };
-  const registry = createAdvancedSkillRegistry({ projectMemoryStore: store });
+  const registry = createAdvancedSkillRegistry({ projectMemoryStore: store, projectMemoryProject: "registry-test-project" });
   assert.deepEqual(listUnregisteredVerifiedSkills(registry), []);
   const result = await registry.execute<{ query: string }, { query: string; entries: unknown[]; count: number }>(
     "conversation.04",
