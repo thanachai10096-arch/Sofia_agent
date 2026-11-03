@@ -45,6 +45,18 @@ CREATE INDEX IF NOT EXISTS sofia_agent_jobs_session_idx
   ON sofia_agent_jobs (owner_key_id, session_key, created_at DESC)
   WHERE session_key IS NOT NULL;
 
+
+-- Brain run snapshots must be shared as well as job metadata: a resumed job
+-- may be claimed by a different serverless instance.
+CREATE TABLE IF NOT EXISTS sofia_agent_run_snapshots (
+  run_id text PRIMARY KEY,
+  snapshot jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS sofia_agent_run_snapshots_updated_idx
+  ON sofia_agent_run_snapshots (updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS sofia_agent_job_checkpoints (
   id uuid PRIMARY KEY,
   job_id uuid NOT NULL REFERENCES sofia_agent_jobs(id) ON DELETE CASCADE,
