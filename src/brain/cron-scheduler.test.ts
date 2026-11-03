@@ -577,3 +577,57 @@ test("runtime lookup outages preserve active executions for a later recovery pas
     "the later recovery pass should reconcile the still-existing runtime job");
 });
 
+test("recovery heartbeat retries a transient store outage without fencing a live monitor", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  let transactions = 0;
+  let heartbeatFailures = 0;
+  const store: CronStore = {
+    async transact(fn) {
+      transactions++;
+      // recover() uses three transactions before starting the monitor:
+      // pending snapshot, schedule lookup, and durable lease acquisition.
+      if (transactions === 4 && heartbeatFailures === 0) {
+        heartbeatFailures++;
+        throw new Error("temporary cron store outage during heartbeat");
+      }
+      return fn(state);
+    },
+  };
+  let reads = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      return {
+        id, status: reads < 12 ? "queued" : "completed",
+        task: "heartbeat retry",
+      } as JobRecord;
+    },
+    async cancel() { return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, recoveryLeaseMs: 3_000 });
+  const schedule = await scheduler.create({
+    name: "heartbeat-store-outage", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "heartbeat-outage-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "heartbeat-outage-job", attempt: 1,
+  });
+
+  const recovered = await scheduler.recover();
+  assert.equal(recovered.monitoring, 1);
+  for (let i = 0; i < 500 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+
+  assert.equal(heartbeatFailures, 1, "the first heartbeat should encounter the simulated transient store outage");
+  assert.ok(transactions >= 5, "the next heartbeat should retry the transactional store");
+  assert.equal(state.history[0].status, "completed",
+    "a transient heartbeat store error must not falsely fence the monitor");
+  assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 1);
+});
+
