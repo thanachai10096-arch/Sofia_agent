@@ -100,7 +100,7 @@ def _authorize(authorization: Annotated[str | None, Header()] = None) -> None:
         not separator
         or scheme.lower() != "bearer"
         or not supplied
-        or not hmac.compare_digest(supplied, expected)
+        or not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
