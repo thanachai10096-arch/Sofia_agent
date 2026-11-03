@@ -67,11 +67,15 @@ export class OutboxDispatcher {
   }
 
   async dispatchOnce(): Promise<OutboxDispatchReport> {
-    const messages = await this.store.claimBatch(this.workerToken, this.batchSize, this.leaseMs);
     const report: OutboxDispatchReport = {
-      claimed: messages.length, delivered: 0, retried: 0, failed: 0, leaseLost: 0,
+      claimed: 0, delivered: 0, retried: 0, failed: 0, leaseLost: 0,
     };
-    for (const message of messages) {
+    // Claim one at a time: claiming a whole batch and sending sequentially lets
+    // later messages' leases expire while they wait behind a slow first send.
+    for (let index = 0; index < this.batchSize; index += 1) {
+      const [message] = await this.store.claimBatch(this.workerToken, 1, this.leaseMs);
+      if (!message) break;
+      report.claimed += 1;
       await this.dispatchMessage(message, report);
     }
     return report;
