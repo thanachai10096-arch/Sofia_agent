@@ -459,7 +459,10 @@ export class CronScheduler {
       try {
         job = await this.runtime.get(execution.jobId);
       } catch {
-        job = undefined;
+        // A runtime lookup failure is not proof that the job is missing.
+        // Leave the durable execution active so a later recovery pass can retry;
+        // terminalizing it here could discard a still-running external operation.
+        continue;
       }
       if (!job) {
         await this.store.transact(async state => {
