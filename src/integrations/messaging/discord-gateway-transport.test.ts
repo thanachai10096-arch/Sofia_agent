@@ -59,6 +59,40 @@ test("Discord Gateway identifies, passes unaddressed group chatter as unaddresse
   await transport.stop();
 });
 
+test("Discord Gateway serializes messages per user and channel without blocking other sessions", async () => {
+  const socket = new FakeSocket();
+  const started: string[] = [];
+  let releaseFirst!: () => void;
+  const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const transport = createDiscordGatewayTransport({
+    botToken: "x".repeat(30),
+    socketFactory: () => socket,
+    fetchImpl: async () => new Response(JSON.stringify({ id: "outgoing-message" }), { status: 200 }),
+  });
+  await transport.start(new AbortController().signal, async (message) => {
+    started.push(message.content);
+    if (message.content === "first") await firstBlocked;
+  });
+  socket.gateway({ op: 10, d: { heartbeat_interval: 60_000 } });
+  socket.gateway({ op: 0, t: "READY", s: 1, d: { session_id: "session-1", user: { id: "999", username: "Sofia" } } });
+  const message = (id: string, channelId: string, content: string) => ({
+    op: 0, t: "MESSAGE_CREATE", s: Number(id), d: {
+      id, channel_id: channelId, guild_id: "303", content,
+      author: { id: "404", username: "user", bot: false }, mentions: [{ id: "999" }],
+    },
+  });
+  socket.gateway(message("101", "202", "first"));
+  socket.gateway(message("102", "202", "second"));
+  socket.gateway(message("103", "203", "other session"));
+  await tick();
+  assert.deepEqual(started, ["first", "other session"]);
+  releaseFirst();
+  await tick();
+  await tick();
+  assert.deepEqual(started, ["first", "other session", "second"]);
+  await transport.stop();
+});
+
 test("Discord Gateway marks only one-to-one DM channels as direct messages", async () => {
   const socket = new FakeSocket();
   const delivered: Array<{ directMessage?: boolean; addressedToBot?: boolean }> = [];
