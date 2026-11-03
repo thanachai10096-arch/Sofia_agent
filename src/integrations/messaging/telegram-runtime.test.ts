@@ -73,6 +73,23 @@ test("Telegram fails closed when multiple users would share one API-key memory o
   assert.doesNotMatch(warnings[0] ?? "", /shared-test-key/);
 });
 
+test("Telegram per-user API keys cannot reuse the core API identity", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    SOFIA_API_KEY: "core-api-key",
+    TELEGRAM_USER_API_KEYS: '{"123":"core-api-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /must not reuse SOFIA_API_KEY/);
+  assert.doesNotMatch(warnings[0] ?? "", /core-api-key/);
+});
+
 test("Telegram runtime accepts multiple users only with a complete per-user API key map", async () => {
   const warnings: string[] = [];
   const runtime = createTelegramMessagingRuntime({
