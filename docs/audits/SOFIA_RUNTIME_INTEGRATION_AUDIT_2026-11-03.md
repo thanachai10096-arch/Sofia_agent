@@ -315,3 +315,8 @@ Remaining release gates: no PostgreSQL driver/pool or migration runner is select
 Identified a critical cross-instance resume gap: the new PostgreSQL job metadata adapter still depended on `FileRunStore` for Brain snapshots. A job claimed by another serverless instance could not reliably load a snapshot from the first instance's local filesystem. Added `PostgresRunStore` using a dedicated `sofia_agent_run_snapshots` table, injected the same optional `RunStore` into both Brain and DurableJobRuntime via the existing dependency factory, exported the adapter, and added a query-contract unit test. Local FileRunStore remains the default, so existing local behavior is preserved.
 
 Still unverified: TypeScript build/tests, live PostgreSQL compatibility and concurrency, snapshot size/retention limits, host Pool injection, migration execution, and Vercel deployment.
+
+
+## Follow-up: PostgreSQL transactional outbox adapter (2026-11-03)
+
+Added `PostgresOutboxStore` and query-contract tests. The adapter supports idempotent enqueue, concurrent batch claims using PostgreSQL row locks with `SKIP LOCKED`, expiring worker leases, lease-fenced acknowledgement, and bounded retry/failure transitions. This is an at-least-once delivery foundation only: no dispatcher or Discord/Telegram transport is connected yet, and no live PostgreSQL, worker-crash, or end-to-end delivery tests have run. The migration already defines the outbox table and dispatch index.
