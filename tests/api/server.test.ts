@@ -220,3 +220,72 @@ test("async API rejects an idempotency key reused with a different request", asy
   assert.equal(mismatch.status, 409);
   assert.equal((await mismatch.json() as { error: string }).error, "idempotency_key_reused");
 });
+
+
+test("async run API prevents another API key from reading or cancelling an active run", async (t) => {
+  let markStarted!: () => void;
+  let markAborted!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const aborted = new Promise<void>((resolve) => { markAborted = resolve; });
+  let providerSignal: AbortSignal | undefined;
+  const provider: ModelProvider = {
+    generate(_request, _route, options) {
+      providerSignal = options?.signal;
+      assert.ok(providerSignal, "async run must pass its cancellation signal to the provider");
+      markStarted();
+      return new Promise((_, reject) => {
+        const onAbort = () => {
+          markAborted();
+          reject(new Error("provider aborted"));
+        };
+        if (providerSignal!.aborted) onAbort();
+        else providerSignal!.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+  };
+  const server = createSofiaApi(dependencies(provider), {
+    apiKeys: {
+      "run-owner-token": ["agent:run", "agent:read"],
+      "different-owner-token": ["agent:run", "agent:read"],
+    },
+    requestTimeoutMs: 10_000,
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}`;
+  const request = (token: string, path: string, init: RequestInit = {}) =>
+    fetch(base + path, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(init.body ? { "content-type": "application/json" } : {}),
+      },
+    });
+
+  const created = await request("run-owner-token", "/v1/agent/runs", {
+    method: "POST",
+    body: JSON.stringify({ task: "hold this run open", async: true }),
+  });
+  assert.equal(created.status, 202);
+  const run = await created.json() as { id: string; status: string };
+  assert.equal(run.status, "running");
+  await started;
+
+  assert.equal((await request("run-owner-token", `/v1/agent/runs/${run.id}`)).status, 200);
+  assert.equal((await request("different-owner-token", `/v1/agent/runs/${run.id}`)).status, 404);
+  assert.equal((await request("different-owner-token", `/v1/agent/runs/${run.id}`, { method: "DELETE" })).status, 404);
+  assert.equal(providerSignal!.aborted, false, "a different owner must not abort the active provider request");
+
+  const cancelled = await request("run-owner-token", `/v1/agent/runs/${run.id}`, { method: "DELETE" });
+  assert.equal(cancelled.status, 200);
+  assert.equal((await cancelled.json() as { status: string }).status, "cancelled");
+  await Promise.race([
+    aborted,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("owner cancellation did not reach the provider")), 2_000)),
+  ]);
+});
