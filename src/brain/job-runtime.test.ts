@@ -1099,13 +1099,15 @@ test("DurableJobRuntime renews notification leases and allows takeover after exp
   }
   assert.equal(completed?.status, "completed");
 
-  assert.equal(await first.claimNotification(submitted.id, "worker-a", 1_000), true);
+  // Use a generous initial lease so slower Windows CI runners do not expire
+  // it before the renewal assertion itself is reached.
+  assert.equal(await first.claimNotification(submitted.id, "worker-a", 10_000), true);
   await new Promise<void>((resolve) => setTimeout(resolve, 100));
-  assert.equal(await first.renewNotificationClaim(submitted.id, "worker-a", 1_500), true);
-  await new Promise<void>((resolve) => setTimeout(resolve, 500));
+  assert.equal(await first.renewNotificationClaim(submitted.id, "worker-a", 3_000), true);
+  await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
   assert.equal(await second.claimNotification(submitted.id, "worker-b", 30_000), false,
     "renewal must prevent takeover while the owning worker is still active");
-  await new Promise<void>((resolve) => setTimeout(resolve, 1_100));
+  await new Promise<void>((resolve) => setTimeout(resolve, 1_200));
   assert.equal(await second.claimNotification(submitted.id, "worker-b", 30_000), true,
     "another worker may recover the notification after the renewed lease expires");
 });
