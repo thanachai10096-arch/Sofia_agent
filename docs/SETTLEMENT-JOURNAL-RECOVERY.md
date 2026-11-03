@@ -63,3 +63,5 @@ Claim release also validates the lock path with `lstat`, opens with `O_NOFOLLOW`
 
 
 The decision helper also validates its input summary defensively: counters must be non-negative safe integers, settled attempts cannot exceed started attempts, unknown-usage settlements cannot exceed settled attempts, and a missing journal must have zero event counts. Any inconsistent summary or reported unknown usage requires operator reconciliation even if a caller supplies an otherwise-clean status flag. This guards callers that construct or transform inspection objects; it does not replace validation of the on-disk journal.
+
+A summary marked `resolved` must also have equal started and settled attempt counts. A caller-supplied `resolved` label with an unmatched attempt is treated as inconsistent and requires operator reconciliation.
