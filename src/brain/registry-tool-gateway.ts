@@ -12,6 +12,29 @@ import { SecurityController } from "../security/controller.js";
 import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, WorkspaceCheckpoint, ToolCall } from "./types.js";
 import { RuntimeCheckpointManager, type CheckpointManager } from "./checkpoint.js";
 
+function awaitWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason ?? new Error("Tool approval was cancelled"));
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => {
+        cleanup();
+        if (signal.aborted) reject(signal.reason ?? new Error("Tool approval was cancelled"));
+        else resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
 function digest(value:string){return createHash("sha256").update(value).digest("hex");}
 function deepFreeze<T>(value:T):T {
   if(value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -74,7 +97,10 @@ export class RegistryToolGateway implements ToolGateway {
       if(!this.approval)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is required for this tool."}};
       context.notifyApproval(true);
       try{
-        const approved=await this.approval({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk});
+        const approved=await awaitWithAbort(
+          Promise.resolve().then(() => this.approval!({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk})),
+          context.signal,
+        );
         if(!approved){
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
