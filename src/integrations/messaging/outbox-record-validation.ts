@@ -42,8 +42,10 @@ export function isValidMessagingOutboxRecord(
 
   if (record.attemptHistory !== undefined &&
       (!Array.isArray(record.attemptHistory) || record.attemptHistory.length > 8 ||
-       record.attemptHistory.some((entry) => !entry || !SAFE_INTEGER(entry.at) ||
-         entry.outcome !== "failed" || entry.code !== "provider_unavailable"))) return false;
+       record.attemptHistory.some((entry) => !entry || typeof entry !== "object" ||
+         Object.keys(entry).some((key) => !["at", "outcome", "code"].includes(key)) ||
+         !SAFE_INTEGER(entry.at) || entry.outcome !== "failed" ||
+         entry.code !== "provider_unavailable"))) return false;
 
   return true;
 }
