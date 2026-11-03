@@ -11,7 +11,7 @@ export function parseDiscordUserApiKeys(value: string): Map<string, string> {
   const result = new Map<string, string>();
   for (const [userId, apiKey] of entries) {
     if (!/^\\d{1,24}$/.test(userId) || typeof apiKey !== "string" ||
-        !/^[A-Za-z0-9._~-]{24,256}$/.test(apiKey)) {
+        !apiKey.trim() || apiKey.length > 4096 || /[\\r\\n\\0]/.test(apiKey)) {
       throw new Error("DISCORD_USER_API_KEYS contains an invalid user ID or API key.");
     }
     if (keys.has(apiKey)) throw new Error("DISCORD_USER_API_KEYS must use a distinct API key for each Discord user.");
