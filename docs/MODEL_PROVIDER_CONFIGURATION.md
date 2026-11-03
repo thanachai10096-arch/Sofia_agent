@@ -103,3 +103,27 @@ console.log(result);
 - Remote endpoints must use HTTPS. Plain HTTP is accepted only for loopback local model servers. URL credentials, query strings, and fragments are rejected. Named provider presets are bound to their configured origin; use `openai-compatible` for a custom endpoint or proxy.
 - API keys are read from environment variables and are not written to Sofia's setup config by this module.
 - Model capabilities differ. Configuring a model under a route name does not guarantee that the model actually supports vision, tool calls, structured output, or a given context length. Verify those features against the target endpoint before relying on them.
+
+
+## Choose a model per run
+
+The `/v1/agent/runs` API, SDK `run()`/`start()`, and CLI support a per-run `modelSelection` profile. Omit it or use `auto` to let Sofia choose among the configured routes for each phase. Use `fast`, `coding`, `reasoning`, or `vision` to pin that profile’s configured model ID for the run while Sofia keeps its phase/capability routing and verification behavior.
+
+CLI examples:
+
+```sh
+sofia run --model auto "Summarize this repository"
+sofia run --model coding "Fix the failing tests"
+sofia run --model reasoning "Compare these architecture options"
+```
+
+SDK/API example:
+
+```ts
+await client.run({ task: "Review the design", modelSelection: "reasoning" });
+```
+
+These values select model IDs configured for the current Sofia server; they do not let a client submit a new provider URL or API key. The current provider configuration is server-wide, so this is not yet per-user provider credential storage or a persistent account preference. If a provider/model cannot perform a required capability, the run may fail rather than silently switching away from the explicitly selected model. Model availability and capability metadata are not guaranteed by listing a model alone.
+
+
+Explicit model selection is not supported for durable `/v1/jobs` yet; those jobs use automatic routing. The API rejects explicit profile values for that endpoint instead of silently ignoring the selection. User-specific persistent preferences and user-supplied provider credentials are also not implemented by this change.
