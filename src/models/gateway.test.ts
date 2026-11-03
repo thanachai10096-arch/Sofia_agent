@@ -124,3 +124,78 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
     globalThis.fetch = originalFetch;
   }
 });
+
+test("OpenAI-compatible adapter serializes assistant tool calls and tool results", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      choices: [{ finish_reason: "stop", message: { role: "assistant", content: "The file contains a title." } }],
+      usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: { baseUrl: "https://api.deepseek.com", apiKey: "deepseek-secret", model: "deepseek-flash" },
+    });
+    const result = await gateway.generate({
+      task: "Read README.md",
+      kind: "coding",
+      step: 2,
+      messages: [
+        { role: "system", content: "You are Sofia." },
+        { role: "user", content: "Read README.md" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "call_read_1", name: "workspace.read_file", arguments: JSON.stringify({ path: "README.md" }) }],
+        },
+        { role: "tool", toolCallId: "call_read_1", content: "# Sofia Agent" },
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "workspace.read_file",
+          description: "Read a workspace file.",
+          parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        },
+      }],
+    }, route);
+
+    assert.deepEqual(requestedBody.messages, [
+      { role: "system", content: "You are Sofia." },
+      { role: "user", content: "Read README.md" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: "call_read_1",
+          type: "function",
+          function: { name: "workspace.read_file", arguments: JSON.stringify({ path: "README.md" }) },
+        }],
+      },
+      { role: "tool", tool_call_id: "call_read_1", content: "# Sofia Agent" },
+    ]);
+    assert.equal(result.text, "The file contains a title.");
+    assert.deepEqual(result.usage, { inputTokens: 20, outputTokens: 8 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("OpenAI-compatible adapter rejects orphaned tool results", async () => {
+  const gateway = new SofiaModelGateway({
+    coding: { baseUrl: "https://api.deepseek.com", apiKey: "test-key", model: "deepseek-flash" },
+  });
+  await assert.rejects(
+    gateway.generate({
+      task: "continue",
+      kind: "coding",
+      step: 2,
+      messages: [{ role: "tool", content: "orphaned result" }],
+    }, route),
+    /require a toolCallId/,
+  );
+});
