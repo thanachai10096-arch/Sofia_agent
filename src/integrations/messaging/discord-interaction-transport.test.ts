@@ -94,3 +94,21 @@ test("Discord transport accepts additional allowlisted slash command names and f
   await transport.stop();
 });
 
+
+
+test("Discord normal channel messages use stable bounded nonces for outbox deduplication", async () => {
+  const sent: Array<{ body: Record<string, unknown> }> = [];
+  const transport = createDiscordInteractionTransport({
+    publicKeyHex,
+    botToken,
+    fetchImpl: async (_input, init) => {
+      sent.push({ body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+      return response({ id: "987654321" });
+    },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  const nonce = "a".repeat(25);
+  await transport.sendMessage("123456789", "Job completed", undefined, undefined, nonce);
+  assert.deepEqual(sent[0]?.body, { content: "Job completed", nonce, enforce_nonce: true });
+  await transport.stop();
+});
