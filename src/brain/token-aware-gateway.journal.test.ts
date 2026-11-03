@@ -56,6 +56,35 @@ test("gateway persists known settlement before completing the inference", async 
   }
 });
 
+test("gateway fails closed after a worker crash leaves a durable run claim", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-gateway-crash-claim-"));
+  try {
+    const crashedWorkerJournal = new FileSettlementJournal("workspace", root);
+    const abandonedClaim = await crashedWorkerJournal.claimRun("crashed-run");
+    await crashedWorkerJournal.begin("crashed-run", { inputTokens: 10, outputTokens: 100 }, abandonedClaim);
+    // Deliberately do not release the claim: this represents process death before
+    // provider settlement or checkpoint acknowledgement.
+
+    const restartedWorkerJournal = new FileSettlementJournal("workspace", root);
+    let providerCalls = 0;
+    const gateway = new TokenAwareGateway(createBudget(), [createRoute(async () => {
+      providerCalls += 1;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 }, finishReason: "complete" };
+    })], 45_000, restartedWorkerJournal);
+
+    await assert.rejects(
+      gateway.generateMetered(request, undefined, "crashed-run"),
+      (error: unknown) => error instanceof GatewayError && error.message.includes("settlement_run_claimed"),
+    );
+    assert.equal(providerCalls, 0, "a restarted worker must not replay a possibly billed provider request");
+    assert.equal(await restartedWorkerJournal.hasUnresolved("crashed-run"), true);
+    // The abandoned claim is intentionally retained for operator reconciliation.
+    await assert.rejects(restartedWorkerJournal.claimRun("crashed-run"), /already claimed/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("gateway refuses to replay a run with an unresolved provider attempt", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-gateway-journal-"));
   try {
