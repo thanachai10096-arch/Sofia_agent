@@ -32,6 +32,15 @@ function restrictSqlitePermissions(filePath: string): void {
 
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
+/** Built-in node:sqlite was introduced in Node 22.5.0. */
+export function supportsNodeSqlite(version: string): boolean {
+  const match = /^(\\d+)\\.(\\d+)\\.(\\d+)/.exec(version);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 22 || (major === 22 && minor >= 5);
+}
+
 /**
  * Durable SQLite-backed session storage.
  *
@@ -43,6 +52,9 @@ export class SqliteSessionStore {
   private constructor(private readonly db: SqliteDatabase, private readonly filePath: string) {}
 
   static async open(filePath = path.join(sofiaStateDirectory("sessions"), "sessions.sqlite")): Promise<SqliteSessionStore> {
+    if (!supportsNodeSqlite(process.versions.node)) {
+      throw new Error("SQLite-backed Sofia sessions require Node.js 22.5 or later. Node.js 20 remains supported for non-SQLite usage.");
+    }
     const absolutePath = filePath === ":memory:" ? filePath : path.resolve(filePath);
     if (absolutePath !== ":memory:") {
       // Newly-created directories are private; existing directory modes are left untouched.
