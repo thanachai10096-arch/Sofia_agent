@@ -67,12 +67,18 @@ export class PostgresOutboxStore implements OutboxStore {
   constructor(private readonly db:PostgresExecutor) {}
 
   async enqueue(message:EnqueueOutboxMessage):Promise<boolean> {
+    // Never let an enqueue caller invent or reassign a tenant or notification
+    // destination. Both must match the persisted job row exactly.
     const result=await this.db.query(
       `INSERT INTO sofia_agent_outbox
        (id,owner_key_id,job_id,event_type,destination,payload,available_at)
-       VALUES ($1::uuid,$2,$3::uuid,$4,$5,$6::jsonb,COALESCE($7::timestamptz,now()))
+       SELECT $1::uuid,j.owner_key_id,j.id,$5,$4,$6::jsonb,COALESCE($7::timestamptz,now())
+       FROM sofia_agent_jobs AS j
+       WHERE j.id=$3::uuid
+         AND j.owner_key_id IS NOT DISTINCT FROM $2::text
+         AND j.notification_channel_id=$4
        ON CONFLICT (job_id,event_type,destination) DO NOTHING RETURNING id`,
-      [message.id,message.ownerKeyId??null,message.jobId,message.eventType,message.destination,
+      [message.id,message.ownerKeyId??null,message.jobId,message.destination,message.eventType,
        JSON.stringify(message.payload),message.availableAt??null],
     );
     return (result.rowCount??result.rows.length)>0;
