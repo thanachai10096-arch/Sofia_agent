@@ -286,7 +286,7 @@ test("OpenAI-compatible Brain requests enable JSON mode only when tools are abse
   globalThis.fetch = async (_input, init) => {
     requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify({
-      choices: [{ finish_reason: "stop", message: { role: "assistant", content: "{\\"ok\\":true}" } }],
+      choices: [{ finish_reason: "stop", message: { role: "assistant", content: "{\"ok\":true}" } }],
       usage: { prompt_tokens: 7, completion_tokens: 4, total_tokens: 11 },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
@@ -302,7 +302,7 @@ test("OpenAI-compatible Brain requests enable JSON mode only when tools are abse
       context: JSON.stringify({ phase: "plan", instructions: "Return JSON", acceptanceCriteria: [] }),
     }, route);
     assert.deepEqual(requestedBody.response_format, { type: "json_object" });
-    assert.equal(result.text, "{\\"ok\\":true}");
+    assert.equal(result.text, "{\"ok\":true}");
   } finally {
     globalThis.fetch = originalFetch;
   }
