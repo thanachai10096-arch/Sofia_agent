@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { FileMessagingOutbox, flushMessagingOutbox } from "./file-outbox.js";
+import { FileMessagingOutbox, flushMessagingOutbox, startMessagingOutboxRetryWorker } from "./file-outbox.js";
 
 test("outbound messages survive restart and are removed only after confirmed delivery", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-"));
@@ -235,6 +235,43 @@ test("provider and observability failures record only one delivery attempt", asy
     assert.equal(record?.attemptHistory?.length, 1);
     assert.equal(record?.lastErrorCode, "provider_unavailable");
     assert.equal(await outbox.claim(id, 5_000, 10_001) !== undefined, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("retry worker stop waits for an in-flight delivery before shutdown completes", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-worker-stop-"));
+  try {
+    const outbox = new FileMessagingOutbox(root);
+    const id = await outbox.enqueue("line", { conversationId: "line-chat", text: "finish before stop" });
+    let releaseSend!: (value: boolean) => void;
+    let started!: () => void;
+    const sendStarted = new Promise<void>((resolve) => { started = resolve; });
+    const sendGate = new Promise<boolean>((resolve) => { releaseSend = resolve; });
+    let sends = 0;
+    const worker = startMessagingOutboxRetryWorker(outbox, {
+      platform: "line",
+      intervalMs: 1_000,
+      send: async () => {
+        sends++;
+        started();
+        return sendGate;
+      },
+    });
+
+    await sendStarted;
+    let stopCompleted = false;
+    const stopping = worker.stop().then(() => { stopCompleted = true; });
+    await Promise.resolve();
+    assert.equal(stopCompleted, false, "stop must wait while provider delivery is unresolved");
+
+    releaseSend(true);
+    await stopping;
+    assert.equal(stopCompleted, true);
+    assert.equal(sends, 1);
+    assert.equal((await outbox.pending()).some((record) => record.id === id), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
