@@ -169,6 +169,33 @@ test("fails closed when the receipt evidence adapter returns malformed rows", as
   assert.equal(state.active.length, 0);
 });
 
+test("rejects duplicate or unrelated rows from the receipt evidence adapter", async () => {
+  const duplicateState = makeHost();
+  const duplicateGet = duplicateState.host.verification.getEvidence;
+  duplicateState.host.verification.getEvidence = async (requestedScope, ids) => {
+    const rows = await duplicateGet(requestedScope, ids);
+    return [...rows, ...rows];
+  };
+  addReceipt(duplicateState, "duplicate-evidence", "run-duplicate");
+  const duplicateResult = await new VerifiedLearningLoop(duplicateState.host)
+    .recordVerifiedCompletion(scope, "duplicate-evidence", "Fix TypeScript build");
+  assert.equal(duplicateResult.recorded, false);
+  assert.equal(duplicateState.experiences.length, 0);
+
+  const extraState = makeHost();
+  const extraGet = extraState.host.verification.getEvidence;
+  extraState.host.verification.getEvidence = async (requestedScope, ids) => {
+    const rows = await extraGet(requestedScope, ids);
+    const original = rows[0]!;
+    return [...rows, { ...original, id: "unrequested-evidence" }];
+  };
+  addReceipt(extraState, "extra-evidence", "run-extra");
+  const extraResult = await new VerifiedLearningLoop(extraState.host)
+    .recordVerifiedCompletion(scope, "extra-evidence", "Fix TypeScript build");
+  assert.equal(extraResult.recorded, false);
+  assert.equal(extraState.experiences.length, 0);
+});
+
 test("rejects stale policy receipts and untrusted evidence", async () => {
   const state = makeHost();
   const loop = new VerifiedLearningLoop(state.host);
