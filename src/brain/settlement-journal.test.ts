@@ -478,7 +478,7 @@ test("settlement validation rejects malformed historical known-usage evidence", 
       JSON.stringify({ version: 1, type: "started", attemptId: "attempt-1", at, maxInputTokens: 10, maxOutputTokens: 10 }),
       malformedSettled,
       JSON.stringify({ version: 1, type: "started", attemptId: "attempt-2", at, maxInputTokens: 10, maxOutputTokens: 10 }),
-    ].join("\\n") + "\\n";
+    ].join("\n") + "\n";
     await writeFile(journalFile, source, { mode: 0o600 });
 
     const journal = new FileSettlementJournal(namespace, root);
