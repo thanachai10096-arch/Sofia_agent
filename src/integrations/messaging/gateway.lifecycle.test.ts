@@ -93,3 +93,40 @@ test("a handler finishing after stop cannot send a stale reply", async () => {
   assert.deepEqual(await dispatch, { status: "disabled" });
   assert.equal(sends, 0);
 });
+
+test("a dedupe claim resolving after restart is released and cannot start old work", async () => {
+  let finishClaim!: (claimed: boolean) => void;
+  let claimStarted!: () => void;
+  let releaseCount = 0;
+  let handled = 0;
+  const claimPending = new Promise<boolean>((resolve) => { finishClaim = resolve; });
+  const entered = new Promise<void>((resolve) => { claimStarted = resolve; });
+
+  const gateway = createMessagingGateway({
+    enabled: true,
+    adapters: [adapter()],
+    allowUser: () => true,
+    deduplicator: {
+      claim: async () => {
+        claimStarted();
+        return claimPending;
+      },
+      release: async () => { releaseCount += 1; },
+    },
+    onMessage: async () => {
+      handled += 1;
+      return "must not run";
+    },
+  });
+
+  await gateway.start();
+  const dispatch = gateway.dispatch(message());
+  await entered;
+  await gateway.restart();
+  finishClaim(true);
+
+  assert.deepEqual(await dispatch, { status: "disabled" });
+  assert.equal(releaseCount, 1);
+  assert.equal(handled, 0);
+  await gateway.stop();
+});
