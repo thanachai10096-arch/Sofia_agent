@@ -132,3 +132,6 @@ export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/u
 
 export { createIsolatedSkillBenchmarkEvaluator } from "./brain/skill-benchmark.js";
 export type { SkillBenchmarkFixture, SkillBenchmarkRun, IsolatedSkillBenchmarkRunner, SkillBenchmarkEvaluatorOptions } from "./brain/skill-benchmark.js";
+
+export { SqliteModelCallJournal } from "./brain/model-call-journal.js";
+export type { ModelCallIdentity, ModelCallSettlement, ModelCallJournalEntry, DispatchDecision, SettlementState } from "./brain/model-call-journal.js";
