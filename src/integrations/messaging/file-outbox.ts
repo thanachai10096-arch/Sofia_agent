@@ -14,6 +14,8 @@ export interface MessagingOutboxRecord {
   lastAttemptAt?: number;
   nextAttemptAt?: number;
   lastErrorCode?: "provider_unavailable";
+  /** Bounded metadata-only delivery history; never stores message text or provider errors. */
+  attemptHistory?: Array<{ at: number; outcome: "failed"; code: "provider_unavailable" }>;
   state?: "pending" | "dead_letter";
 }
 const SAFE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -130,6 +132,10 @@ export class FileMessagingOutbox {
         lastAttemptAt: now,
         nextAttemptAt: decision.nextAttemptAt,
         lastErrorCode: "provider_unavailable",
+        attemptHistory: [
+          ...(Array.isArray(record.attemptHistory) ? record.attemptHistory.slice(-7) : []),
+          { at: now, outcome: "failed" as const, code: "provider_unavailable" as const },
+        ],
         state: decision.deadLetter ? "dead_letter" : "pending",
       };
       const temporary = target + "." + process.pid + "." + randomUUID() + ".tmp";
@@ -223,6 +229,10 @@ export class FileMessagingOutbox {
             typeof value.message.conversationId !== "string" ||
             typeof value.message.text !== "string" ||
             Buffer.byteLength(value.message.text, "utf8") > MAX_RECORD_BYTES) continue;
+        if (value.attemptHistory !== undefined &&
+            (!Array.isArray(value.attemptHistory) || value.attemptHistory.length > 8 ||
+             value.attemptHistory.some((entry) => !entry || !Number.isFinite(entry.at) ||
+               entry.outcome !== "failed" || entry.code !== "provider_unavailable"))) continue;
         records.push(value);
       } catch { /* corrupt records remain for operator inspection; never auto-delete */ }
     }
