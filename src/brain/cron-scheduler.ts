@@ -54,6 +54,11 @@ export interface CronAuditEvent {
   scheduleId: string;
   detail?: string;
 }
+function hasLiveRecoveryLease(execution: StoredCronExecution, nowMs: number): boolean {
+  const expiresAt = execution.recoveryLeaseExpiresAt ? Date.parse(execution.recoveryLeaseExpiresAt) : 0;
+  return !!execution.recoveryLeaseOwnerToken && Number.isFinite(expiresAt) && expiresAt > nowMs;
+}
+
 interface SchedulerState {
   schedules: CronSchedule[];
   history: StoredCronExecution[];
@@ -423,7 +428,8 @@ export class CronScheduler {
         // the global concurrency budget forever after a restart.
         const orphaned = await this.store.transact(async state => {
           const current = state.history.find(item => item.id === execution.id);
-          if (!current || (current.status !== "claimed" && current.status !== "running")) return false;
+          if (!current || (current.status !== "claimed" && current.status !== "running") ||
+            hasLiveRecoveryLease(current, this.now().getTime())) return false;
           current.status = "failed";
           current.finishedAt = this.now().toISOString();
           current.error = "Schedule record is missing during recovery; execution cannot be safely resumed.";
@@ -438,9 +444,10 @@ export class CronScheduler {
       }
 
       if (!execution.jobId) {
-        await this.store.transact(async state => {
+        const transitioned = await this.store.transact(async state => {
           const current = state.history.find(item => item.id === execution.id);
-          if (!current || (current.status !== "claimed" && current.status !== "running")) return;
+          if (!current || (current.status !== "claimed" && current.status !== "running") ||
+            hasLiveRecoveryLease(current, this.now().getTime())) return false;
           current.status = "failed";
           current.finishedAt = this.now().toISOString();
           current.error = "Dispatch outcome is indeterminate after restart; automatic resubmission suppressed to prevent duplicate work.";
@@ -453,9 +460,12 @@ export class CronScheduler {
             at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.indeterminate",
             scheduleId: execution.scheduleId, detail: execution.id,
           });
+          return true;
         });
-        indeterminate++;
-        reconciled++;
+        if (transitioned) {
+          indeterminate++;
+          reconciled++;
+        }
         continue;
       }
 
@@ -469,9 +479,10 @@ export class CronScheduler {
         continue;
       }
       if (!job) {
-        await this.store.transact(async state => {
+        const transitioned = await this.store.transact(async state => {
           const current = state.history.find(item => item.id === execution.id);
-          if (!current || (current.status !== "claimed" && current.status !== "running")) return;
+          if (!current || (current.status !== "claimed" && current.status !== "running") ||
+            hasLiveRecoveryLease(current, this.now().getTime())) return false;
           current.status = "failed";
           current.finishedAt = this.now().toISOString();
           current.error = "Runtime job was not found during scheduler recovery.";
@@ -484,8 +495,9 @@ export class CronScheduler {
             at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.job_missing",
             scheduleId: execution.scheduleId, detail: execution.jobId,
           });
+          return true;
         });
-        reconciled++;
+        if (transitioned) reconciled++;
         continue;
       }
 
@@ -493,9 +505,10 @@ export class CronScheduler {
         const recoveredStatus: CronExecution["status"] = job.status;
         const recoveredJobId = job.id;
         const recoveredError = job.error;
-        await this.store.transact(async state => {
+        const transitioned = await this.store.transact(async state => {
           const current = state.history.find(item => item.id === execution.id);
-          if (!current || (current.status !== "claimed" && current.status !== "running")) return;
+          if (!current || (current.status !== "claimed" && current.status !== "running") ||
+            hasLiveRecoveryLease(current, this.now().getTime())) return false;
           current.status = recoveredStatus;
           current.finishedAt = this.now().toISOString();
           if (recoveredError) current.error = recoveredError;
@@ -510,8 +523,9 @@ export class CronScheduler {
             at: current.finishedAt, actor: "scheduler", action: "schedule.recovery.reconciled",
             scheduleId: execution.scheduleId, detail: recoveredStatus,
           });
+          return true;
         });
-        reconciled++;
+        if (transitioned) reconciled++;
         continue;
       }
 
