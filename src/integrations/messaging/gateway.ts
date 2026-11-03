@@ -113,7 +113,11 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
       return enabled ? lifecycle : "disabled";
     },
     async dispatch(message) {
-      if (!enabled || stopped) return { status: "disabled" };
+      const dispatchGeneration = generation;
+      const dispatchSignal = controller.signal;
+      const isCurrentDispatch = () =>
+        dispatchGeneration === generation && !dispatchSignal.aborted && !stopped;
+      if (!enabled || !isCurrentDispatch()) return { status: "disabled" };
       const identity = message.identity;
       if (identity.platform !== message.platform || !identity.userId || identity.userId.length > 256 ||
           !identity.channelId || identity.channelId.length > 256 || !identity.conversationId ||
@@ -135,6 +139,9 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
           errorType: error instanceof Error ? error.name : "unknown",
         });
       }
+      // Policy checks may await external stores. A restart during that wait must
+      // not allow an old inbound message to cross into the new adapter generation.
+      if (!isCurrentDispatch()) return { status: "disabled" };
       if (!allowed) {
         log?.warn("messaging_access_denied", { platform: message.platform });
         return { status: "forbidden" };
@@ -143,9 +150,9 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
       const currentTime = now();
       if (options.rateLimiter) {
         try {
-          if (!(await options.rateLimiter.consume({ key: rateKey, limit: max, windowMs, now: currentTime }))) {
-            return { status: "rate_limited" };
-          }
+          const permitted = await options.rateLimiter.consume({ key: rateKey, limit: max, windowMs, now: currentTime });
+          if (!isCurrentDispatch()) return { status: "disabled" };
+          if (!permitted) return { status: "rate_limited" };
         } catch (error) {
           log?.warn("messaging_rate_limiter_failed", {
             platform: message.platform,
@@ -177,8 +184,15 @@ export function createMessagingGateway(options: MessagingGatewayOptions): Messag
       if (options.deduplicator && !(await options.deduplicator.claim(dedupeKey))) {
         return { status: "duplicate" };
       }
+      if (!isCurrentDispatch()) {
+        if (options.deduplicator) await options.deduplicator.release(dedupeKey);
+        return { status: "disabled" };
+      }
       try {
-        const reply = await options.onMessage(message, controller.signal);
+        const reply = await options.onMessage(message, dispatchSignal);
+        // A handler may ignore cancellation or finish just as a restart begins.
+        // Never deliver its stale reply through an adapter from the new generation.
+        if (!isCurrentDispatch()) return { status: "disabled" };
         if (reply?.trim()) {
           const adapter = adapters.get(message.platform);
           if (adapter) {
