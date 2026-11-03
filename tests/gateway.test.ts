@@ -32,13 +32,13 @@ test("gateway returns a validated assistant response and token usage", async () 
   }
 });
 
-test("gateway retries transient provider status and then succeeds", async () => {
+test("gateway retries explicit rate-limit rejection and then succeeds", async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => {
     calls++;
     return calls === 1
-      ? new Response("temporarily unavailable", { status: 503 })
+      ? new Response("rate limited", { status: 429, headers: { "retry-after": "0.001" } })
       : okResponse();
   };
   try {
@@ -48,6 +48,42 @@ test("gateway retries transient provider status and then succeeds", async () => 
     const result = await gateway.generate(request, makeRoute());
     assert.equal(result.text, "hello back");
     assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("gateway does not retry ambiguous server errors that may already be billed", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response("temporarily unavailable", { status: 503 });
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model" },
+    });
+    await assert.rejects(gateway.generate(request, makeRoute()), /request failed \(503\)/);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("gateway does not retry network failures with an ambiguous billing outcome", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    throw new Error("socket disconnected");
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": { baseUrl: "https://example.test/v1", apiKey: "test", model: "test-model" },
+    });
+    await assert.rejects(gateway.generate(request, makeRoute()), /socket disconnected/);
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
