@@ -220,3 +220,24 @@ test("SQLite session storage rejects a directory as a database path", {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("atomic appends from independent SQLite connections preserve every message", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-atomic-append-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const first = await SqliteSessionStore.open(file);
+  const second = await SqliteSessionStore.open(file);
+  try {
+    for (let index = 0; index < 40; index += 1) {
+      (index % 2 === 0 ? first : second).appendMessage("shared", `message-${index}`);
+    }
+    const messages = first.get("shared")?.messages ?? [];
+    assert.equal(messages.length, 40);
+    assert.deepEqual(new Set(messages), new Set(Array.from({ length: 40 }, (_, index) => `message-${index}`)));
+    assert.equal(second.get("shared")?.messages.length, 40);
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
