@@ -79,6 +79,18 @@ export interface VerifiedLearningHost {
     runRegression(scope: LearningScope, candidate: SkillCandidate): Promise<SkillEvaluation>;
   };
   currentPolicyRevision(scope: LearningScope): Promise<string>;
+  /**
+   * Run an operation while the authoritative policy revision is pinned to the
+   * expected value. Implementations MUST serialize policy writes against this
+   * callback (or use an equivalent shared transactional/locking primitive).
+   * Returning false means the revision was stale and operation was not called.
+   * This is required for activation; currentPolicyRevision() alone is only a snapshot.
+   */
+  withCurrentPolicyRevision?<T>(
+    scope: LearningScope,
+    expectedRevision: string,
+    operation: () => Promise<T>,
+  ): Promise<{ matched: boolean; value?: T }>;
   redact(text: string): string;
   assessCandidate(scope: LearningScope, candidate: SkillCandidate): Promise<{ allowed: boolean; confidence: number; reason?: string }>;
   /** Must route promotion through Sofia's existing VersionedSkillLifecycle and explicit approval gate. */
