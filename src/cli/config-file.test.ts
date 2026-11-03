@@ -177,3 +177,48 @@ test("CLI run combines task arguments and unknown commands resolve to help", () 
   });
   assert.deepEqual(resolveCliInvocation(["unsupported"]), { command: "help" });
 });
+
+test("safe config loading returns only non-secret provider metadata", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-safe-load-test-"));
+  const file = path.join(directory, "config.json");
+  try {
+    await writeFile(file, JSON.stringify({
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4.1-mini",
+    }));
+    assert.deepEqual(await readSafeLocalConfig(file), {
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4.1-mini",
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("safe config loading rejects legacy plaintext keys instead of importing them", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-safe-legacy-test-"));
+  const file = path.join(directory, "config.json");
+  const original = JSON.stringify({ provider: "openai", apiKey: "legacy-secret-value" });
+  try {
+    await writeFile(file, original, { mode: 0o600 });
+    await assert.rejects(readSafeLocalConfig(file), /legacy plaintext API key/);
+    assert.equal(await readFile(file, "utf8"), original);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("safe config loading rejects non-object and invalid-typed settings", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-invalid-load-test-"));
+  const file = path.join(directory, "config.json");
+  try {
+    await writeFile(file, JSON.stringify(["not", "an", "object"]));
+    await assert.rejects(readSafeLocalConfig(file), /must contain a JSON object/);
+    await writeFile(file, JSON.stringify({ provider: 42 }));
+    await assert.rejects(readSafeLocalConfig(file), /provider must be a string/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
