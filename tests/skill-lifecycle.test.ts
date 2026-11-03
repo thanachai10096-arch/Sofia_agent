@@ -37,6 +37,37 @@ test("skill lifecycle rejects missing, blank, duplicate, or oversized provenance
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("separate lifecycle instances reload under the writer lock and preserve each other's candidates", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "shared", "lifecycle.json");
+    const firstWriter = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    const secondWriter = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+
+    const first = firstWriter.propose(pkg("1.0.0"), {
+      source: "writer-one", evidenceIds: ["writer-one-evidence"], confidence: 0.9,
+    });
+    const second = secondWriter.propose({ ...pkg("1.0.1"), skill: { ...pkg("1.0.1").skill, id: "second-skill" } }, {
+      source: "writer-two", evidenceIds: ["writer-two-evidence"], confidence: 0.9,
+    });
+
+    const refreshedWriter = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    assert.deepEqual(refreshedWriter.list().map(item => item.id).sort(), [first.id, second.id].sort());
+
+    const lockDirectory = file + ".lock";
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(lockDirectory);
+    assert.throws(
+      () => refreshedWriter.propose(pkg("1.0.2"), {
+        source: "blocked-writer", evidenceIds: ["blocked"], confidence: 0.9,
+      }),
+      /locked by another writer/i,
+    );
+    rmSync(lockDirectory, { recursive: true, force: true });
+    assert.equal(refreshedWriter.list().length, 2, "a rejected writer must not alter persisted candidates");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill lifecycle requires evaluation and confidence before promotion", async () => {
   const root = dir();
   try {
