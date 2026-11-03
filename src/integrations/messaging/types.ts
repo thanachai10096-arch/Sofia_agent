@@ -30,6 +30,8 @@ export interface OutboundMessage {
   replyToMessageId?: string;
   /** Opaque provider interaction correlation ID; used by Discord deferred replies. */
   interactionId?: string;
+  /** Stable durable-outbox ID; transports may map it to provider deduplication. */
+  deliveryId?: string;
 }
 export interface DeliveryReceipt {
   state: DeliveryState;
