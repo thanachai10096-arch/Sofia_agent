@@ -245,7 +245,7 @@ if (process.env.DISCORD_GATEWAY_ENABLED === "true") {
           });
           return;
         }
-        if (rawText.startsWith("/") && !rawText.startsWith("/run ")) return;
+        if (rawText.startsWith("/") && rawText !== "/run" && !rawText.startsWith("/run ")) return;
         const task = rawText === "/run" ? "" : rawText.startsWith("/run ") ? rawText.slice(5).trim() : rawText;
         if (!task) {
           await discordGatewayTransport?.sendMessage(message.channelId, "Please include a task after /run.", message.id);
