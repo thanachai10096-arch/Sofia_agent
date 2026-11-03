@@ -110,14 +110,14 @@ export function buildTelegramSessionContext(
   userId: string,
   conversationId: string,
 ): string | undefined {
-  let session;
+  let messages: string[] = [];
   try {
-    session = store?.get(telegramSessionKey(userId, conversationId));
+    messages = store?.get(telegramSessionKey(userId, conversationId))?.messages ?? [];
   } catch {
     // Session storage is an optional context enhancement; a read failure must not block chat.
     return undefined;
   }
-  const history = (session?.messages ?? [])
+  const history = messages
     .filter((entry) => !containsPromptInjection(entry))
     .slice(-10)
     .map((entry) => String(redactSecrets(entry)).slice(0, 1_200));
