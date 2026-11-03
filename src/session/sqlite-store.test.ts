@@ -308,3 +308,36 @@ test("SQLite session storage rejects a directory as a database path", {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("transactional append rolls back transcript and FTS changes when a message insert fails", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-append-rollback-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(file);
+  const db = new DatabaseSync(file);
+  try {
+    store.save({ id: "append-rollback", messages: ["preserve this transcript"], updatedAt: 0 });
+    assert.equal(store.search("preserve this transcript").length, 1);
+
+    db.exec(`
+      CREATE TRIGGER reject_append_message
+      BEFORE INSERT ON session_messages
+      WHEN NEW.content = 'force-append-transaction-error'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced append transaction failure');
+      END;
+    `);
+
+    assert.throws(
+      () => store.appendMessages("append-rollback", ["replacement", "force-append-transaction-error"]),
+      /forced append transaction failure/,
+    );
+    assert.deepEqual(store.get("append-rollback")?.messages, ["preserve this transcript"]);
+    assert.equal(store.search("preserve this transcript").length, 1);
+    assert.deepEqual(store.search("replacement"), []);
+  } finally {
+    db.close();
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
