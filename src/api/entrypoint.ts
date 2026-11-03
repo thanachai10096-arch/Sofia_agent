@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
@@ -187,16 +188,30 @@ if (discordConfigured) {
           job.notificationDelivered || job.status === "queued" || job.status === "running" ||
           Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
       notificationInFlight.add(job.id);
+      const notificationToken = randomUUID();
+      let claimed = false;
       try {
+        // The durable claim serializes recovery delivery across workers sharing
+        // this local file store. A different-host shared store must provide its
+        // own transactional implementation; this file store fails closed there.
+        if (deps.jobRuntime.claimNotification) {
+          claimed = await deps.jobRuntime.claimNotification(job.id, notificationToken, 30_000);
+          if (!claimed) continue;
+        } else {
+          // Backward-compatible fallback for injected JobRuntime implementations
+          // that have not adopted the optional claim contract yet.
+          claimed = true;
+        }
         const message = job.status === "completed"
           ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
           : job.snapshot
             ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
             : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
         await discordTransport.sendMessage(job.notificationChannelId, message);
-        await deps.jobRuntime.markNotificationDelivered?.(job.id);
+        await deps.jobRuntime.markNotificationDelivered?.(job.id, notificationToken);
       } catch {
-        // Keep the marker unset so the next retry can attempt delivery again.
+        // Keep the marker unset and release this worker's lease for a prompt retry.
+        if (claimed) await deps.jobRuntime.releaseNotificationClaim?.(job.id, notificationToken).catch(() => undefined);
       } finally {
         notificationInFlight.delete(job.id);
       }
