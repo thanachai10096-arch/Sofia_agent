@@ -78,7 +78,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
   function enqueueMessage(raw: GatewayMessage): void {
     const userId = raw.author?.id;
     const channelId = raw.channel_id;
-    if (!userId || !channelId || !/^\\d{1,24}$/.test(userId) || !/^\\d{1,24}$/.test(channelId)) return;
+    if (!userId || !channelId || !/^\d{1,24}$/.test(userId) || !/^\d{1,24}$/.test(channelId)) return;
     const key = JSON.stringify([userId, channelId]);
     const queued = queuedMessageCounts.get(key) ?? 0;
     if (queued >= MAX_QUEUED_MESSAGES_PER_SESSION) {
