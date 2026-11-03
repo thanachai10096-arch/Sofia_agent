@@ -136,14 +136,18 @@ test("startup recovery restores an interrupted file target from a verified durab
     await journal.append(interrupted, prepared.revision);
     await writeFile(destination, "partially-restored");
 
+    // Recreate stores and adapter as a fresh process would after restart.
+    const reopenedJournal = new FileRestoreJournalStore(path.join(root, "journal"));
+    const reopenedSnapshots = new FileRestoreSnapshotStore(path.join(root, "snapshots"));
+    const reopenedAdapter = directoryBackupRestoreAdapter("state", destinationRoot, ["state.json"]);
     const recovered = await recoverInterruptedRestoreTransaction({
       transactionId,
-      journal,
-      snapshotStore,
+      journal: reopenedJournal,
+      snapshotStore: reopenedSnapshots,
       adapters: [{
-        name: adapter.name,
-        paths: adapter.paths,
-        rollbackFromSnapshotBytes: adapter.rollbackFromSnapshotBytes!,
+        name: reopenedAdapter.name,
+        paths: reopenedAdapter.paths,
+        rollbackFromSnapshotBytes: reopenedAdapter.rollbackFromSnapshotBytes!,
       }],
       async withExclusiveLock(_id, operation) { return operation(); },
     });
