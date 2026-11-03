@@ -736,3 +736,98 @@ test("Brain saves reusable workflow memory only after verified completion and ex
   assert.match(learned.content, /Verification evidence:/);
   assert.doesNotMatch(learned.content, /"content":"hello"/);
 });
+
+
+test("Brain does not advance to later steps when an in-flight tool resolves after cancellation", async () => {
+  const controller = new AbortController();
+  let resolveFirst!: (value: ToolResult) => void;
+  let firstStarted!: () => void;
+  const started = new Promise<void>((resolve) => { firstStarted = resolve; });
+  const calls: string[] = [];
+  const tools = makeTools();
+  tools.execute = async (call) => {
+    calls.push(call.tool);
+    if (call.tool === "workspace.write_file") {
+      firstStarted();
+      return await new Promise<ToolResult>((resolve) => { resolveFirst = resolve; });
+    }
+    return {
+      ok: true,
+      data: ["hello.txt"],
+      evidenceId: "late-step",
+    };
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const execution = brain.run({
+    task: "Write a file, then inspect it",
+    signal: controller.signal,
+    understanding: {
+      objective: "Write then inspect a file",
+      constraints: [],
+      assumptions: [],
+      requiredCapabilities: ["file-write"],
+      requiredTools: ["workspace.write_file", "workspace.list_files"],
+      risk: "low",
+      successCriteria: ["file inspected"],
+      ambiguities: [],
+    },
+    plan: {
+      strategy: "initial",
+      reason: "Perform two ordered steps",
+      steps: [
+        {
+          id: "write",
+          objective: "Write the file",
+          dependencies: [],
+          call: { tool: "workspace.write_file", input: { path: "hello.txt", content: "hello" } },
+        },
+        {
+          id: "inspect",
+          objective: "Inspect the file",
+          dependencies: ["write"],
+          call: { tool: "workspace.list_files", input: { path: "." } },
+        },
+      ],
+    },
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "file exists" };
+      },
+    }],
+  });
+
+  await started;
+  controller.abort(new Error("cancel during tool execution"));
+  const report = await execution;
+  assert.equal(report.state, "cancelled");
+  assert.equal(report.completed, false);
+
+  // The underlying tool may not cooperate with AbortSignal. Its late result
+  // must never be consumed as permission to advance the Brain state machine.
+  resolveFirst({ ok: true, data: { written: true }, evidenceId: "late-write" });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(calls, ["workspace.write_file"]);
+});
