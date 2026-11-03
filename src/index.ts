@@ -25,7 +25,11 @@ export { createBuiltinTools } from "./tools/builtin.js";
 export { buildRepositoryMap, compactRepositoryMap } from "./brain/repository-intelligence.js";
 export { createEditPatch, applyEditPatch, unifiedDiff } from "./brain/edit-engine.js";
 export { reviewCodeChange } from "./review/code-review.js";
-export { FileProjectMemoryStore, PersistentSkillLedger, memoryEntryFromConvention, memoryEntryFromRepair } from "./brain/project-memory.js";
+export { ScopedProjectMemoryStore } from "./brain/scoped-project-memory.js";
+export type { ProjectMemoryAccessScope, ScopedProjectMemoryStoreOptions } from "./brain/scoped-project-memory.js";
+export { FileProjectMemoryStore, PersistentSkillLedger, ProjectEpisodicMemoryStore, ProjectMemoryFeedbackStore, memoryEntryFromConvention, memoryEntryFromRepair, memoryEntryFromEpisode } from "./brain/project-memory.js";
+export { listProjectMemoryVersions, rollbackProjectMemory, saveVersionedProjectMemory } from "./brain/memory-versioning.js";
+export type { ProjectMemoryVersion, ProjectMemoryVersionMetadata, ProjectMemoryVersionResult } from "./brain/memory-versioning.js";
 export { DurableJobRuntime } from "./brain/job-runtime.js";
 export { BoundedSubagentCoordinator } from "./brain/subagent-coordinator.js";
 export type { SubagentTask, SubagentBatchItem, SubagentCoordinatorOptions, SubagentRuntimeFactory } from "./brain/subagent-coordinator.js";
@@ -125,4 +129,15 @@ export type { ManagedMcpServer, ManagedMcpServerOptions } from "./mcp/managed-se
 export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHAT_DEDUPE_RELEASE_SCRIPT } from "./integrations/redis-chat-deduplicator.js";
 export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
+export { MarkdownUserMemoryStore, MarkdownProjectMemoryStore } from "./brain/markdown-memory.js";
+export type { MarkdownMemoryOptions } from "./brain/markdown-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
+
+export { analyzeMemoryEntries, analyzeMemoryConsolidation, analyzeVerifiedMemoryRevalidation, detectMemoryConflicts, normalizeMemoryForComparison } from "./brain/memory-maintenance.js";
+export type { MemoryMaintenanceRecord, MemoryMaintenanceReport, MemoryConsolidationReport, VerifiedMemoryRevalidationRecord, VerifiedMemoryRevalidationCandidate, VerifiedMemoryRevalidationReport, StaleMemoryCandidate, DuplicateMemoryGroup, MemoryReviewPair, MemoryConflictReviewPair } from "./brain/memory-maintenance.js";
+
+export { rankMemoryDocuments } from "./brain/memory-retrieval.js";
+export type { MemorySearchDocument, RankedMemory } from "./brain/memory-retrieval.js";
+
+export { promoteVerifiedProjectMemory } from "./brain/verified-memory.js";
+export type { VerifiedMemoryKind, MemoryPromotionCandidate, MemoryVerificationCheck, MemoryVerificationReceipt, VerifiedMemoryPromotionOptions, VerifiedMemoryPromotionResult } from "./brain/verified-memory.js";

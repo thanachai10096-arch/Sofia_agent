@@ -90,11 +90,11 @@ export async function runDiscordTaskAsDurableJob(
  * treated as untrusted data, secret-redacted, injection-filtered, and never shared
  * between Discord users or channels.
  */
-export async function buildDiscordSessionContext(runtime: JobRuntime, sessionKey: string, limit = 5): Promise<string> {
+export async function buildDiscordSessionContext(runtime: JobRuntime, sessionKey: string, limit = 5, ownerKeyId?: string): Promise<string> {
   if (!sessionKey.trim() || sessionKey.length > 1024) throw new Error("Invalid Discord session key.");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10) throw new Error("Invalid Discord session context limit.");
   const jobs = (await runtime.list())
-    .filter((job) => job.sessionKey === sessionKey && job.status === "completed" && Boolean(job.result?.summary))
+    .filter((job) => job.sessionKey === sessionKey && (!ownerKeyId || job.ownerKeyId === ownerKeyId) && job.status === "completed" && Boolean(job.result?.summary))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, limit)
     .reverse();

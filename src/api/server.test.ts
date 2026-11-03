@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
+import type { UserMemoryEntry, UserMemoryStore } from "../brain/user-memory.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
 
@@ -34,7 +35,7 @@ test("API sessions are persisted and scoped to the authenticated API key", async
   assert.ok(address && typeof address !== "string");
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
-  const startAndWait = async (apiKey: string, task: string) => {
+  const startAndWait = async (apiKey: string, task: string): Promise<string> => {
     const started = await fetch(`${baseUrl}/v1/agent/runs`, {
       method: "POST",
       headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
@@ -48,7 +49,7 @@ test("API sessions are persisted and scoped to the authenticated API key", async
       });
       assert.equal(response.status, 200);
       const run = await response.json() as { status: string };
-      if (run.status === "completed") return;
+      if (run.status === "completed") return initial.id;
       if (run.status === "failed" || run.status === "cancelled") {
         throw new Error(`API run ended with status ${run.status}`);
       }
@@ -58,8 +59,28 @@ test("API sessions are persisted and scoped to the authenticated API key", async
   };
 
   try {
-    await startAndWait("key-one", "first user's task");
-    await startAndWait("key-two", "second user's task");
+    const firstRunId = await startAndWait("key-one", "first user's task");
+    const secondRunId = await startAndWait("key-two", "second user's task");
+
+    // A different authenticated principal cannot inspect or cancel another user's run.
+    const crossUserRead = await fetch(`${baseUrl}/v1/agent/runs/${firstRunId}`, {
+      headers: { authorization: "Bearer key-two" },
+    });
+    assert.equal(crossUserRead.status, 404);
+    const crossUserDelete = await fetch(`${baseUrl}/v1/agent/runs/${firstRunId}`, {
+      method: "DELETE",
+      headers: { authorization: "Bearer key-two" },
+    });
+    assert.equal(crossUserDelete.status, 404);
+
+    const firstOwnerRead = await fetch(`${baseUrl}/v1/agent/runs/${firstRunId}`, {
+      headers: { authorization: "Bearer key-one" },
+    });
+    assert.equal(firstOwnerRead.status, 200);
+    const secondOwnerRead = await fetch(`${baseUrl}/v1/agent/runs/${secondRunId}`, {
+      headers: { authorization: "Bearer key-two" },
+    });
+    assert.equal(secondOwnerRead.status, 200);
 
     const idFor = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 32);
     assert.deepEqual(sessions.get(`${idFor("key-one")}:shared-client-session`)?.messages, [
@@ -143,6 +164,161 @@ test("API rejects unknown model routes before starting a run", async () => {
     });
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { error: "invalid_model_route" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API personal memory is isolated by distinct authenticated per-user API keys", async () => {
+  const byPrincipal = new Map<string, UserMemoryEntry[]>();
+  const memoryStore: UserMemoryStore = {
+    async save(principal: string, entry: UserMemoryEntry) {
+      const entries = byPrincipal.get(principal) ?? [];
+      entries.push(entry);
+      byPrincipal.set(principal, entries);
+    },
+    async list(principal: string) { return byPrincipal.get(principal) ?? []; },
+    async find(principal: string, query: string, _limit?: number) {
+      return (byPrincipal.get(principal) ?? []).filter((entry) => entry.content.includes(query));
+    },
+    async delete(principal: string, id: string) {
+      const entries = byPrincipal.get(principal) ?? [];
+      const next = entries.filter((entry) => entry.id !== id);
+      byPrincipal.set(principal, next);
+      return next.length !== entries.length;
+    },
+    async clear(principal: string) { byPrincipal.delete(principal); },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: memoryStore,
+  }, {
+    apiKeys: {
+      "telegram-user-one-key": ["memory:read", "memory:write"],
+      "telegram-user-two-key": ["memory:read", "memory:write"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const request = (key: string, init: RequestInit = {}) => fetch(baseUrl + "/v1/memory", {
+    ...init,
+    headers: {
+      authorization: "Bearer " + key,
+      ...(init.body ? { "content-type": "application/json" } : {}),
+    },
+  });
+
+  try {
+    const saved = await request("telegram-user-one-key", {
+      method: "POST",
+      body: JSON.stringify({ kind: "preference", content: "I prefer private project summaries." }),
+    });
+    assert.equal(saved.status, 201);
+    const savedPayload = await saved.json() as { memory: UserMemoryEntry };
+    assert.ok(savedPayload.memory.id);
+
+    const ownerRead = await request("telegram-user-one-key");
+    const ownerPayload = await ownerRead.json() as { memories: UserMemoryEntry[] };
+    assert.equal(ownerPayload.memories.length, 1);
+    assert.match(ownerPayload.memories[0]?.content ?? "", /private project summaries/);
+
+    const otherRead = await request("telegram-user-two-key");
+    const otherPayload = await otherRead.json() as { memories: Array<{ content: string }> };
+    assert.deepEqual(otherPayload.memories, []);
+
+    // A second principal can write private memory without making it visible to the first.
+    const secondSaved = await request("telegram-user-two-key", {
+      method: "POST",
+      body: JSON.stringify({ kind: "preference", content: "I prefer isolated release notes." }),
+    });
+    assert.equal(secondSaved.status, 201);
+    const secondOwnerRead = await request("telegram-user-two-key");
+    const secondOwnerPayload = await secondOwnerRead.json() as { memories: UserMemoryEntry[] };
+    assert.equal(secondOwnerPayload.memories.length, 1);
+    assert.match(secondOwnerPayload.memories[0]?.content ?? "", /isolated release notes/);
+
+    const firstStillIsolated = await request("telegram-user-one-key");
+    const firstStillIsolatedPayload = await firstStillIsolated.json() as { memories: UserMemoryEntry[] };
+    assert.equal(firstStillIsolatedPayload.memories.length, 1);
+    assert.match(firstStillIsolatedPayload.memories[0]?.content ?? "", /private project summaries/);
+
+    // Knowing another user's memory ID must not authorize deletion.
+    const crossUserDelete = await fetch(baseUrl + "/v1/memory/" + encodeURIComponent(savedPayload.memory.id), {
+      method: "DELETE",
+      headers: { authorization: "Bearer telegram-user-two-key" },
+    });
+    assert.equal(crossUserDelete.status, 404);
+
+    const ownerAfterDeniedDelete = await request("telegram-user-one-key");
+    const ownerAfterDeniedDeletePayload = await ownerAfterDeniedDelete.json() as { memories: UserMemoryEntry[] };
+    assert.equal(ownerAfterDeniedDeletePayload.memories.length, 1);
+    assert.equal(ownerAfterDeniedDeletePayload.memories[0]?.id, savedPayload.memory.id);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API job inspection, resume, and cancellation are isolated by authenticated owner", async () => {
+  const ownerKey = "job-owner-key";
+  const otherKey = "job-other-key";
+  const ownerKeyId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
+  const job = {
+    id: "11111111-2222-4333-8444-555555555555",
+    status: "failed" as const,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    task: "private owner job",
+    ownerKeyId,
+  };
+  let resumeCalls = 0;
+  let cancelCalls = 0;
+  const jobRuntime = {
+    submit: async () => { throw new Error("not used"); },
+    get: async (id: string) => id === job.id ? job : undefined,
+    resume: async () => { resumeCalls += 1; return job; },
+    cancel: async () => { cancelCalls += 1; return true; },
+    list: async () => [job],
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    jobRuntime,
+  }, {
+    apiKeys: {
+      [ownerKey]: ["agent:run", "agent:read"],
+      [otherKey]: ["agent:run", "agent:read"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const request = (key: string, path: string, init: RequestInit = {}) => fetch(baseUrl + path, {
+    ...init,
+    headers: { authorization: "Bearer " + key },
+  });
+
+  try {
+    assert.equal((await request(otherKey, "/v1/jobs/" + job.id)).status, 404);
+    assert.equal((await request(otherKey, "/v1/jobs/" + job.id + "/cancel", { method: "POST" })).status, 404);
+    assert.equal((await request(otherKey, "/v1/jobs/" + job.id + "/resume", { method: "POST" })).status, 404);
+    assert.equal(cancelCalls, 0);
+    assert.equal(resumeCalls, 0);
+
+    assert.equal((await request(ownerKey, "/v1/jobs/" + job.id)).status, 200);
+    assert.equal((await request(ownerKey, "/v1/jobs/" + job.id + "/cancel", { method: "POST" })).status, 202);
+    assert.equal((await request(ownerKey, "/v1/jobs/" + job.id + "/resume", { method: "POST" })).status, 202);
+    assert.equal(cancelCalls, 1);
+    assert.equal(resumeCalls, 1);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

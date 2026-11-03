@@ -280,6 +280,10 @@ Sofia keeps project-level workflow memory separate from user-scoped memory and c
 - Memory content is treated as untrusted reference data, checked for prompt-injection-like content, and redacted for common secrets before persistence.
 - The local file-backed stores are intended for a single active process. Multi-host deployments need a shared transactional storage design before relying on concurrent writes.
 
+## Markdown memory snapshots
+
+The default dependency factory decorates the existing structured memory stores with private Markdown projections. Explicitly saved user memories are mirrored to a per-principal `USER.md`; project decisions and workflow memories are mirrored to a per-project `MEMORY.md`. The JSON stores remain canonical and are still used for retrieval. Markdown files are generated snapshots, not editable import sources. Set `SOFIA_STATE_DIR` to an absolute persistent private directory for production deployments; do not commit runtime memory files. See [Markdown Memory](docs/MARKDOWN_MEMORY.md) for storage boundaries and lifecycle details.
+
 ## User memory
 
 See [User Memory](docs/USER_MEMORY.md) for explicit, authenticated-user-scoped memory API routes, retrieval behavior, scopes, retention limits, and privacy boundaries. User memory is distinct from project memory and persisted conversation transcripts.

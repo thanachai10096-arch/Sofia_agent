@@ -12,6 +12,16 @@ const STATUSES=new Set(["queued","running","completed","failed","cancelled"]);
 const KINDS=new Set(["coding","debugging","research","analysis","vision","general"]);
 const CAPABILITIES=new Set(["system:discover","workspace:list","workspace:read","workspace:write","process:execute","screen:capture","app:launch","input:control"]);
 const EVENT_TYPES=new Set(["run.started","task.classified","model.selected","model.completed","tool.started","tool.completed","tool.failed","tool.output_suspicious","tool.approval_required","review.started","review.completed","retry","run.completed","run.failed"]);
+// Serialize writes/removals to the same record across store instances in this process.
+// This is not a cross-process lock; shared multi-worker storage still needs a transactional backend.
+const recordQueues = new Map<string, Promise<void>>();
+function enqueueRecordOperation(target: string, operation: () => Promise<void>): Promise<void> {
+ const previous = recordQueues.get(target) ?? Promise.resolve();
+ const next = previous.catch(() => undefined).then(operation);
+ recordQueues.set(target, next);
+ void next.finally(() => { if (recordQueues.get(target) === next) recordQueues.delete(target); }).catch(() => undefined);
+ return next;
+}
 function validResult(value:unknown):value is AgentResult {
  if(!value||typeof value!=="object"||Array.isArray(value))return false;
  const r=value as Partial<AgentResult>;
@@ -37,12 +47,12 @@ function validRecord(value:unknown,filename:string):value is RunRecord {
 }
 /** Atomic best-effort JSON persistence for one API server instance. */
 export class FileRunRecordStore implements RunRecordStore {
- private chain:Promise<void>=Promise.resolve();
  constructor(private readonly directory:string){mkdirSync(directory,{recursive:true,mode:0o700});try{chmodSync(directory,0o700);}catch{/* permissions unavailable on this platform */}}
  private file(id:string){if(!SAFE_ID.test(id))throw new Error("Unsafe run id.");return path.join(this.directory,id+".json");}
  save(record:RunRecord):Promise<void>{
-  this.chain=this.chain.then(async()=>{
-   const target=this.file(record.id),tmp=target+"."+process.pid+"."+randomUUID()+".tmp";
+  const target=this.file(record.id);
+  return enqueueRecordOperation(target,async()=>{
+   const tmp=target+"."+process.pid+"."+randomUUID()+".tmp";
    try{
     await fs.writeFile(tmp,JSON.stringify(record),{encoding:"utf8",mode:0o600});
     try{await fs.chmod(tmp,0o600);}catch{}
@@ -50,9 +60,11 @@ export class FileRunRecordStore implements RunRecordStore {
    }catch{/* best effort; in-memory state remains authoritative */}
    finally{try{await fs.unlink(tmp);}catch{/* renamed or already absent */}}
   });
-  return this.chain;
  }
- remove(id:string):Promise<void>{this.chain=this.chain.then(async()=>{try{await fs.unlink(this.file(id));}catch{/* already absent */}});return this.chain;}
+ remove(id:string):Promise<void>{
+  const target=this.file(id);
+  return enqueueRecordOperation(target,async()=>{try{await fs.unlink(target);}catch{/* already absent */}});
+ }
  loadAllSync():RunRecord[]{
   const out:RunRecord[]=[];let names:string[];try{names=readdirSync(this.directory);}catch{return out;}
   for(const name of names){const full=path.join(this.directory,name);if(!name.endsWith(".json")){if(name.endsWith(".tmp"))try{if(Date.now()-statSync(full).mtimeMs>24*60*60*1000)unlinkSync(full);}catch{};continue;}

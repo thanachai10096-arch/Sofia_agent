@@ -87,3 +87,44 @@ test("project memory ranks entries matching more query terms ahead of weaker mat
   assert.equal(results[0]?.id, "strong");
   assert.equal(results.some((entry) => entry.id === "weak"), true);
 });
+test("project memory identity includes project so equal IDs cannot overwrite another project", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-project-identity-"));
+  const store = new FileProjectMemoryStore("shared-workspace", root);
+  const now = new Date().toISOString();
+  await store.save({ id: "same-id", project: "project-a", kind: "decision", content: "Project A private decision", confidence: 0.9, createdAt: now, updatedAt: now, uses: 0 });
+  await store.save({ id: "same-id", project: "project-b", kind: "decision", content: "Project B separate decision", confidence: 0.9, createdAt: now, updatedAt: now, uses: 0 });
+  await store.save({ id: "same-id", project: "project-a", kind: "decision", content: "Project A updated decision", confidence: 0.9, createdAt: now, updatedAt: now, uses: 1 });
+  const entries = await store.list();
+  assert.equal(entries.length, 2);
+  assert.equal(entries.find((entry) => entry.project === "project-a")?.content, "Project A updated decision");
+  assert.equal(entries.find((entry) => entry.project === "project-b")?.content, "Project B separate decision");
+});
+
+
+test("concurrent project memory writes from separate store instances do not lose records", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-concurrent-"));
+  const first = new FileProjectMemoryStore("concurrent-project", root);
+  const second = new FileProjectMemoryStore("concurrent-project", root);
+  const now = new Date().toISOString();
+  const writes = Array.from({ length: 32 }, (_, index) => {
+    const store = index % 2 === 0 ? first : second;
+    return store.save({
+      id: `concurrent-${index}`,
+      project: "concurrent-project",
+      kind: "decision",
+      content: `Concurrent memory record ${index}`,
+      confidence: 0.9,
+      createdAt: now,
+      updatedAt: now,
+      uses: 0,
+    });
+  });
+
+  await Promise.all(writes);
+  const entries = await first.list();
+  assert.equal(entries.length, 32);
+  assert.deepEqual(
+    entries.map((entry) => entry.id).sort(),
+    Array.from({ length: 32 }, (_, index) => `concurrent-${index}`).sort(),
+  );
+});

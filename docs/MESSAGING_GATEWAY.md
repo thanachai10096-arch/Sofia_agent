@@ -28,7 +28,17 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Only explicit `/run <task>` commands dispatch work; ordinary messages do not start runs. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Ordinary text messages dispatch as natural-language tasks by default; the explicit `/run <task>` prefix remains supported, and other slash commands are ignored.
+
+For per-user memory/session isolation in a shared Telegram bot, configure `TELEGRAM_USER_API_KEYS` as a server-side JSON object mapping every allowed Telegram numeric user ID to a distinct Sofia API key, for example:
+```json
+{"123456789":"sofia_user_1_key","987654321":"sofia_user_2_key"}
+```
+Each mapped key must be unique, and the mapping must match the allowlisted Telegram users exactly. The standalone API entrypoint registers valid mapped keys with the configured `SOFIA_API_SCOPES`; custom API hosts must add each key to their trusted `apiKeys` configuration with the intended scopes. The standalone API still requires its primary `SOFIA_API_KEY`. Include `memory:read,memory:write` in `SOFIA_API_SCOPES` only when these users should manage their explicitly saved memories through the Memory API. The Telegram adapter selects the key only after deriving the immutable sender ID from the verified Telegram update; completion polling uses the same user's key. When this mapping is configured, every allowlisted user must have an entry. Do not put this JSON in source control or client-side configuration.
+
+If `TELEGRAM_USER_API_KEYS` is absent, the legacy `SOFIA_API_KEY` mode remains available for compatibility, but all allowed Telegram users share one API principal and therefore share that principal's memory and session scope. The runtime emits a warning in this mode. Do not use shared-key mode for a multi-user deployment where personal memory or private session history is enabled.
+
+The bridge uses server-side credentials, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API keys in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
@@ -41,7 +51,7 @@ The existing `createChatCommandHandler` remains the shared command dispatcher fo
 ## Configuration outline
 
 At the application composition root:
-1. Construct the existing Sofia SDK client with a server-side API key that has the required `agent:run` scope.
+1. Construct the existing Sofia SDK client with a server-side API key that has the required `agent:run` scope. For multi-user Telegram, provision a distinct API key per allowed user and configure `TELEGRAM_USER_API_KEYS`.
 2. Reuse the existing `ChatAccessPolicy` and atomic `ChatMessageDeduplicator`.
 3. Construct the Telegram adapter with `createTelegramAdapter(createTelegramHttpTransport({ token: process.env.TELEGRAM_BOT_TOKEN! }))`.
 4. Construct the Discord transport with `createDiscordInteractionTransport({ publicKeyHex, botToken: process.env.DISCORD_BOT_TOKEN! })`; wrap it with `createDiscordAdapter` and pass the transport to `createSofiaApi` as `discordInteractionRoute: { transport }` (default path `/v1/integrations/discord/interactions`). Expose that route only over HTTPS. For the standalone entrypoint, configure `DISCORD_ALLOWED_USER_IDS=123...,456...` and `DISCORD_ALLOWED_CHANNEL_IDS=789...`; both lists are mandatory and validated before the transport starts.
@@ -62,6 +72,8 @@ The code outline above is not a claim that the repository's API server is alread
 - [ ] Discord application command is registered; signature verification rejects invalid/stale signatures and accepts a genuine interaction.
 - [ ] Discord deferred response is edited and all follow-up chunks are delivered within the interaction token lifetime.
 - [ ] Unauthorized users/channels cannot invoke runs; policy errors fail closed.
+- [ ] Multi-user Telegram maps each immutable sender ID to a distinct API key; test that user A cannot read user B's Memory or session history.
+- [ ] Shared-key Telegram mode is used only for single-principal deployments and its warning is visible to operators.
 - [ ] Standalone Discord deployment has explicit, non-empty user and channel allowlists; startup rejects missing, malformed, or duplicate IDs.
 - [ ] API keys and bot tokens never appear in logs, client assets, test snapshots, or error messages.
 - [ ] Graceful shutdown stops polling and rejects new dispatches.
@@ -75,3 +87,8 @@ The code outline above is not a claim that the repository's API server is alread
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+
+### Messaging API key scopes
+
+Per-user Telegram and Discord API keys use `SOFIA_MESSAGING_API_SCOPES`, separate from the primary `SOFIA_API_SCOPES`. The default is `agent:run,agent:read`. Add `memory:read,memory:write` only when personal memory is intentionally enabled for chat users; the API then scopes memory by each mapped key's authenticated principal. `security:admin`, desktop capabilities, unknown scopes, empty entries, and duplicates are rejected. Invalid messaging scope configuration disables mapped messaging credentials without taking down the core API.

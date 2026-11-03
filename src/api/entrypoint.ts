@@ -1,23 +1,65 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
+import { parseMessagingApiScopes } from "./messaging-scopes.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
+import { matchDiscordUserApiKeys, parseDiscordUserApiKeys } from "../integrations/messaging/discord-user-api-keys.js";
 import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
-import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { createTelegramMessagingRuntime, parseTelegramUserAllowlist, parseTelegramUserApiKeys } from "../integrations/messaging/telegram-runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
 const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+let messagingScopes = ["agent:run", "agent:read"];
+let messagingScopesValid = true;
+try { messagingScopes = parseMessagingApiScopes(process.env.SOFIA_MESSAGING_API_SCOPES); }
+catch {
+  messagingScopesValid = false;
+  console.error("Messaging API scopes are invalid; per-user messaging credentials are disabled.");
+}
+let telegramUserApiKeys = new Map<string, string>();
+if (process.env.SOFIA_MESSAGING_ENABLED === "true" && process.env.TELEGRAM_USER_API_KEYS?.trim()) {
+  try {
+    const candidateKeys = parseTelegramUserApiKeys(process.env.TELEGRAM_USER_API_KEYS.trim());
+    const allowedUsers = parseTelegramUserAllowlist(process.env.TELEGRAM_ALLOWED_USER_IDS ?? "");
+    const mappingMatchesAllowlist = candidateKeys.size === allowedUsers.size &&
+      [...allowedUsers].every((userId) => candidateKeys.has(userId)) &&
+      [...candidateKeys.values()].every((key) => key !== apiKey);
+    if (mappingMatchesAllowlist) telegramUserApiKeys = new Map(candidateKeys);
+  } catch {
+    // Invalid optional Telegram configuration must disable the bridge, not the core API.
+    // createTelegramMessagingRuntime emits the operator-facing redacted warning.
+  }
+}
+let discordUserApiKeys = new Map<string, string>();
+if (process.env.DISCORD_USER_API_KEYS?.trim()) {
+  try {
+    const candidateKeys = parseDiscordUserApiKeys(process.env.DISCORD_USER_API_KEYS.trim());
+    const allowedUsers = parseDiscordIdAllowlist(process.env.DISCORD_ALLOWED_USER_IDS, "DISCORD_ALLOWED_USER_IDS");
+    if (matchDiscordUserApiKeys(candidateKeys, allowedUsers, [apiKey, ...telegramUserApiKeys.values()])) discordUserApiKeys = candidateKeys;
+    else console.error("Discord per-user API key mapping disabled: mapping must match the user allowlist and use keys distinct from other API principals.");
+  } catch {
+    console.error("Discord per-user API key mapping disabled: configuration is invalid.");
+  }
+}
+if (!messagingScopesValid) {
+  telegramUserApiKeys.clear();
+  discordUserApiKeys.clear();
+}
+const apiKeys: Record<string, string[]> = Object.create(null) as Record<string, string[]>;
+apiKeys[apiKey] = scopes;
+for (const key of telegramUserApiKeys.values()) apiKeys[key] = messagingScopes;
+for (const key of discordUserApiKeys.values()) apiKeys[key] = messagingScopes;
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
 const deps = createSofiaAgentDependencies(workspace);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
-const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
+const telegramRuntime = messagingScopesValid ? createTelegramMessagingRuntime(process.env, workspace) : undefined;
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -126,7 +168,7 @@ if (discordConfigured) {
         channelId: message.channelId,
         conversationId: message.channelId,
       });
-      const sessionContext = await buildDiscordSessionContext(deps.jobRuntime, sessionKey);
+      const sessionContext = await buildDiscordSessionContext(deps.jobRuntime, sessionKey, 5, principalId);
       const taskWithMemory = sessionContext
         ? task + "\n\n" + sessionContext
         : task;
@@ -210,7 +252,7 @@ if (discordConfigured) {
 }
 
 const server = createSofiaApi(deps, {
-  apiKeys: { [apiKey]: scopes },
+  apiKeys,
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(path.join(workspace, ".sofia", "api-runs")),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),

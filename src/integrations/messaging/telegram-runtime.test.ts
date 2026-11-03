@@ -5,6 +5,7 @@ import {
   reportTelegramRunCompletion,
   parseTelegramChatAllowlist,
   parseTelegramUserAllowlist,
+  parseTelegramUserApiKeys,
 } from "./telegram-runtime.js";
 
 test("Telegram allowlists accept numeric user IDs and signed chat IDs", () => {
@@ -55,7 +56,8 @@ test("complete Telegram configuration constructs a runtime without starting netw
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.ok(runtime);
   await runtime.stop();
-  assert.deepEqual(warnings, []);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /share that API key.s memory and session scope/);
 });
 
 
@@ -98,4 +100,79 @@ test("Telegram run completion reports failed runs without exposing internal erro
   assert.match(sent[0]?.text ?? "", /task failed/i);
   assert.match(sent[0]?.text ?? "", /Reason: provider_http_402_insufficient_credits/);
   assert.doesNotMatch(sent[0]?.text ?? "", /Bearer secret-token/);
+});
+
+
+test("Telegram per-user API keys require unique credentials for numeric user IDs", () => {
+  const keys = parseTelegramUserApiKeys('{"123":"key-one","456":"key-two"}');
+  assert.equal(keys.get("123"), "key-one");
+  assert.equal(keys.get("456"), "key-two");
+  assert.throws(() => parseTelegramUserApiKeys("[]"), /JSON object/);
+  assert.throws(() => parseTelegramUserApiKeys('{"abc":"key-one"}'), /invalid user ID or API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"same","456":"same"}'), /distinct API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"  "}'), /invalid user ID or API key/);
+});
+
+
+test("Telegram per-user API credentials allow keyless shared fallback and cover every allowlisted sender", async () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123,456",
+    TELEGRAM_USER_API_KEYS: '{"123":"user-one-key","456":"user-two-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.ok(runtime);
+  await runtime.stop();
+  assert.deepEqual(warnings, []);
+});
+
+test("Telegram per-user credentials fail closed when an allowlisted user has no key", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123,456",
+    TELEGRAM_USER_API_KEYS: '{"123":"user-one-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0] ?? "", /user-one-key|123|456/);
+});
+
+
+test("Telegram per-user credentials reject keys for users outside the allowlist", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    TELEGRAM_USER_API_KEYS: '{"123":"user-one-key","999":"unlisted-user-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0] ?? "", /user-one-key|unlisted-user-key|123|999/);
+});
+
+
+test("Telegram per-user credentials reject reuse of the primary API key", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    SOFIA_API_KEY: "shared-primary-key",
+    TELEGRAM_USER_API_KEYS: '{"123":"shared-primary-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0] ?? "", /shared-primary-key|123/);
 });

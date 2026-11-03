@@ -12,7 +12,7 @@ Register these commands for one test guild:
 - `/cancel job_id:<id>` — request cancellation of an owned job.
 - `/resume job_id:<id>` — resume an owned job when a checkpoint exists and the job is eligible for resume.
 
-Completed jobs can contribute a short, redacted session context to later `/run` tasks from the same Discord user in the same channel. Historical context is treated as untrusted data, not instructions. Jobs are owner-scoped; user and channel allowlists are mandatory.
+Completed jobs can contribute a short, redacted session context to later `/run` tasks from the same Discord user in the same channel. Retrieval checks both the derived session key and the durable job owner key, so a matching session key alone cannot expose another owner's history. Historical context is treated as untrusted data, not instructions. Jobs are owner-scoped; user and channel allowlists are mandatory.
 
 ## 1. Create and configure the Discord application
 

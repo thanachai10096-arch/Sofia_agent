@@ -55,6 +55,8 @@ export type ChatDispatchResult =
 
 export interface ChatCommandHandlerOptions {
   client: ChatRunStarter;
+  /** Optional per-verified-sender client resolver for tenant-isolated credentials. */
+  clientForCommand?: (command: VerifiedChatCommand) => ChatRunStarter;
   accessPolicy: ChatAccessPolicy;
   deduplicator: ChatMessageDeduplicator;
   maxTaskCharacters?: number;
@@ -94,7 +96,8 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
       const idempotencyKey = "chat_" + createHash("sha256")
         .update(JSON.stringify([command.platform, command.conversationId, command.messageId]))
         .digest("hex");
-      const run = await options.client.start({
+      const client = options.clientForCommand?.(command) ?? options.client;
+      const run = await client.start({
         task,
         context: `Origin: ${command.platform} chat integration. Conversation ID: ${command.conversationId}.`,
       }, undefined, { idempotencyKey });

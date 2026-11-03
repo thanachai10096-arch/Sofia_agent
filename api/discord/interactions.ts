@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import { verifyDiscordRequest } from "../../src/integrations/messaging/platform-security.js";
+import { resolveDiscordUserApiKey } from "../../src/integrations/messaging/discord-user-api-keys.js";
+import { parseDiscordIdAllowlist } from "../../src/integrations/messaging/discord-allowlist.js";
 
 export const config = {
   api: { bodyParser: false },
@@ -43,10 +45,10 @@ async function readRawBody(req: IncomingMessage): Promise<Buffer | null> {
   return Buffer.concat(chunks);
 }
 
-function allowedIds(envValue: string | undefined): Set<string> {
-  return new Set((envValue ?? "").split(",").map((value) => value.trim()).filter((value) => /^\d{1,24}$/.test(value)));
+function allowedIds(envValue: string | undefined, variableName: string): Set<string> {
+  try { return new Set(parseDiscordIdAllowlist(envValue, variableName)); }
+  catch { return new Set(); }
 }
-
 function isSnowflake(value: unknown): value is string {
   return typeof value === "string" && /^\d{1,24}$/.test(value);
 }
@@ -67,8 +69,7 @@ export default async function discordInteractions(req: IncomingMessage, res: Ser
 
   const publicKey = process.env.DISCORD_PUBLIC_KEY;
   const apiBase = process.env.SOFIA_API_BASE_URL;
-  const apiKey = process.env.SOFIA_API_KEY;
-  if (!publicKey || !apiBase || !apiKey) {
+  if (!publicKey || !apiBase) {
     reply(res, 503, { error: "discord_integration_not_configured" });
     return;
   }
@@ -124,10 +125,21 @@ export default async function discordInteractions(req: IncomingMessage, res: Ser
   }
 
   // Empty allowlists deny all requests; access must be explicitly configured.
-  const allowedUsers = allowedIds(process.env.DISCORD_ALLOWED_USER_IDS);
-  const allowedChannels = allowedIds(process.env.DISCORD_ALLOWED_CHANNEL_IDS);
+  const allowedUsers = allowedIds(process.env.DISCORD_ALLOWED_USER_IDS, "DISCORD_ALLOWED_USER_IDS");
+  const allowedChannels = allowedIds(process.env.DISCORD_ALLOWED_CHANNEL_IDS, "DISCORD_ALLOWED_CHANNEL_IDS");
   if (!allowedUsers.has(user.id) || !allowedChannels.has(interaction.channel_id)) {
     reply(res, 200, { type: 4, data: { content: "Access denied.", flags: 64 } });
+    return;
+  }
+
+  const apiKey = resolveDiscordUserApiKey(
+    process.env.DISCORD_USER_API_KEYS,
+    [...allowedUsers],
+    user.id,
+    process.env.SOFIA_API_KEY ? [process.env.SOFIA_API_KEY] : [],
+  );
+  if (!apiKey) {
+    reply(res, 503, { error: "discord_user_api_key_unavailable" });
     return;
   }
 

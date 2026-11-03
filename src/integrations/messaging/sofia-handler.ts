@@ -9,6 +9,8 @@ import type { InboundMessage } from "./types.js";
 export interface SofiaMessagingHandlerOptions {
   /** Existing Sofia SDK/API client; credentials remain server-side. */
   client: ChatRunStarter;
+  /** Optional per-verified-sender API client resolver for tenant-isolated credentials. */
+  clientForCommand?: (command: import("../chat-adapter.js").VerifiedChatCommand) => ChatRunStarter;
   /** Existing access policy and atomic deduplicator from chat-adapter.ts. */
   accessPolicy: ChatAccessPolicy;
   deduplicator: ChatMessageDeduplicator;
@@ -53,6 +55,7 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
   const naturalLanguageEnabled = options.naturalLanguageEnabled ?? true;
   const handleCommand = createChatCommandHandler({
     client: options.client,
+    ...(options.clientForCommand ? { clientForCommand: options.clientForCommand } : {}),
     accessPolicy: options.accessPolicy,
     deduplicator: options.deduplicator,
     maxTaskCharacters: options.maxTaskCharacters,
