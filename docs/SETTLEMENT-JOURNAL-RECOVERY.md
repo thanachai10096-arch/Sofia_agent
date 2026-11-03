@@ -81,7 +81,7 @@ This is an integrity check on the local append-only journal; it does not indepen
 
 ## Checkpoint admission
 
-Checkpoint acknowledgement is serialized by the per-run claim and now validates the journal before appending. It refuses to append a checkpoint if any provider attempt is still pending, any settlement has unknown or invalid usage, or the journal contains malformed/unmatched evidence. Only fully matched settlements with validated known usage are eligible. This prevents the journal from accumulating misleading checkpoint markers during an unresolved billing incident; a durable execution snapshot alone cannot establish provider usage.
+Checkpoint acknowledgement is serialized by the per-run claim and now validates the journal before appending. It refuses to append a checkpoint if any provider attempt is still pending, any settlement has unknown or invalid usage, or the journal contains malformed/unmatched evidence. A checkpoint encountered in the event stream while an attempt is pending or after ambiguous evidence is itself invalid; later settlements or checkpoints cannot repair or clear that history. Recovery inspection, unresolved checks, settlement validation, and checkpoint admission all fail closed on this sequence. Only fully matched settlements with validated known usage are eligible. This prevents the journal from accumulating misleading checkpoint markers during an unresolved billing incident; a durable execution snapshot alone cannot establish provider usage.
 
 ## Attempt identifier uniqueness
 
