@@ -194,3 +194,24 @@ test("outbox persists bounded metadata-only attempt history across restart and r
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("retry worker rejects unsafe polling intervals", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-outbox-worker-"));
+  try {
+    const outbox = new FileMessagingOutbox(root);
+    const { startMessagingOutboxRetryWorker } = await import("./file-outbox.js");
+    assert.throws(() => startMessagingOutboxRetryWorker(outbox, {
+      platform: "line",
+      intervalMs: 999,
+      send: async () => true,
+    }), /Invalid messaging outbox retry worker interval/);
+    assert.throws(() => startMessagingOutboxRetryWorker(outbox, {
+      platform: "line",
+      intervalMs: 60 * 60_000 + 1,
+      send: async () => true,
+    }), /Invalid messaging outbox retry worker interval/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
