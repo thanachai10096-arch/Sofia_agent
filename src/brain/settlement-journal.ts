@@ -595,13 +595,83 @@ export class FileSettlementJournal {
     return pendingAttempts.size > 0 || ambiguousEvidence || uncheckpointedKnownSettlement;
   }
 
+  private async assertCheckpointSafe(runId: string): Promise<void> {
+    const journalFile = this.file(runId);
+    let source: string;
+    try {
+      const info = await fs.lstat(journalFile);
+      if (info.isSymbolicLink() || !info.isFile()) {
+        throw new Error("Cannot checkpoint corrupt settlement evidence");
+      }
+      const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+      const handle = await fs.open(journalFile, fsConstants.O_RDONLY | noFollow);
+      try {
+        const opened = await handle.stat();
+        if (!opened.isFile() || opened.dev !== info.dev || opened.ino !== info.ino) {
+          throw new Error("Settlement journal record changed during checkpoint validation");
+        }
+        source = await handle.readFile("utf8");
+      } finally {
+        await handle.close();
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+
+    const pending = new Set<string>();
+    let ambiguous = false;
+    for (const line of source.split("\n")) {
+      if (!line) continue;
+      let raw: unknown;
+      try { raw = JSON.parse(line) as unknown; } catch {
+        throw new Error("Cannot checkpoint corrupt settlement evidence");
+      }
+      if (!raw || typeof raw !== "object") throw new Error("Cannot checkpoint corrupt settlement evidence");
+      const event = raw as Record<string, unknown>;
+      if (event.version !== 1 || typeof event.at !== "string" || !Number.isFinite(Date.parse(event.at))) {
+        throw new Error("Cannot checkpoint corrupt settlement evidence");
+      }
+      if (event.type === "checkpoint") continue;
+      if (event.type === "started") {
+        if (typeof event.attemptId !== "string" || !event.attemptId ||
+            !Number.isSafeInteger(event.maxInputTokens) || (event.maxInputTokens as number) < 0 ||
+            !Number.isSafeInteger(event.maxOutputTokens) || (event.maxOutputTokens as number) < 0 ||
+            pending.has(event.attemptId)) {
+          throw new Error("Cannot checkpoint corrupt or ambiguous settlement evidence");
+        }
+        pending.add(event.attemptId);
+        continue;
+      }
+      if (event.type === "settled") {
+        if (typeof event.attemptId !== "string" || !event.attemptId ||
+            typeof event.usageKnown !== "boolean" || !pending.has(event.attemptId)) {
+          throw new Error("Cannot checkpoint corrupt or unmatched settlement evidence");
+        }
+        pending.delete(event.attemptId);
+        const usage = event.usage as Record<string, unknown> | undefined;
+        if (!event.usageKnown || !usage ||
+            !Number.isSafeInteger(usage.inputTokens) || (usage.inputTokens as number) < 0 ||
+            !Number.isSafeInteger(usage.outputTokens) || (usage.outputTokens as number) < 0) {
+          ambiguous = true;
+        }
+        continue;
+      }
+      throw new Error("Cannot checkpoint corrupt settlement evidence");
+    }
+    if (pending.size > 0 || ambiguous) {
+      throw new Error("Cannot acknowledge checkpoint while provider settlement is pending or ambiguous");
+    }
+  }
+
   async acknowledgeCheckpoint(runId: string): Promise<void> {
     if (!runId) throw new Error("Invalid settlement journal checkpoint");
-    // Checkpoint acknowledgement happens after provider execution. It must use
-    // the same claim boundary so a new worker cannot observe a partially-written
-    // checkpoint and begin another billable request concurrently.
+    // The claim serializes validation and append against all cooperating workers.
+    // Refuse to add a misleading checkpoint while any provider outcome is pending,
+    // unknown, unmatched, or corrupt; only known matched settlements are eligible.
     const claim = await this.claimRun(runId);
     try {
+      await this.assertCheckpointSafe(runId);
       await this.append(runId, { version: 1, type: "checkpoint", at: new Date().toISOString() });
     } finally {
       await claim.release();
