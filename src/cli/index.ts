@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir, readFile, writeFile, chmod } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -8,6 +8,7 @@ import { SofiaAgent } from "../agent/core.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createCliSessionId } from "./session-id.js";
+import { writeSafeLocalConfig } from "./config-file.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -123,11 +124,7 @@ async function setup() {
       }
       console.log(`\nSet ${requiredKeyEnv} in your shell environment before starting Sofia. The setup wizard never asks for or writes API keys.`);
     }
-    await mkdir(configDir, { recursive: true, mode: 0o700 });
-    await chmod(configDir, 0o700);
-    const config: LocalConfig = { provider, baseUrl, model };
-    await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
-    await chmod(configPath, 0o600);
+    await writeSafeLocalConfig(configPath, { provider, baseUrl, model });
     console.log("Saved provider, endpoint, and model configuration to ~/.sofia/config.json (owner-only permissions).");
   } finally {
     rl.close();
