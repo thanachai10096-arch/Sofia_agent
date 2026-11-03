@@ -1,8 +1,10 @@
 import {
+  advanceRestoreJournal,
   type RestoreJournalRecord,
   type RestoreJournalStore,
   validateRestoreJournalRecord,
 } from "./restore-journal.js";
+import type { RestoreSnapshotStore } from "./restore-snapshot-store.js";
 
 export type RestoreRecoveryDisposition =
   | "completed"
@@ -94,4 +96,130 @@ export async function scanRestoreRecovery(
     needsRecovery: items.length - completed - rolledBack,
     items,
   };
+}
+
+
+export interface RestoreRecoveryAdapter {
+  name: string;
+  paths: readonly string[];
+  rollbackFromSnapshotBytes(bytes: Uint8Array): Promise<void>;
+}
+
+export interface RecoverInterruptedRestoreOptions {
+  transactionId: string;
+  journal: RestoreJournalStore;
+  snapshotStore: RestoreSnapshotStore;
+  adapters: readonly RestoreRecoveryAdapter[];
+  /**
+   * Must provide a process-wide exclusive maintenance lock for this transaction.
+   * Recovery without mutual exclusion could race another recovery worker.
+   */
+  withExclusiveLock<T>(transactionId: string, operation: () => Promise<T>): Promise<T>;
+}
+
+/**
+ * Explicitly roll back one interrupted transaction using its verified durable
+ * snapshots. The caller must supply a process-wide lock and adapters bound to
+ * the same destinations as the original transaction.
+ */
+export async function recoverInterruptedRestoreTransaction(
+  options: RecoverInterruptedRestoreOptions,
+): Promise<RestoreJournalRecord> {
+  const { transactionId, journal, snapshotStore, adapters } = options;
+  if (!/^[a-f0-9-]{16,64}$/iu.test(transactionId)) {
+    throw new Error("Restore recovery transaction ID is invalid.");
+  }
+  if (!journal || !snapshotStore || typeof options.withExclusiveLock !== "function") {
+    throw new Error("Restore recovery requires journal, snapshot storage, and an exclusive lock.");
+  }
+  if (!Array.isArray(adapters)) throw new Error("Restore recovery adapters must be an array.");
+  const byName = new Map<string, RestoreRecoveryAdapter>();
+  for (const adapter of adapters) {
+    if (!adapter || typeof adapter.name !== "string" || !adapter.name.trim() ||
+        !Array.isArray(adapter.paths) || typeof adapter.rollbackFromSnapshotBytes !== "function" ||
+        byName.has(adapter.name)) {
+      throw new Error("Restore recovery adapter configuration is invalid.");
+    }
+    byName.set(adapter.name, adapter);
+  }
+
+  return options.withExclusiveLock(transactionId, async () => {
+    let record = await journal.read(transactionId);
+    if (!record) throw new Error("Restore recovery journal record was not found.");
+    record = validateRestoreJournalRecord(record);
+    if (record.phase === "committed" || record.phase === "rolled_back") return record;
+    if (record.phase === "rollback_failed") {
+      throw new Error("Restore transaction has a failed rollback and requires manual recovery.");
+    }
+
+    for (const target of record.targets) {
+      const adapter = byName.get(target.name);
+      if (!adapter || adapter.paths.length !== target.paths.length ||
+          adapter.paths.some((item) => !target.paths.includes(item))) {
+        throw new Error(`Restore recovery adapter does not match journal target: ${target.name}`);
+      }
+      if (target.phase !== "pending" && target.phase !== "rolled_back" &&
+          target.phase !== "rollback_failed" &&
+          (!target.rollbackSnapshotRef || !target.rollbackSnapshotSha256)) {
+        throw new Error(`Restore target ${target.name} has no durable rollback snapshot.`);
+      }
+      if (target.phase === "rollback_failed") {
+        throw new Error(`Restore target ${target.name} previously failed rollback and requires manual recovery.`);
+      }
+    }
+
+    const append = async (
+      phase: RestoreJournalRecord["phase"],
+      targets: RestoreJournalRecord["targets"],
+      failureCode?: string,
+    ) => {
+      const next = advanceRestoreJournal(record!, {
+        phase,
+        updatedAt: new Date().toISOString(),
+        targets,
+        ...(failureCode ? { failureCode } : {}),
+      });
+      await journal.append(next, record!.revision);
+      record = next;
+    };
+
+    const pendingTargets = record.targets.map((target) => ({
+      ...target,
+      phase: target.phase === "pending" || target.phase === "rolled_back"
+        ? target.phase
+        : "rollback_pending" as const,
+    }));
+    await append("rollback_required", pendingTargets, "startup_recovery_requested");
+    await append("rolling_back", record.targets, "startup_recovery_requested");
+
+    for (const target of [...record.targets].reverse()) {
+      if (target.phase === "pending" || target.phase === "rolled_back") continue;
+      const adapter = byName.get(target.name)!;
+      try {
+        const bytes = await snapshotStore.read(target.rollbackSnapshotRef!, target.rollbackSnapshotSha256!);
+        await adapter.rollbackFromSnapshotBytes(bytes);
+        const updated = record.targets.map((item) =>
+          item.name === target.name ? { ...item, phase: "rolled_back" as const } : item);
+        await append("rolling_back", updated, "startup_recovery_requested");
+      } catch (error) {
+        const updated = record.targets.map((item) =>
+          item.name === target.name ? { ...item, phase: "rollback_failed" as const } : item);
+        try {
+          await append("rollback_failed", updated, "startup_recovery_failed");
+        } catch (journalError) {
+          throw new Error(
+            `Restore recovery failed for ${target.name}, and failure could not be journaled: ${journalError instanceof Error ? journalError.message : String(journalError)}`,
+            { cause: error },
+          );
+        }
+        throw new Error(
+          `Restore recovery failed for ${target.name}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      }
+    }
+
+    await append("rolled_back", record.targets, "startup_recovery_completed");
+    return record;
+  });
 }
