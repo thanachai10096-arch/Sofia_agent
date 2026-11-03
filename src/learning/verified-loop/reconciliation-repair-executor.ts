@@ -152,7 +152,10 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
           if (existing.state === "running") {
             const lastHeartbeat = Date.parse(String(existing.updated_at));
             const journalNow = this.clock().getTime();
-            const stale = Number.isFinite(lastHeartbeat) && Number.isFinite(journalNow) && journalNow - lastHeartbeat >= this.leaseMs;
+            // Invalid persisted timestamps cannot safely prove ownership; fail closed
+            // by allowing a fresh fenced claim rather than stranding the repair forever.
+            const stale = !Number.isFinite(lastHeartbeat) || !Number.isFinite(journalNow) ||
+              journalNow - lastHeartbeat >= this.leaseMs;
             if (!stale) {
               this.db.exec("COMMIT");
               return { key: String(existing.repair_key), scope: { ...entry.scope }, skillId: String(existing.skill_id), policyRevision: String(existing.policy_revision), state: "running", attempts: Number(existing.attempts), updatedAt: String(existing.updated_at), ...(typeof existing.result === "string" ? { result: existing.result } : {}), claimed: false };
@@ -203,7 +206,14 @@ export class SqliteLearningRepairJournal implements LearningRepairJournal {
     return this.serial(() => {
       this.db.exec("BEGIN IMMEDIATE");
       try {
-        const updated = this.db.prepare("UPDATE learning_repair_journal SET updated_at=? WHERE repair_key=? AND tenant_id=? AND principal_id=? AND project_id=? AND state='running' AND claim_token=?").run(this.clock().toISOString(), key, scope.tenantId, scope.principalId, scope.projectId, claimToken);
+        const now = this.clock();
+        const nowMs = now.getTime();
+        if (!Number.isFinite(nowMs)) throw new Error("Invalid repair journal clock");
+        const renewedAt = now.toISOString();
+        const leaseCutoff = new Date(nowMs - this.leaseMs).toISOString();
+        // An expired owner may not resurrect its lease. If takeover already occurred,
+        // claim_token also fences this update; if not, expiry alone still rejects it.
+        const updated = this.db.prepare("UPDATE learning_repair_journal SET updated_at=? WHERE repair_key=? AND tenant_id=? AND principal_id=? AND project_id=? AND state='running' AND claim_token=? AND updated_at>?").run(renewedAt, key, scope.tenantId, scope.principalId, scope.projectId, claimToken, leaseCutoff);
         this.db.exec("COMMIT");
         return Number(updated.changes) === 1;
       } catch (error) { try { this.db.exec("ROLLBACK"); } catch {} throw error; }
