@@ -24,3 +24,8 @@ test("CLI command parsing remains side-effect free", () => {
   });
   assert.deepEqual(resolveCliInvocation(["chat"]), { command: "chat" });
 });
+
+test("importing CLI entrypoint exposes main without running commands", async () => {
+  const cli = await import("./index.js");
+  assert.equal(typeof cli.main, "function");
+});
