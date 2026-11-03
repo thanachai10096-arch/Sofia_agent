@@ -315,6 +315,50 @@ test("fails closed when regression checks contain malformed details", async () =
   assert.equal(state.evaluations.size, 0);
 });
 
+test("fails closed when regression evidence adapter returns duplicate rows", async () => {
+  const state = makeHost();
+  const getEvidence = state.host.verification.getEvidence;
+  state.host.verification.getEvidence = async (requestedScope, ids) => {
+    const rows = await getEvidence(requestedScope, ids);
+    return ids.some(id => id.startsWith("reg-")) && rows.length > 0
+      ? [rows[0]!, rows[0]!]
+      : rows;
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "duplicate-regression-1", "run1");
+  addReceipt(state, "duplicate-regression-2", "run2");
+  addReceipt(state, "duplicate-regression-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "duplicate-regression-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "duplicate-regression-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "duplicate-regression-3", "Fix TypeScript build");
+
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
+test("fails closed when regression evidence adapter returns unrelated extra rows", async () => {
+  const state = makeHost();
+  const getEvidence = state.host.verification.getEvidence;
+  state.host.verification.getEvidence = async (requestedScope, ids) => {
+    const rows = await getEvidence(requestedScope, ids);
+    return ids.some(id => id.startsWith("reg-")) && rows.length > 0
+      ? [...rows, { ...rows[0]!, id: "unrequested-regression-evidence" }]
+      : rows;
+  };
+  const loop = new VerifiedLearningLoop(state.host);
+  addReceipt(state, "extra-regression-1", "run1");
+  addReceipt(state, "extra-regression-2", "run2");
+  addReceipt(state, "extra-regression-3", "run3");
+
+  await loop.recordVerifiedCompletion(scope, "extra-regression-1", "Fix TypeScript build");
+  await loop.recordVerifiedCompletion(scope, "extra-regression-2", "Fix TypeScript build");
+  const result = await loop.recordVerifiedCompletion(scope, "extra-regression-3", "Fix TypeScript build");
+
+  assert.equal(result.skillActivated, undefined);
+  assert.equal(state.active.length, 0);
+});
+
 test("fails closed when regression evidence adapter returns malformed rows", async () => {
   const state = makeHost();
   const getEvidence = state.host.verification.getEvidence;
