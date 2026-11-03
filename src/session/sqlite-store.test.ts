@@ -263,3 +263,30 @@ test("deleting a SQLite session atomically removes its transcript and full-text 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("failed session deletion rolls back both transcript and search-index changes", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-delete-rollback-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(file);
+  const db = new DatabaseSync(file);
+  try {
+    store.save({ id: "atomic-erase", messages: ["retain deletion rollback phrase"], updatedAt: 0 });
+    db.exec(`
+      CREATE TRIGGER reject_session_delete
+      BEFORE DELETE ON sessions
+      WHEN OLD.id = 'atomic-erase'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced delete failure');
+      END;
+    `);
+
+    assert.throws(() => store.delete("atomic-erase"), /forced delete failure/);
+    assert.deepEqual(store.get("atomic-erase")?.messages, ["retain deletion rollback phrase"]);
+    assert.deepEqual(store.search("rollback").map((session) => session.id), ["atomic-erase"]);
+  } finally {
+    db.close();
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
