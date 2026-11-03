@@ -351,7 +351,11 @@ export class SofiaModelGateway implements ModelProvider {
     }
 
     const execute = async () => {
-      const maxAttempts = 3;
+      // Brain calls are metered and protected by the durable settlement journal.
+      // A transport retry could repeat a billable provider request before usage is
+      // known, so each structured Brain attempt must make exactly one HTTP request.
+      // Ordinary chat keeps its bounded transient retry behavior.
+      const maxAttempts = brainStructuredOutput ? 1 : 3;
       let lastError: unknown;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         let retryableFailure = false;
