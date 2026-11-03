@@ -1412,3 +1412,70 @@ test("DurableJobRuntime writes and recovers checkpoints only through the authent
   assert.equal((await runtime.get(submitted.id, "owner-a"))?.snapshot?.checkpointId, snapshot.checkpointId);
   assert.equal(stores.get("owner-a")?.loaded, 1);
 });
+
+
+test("DurableJobRuntime retention deletes snapshots through each expired job owner's store", async () => {
+  const namespace = "job-runtime-owner-retention-" + randomUUID();
+  const deletedByOwner = new Map<string, string[]>();
+  const resolver = (ownerKeyId?: string) => ({
+    async save() {},
+    async load() { return undefined; },
+    async delete(runId: string) {
+      const key = ownerKeyId ?? "local";
+      const deleted = deletedByOwner.get(key) ?? [];
+      deleted.push(runId);
+      deletedByOwner.set(key, deleted);
+    },
+  });
+  const deletedJournalEvidence: Array<{ runId: string; ownerKeyId?: string }> = [];
+  let nextRun = 0;
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async () => {
+      const snapshot = {
+        version: 1,
+        runId: "retention-run-" + (++nextRun),
+        task: "retention owner test",
+        understanding: {},
+        plan: {},
+        acceptanceCriteria: [],
+        completedStepIds: [],
+        checkpointId: "retention-checkpoint-" + nextRun,
+        usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+        observations: [],
+        diagnoses: [],
+        decisions: [],
+        recoveryRounds: 0,
+        trace: [],
+      } as unknown as import("./run-state.js").BrainRunSnapshot;
+      await onRunSnapshot?.(snapshot);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), resolver, namespace, async (runId, ownerKeyId) => {
+    deletedJournalEvidence.push({ runId, ownerKeyId });
+  });
+
+  const ownerA = await runtime.submit({ task: "owner A", ownerKeyId: "owner-a" });
+  const ownerB = await runtime.submit({ task: "owner B", ownerKeyId: "owner-b" });
+  for (const id of [ownerA.id, ownerB.id]) {
+    let current = await runtime.get(id);
+    for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      current = await runtime.get(id);
+    }
+    assert.equal(current?.status, "failed");
+  }
+
+  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; updatedAt: string }>;
+  for (const record of records) record.updatedAt = new Date(0).toISOString();
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+  assert.equal(await runtime.pruneExpired(60_000), 2);
+  assert.deepEqual(deletedByOwner.get("owner-a"), ["retention-run-1"]);
+  assert.deepEqual(deletedByOwner.get("owner-b"), ["retention-run-2"]);
+  assert.deepEqual(deletedJournalEvidence, [
+    { runId: "retention-run-1", ownerKeyId: "owner-a" },
+    { runId: "retention-run-2", ownerKeyId: "owner-b" },
+  ]);
+});
