@@ -138,3 +138,6 @@ export type { OutboxStore, OutboxMessage, EnqueueOutboxMessage, OutboxStatus } f
 
 export { OutboxDispatcher } from "./brain/outbox-dispatcher.js";
 export type { OutboxDeliveryContext, OutboxSender, OutboxDispatcherOptions, OutboxDispatchReport } from "./brain/outbox-dispatcher.js";
+
+export { OutboxWorker } from "./brain/outbox-worker.js";
+export type { OutboxWorkerOptions } from "./brain/outbox-worker.js";
