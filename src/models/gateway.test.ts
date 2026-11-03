@@ -171,7 +171,7 @@ test("explicit HTTP 429 rejection is retried and a later valid response is accep
       });
     }
     return new Response(JSON.stringify({
-      choices: [{ message: { content: "recovered response" }, finish_reason: "stop" }],
+      choices: [{ message: { content: "{\"ok\":true}" }, finish_reason: "stop" }],
       usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
