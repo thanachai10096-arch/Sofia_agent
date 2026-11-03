@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import { verifyDiscordRequest } from "../../src/integrations/messaging/platform-security.js";
-import { matchDiscordUserApiKeys, parseDiscordUserApiKeys } from "../../src/integrations/messaging/discord-user-api-keys.js";
+import { resolveDiscordUserApiKey } from "../../src/integrations/messaging/discord-user-api-keys.js";
 import { parseDiscordIdAllowlist } from "../../src/integrations/messaging/discord-allowlist.js";
 
 export const config = {
@@ -132,28 +132,14 @@ export default async function discordInteractions(req: IncomingMessage, res: Ser
     return;
   }
 
-  let apiKey: string | undefined;
-  if (!process.env.DISCORD_USER_API_KEYS?.trim()) {
-    reply(res, 503, { error: "discord_user_api_keys_required" });
-    return;
-  }
-  try {
-    const userKeys = parseDiscordUserApiKeys(process.env.DISCORD_USER_API_KEYS.trim());
-    if (!matchDiscordUserApiKeys(
-      userKeys,
-      [...allowedUsers],
-      process.env.SOFIA_API_KEY ? [process.env.SOFIA_API_KEY] : [],
-    )) {
-      reply(res, 503, { error: "discord_user_key_mapping_invalid" });
-      return;
-    }
-    apiKey = userKeys.get(user.id);
-  } catch {
-    reply(res, 503, { error: "discord_user_key_mapping_invalid" });
-    return;
-  }
+  const apiKey = resolveDiscordUserApiKey(
+    process.env.DISCORD_USER_API_KEYS,
+    [...allowedUsers],
+    user.id,
+    process.env.SOFIA_API_KEY ? [process.env.SOFIA_API_KEY] : [],
+  );
   if (!apiKey) {
-    reply(res, 503, { error: "discord_api_key_not_configured" });
+    reply(res, 503, { error: "discord_user_api_key_unavailable" });
     return;
   }
 
