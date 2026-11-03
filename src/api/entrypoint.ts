@@ -13,7 +13,7 @@ import { createTelegramMessagingRuntime, parseTelegramUserAllowlist, parseTelegr
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
-const apiKey = process.env.SOFIA_API_KEY?.trim();
+const apiKey = (process.env.SOFIA_API_KEY ?? process.env.SOFIA_INTERNAL_API_KEY)?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
 const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
 let messagingScopes = ["agent:run", "agent:read"];
