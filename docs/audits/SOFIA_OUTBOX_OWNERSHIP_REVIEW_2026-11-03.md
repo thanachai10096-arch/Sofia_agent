@@ -38,3 +38,24 @@ This is additive at the code level and does not change the public API. The query
 - Changed files: `src/brain/postgres-outbox-store.ts`, `src/brain/postgres-outbox-store.test.ts`.
 - Added SQL-contract assertions; tests were not executed.
 - No local build, typecheck, unit test, live PostgreSQL test, migration, Vercel deployment, merge, or production change was performed.
+
+
+## Additional Discord Gateway path review
+
+Inspected `workers/discord-gateway/daemon/worker.mjs` directly:
+
+- The daemon filters inbound messages against separate `DISCORD_ALLOWED_USER_IDS` and `DISCORD_ALLOWED_CHANNEL_IDS` sets.
+- It submits each message directly to `/api/v1/agent/runs`, using an idempotency key derived from the Discord message ID. It does not submit through the durable Job Runtime / PostgreSQL Outbox path reviewed above.
+- It posts the returned reply directly to the originating Discord channel. Therefore, in a shared allowlisted channel, an allowed user's task and Sofia's response are visible to other channel members unless Discord permissions or product policy restrict visibility.
+- Its `seen`, `inflight`, and pending message state is process-local. A daemon restart loses this deduplication state; the request idempotency key is useful only if the API endpoint persists and enforces it durably for the authenticated principal.
+- The current daemon's direct-send path does not propagate an outbox delivery ID or Discord nonce. The outbox adapter's retry-deduplication guarantees do not apply to this daemon path.
+
+No code change was made to this worker in this review because changing channel visibility or switching its request path would alter the integration's behavior and requires an explicit product decision. Recommended release policy: use private DM delivery for personal tasks, or require explicit shared-channel mode with a clear warning that messages and results are visible to channel members. Also add a durable message-ID idempotency contract to the run endpoint before treating gateway retries as restart-safe.
+
+## Additional source-level tests
+
+Added source-level SQL contract tests that explicitly assert:
+- An expired processing lease is eligible for reclaim under the `SKIP LOCKED` claim statement and the new worker token replaces the previous lease token.
+- A stale worker's ACK and retry both fail when the store reports no affected row, with each mutation requiring processing status, matching worker token, and a still-live lease.
+
+These tests have not been executed. They prove the intended SQL predicates are present, not actual PostgreSQL locking behavior or transaction isolation.
