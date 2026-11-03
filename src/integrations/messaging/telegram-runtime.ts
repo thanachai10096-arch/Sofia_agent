@@ -161,6 +161,9 @@ export function createTelegramMessagingRuntime(
     )) {
       throw new Error("TELEGRAM_USER_API_KEYS must match the allowed Telegram user IDs exactly.");
     }
+    if (userApiKeys && apiKey && [...userApiKeys.values()].includes(apiKey)) {
+      throw new Error("TELEGRAM_USER_API_KEYS must not reuse the primary Sofia API key.");
+    }
     const clientCache = new Map<string, SofiaClient>();
     const clientForUser = (userId: string): SofiaClient => {
       const key = userApiKeys?.get(userId) ?? apiKey;
