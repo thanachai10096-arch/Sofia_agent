@@ -1346,3 +1346,69 @@ test("DurableJobRuntime checks persisted job ownership before loading or resumin
   assert.equal(owned?.snapshot?.checkpointId, "owner-private-checkpoint");
   assert.equal(snapshotLoads, 1, "the authenticated owner can recover its checkpoint");
 });
+
+
+test("DurableJobRuntime writes and recovers checkpoints only through the authenticated owner's RunStore", async () => {
+  const namespace = "job-runtime-owner-run-store-" + randomUUID();
+  const stores = new Map<string, { saved: import("./run-state.js").BrainRunSnapshot[]; loaded: number }>();
+  const resolver = (ownerKeyId?: string) => {
+    const key = ownerKeyId ?? "local";
+    let state = stores.get(key);
+    if (!state) {
+      state = { saved: [], loaded: 0 };
+      stores.set(key, state);
+    }
+    return {
+      async save(snapshot: import("./run-state.js").BrainRunSnapshot) { state!.saved.push(snapshot); },
+      async load(runId: string) {
+        state!.loaded += 1;
+        return state!.saved.find((item) => item.runId === runId);
+      },
+      async delete(runId: string) {
+        state!.saved = state!.saved.filter((item) => item.runId !== runId);
+      },
+    };
+  };
+
+  const snapshot = {
+    version: 1,
+    runId: "owner-isolated-run-" + randomUUID(),
+    task: "owner isolated checkpoint",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "owner-isolated-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async () => {
+      await onRunSnapshot?.(snapshot);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), resolver, namespace);
+
+  const submitted = await runtime.submit({ task: snapshot.task, ownerKeyId: "owner-a" });
+  let current = await runtime.get(submitted.id, "owner-a");
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id, "owner-a");
+  }
+
+  assert.equal(current?.status, "failed");
+  assert.equal(stores.get("owner-a")?.saved.length, 1);
+  assert.equal(stores.has("owner-b"), false);
+
+  // Re-reading the owner's job hydrates from that owner's store. A foreign
+  // owner is rejected before the resolver is called for its namespace.
+  assert.equal((await runtime.get(submitted.id, "owner-b")), undefined);
+  assert.equal(stores.has("owner-b"), false);
+  assert.equal((await runtime.get(submitted.id, "owner-a"))?.snapshot?.checkpointId, snapshot.checkpointId);
+  assert.equal(stores.get("owner-a")?.loaded, 1);
+});
