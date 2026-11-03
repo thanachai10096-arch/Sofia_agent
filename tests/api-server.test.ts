@@ -5,7 +5,7 @@ import { createSofiaApi } from "../src/api/server.js";
 import type { AgentDependencies } from "../src/agent/types.js";
 import type { SofiaBrain } from "../src/brain/executor.js";
 
-function dependencies(): AgentDependencies {
+function dependencies(sessionStore?: AgentDependencies["sessionStore"]): AgentDependencies {
   const fakeBrain = {
     runId: "api-e2e-run",
     run: async () => ({
@@ -23,6 +23,7 @@ function dependencies(): AgentDependencies {
     router: { select: () => ({ id: "unused" }), markUnhealthy: () => undefined } as unknown as AgentDependencies["router"],
     reviewer: { review: async () => ({ approved: true, reason: "approved" }) },
     brainFactory: () => fakeBrain,
+    ...(sessionStore ? { sessionStore } : {}),
   };
 }
 
@@ -120,6 +121,63 @@ test("API E2E authenticates, starts an async run, deduplicates retries, and isol
     assert.equal(disallowedOrigin.headers.get("access-control-allow-origin"), null);
   } finally {
     await closeServer();
+  }
+});
+
+test("API session transcripts are isolated by API key and reused only within the same key", async () => {
+  const sessions = new Map<string, { id: string; messages: string[]; updatedAt: number }>();
+  const sessionStore: NonNullable<AgentDependencies["sessionStore"]> = {
+    getOrCreate(id) {
+      let session = sessions.get(id);
+      if (!session) {
+        session = { id, messages: [], updatedAt: Date.now() };
+        sessions.set(id, session);
+      }
+      return session;
+    },
+    save(session) {
+      sessions.set(session.id, { ...session, messages: [...session.messages] });
+    },
+  };
+  const server = createSofiaApi(dependencies(sessionStore), {
+    apiKeys: {
+      "session-owner-a": ["agent:run"],
+      "session-owner-b": ["agent:run"],
+    },
+    requestTimeoutMs: 5_000,
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address() as AddressInfo;
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const run = async (key: string, task: string) => {
+    const response = await fetch(`${baseUrl}/v1/agent/runs`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({ task, sessionId: "shared-client-session" }),
+    });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  try {
+    await run("session-owner-a", "research the first private topic");
+    await run("session-owner-b", "research the second private topic");
+    await run("session-owner-a", "research a follow-up private topic");
+
+    assert.equal(sessions.size, 2);
+    const ownerA = [...sessions.values()].find((session) => session.messages.some((message) => message.includes("first private topic")));
+    const ownerB = [...sessions.values()].find((session) => session.messages.some((message) => message.includes("second private topic")));
+    assert.ok(ownerA);
+    assert.ok(ownerB);
+    assert.notEqual(ownerA.id, ownerB.id);
+    assert.ok(ownerA.messages.some((message) => message.includes("follow-up private topic")));
+    assert.equal(ownerB.messages.some((message) => message.includes("follow-up private topic")), false);
+    assert.equal(ownerA.messages.some((message) => message.includes("second private topic")), false);
+    assert.equal(ownerB.messages.some((message) => message.includes("first private topic")), false);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
 
