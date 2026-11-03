@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { FileSettlementJournal } from "./settlement-journal.js";
 
@@ -25,6 +26,63 @@ test("settlement journal records only bounded accounting metadata", async () => 
     const raw = await readFile(path.join(root, (await import("node:crypto")).createHash("sha256").update("workspace-secret").digest("hex"), files[0]!), "utf8");
     assert.match(raw, /"maxInputTokens":12/);
     assert.doesNotMatch(raw, /workspace-secret|run-private|prompt|api[_-]?key|provider-name/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("settlement recovery inspection is read-only and reports active claims", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-inspect-"));
+  try {
+    const journal = new FileSettlementJournal("workspace", root);
+    const claim = await journal.claimRun("inspect-run");
+    const attempt = await journal.begin("inspect-run", { inputTokens: 10, outputTokens: 20 }, claim);
+
+    const active = await journal.inspectRun("inspect-run");
+    assert.equal(active.claim, "active");
+    assert.equal(active.journal, "unresolved");
+    assert.equal(active.startedAttempts, 1);
+    assert.equal(active.settledAttempts, 0);
+    assert.equal(active.unresolved, true);
+    assert.ok(active.owner?.pid);
+    assert.ok(active.owner?.hostname);
+    assert.equal("token" in (active.owner ?? {}), false, "inspection must not expose the lock token");
+    await assert.rejects(journal.claimRun("inspect-run"), /already claimed/);
+
+    await journal.settle("inspect-run", attempt, { inputTokens: 8, outputTokens: 9 }, claim);
+    await claim.release();
+    const settled = await journal.inspectRun("inspect-run");
+    assert.equal(settled.claim, "absent");
+    assert.equal(settled.journal, "unresolved", "known settlement remains pending until checkpoint");
+    assert.equal(settled.startedAttempts, 1);
+    assert.equal(settled.settledAttempts, 1);
+    assert.equal(settled.unknownUsageAttempts, 0);
+    assert.equal(settled.unresolved, true);
+
+    await journal.acknowledgeCheckpoint("inspect-run");
+    const resolved = await journal.inspectRun("inspect-run");
+    assert.equal(resolved.journal, "resolved");
+    assert.equal(resolved.checkpoints, 1);
+    assert.equal(resolved.unresolved, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("settlement recovery inspection classifies malformed journal evidence as corrupt", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-settlement-inspect-corrupt-"));
+  try {
+    const namespace = "workspace";
+    const runId = "corrupt-inspect-run";
+    const directory = path.join(root, createHash("sha256").update(namespace).digest("hex"));
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const journalFile = path.join(directory, createHash("sha256").update(runId).digest("hex") + ".jsonl");
+    await writeFile(journalFile, '{"version":1,"type":"started"\n', { mode: 0o600 });
+    const journal = new FileSettlementJournal(namespace, root);
+    const inspection = await journal.inspectRun(runId);
+    assert.equal(inspection.claim, "absent");
+    assert.equal(inspection.journal, "corrupt");
+    assert.equal(inspection.unresolved, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
