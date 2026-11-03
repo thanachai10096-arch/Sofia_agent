@@ -134,5 +134,65 @@ export function directoryBackupRestoreAdapter(
         }
       }
     },
+    serializeRollbackSnapshot(rawSnapshot) {
+      if (!(rawSnapshot instanceof Map)) throw new Error("Invalid file restore rollback snapshot.");
+      const snapshot = rawSnapshot as FileRollbackSnapshot;
+      const entries = [...snapshot.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+      if (entries.length !== paths.length || entries.some(([relativePath]) => !paths.includes(relativePath))) {
+        throw new Error("File restore rollback snapshot does not match configured paths.");
+      }
+      return Buffer.from(JSON.stringify({
+        format: "sofia-file-rollback-snapshot",
+        version: 1,
+        entries: entries.map(([relativePath, bytes]) => ({
+          path: relativePath,
+          content: bytes === null ? null : Buffer.from(bytes).toString("base64"),
+        })),
+      }), "utf8");
+    },
+    async rollbackFromSnapshotBytes(bytes) {
+      let parsed: unknown;
+      try { parsed = JSON.parse(Buffer.from(bytes).toString("utf8")); }
+      catch { throw new Error("Persisted file rollback snapshot is not valid JSON."); }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Persisted file rollback snapshot has an invalid shape.");
+      }
+      const value = parsed as { format?: unknown; version?: unknown; entries?: unknown };
+      if (value.format !== "sofia-file-rollback-snapshot" || value.version !== 1 ||
+          !Array.isArray(value.entries) || value.entries.length !== paths.length) {
+        throw new Error("Persisted file rollback snapshot has an unsupported format.");
+      }
+      const snapshot: FileRollbackSnapshot = new Map();
+      for (const entry of value.entries) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          throw new Error("Persisted file rollback snapshot entry is invalid.");
+        }
+        const item = entry as { path?: unknown; content?: unknown };
+        if (typeof item.path !== "string" || !paths.includes(item.path) || snapshot.has(item.path)) {
+          throw new Error("Persisted file rollback snapshot path ownership is invalid.");
+        }
+        if (item.content === null) snapshot.set(item.path, null);
+        else if (typeof item.content === "string" &&
+                 /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(item.content)) {
+          const decoded = Buffer.from(item.content, "base64");
+          if (decoded.toString("base64") !== item.content) {
+            throw new Error("Persisted file rollback snapshot encoding is invalid.");
+          }
+          snapshot.set(item.path, decoded);
+        } else {
+          throw new Error("Persisted file rollback snapshot content is invalid.");
+        }
+      }
+      if (paths.some((relativePath) => !snapshot.has(relativePath))) {
+        throw new Error("Persisted file rollback snapshot is incomplete.");
+      }
+      for (const relativePath of [...paths].reverse()) {
+        const destination = await assertSafeDestination(root, relativePath);
+        const previous = snapshot.get(relativePath);
+        if (previous === null) await fs.rm(destination, { force: true });
+        else if (previous instanceof Uint8Array) await atomicWrite(destination, previous);
+        else throw new Error("Persisted file rollback snapshot contains an invalid value.");
+      }
+    },
   };
 }
