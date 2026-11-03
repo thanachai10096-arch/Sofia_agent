@@ -124,3 +124,108 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("provider HTTP errors expose status but never echo response bodies", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  const secretEcho = "provider echoed prompt=private-user-data api_key=do-not-leak";
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response(secretEcho, { status: 503 });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    await assert.rejects(
+      gateway.generate({ task: "test", kind: "coding", step: 1 }, { ...route, healthy: true }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /503/);
+        assert.equal(error.message.includes("private-user-data"), false);
+        assert.equal(error.message.includes("do-not-leak"), false);
+        return true;
+      },
+    );
+    assert.equal(calls, 1, "ambiguous 5xx outcomes must not be retried");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("explicit HTTP 429 rejection is retried and a later valid response is accepted", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls === 1) {
+      return new Response("rate limited", {
+        status: 429,
+        headers: { "retry-after": "0.001" },
+      });
+    }
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: "recovered response" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    const result = await gateway.generate(
+      { task: "test", kind: "coding", step: 1 },
+      { ...route, healthy: true },
+    );
+    assert.equal(calls, 2);
+    assert.equal(result.text, "recovered response");
+    assert.deepEqual(result.usage, { inputTokens: 10, outputTokens: 4 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("OpenAI-compatible structured Brain requests use JSON mode without enabling tools", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: "{\\"ok\\":true}" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 8, completion_tokens: 3, total_tokens: 11 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://provider.example.test/v1",
+        apiKey: "provider-secret",
+        model: "test-model",
+      },
+    });
+    const result = await gateway.generate({
+      task: "plan the task",
+      kind: "analysis",
+      step: 1,
+      context: JSON.stringify({ phase: "plan", instructions: "Return JSON", acceptanceCriteria: [] }),
+    }, { ...route, healthy: true });
+
+    assert.deepEqual(requestedBody.response_format, { type: "json_object" });
+    assert.equal("tools" in requestedBody, false);
+    assert.equal(result.text, '{"ok":true}');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
