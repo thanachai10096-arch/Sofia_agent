@@ -38,7 +38,7 @@ export class VerifiedLearningLoop {
     }
   }
 
-  async recordVerifiedCompletion(scope: LearningScope, receiptId: string, summary: string): Promise<{ recorded: boolean; experienceId?: string; skillActivated?: string }> {
+  async recordVerifiedCompletion(scope: LearningScope, receiptId: string, summary: string, sequence?: number): Promise<{ recorded: boolean; experienceId?: string; skillActivated?: string }> {
     if (!validScope(scope)) throw new Error("Invalid authenticated learning scope");
     try {
       const receipt = await this.host.verification.getReceipt(scope, receiptId);
@@ -61,6 +61,17 @@ export class VerifiedLearningLoop {
       };
 
       const prepared = await this.host.transaction(scope, async tx => {
+        if (sequence !== undefined) {
+          if (!Number.isSafeInteger(sequence) || sequence < 1) {
+            throw new Error("Invalid authoritative receipt sequence");
+          }
+          if (typeof tx.bindReceiptSequence !== "function") {
+            throw new Error("Learning transaction adapter does not support atomic receipt sequence binding");
+          }
+          // This identity claim and the experience insert share one durable transaction.
+          // A crash rolls both back; a committed receipt can be safely replayed.
+          await tx.bindReceiptSequence(scope, sequence, receipt.id);
+        }
         const inserted = await tx.insertExperienceIfAbsent(experience);
         // A prior attempt may have committed the experience and then crashed before
         // candidate evaluation. Recover that durable row instead of permanently
