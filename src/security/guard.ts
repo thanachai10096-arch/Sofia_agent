@@ -213,7 +213,18 @@ export function redactSecrets(value: unknown): unknown {
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      result[key] = /(?:token|secret|password|credential|private.?key|authorization|api.?key)/i.test(key) ? "[REDACTED]" : redactSecrets(item);
+      // Numeric usage counters are operational metadata, not credentials. In
+      // particular BrainRunSnapshot.usage.reservedOrUsedTokens must survive
+      // checkpoint persistence so a resumed run retains its budget accounting.
+      const isNumericUsageCounter =
+        typeof item === "number" &&
+        Number.isSafeInteger(item) &&
+        /^(?:reservedOrUsedTokens|inputTokens|outputTokens|tokenCount|tokensUsed)$/i.test(key);
+      result[key] = isNumericUsageCounter
+        ? item
+        : /(?:token|secret|password|credential|private.?key|authorization|api.?key)/i.test(key)
+          ? "[REDACTED]"
+          : redactSecrets(item);
     }
     return result;
   }
