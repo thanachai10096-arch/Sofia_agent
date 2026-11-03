@@ -588,6 +588,10 @@ test("recovery rejects started bounds whose combined token count is unsafe", asy
     assert.equal(inspection.journal, "corrupt",
       "inspection must classify invalid reservation bounds as corrupt evidence");
     assert.equal(inspection.unresolved, true);
+    assert.equal(inspection.startedAttempts, 0,
+      "corrupt reservation bounds must not be counted as a valid started attempt");
+    assert.equal(inspection.settledAttempts, 0,
+      "a settlement following an invalid Started event must not be counted as valid");
     await assert.rejects(journal.acknowledgeCheckpoint(runId), /corrupt|ambiguous|pending/,
       "checkpoint admission must reject unsafe historical reservation bounds");
     assert.equal(await readFile(journalFile, "utf8"), source,
