@@ -132,13 +132,24 @@ test("coordinator blocks boolean-only approval when receipt resolver is unavaila
 
 test("coordinator rejects approval receipts bound to another actor, scope, or policy", async () => {
   const mismatches = [
-    { actorId: "other-operator" },
-    { scope: { ...scope, tenantId: "other-tenant" } },
-    { policyRevision: "stale-policy" },
+    { actorId: "other-operator", scope, policyRevision: "policy-1" },
+    { actorId: "operator-a", scope: { ...scope, tenantId: "other-tenant" }, policyRevision: "policy-1" },
+    { actorId: "operator-a", scope, policyRevision: "stale-policy" },
   ];
-  for (const override of mismatches) {
-    const h = host({ approvalBinding: { id: "receipt-1", actorId: "operator-a", skillId: "skill-1", scope, policyRevision: "policy-1", status: "approved", ...override } });
+  for (const binding of mismatches) {
+    const h = host();
+    // Mutate the fixture's authoritative resolver result directly so each
+    // iteration proves the coordinator rejects the exact mismatched receipt.
+    h.state.approvalBinding = {
+      id: "receipt-1",
+      actorId: binding.actorId,
+      skillId: "skill-1",
+      scope: binding.scope,
+      policyRevision: binding.policyRevision,
+      status: "approved",
+    };
     const result = await inspectLearningRecovery(scope, h.adapter);
     assert.equal(result.assessments[0]?.disposition, "blocked-approval");
+    assert.match(result.assessments[0]?.reason ?? "", /different actor, skill, scope, or policy revision/);
   }
 });
