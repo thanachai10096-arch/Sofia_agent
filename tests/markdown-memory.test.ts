@@ -95,3 +95,49 @@ test("Markdown project memory writes project-scoped MEMORY.md snapshots", async 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("concurrent user clear and save leave the canonical memory and Markdown projection consistent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-markdown-user-race-"));
+  try {
+    const entries: ReturnType<typeof createUserMemoryEntry>[] = [];
+    let signalClearStarted!: () => void;
+    const clearStarted = new Promise<void>((resolve) => { signalClearStarted = resolve; });
+    let finishClear!: () => void;
+    const clearGate = new Promise<void>((resolve) => { finishClear = resolve; });
+    const base: UserMemoryStore = {
+      async save(_userId, entry) {
+        const index = entries.findIndex((item) => item.id === entry.id);
+        if (index < 0) entries.push(entry);
+        else entries[index] = entry;
+      },
+      async list() { return [...entries]; },
+      async find() { return [...entries]; },
+      async delete(_userId, id) {
+        const next = entries.filter((entry) => entry.id !== id);
+        const deleted = next.length !== entries.length;
+        entries.splice(0, entries.length, ...next);
+        return deleted;
+      },
+      async clear() {
+        entries.splice(0, entries.length);
+        signalClearStarted();
+        await clearGate;
+      },
+    };
+    const store = new MarkdownUserMemoryStore(base, { root });
+    const clearing = store.clear("principal-race");
+    await clearStarted;
+    const saving = store.save("principal-race", createUserMemoryEntry("fact", "Saved after clear"));
+    finishClear();
+    await Promise.all([clearing, saving]);
+
+    assert.equal(entries.length, 1);
+    assert.match(
+      await readFile(join(root, "users", createHash("sha256").update("principal-race").digest("hex"), "USER.md"), "utf8"),
+      /Saved after clear/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
