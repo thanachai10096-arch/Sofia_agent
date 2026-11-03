@@ -117,12 +117,25 @@ export async function writeSafeLocalConfig(filePath: string, config: SafeLocalCo
   }
 }
 
-/** Apply only non-secret CLI metadata. Legacy apiKey fields are intentionally ignored. */
+/**
+ * Apply a local provider profile only when the environment has not selected a
+ * different provider. Provider, endpoint, and model are one configuration unit:
+ * mixing an environment-selected provider with a stale local endpoint can send
+ * credentials to the wrong origin or make a valid setup fail closed.
+ */
 export function applySafeLocalConfigEnvironment(
   config: Partial<SafeLocalConfig>,
   environment: NodeJS.ProcessEnv,
 ): void {
-  if (!environment.SOFIA_MODEL_PROVIDER && config.provider) environment.SOFIA_MODEL_PROVIDER = config.provider;
-  if (!environment.SOFIA_MODEL_BASE_URL && config.baseUrl) environment.SOFIA_MODEL_BASE_URL = config.baseUrl;
-  if (!environment.SOFIA_MODEL_NAME && config.model) environment.SOFIA_MODEL_NAME = config.model;
+  const environmentProvider = environment.SOFIA_MODEL_PROVIDER?.trim().toLowerCase();
+  const localProvider = config.provider?.trim().toLowerCase();
+  const useLocalProfile = !environmentProvider || environmentProvider === localProvider;
+
+  if (!environmentProvider && config.provider) environment.SOFIA_MODEL_PROVIDER = config.provider;
+  if (useLocalProfile && !environment.SOFIA_MODEL_BASE_URL && config.baseUrl) {
+    environment.SOFIA_MODEL_BASE_URL = config.baseUrl;
+  }
+  if (useLocalProfile && !environment.SOFIA_MODEL_NAME && config.model) {
+    environment.SOFIA_MODEL_NAME = config.model;
+  }
 }
