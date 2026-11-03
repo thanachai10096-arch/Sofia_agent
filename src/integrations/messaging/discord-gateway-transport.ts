@@ -197,7 +197,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
       return;
     }
     if (payload.op === 1) {
-      if (heartbeatInterval > 0) send(1, sequence);
+      if (heartbeatInterval > 0) { awaitingHeartbeatAck = true; send(1, sequence); }
       return;
     }
     if (payload.op === 7) {
