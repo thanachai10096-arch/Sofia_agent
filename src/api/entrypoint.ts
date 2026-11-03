@@ -126,9 +126,9 @@ if (discordConfigured) {
         return;
       }
       const trimmedMessage = message.content.trim();
-      const isRunCommand = /^\/run(?:\\s+|$)/i.test(trimmedMessage);
+      const isRunCommand = /^\/run(?:\s+|$)/i.test(trimmedMessage);
       const task = isRunCommand
-        ? trimmedMessage.replace(/^\/run\\s*/i, "").trim()
+        ? trimmedMessage.replace(/^\/run\s*/i, "").trim()
         : trimmedMessage.startsWith("/")
           ? ""
           : trimmedMessage;
