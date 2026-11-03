@@ -42,6 +42,53 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
 });
 
 
+
+test("DurableJobRuntime rejects a late worker save after its lease expires", async () => {
+  const namespace = "job-runtime-expired-save-" + randomUUID();
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => { started = resolve; });
+  let finish!: () => void;
+  const finishRun = new Promise<void>((resolve) => { finish = resolve; });
+  const brain = {
+    run: async () => {
+      started();
+      await finishRun;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain;
+
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({ task: "late save after lease expiry" });
+  await running;
+
+  const stateFile = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{
+    id: string;
+    leaseExpiresAt?: string;
+  }>;
+  const saved = records.find((item) => item.id === submitted.id);
+  assert.ok(saved);
+  saved.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+  // Finish before the next heartbeat: the expired lease must reject the final
+  // save even though no replacement worker has claimed the job yet.
+  finish();
+  let finalRecord = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && finalRecord?.status === "running"; attempt++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    finalRecord = await runtime.get(submitted.id);
+  }
+  assert.equal(finalRecord?.status, "failed");
+  assert.match(finalRecord?.error ?? "", /lease expired/i);
+});
+
+
 test("DurableJobRuntime cancels an active run and persists the terminal state", async () => {
   const namespace = "job-runtime-cancel-" + randomUUID();
   let started!: () => void;
