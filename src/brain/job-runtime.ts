@@ -86,6 +86,7 @@ export interface JobRuntime {
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
   claimNotification?(id: string, ownerToken: string, leaseMs?: number): Promise<boolean>;
+  renewNotificationClaim?(id: string, ownerToken: string, leaseMs?: number): Promise<boolean>;
   releaseNotificationClaim?(id: string, ownerToken: string): Promise<void>;
   markNotificationDelivered?(id: string, ownerToken?: string): Promise<void>;
 }
@@ -343,6 +344,20 @@ class FileJobStateStore {
     });
   }
 
+  async renewNotificationClaim(id: string, ownerToken: string, leaseMs: number): Promise<boolean> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.notificationDelivered || record.notificationLeaseOwnerToken !== ownerToken) return false;
+      const expires = record.notificationLeaseExpiresAt ? Date.parse(record.notificationLeaseExpiresAt) : 0;
+      if (!Number.isFinite(expires) || expires <= Date.now()) return false;
+      record.notificationLeaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return true;
+    });
+  }
+
   async releaseNotificationClaim(id: string, ownerToken: string): Promise<void> {
     await this.withFileLock(async () => {
       const records = await this.read();
@@ -443,14 +458,15 @@ class FileJobStateStore {
           // Notification delivery is monotonic: a stale job snapshot must never
           // reset a durable delivered marker or resurrect an already-released lease.
           notificationDelivered: current.notificationDelivered === true || record.notificationDelivered === true,
-          ...(current.notificationDelivered === true
-            ? { notificationLeaseOwnerToken: undefined, notificationLeaseExpiresAt: undefined }
-            : current.notificationLeaseOwnerToken && record.notificationLeaseOwnerToken === undefined
-              ? {
-                  notificationLeaseOwnerToken: current.notificationLeaseOwnerToken,
-                  notificationLeaseExpiresAt: current.notificationLeaseExpiresAt,
-                }
-              : {}),
+          // Notification lease fields are mutated only by the dedicated atomic
+          // claim/renew/release methods. A stale in-memory JobRecord must neither
+          // overwrite a newer owner nor resurrect a released lease.
+          notificationLeaseOwnerToken: current.notificationDelivered === true
+            ? undefined
+            : current.notificationLeaseOwnerToken,
+          notificationLeaseExpiresAt: current.notificationDelivered === true
+            ? undefined
+            : current.notificationLeaseExpiresAt,
           ...(record.status === "running" && current.status === "running"
             ? { leaseExpiresAt: current.leaseExpiresAt, heartbeatAt: current.heartbeatAt }
             : {}),
@@ -545,6 +561,10 @@ export class DurableJobRuntime implements JobRuntime {
 
   async claimNotification(id: string, ownerToken: string, leaseMs = 30_000): Promise<boolean> {
     return this.state.claimNotification(id, ownerToken, leaseMs);
+  }
+
+  async renewNotificationClaim(id: string, ownerToken: string, leaseMs = 60_000): Promise<boolean> {
+    return this.state.renewNotificationClaim(id, ownerToken, leaseMs);
   }
 
   async releaseNotificationClaim(id: string, ownerToken: string): Promise<void> {
