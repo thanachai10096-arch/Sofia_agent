@@ -1,7 +1,8 @@
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import create_app
+from app import _authorize, create_app
 
 
 class FakeEmbedder:
@@ -25,10 +26,21 @@ def auth():
     return {"Authorization": "Bearer test-secret"}
 
 
-def test_health_does_not_require_auth_or_load_models(client):
-    response = client.get("/health")
+def test_health_does_not_require_auth_or_load_models(monkeypatch):
+    calls = {"embedder": 0, "reranker": 0}
+
+    def embedder_factory():
+        calls["embedder"] += 1
+        return FakeEmbedder()
+
+    def reranker_factory():
+        calls["reranker"] += 1
+        return FakeReranker()
+
+    response = TestClient(create_app(embedder_factory, reranker_factory)).get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert calls == {"embedder": 0, "reranker": 0}
 
 
 @pytest.mark.parametrize(
@@ -38,7 +50,6 @@ def test_health_does_not_require_auth_or_load_models(client):
         {"Authorization": "Basic test-secret"},
         {"Authorization": "Bearer"},
         {"Authorization": "Bearer wrong"},
-        {"Authorization": "Bearer tóken"},
     ],
 )
 def test_ai_endpoints_reject_missing_or_invalid_auth(client, headers):
@@ -46,6 +57,13 @@ def test_ai_endpoints_reject_missing_or_invalid_auth(client, headers):
         "/v1/embeddings", json={"texts": ["hello"]}, headers=headers
     )
     assert response.status_code == 401
+
+
+def test_authorization_rejects_non_ascii_token_without_raising_encoding_error(monkeypatch):
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    with pytest.raises(HTTPException) as error:
+        _authorize("Bearer tóken")
+    assert error.value.status_code == 401
 
 
 def test_ai_endpoints_fail_closed_without_configured_token(monkeypatch):
