@@ -48,6 +48,17 @@ export function createVoiceUtteranceController(options: VoiceUtteranceController
     const error = cause instanceof Error ? cause : new Error("Voice turn failed");
     try { options.onError?.(error); } catch { /* observer isolation */ }
   };
+  const isClosed = () => state === "closed";
+  const waitForSessionIdle = async () => {
+    const deadline = Date.now() + 30_000;
+    while (!isClosed()) {
+      const sessionState = options.session.snapshot().state;
+      if (sessionState === "idle") return;
+      if (sessionState === "closed") throw new Error("Voice session is closed");
+      if (Date.now() >= deadline) throw new Error("Timed out waiting for interrupted voice turn to settle");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
   const append = (target: VoicePreRollFrame[], frame: VoicePreRollFrame) => {
     if (frame.bytes.byteLength > maxBytes - bytes) throw new Error("Voice utterance exceeds configured byte limit");
     target.push({ bytes: frame.bytes.slice(), durationMs: frame.durationMs });
@@ -66,6 +77,7 @@ export function createVoiceUtteranceController(options: VoiceUtteranceController
       try {
         while (next && !isClosed()) {
           if (activeTurn) await activeTurn.catch(() => undefined);
+          await waitForSessionIdle();
           if (isClosed()) break;
           const total = next.frames.reduce((sum, item) => sum + item.bytes.byteLength, 0);
           const audio = new Uint8Array(total);
