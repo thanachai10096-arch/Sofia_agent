@@ -17,11 +17,20 @@ export interface SofiaRunInput {
   acceptanceCriteria?: Array<{ id: string; description: string; probe: { tool: string; input: Record<string, unknown> } }>;
 }
 
+export interface SofiaModelFeatureSupport {
+  toolCalling?: boolean;
+  vision?: boolean;
+  structuredOutput?: boolean;
+  contextWindow?: number;
+}
+
 export interface SofiaModelOption {
   id: string;
   model: string;
   capabilities: string[];
   healthy: boolean;
+  /** Operator-declared capabilities; omitted fields remain unknown. */
+  featureSupport?: SofiaModelFeatureSupport;
 }
 
 export interface SofiaModelList {
