@@ -317,7 +317,7 @@ export class FileSettlementJournal {
 
     let started = 0;
     let settled = 0;
-    for (const line of source.split("\\n")) {
+    for (const line of source.split("\n")) {
       if (!line) continue;
       let raw: unknown;
       try {
