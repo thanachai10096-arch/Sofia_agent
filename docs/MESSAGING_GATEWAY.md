@@ -28,7 +28,7 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Only explicit `/run <task>` commands dispatch work; ordinary messages do not start runs. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Ordinary text messages dispatch as natural-language tasks by default; set `naturalLanguageEnabled: false` for command-only behavior. Explicit `/run <task>` commands remain supported. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
@@ -54,6 +54,18 @@ The code outline above is not a claim that the repository's API server is alread
 
 - The shared Sofia SDK supports an optional `idempotencyKey` for async runs. Reuse a key only for the same logical request; the API returns `409 idempotency_key_reused` if the same key is presented with a different request payload. This protection is currently process-local and is not persisted across server restarts.
 
+## Telegram HTTP 409 troubleshooting
+
+Telegram returns HTTP 409 for a long-polling conflict when another consumer is using `getUpdates`, or when webhook delivery conflicts with polling. Before polling, this transport checks `getWebhookInfo` and refuses to poll when a webhook URL is configured; it does not silently delete an intentional webhook. Repeated HTTP 409 responses should be investigated rather than retried indefinitely.
+
+1. Confirm that only one running process/service uses this exact bot token. Check local development terminals, old Railway services, preview deployments, background workers, and any other host where the bot was tested. Do not paste the token into chat, issues, screenshots, or shell history.
+2. Check the bot's webhook state with Telegram's official `getWebhookInfo` API using a trusted secret-handling method. Never share the full request URL because the bot token is embedded in it. If a webhook is intentionally required, do not use this long-polling transport for that bot.
+3. Stop the stale poller only after confirming which service owns it. Do not stop unrelated Sofia services just because they have a similar name.
+4. After the conflict is resolved, restart the intended test instance and verify that it receives a message from an allowlisted user, rejects an unallowlisted user, and can deliver a real Sofia result.
+5. If HTTP 409 persists, record only the timestamp, service/deployment ID, and status code. Never include the token, full Bot API URL, chat contents, or raw provider response in diagnostics.
+
+The transport treats HTTP 409 as terminal and emits `poll_conflict` rather than entering an exponential retry loop. It marks the polling transport stopped after the loop exits, rejects outbound sends while stopped, and permits an explicit `start()` after the conflict is resolved. This makes the failure visible and avoids futile retries; it does not automatically find or stop the competing consumer. The Sofia API can remain available while Telegram polling is stopped.
+
 ## Production acceptance checklist
 
 - [ ] Typecheck, build, and full test suite pass on the PR head.
@@ -75,3 +87,26 @@ The code outline above is not a claim that the repository's API server is alread
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+
+### Channel health and explicit restart
+
+- `createMessagingGateway` exposes `getStatus()` and an explicit `restart()`. Restart aborts the previous generation, stops all adapters, creates a fresh abort signal, and starts the same adapters again.
+- Inbound callbacks are generation-fenced: callbacks retained by an old adapter generation are ignored after stop/restart. Authorization, rate limiting, deduplication, and the existing handler remain in the same gateway.
+- Telegram transport emits safe lifecycle states through `onStatus`: `starting`, `polling`, `stopped`, `webhook_conflict`, `poll_conflict`, and `preflight_failed`. The runtime exposes these through `getStatus()` and an operator-triggered `restart()`.
+- A 409 remains terminal. Do not call `restart()` until the operator has identified and resolved the competing `getUpdates` consumer. Restarting without remediation will simply encounter the conflict again; no automatic retry or webhook deletion is performed.
+- A Telegram runtime status of `poll_conflict` or `webhook_conflict` means the core Sofia API may still be healthy while that channel is unavailable. Surface the channel state in operational health reporting rather than treating it as overall API health.
+
+- The API `GET /health` response now includes a `channels` object when the host supplies `SofiaApiConfig.channelHealth`. The entrypoint reports Telegram's live transport state and whether Discord is configured and started. Only safe status strings are exposed; credentials, allowlists, and message data are never included.
+- Channel diagnostics are optional and isolated: if the diagnostic callback throws, `/health` still returns HTTP 200 for the core API and omits the `channels` field.
+
+- Discord's HTTP interaction transport exposes a read-only `getStatus()` snapshot (`running` or `stopped`). The public health endpoint uses this live state rather than treating a configured transport as permanently running; a parent abort is reflected immediately.
+
+### Discord completion-notification recovery semantics
+
+- Job completion and the notification-delivered marker are persisted separately from Discord's message-send operation. A process can crash after Discord accepts a notification but before Sofia persists `notificationDelivered=true`; the recovery loop may then send the notice again. Recovery is therefore **at-least-once**, not exactly-once.
+- The in-memory `notificationInFlight` set prevents overlapping retries inside one API process. Initial live completion, resumed completion, and post-restart recovery all use the same durable, token-fenced notification-delivery helper: `claimNotification` is acquired under the same atomic file lock as job-state writes, and only the lease owner can renew, mark delivery, or release the claim. While a send is pending, the API renews the lease periodically; concurrent workers sharing this local file store therefore cannot both claim the same pending job notice while the owner continues heartbeating.
+- A failed send releases the owning claim and leaves the durable delivered marker unset so a later retry can deliver the notice. A successful send is followed by an owner-checked marker update; operators should still tolerate a rare duplicate if the process crashes after Discord accepts the message but before that update, or if a worker becomes partitioned long enough to lose its lease while the provider request remains in flight.
+- Resuming a failed job atomically resets the previous attempt's notification marker and invalidates its notification lease. A delayed notifier from the previous attempt therefore cannot mark the resumed attempt's notice as delivered.
+- The file-backed lock explicitly refuses coordination from a different host. This claim is limited to cooperating workers on the same host and shared local filesystem; it is not a distributed multi-host lease. A multi-host deployment still requires a transactional shared outbox/lease store and stable provider idempotency where available, while documenting the provider/database transaction boundary.
+- Recovery notices intentionally contain only job ID, terminal status, and whether a checkpoint exists. They do not replay task text, model output, or historical chat content into a channel after restart.

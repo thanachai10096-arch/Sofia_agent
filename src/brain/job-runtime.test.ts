@@ -488,8 +488,26 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
-  const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
+  const workerCount = 12;
+  const started = Array.from({ length: workerCount }, () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  });
+  const settled = Array.from({ length: workerCount }, () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  });
+  const runtimes = Array.from({ length: workerCount }, (_, index) => new DurableJobRuntime(() => ({
+    run: async ({ signal }: { signal?: AbortSignal }) => {
+      started[index]!.resolve();
+      if (!signal) throw new Error("Runtime did not pass an abort signal");
+      if (signal.aborted) return { completed: false, state: "cancelled" };
+      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+      settled[index]!.resolve();
+      return { completed: false, state: "cancelled" };
+    },
   } as unknown as SofiaBrain), undefined, namespace));
 
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
@@ -503,6 +521,20 @@ test("DurableJobRuntime preserves concurrent submissions from independent runtim
 
   assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
   for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
+
+  // Wait until every worker owns its lease before cancelling; this proves cleanup
+  // happens only after the workers have observed cancellation and settled.
+  await Promise.all(started.map((item) => item.promise));
+  await Promise.all(runtimes.map((runtime, index) => runtime.cancel(submitted[index]!.id)));
+  await Promise.all(settled.map((item) => item.promise));
+
+  let terminal = await reader.list();
+  for (let attempt = 0; attempt < 100 && !terminal.every((record) => record.status === "cancelled"); attempt += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    terminal = await reader.list();
+  }
+  assert.equal(terminal.length, workerCount);
+  assert.ok(terminal.every((record) => record.status === "cancelled"), "all workers must persist cancellation before cleanup");
 
   const file = path.join(
     os.tmpdir(),
@@ -996,4 +1028,182 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(selectedRoute, "coding");
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
+});
+
+
+test("DurableJobRuntime atomically claims and fences recovery notification delivery", async () => {
+  const namespace = "job-runtime-notification-claim-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "done" }),
+  } as unknown as SofiaBrain;
+  const first = new DurableJobRuntime(() => brain, undefined, namespace);
+  const second = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await first.submit({
+    task: "notification claim test",
+    ownerKeyId: "discord:test-user",
+    notificationChannelId: "test-channel",
+  });
+
+  let completed = await first.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && completed?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    completed = await first.get(submitted.id);
+  }
+  assert.equal(completed?.status, "completed");
+
+  const claims = await Promise.all([
+    first.claimNotification(submitted.id, "worker-a", 30_000),
+    second.claimNotification(submitted.id, "worker-b", 30_000),
+  ]);
+  assert.equal(claims.filter(Boolean).length, 1, "only one worker may own the notification lease");
+  assert.equal((await first.get(submitted.id))?.notificationLeaseOwnerToken, undefined,
+    "public job reads must not expose the notification lease token");
+  const winner = claims[0] ? "worker-a" : "worker-b";
+  const loser = winner === "worker-a" ? "worker-b" : "worker-a";
+
+  await first.markNotificationDelivered(submitted.id, loser);
+  assert.equal((await first.get(submitted.id))?.notificationDelivered, false, "a stale worker cannot mark delivery");
+
+  // Simulate an old in-memory job snapshot captured while the lease existed.
+  const stateStore = (first as unknown as {
+    state: {
+      get(id: string): Promise<import("./job-runtime.js").JobRecord | undefined>;
+      save(record: import("./job-runtime.js").JobRecord): Promise<boolean>;
+    };
+  }).state;
+  const staleSnapshot = await stateStore.get(submitted.id);
+  assert.ok(staleSnapshot?.notificationLeaseOwnerToken === winner);
+  await first.releaseNotificationClaim(submitted.id, winner);
+  assert.equal(await stateStore.save(staleSnapshot), true);
+  assert.equal(await second.claimNotification(submitted.id, "worker-c", 30_000), true,
+    "saving a stale snapshot must not resurrect a released notification lease");
+
+  await second.markNotificationDelivered(submitted.id, "worker-c");
+  assert.equal((await first.get(submitted.id))?.notificationDelivered, true);
+  assert.equal(await first.claimNotification(submitted.id, "worker-d", 30_000), false, "delivered notices cannot be claimed again");
+});
+
+test("DurableJobRuntime renews notification leases and allows takeover after expiry", async () => {
+  const namespace = "job-runtime-notification-renewal-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "done" }),
+  } as unknown as SofiaBrain;
+  const first = new DurableJobRuntime(() => brain, undefined, namespace);
+  const second = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await first.submit({ task: "notification lease renewal test" });
+
+  let completed = await first.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && completed?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    completed = await first.get(submitted.id);
+  }
+  assert.equal(completed?.status, "completed");
+
+  // Use a generous initial lease so slower Windows CI runners do not expire
+  // it before the renewal assertion itself is reached.
+  assert.equal(await first.claimNotification(submitted.id, "worker-a", 10_000), true);
+  await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  assert.equal(await first.renewNotificationClaim(submitted.id, "worker-a", 3_000), true);
+  await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+  assert.equal(await second.claimNotification(submitted.id, "worker-b", 30_000), false,
+    "renewal must prevent takeover while the owning worker is still active");
+  await new Promise<void>((resolve) => setTimeout(resolve, 1_200));
+  assert.equal(await second.claimNotification(submitted.id, "worker-b", 30_000), true,
+    "another worker may recover the notification after the renewed lease expires");
+});
+
+
+test("DurableJobRuntime resets prior recovery delivery when a failed job is resumed", async () => {
+  const namespace = "job-runtime-notification-reset-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: false, state: "failed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({ task: "notification reset test" });
+
+  let failed = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && failed?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    failed = await runtime.get(submitted.id);
+  }
+  assert.equal(failed?.status, "failed");
+  assert.equal(await runtime.claimNotification(submitted.id, "old-worker", 30_000), true);
+  await runtime.markNotificationDelivered(submitted.id, "old-worker");
+  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, true);
+
+  const stateStore = (runtime as unknown as {
+    state: {
+      claim(id: string, ownerToken: string, leaseMs: number): Promise<import("./job-runtime.js").JobRecord | undefined>;
+    };
+  }).state;
+  const resumed = await stateStore.claim(submitted.id, "new-job-worker", 15_000);
+  assert.equal(resumed?.status, "running");
+  assert.equal(resumed?.notificationDelivered, false,
+    "the failed-to-running claim resets the prior attempt's delivery marker atomically");
+  await runtime.markNotificationDelivered(submitted.id, "old-worker");
+  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, false,
+    "a notifier from the previous attempt cannot mark the resumed attempt's notice as delivered");
+  assert.equal(await runtime.claimNotification(submitted.id, "new-worker", 30_000), false,
+    "recovery notices cannot be claimed while the resumed job is running");
+});
+
+
+test("DurableJobRuntime expires notification claims and fences stale owners", async () => {
+  const namespace = "job-runtime-notification-expiry-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "done" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({
+    task: "notification lease expiry test",
+    ownerKeyId: "discord:test-user",
+    notificationChannelId: "test-channel",
+  });
+
+  let completed = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && completed?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    completed = await runtime.get(submitted.id);
+  }
+  assert.equal(completed?.status, "completed");
+
+  assert.equal(await runtime.claimNotification(submitted.id, "expired-worker", 1), true);
+  await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  assert.equal(await runtime.claimNotification(submitted.id, "current-worker", 30_000), true);
+  await runtime.markNotificationDelivered(submitted.id);
+  assert.equal(
+    (await runtime.get(submitted.id))?.notificationDelivered,
+    false,
+    "an ownerless legacy caller cannot bypass an active notification lease",
+  );
+  await runtime.releaseNotificationClaim(submitted.id, "expired-worker");
+  await runtime.markNotificationDelivered(submitted.id, "expired-worker");
+  assert.equal(
+    (await runtime.get(submitted.id))?.notificationDelivered,
+    false,
+    "an expired worker cannot mark delivery or clear the current owner's claim",
+  );
+  await runtime.markNotificationDelivered(submitted.id, "current-worker");
+  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, true);
+});
+
+test("DurableJobRuntime rejects invalid notification lease durations", async () => {
+  const namespace = "job-runtime-notification-invalid-lease-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "done" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({
+    task: "notification invalid lease test",
+    ownerKeyId: "discord:test-user",
+    notificationChannelId: "test-channel",
+  });
+  let completed = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && completed?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    completed = await runtime.get(submitted.id);
+  }
+  assert.equal(completed?.status, "completed");
+  await assert.rejects(runtime.claimNotification(submitted.id, "worker", 0), /positive safe-integer/);
+  await assert.rejects(runtime.renewNotificationClaim(submitted.id, "worker", -1), /positive safe-integer/);
 });

@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
@@ -33,6 +34,41 @@ if (discordRequested && !discordConfigured) {
 let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
 const discordAbort = new AbortController();
 let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
+
+/**
+ * Serialize every Discord job-result/recovery notification through the same
+ * durable lease. This covers initial completion, resumed completion, and
+ * post-restart recovery so those paths cannot race each other on shared storage.
+ */
+async function sendClaimedDiscordNotification(jobId: string, channelId: string, message: string): Promise<boolean> {
+  if (!discordTransport || !deps.jobRuntime) return false;
+  const token = randomUUID();
+  let claimed = false;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  try {
+    if (deps.jobRuntime.claimNotification) {
+      claimed = await deps.jobRuntime.claimNotification(jobId, token, 60_000);
+      if (!claimed) return false;
+      if (deps.jobRuntime.renewNotificationClaim) {
+        heartbeat = setInterval(() => {
+          void deps.jobRuntime?.renewNotificationClaim?.(jobId, token, 60_000).catch(() => false);
+        }, 15_000);
+        heartbeat.unref?.();
+      }
+    } else {
+      // Compatibility for injected JobRuntime implementations without leases.
+      claimed = true;
+    }
+    await discordTransport.sendMessage(channelId, message);
+    await deps.jobRuntime.markNotificationDelivered?.(jobId, token);
+    return true;
+  } catch (error) {
+    if (claimed) await deps.jobRuntime.releaseNotificationClaim?.(jobId, token).catch(() => undefined);
+    throw error;
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+  }
+}
 
 if (discordConfigured) {
   if (!discordPublicKey || !discordBotToken) {
@@ -96,8 +132,7 @@ if (discordConfigured) {
           void deps.jobRuntime.resume(job.id).then(async (resumed) => {
             const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
-            await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
-            await deps.jobRuntime?.markNotificationDelivered?.(resumed.id);
+            await sendClaimedDiscordNotification(resumed.id, message.channelId, content.slice(0, 1700));
           }).catch(async () => {
             try {
               await discordTransport?.sendMessage(message.channelId, "Sofia could not resume job " + job.id + ". Check the job status and server logs.");
@@ -147,8 +182,8 @@ if (discordConfigured) {
         const prefix = result.status === "completed" ? "Sofia completed the task." : "Sofia job " + result.status + ".";
         const response = prefix + "\nJob ID: " + result.id + "\n" + result.summary;
         const safeResponse = response.length > 1700 ? response.slice(0, 1690) + "… (truncated)" : response;
-        await discordTransport?.sendMessage(message.channelId, safeResponse);
-        await deps.jobRuntime?.markNotificationDelivered?.(result.id);
+        // Live completion and recovery use the same durable notification claim.
+        await sendClaimedDiscordNotification(result.id, message.channelId, safeResponse);
       }).catch(async () => {
         try {
           await discordTransport?.sendMessage(
@@ -193,10 +228,9 @@ if (discordConfigured) {
           : job.snapshot
             ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
             : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
-        await discordTransport.sendMessage(job.notificationChannelId, message);
-        await deps.jobRuntime.markNotificationDelivered?.(job.id);
+        await sendClaimedDiscordNotification(job.id, job.notificationChannelId, message);
       } catch {
-        // Keep the marker unset so the next retry can attempt delivery again.
+        // The shared helper releases its own lease after a failed send.
       } finally {
         notificationInFlight.delete(job.id);
       }
@@ -214,6 +248,10 @@ const server = createSofiaApi(deps, {
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(path.join(workspace, ".sofia", "api-runs")),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
+  channelHealth: () => ({
+    telegram: { status: telegramRuntime?.getStatus() ?? "disabled" },
+    discord: { status: discordTransport?.getStatus() ?? "disabled" },
+  }),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
 const port = Number(process.env.PORT ?? 3000);

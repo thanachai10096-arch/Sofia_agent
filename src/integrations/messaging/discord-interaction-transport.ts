@@ -26,8 +26,11 @@ export interface DiscordInteractionResult {
   status: 200 | 400 | 401 | 503;
   body: Record<string, unknown>;
 }
+export type DiscordInteractionTransportStatus = "stopped" | "running";
 export type DiscordInteractionTransport = DiscordTransport & {
   handleRequest(input: DiscordInteractionRequest): Promise<DiscordInteractionResult>;
+  /** Safe lifecycle snapshot; does not expose credentials or interaction data. */
+  getStatus(): DiscordInteractionTransportStatus;
 };
 export interface DiscordInteractionTransportOptions {
   publicKeyHex: string;
@@ -118,6 +121,9 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
       const stopFromParent = () => controller?.abort(signal.reason);
       signal.addEventListener("abort", stopFromParent, { once: true });
       if (signal.aborted) stopFromParent();
+    },
+    getStatus() {
+      return active && controller && !controller.signal.aborted ? "running" : "stopped";
     },
     async handleRequest(input) {
       if (!active || !callback || controller?.signal.aborted) {
