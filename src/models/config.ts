@@ -53,8 +53,8 @@ function normalizeBaseUrl(value: string): string {
   return normalized;
 }
 
-function selectProvider(): ProviderSelection {
-  const requested = process.env.SOFIA_MODEL_PROVIDER?.trim().toLowerCase();
+function selectProvider(providerOverride?: string): ProviderSelection {
+  const requested = (providerOverride || process.env.SOFIA_MODEL_PROVIDER || "").trim().toLowerCase();
   const customBaseUrl = firstEnv("SOFIA_BASE_URL", "BASE_URL");
   const dedicatedCustomApiKey = firstEnv("SOFIA_MODEL_API_KEY", "SOFIA_PROVIDER_API_KEY", "API_KEY");
   const customModel = firstEnv("SOFIA_MODEL", "MODEL");
@@ -153,7 +153,6 @@ function selectProvider(): ProviderSelection {
  * implement the OpenAI Chat Completions-compatible API.
  */
 export function loadModelConfigFromEnv(): SofiaModelConfig {
-  const selected = selectProvider();
   const definitions = [
     ["fast", ["fast"], 1, 1, 5],
     ["coding", ["coding", "tool-use", "reasoning"], 2, 2, 8],
@@ -161,10 +160,27 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
     ["vision", ["vision", "reasoning"], 3, 3, 8],
   ] as const;
 
+  // Route-level provider assignments are additive: existing deployments can
+  // continue selecting one global provider, while advanced deployments may
+  // route fast/coding/reasoning/vision independently.
+  const routeProviderOverrides = definitions.map(([id]) =>
+    firstEnv("SOFIA_" + id.toUpperCase() + "_PROVIDER"));
+  const allRoutesExplicit = routeProviderOverrides.every(Boolean);
+  const globalProviderConfigured = Boolean(firstEnv("SOFIA_MODEL_PROVIDER"));
+  const fallback = allRoutesExplicit && !globalProviderConfigured
+    ? undefined
+    : selectProvider();
+
   const routes: ModelRoute[] = [];
   const providers: SofiaModelConfig["providers"] = {};
 
-  for (const [id, capabilities, cost, latency, quality] of definitions) {
+  for (const [index, [id, capabilities, cost, latency, quality]] of definitions.entries()) {
+    const selected = routeProviderOverrides[index]
+      ? selectProvider(routeProviderOverrides[index])
+      : fallback;
+    if (!selected) {
+      throw new Error("Set SOFIA_MODEL_PROVIDER or configure SOFIA_" + id.toUpperCase() + "_PROVIDER for every route.");
+    }
     const routeModelName = selected.routeModelPrefix + "_" + id.toUpperCase() + "_MODEL";
     const model = firstEnv(routeModelName) || selected.defaultModel;
 
