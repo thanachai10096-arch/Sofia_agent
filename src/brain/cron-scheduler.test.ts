@@ -535,3 +535,45 @@ test("recovery terminalizes orphaned executions whose schedule record is missing
   assert.match(state.history[0].error, /schedule record is missing/i);
   assert.ok(state.audit.some(event => event.action === "schedule.recovery.orphaned"));
 });
+
+test("runtime lookup outages preserve active executions for a later recovery pass", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let reads = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get(id: string) {
+      reads++;
+      if (reads === 1) throw new Error("temporary runtime API outage");
+      return { id, status: reads === 2 ? "queued" : "completed", task: "recover after outage" } as JobRecord;
+    },
+    async cancel() { return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store });
+  const schedule = await scheduler.create({
+    name: "runtime-outage-recovery", task: "task", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  state.history.push({
+    id: "outage-recovery-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "outage-recovery-job", attempt: 1,
+  });
+
+  const unavailable = await scheduler.recover();
+  assert.deepEqual(unavailable, { reconciled: 0, monitoring: 0, indeterminate: 0 });
+  assert.equal(state.history[0].status, "running",
+    "a transient runtime lookup error must not be misclassified as a missing job");
+  assert.equal(state.history[0].finishedAt, undefined);
+
+  const recovered = await scheduler.recover();
+  assert.equal(recovered.monitoring, 1);
+  for (let i = 0; i < 100 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(state.history[0].status, "completed",
+    "the later recovery pass should reconcile the still-existing runtime job");
+});
+
