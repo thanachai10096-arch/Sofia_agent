@@ -137,6 +137,7 @@ test("custom OpenAI-compatible endpoint supports SOFIA_BASE_URL, SOFIA_API_KEY, 
   assert.equal(config.providers.fast?.baseUrl, "https://llm.example.test/v1");
   assert.equal(config.providers.fast?.apiKey, "custom-provider-key");
   assert.equal(config.providers.fast?.model, "vendor/model-default");
+  assert.equal(config.providers.fast?.protocol, "openai-compatible");
   assert.equal(config.providers.coding?.model, "vendor/model-code");
   assert.equal(config.providers.reasoning?.model, "vendor/model-default");
 });
@@ -240,4 +241,15 @@ test("invalid context window declaration fails fast", () => {
   process.env.GEMINI_API_KEY = "gemini-test-key";
   process.env.SOFIA_CODING_CONTEXT_WINDOW = "-1";
   assert.throws(loadModelConfigFromEnv, /SOFIA_CODING_CONTEXT_WINDOW must be a positive safe integer/);
+});
+
+
+test("custom provider rejects an unsupported wire protocol", () => {
+  clear();
+  process.env.SOFIA_MODEL_PROVIDER = "custom";
+  process.env.SOFIA_MODEL_PROTOCOL = "openai-responses";
+  process.env.SOFIA_BASE_URL = "https://llm.example.test/v1";
+  process.env.SOFIA_API_KEY = "custom-provider-key";
+  process.env.SOFIA_MODEL = "vendor/model";
+  assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_PROTOCOL must be openai-compatible or anthropic-messages/);
 });
