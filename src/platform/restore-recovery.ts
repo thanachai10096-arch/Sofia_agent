@@ -189,8 +189,12 @@ export async function recoverInterruptedRestoreTransaction(
         ? target.phase
         : "rollback_pending" as const,
     }));
-    await append("rollback_required", pendingTargets, "startup_recovery_requested");
-    await append("rolling_back", record.targets, "startup_recovery_requested");
+    if (record.phase === "prepared" || record.phase === "applying") {
+      await append("rollback_required", pendingTargets, "startup_recovery_requested");
+    }
+    if (record.phase === "rollback_required") {
+      await append("rolling_back", record.targets, "startup_recovery_requested");
+    }
 
     for (const target of [...record.targets].reverse()) {
       if (target.phase === "pending" || target.phase === "rolled_back") continue;
@@ -220,6 +224,6 @@ export async function recoverInterruptedRestoreTransaction(
     }
 
     await append("rolled_back", record.targets, "startup_recovery_completed");
-    return record;
+    return record!;
   });
 }
