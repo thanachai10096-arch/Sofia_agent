@@ -52,7 +52,8 @@ if (!messagingScopesValid) {
   telegramUserApiKeys.clear();
   discordUserApiKeys.clear();
 }
-const apiKeys: Record<string, string[]> = { [apiKey]: scopes };
+const apiKeys: Record<string, string[]> = Object.create(null) as Record<string, string[]>;
+apiKeys[apiKey] = scopes;
 for (const key of telegramUserApiKeys.values()) apiKeys[key] = messagingScopes;
 for (const key of discordUserApiKeys.values()) apiKeys[key] = messagingScopes;
 mkdirSync(path.join(workspace, ".sofia", "api-runs"), { recursive: true, mode: 0o700 });
