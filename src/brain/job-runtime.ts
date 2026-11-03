@@ -623,6 +623,19 @@ export class DurableJobRuntime implements JobRuntime {
       else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
     }
 
+    const persistOwnedRecord = async (): Promise<boolean> => {
+      const saved = await this.state.save(record);
+      if (saved) return true;
+
+      // A lease may have expired and been claimed by another worker, or a
+      // cancellation may have won the race. Never leave this runtime reporting
+      // its stale local success after the durable store rejected the write.
+      const latest = await this.state.get(record.id);
+      if (latest) Object.assign(record, latest);
+      controller.abort(new Error("Job execution lease was lost or cancelled"));
+      return false;
+    };
+
     const onSnapshot = async (snapshot: BrainRunSnapshot): Promise<void> => {
       // The separate RunStore persists snapshots independently of the redacted job
       // record. Sanitize before either persistence path so credentials cannot bypass
@@ -636,8 +649,7 @@ export class DurableJobRuntime implements JobRuntime {
         // The job record also embeds its snapshot. Persist that fallback even when
         // the dedicated snapshot store is temporarily unavailable.
       }
-      const saved = await this.state.save(record);
-      if (!saved) controller.abort(new Error("Job execution lease was lost or cancelled"));
+      await persistOwnedRecord();
     };
 
     try {
@@ -675,14 +687,14 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = result.completed ? "completed" : "failed";
       }
       record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
+      await persistOwnedRecord();
     } catch (error) {
       if (record.status !== "cancelled") {
         record.error = error instanceof Error ? error.message : String(error);
         record.status = controller.signal.aborted ? "cancelled" : "failed";
         record.updatedAt = new Date().toISOString();
       }
-      await this.state.save(record);
+      await persistOwnedRecord();
     } finally {
       clearInterval(heartbeat);
       if (externalSignal && onExternalAbort) {
