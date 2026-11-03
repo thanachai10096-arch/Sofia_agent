@@ -15,6 +15,8 @@ test("Discord API key mapping rejects malformed, duplicate, and reused credentia
   assert.throws(() => parseDiscordUserApiKeys("not-json"), /valid JSON/);
   assert.throws(() => parseDiscordUserApiKeys("[]"), /JSON object/);
   assert.throws(() => parseDiscordUserApiKeys(JSON.stringify({ "123": "bad\nkey" })), /invalid user ID or API key/);
+  assert.throws(() => parseDiscordUserApiKeys(JSON.stringify({ "123": " shared-key " })), /invalid user ID or API key/);
+  assert.throws(() => parseDiscordUserApiKeys(JSON.stringify({ "123": "shared-key", "456": " shared-key " })), /invalid user ID or API key/);
   assert.throws(() => parseDiscordUserApiKeys(JSON.stringify({
     "123": "sofia_user_key_123456789_abcdefghijkl",
     "456": "sofia_user_key_123456789_abcdefghijkl",
