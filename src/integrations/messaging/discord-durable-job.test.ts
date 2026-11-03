@@ -113,9 +113,15 @@ test("Discord durable job lookup returns only jobs owned by the requesting Disco
     task: "private task",
     ownerKeyId: "discord:123",
   }];
-  const runtime = runtimeFor(records);
-  assert.equal((await getDiscordOwnedJob(runtime, "discord-job-12345678", "discord:123"))?.id, "discord-job-12345678");
-  assert.equal(await getDiscordOwnedJob(runtime, "discord-job-12345678", "discord:456"), undefined);
+  const jobId = "12345678-1234-1234-1234-123456789abc";
+  records[0]!.id = jobId;
+  const base = runtimeFor(records);
+  const runtime: JobRuntime = {
+    ...base,
+    async get(id) { return id === jobId ? { ...records[0]! } : undefined; },
+  };
+  assert.equal((await getDiscordOwnedJob(runtime, jobId, "discord:123"))?.id, jobId);
+  assert.equal(await getDiscordOwnedJob(runtime, jobId, "discord:456"), undefined);
   assert.equal(await getDiscordOwnedJob(runtime, "not-a-job-id", "discord:123"), undefined);
-  assert.equal(await getDiscordOwnedJob(runtime, "discord-job-12345678", "api-key:123"), undefined);
+  assert.equal(await getDiscordOwnedJob(runtime, jobId, "api-key:123"), undefined);
 });
