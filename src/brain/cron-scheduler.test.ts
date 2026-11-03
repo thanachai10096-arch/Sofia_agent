@@ -621,6 +621,44 @@ test("runtime lookup outages preserve active executions for a later recovery pas
     "the later recovery pass should reconcile the still-existing runtime job");
 });
 
+test("recovery monitors a runtime job that is temporarily invisible on the first lookup", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let reads = 0;
+  let cancelCalls = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not resubmit"); },
+    async get(id: string) {
+      reads++;
+      if (reads === 1) return undefined;
+      if (reads === 2) return { id, status: "queued", task: "startup visibility delay" } as JobRecord;
+      return { id, status: "completed", task: "startup visibility delay" } as JobRecord;
+    },
+    async cancel() { cancelCalls++; return true; },
+    async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, recoveryLeaseMs: 3_000 });
+  const schedule = await scheduler.create({
+    name: "initial-runtime-invisibility", task: "startup visibility delay", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "alice", timeoutMs: 5_000,
+  }, "alice");
+  state.history.push({
+    id: "initially-hidden-job", scheduleId: schedule.id, scheduledFor: new Date().toISOString(),
+    startedAt: new Date().toISOString(), status: "running", jobId: "initially-hidden-job", attempt: 1,
+  });
+
+  const result = await scheduler.recover();
+  assert.deepEqual(result, { reconciled: 0, monitoring: 1, indeterminate: 0 });
+  for (let i = 0; i < 100 && state.history[0].status === "running"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+
+  assert.ok(reads >= 3, "recovery monitor should retry the initially missing runtime record");
+  assert.equal(cancelCalls, 0, "recovery must not cancel a job because its first lookup was empty");
+  assert.equal(state.history[0].status, "completed");
+  assert.ok(state.audit.some((event: any) => event.action === "schedule.recovery.finished"));
+});
+
 test("recovered monitor retries a temporarily missing runtime record without cancelling the job", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
