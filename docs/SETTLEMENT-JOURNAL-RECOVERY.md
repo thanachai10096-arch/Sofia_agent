@@ -47,7 +47,7 @@ Never put prompts, user task text, credentials, provider replies, or API keys in
 
 ## Journal path integrity
 
-Journal inspection and unresolved-state checks reject symbolic links and non-regular journal records. Reads use `O_NOFOLLOW` where supported and verify that the opened file descriptor still refers to the inode observed by `lstat`. A symlinked or replaced record is treated as corrupt/unresolved evidence; it is never interpreted as an empty, resolved journal. This is a local filesystem hardening measure, not a substitute for a transactional shared store on multi-host deployments.
+Journal inspection and unresolved-state checks reject symbolic links and non-regular journal records. Reads use `O_NOFOLLOW` where supported and verify that the opened file descriptor still refers to the inode observed by `lstat`. Appends perform the same inode check when a record already exists. The namespace directory is opened with directory/no-follow flags and permissions are tightened through the verified descriptor rather than by following its path. A symlinked or replaced record is treated as corrupt/unresolved evidence; it is never interpreted as an empty, resolved journal. This is a local filesystem hardening measure, not a substitute for a transactional shared store on multi-host deployments.
 
 ## Read-only recovery decision classification
 
