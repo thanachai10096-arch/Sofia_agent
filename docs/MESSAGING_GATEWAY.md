@@ -87,3 +87,8 @@ The code outline above is not a claim that the repository's API server is alread
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+
+### Messaging API key scopes
+
+Per-user Telegram and Discord API keys use `SOFIA_MESSAGING_API_SCOPES`, separate from the primary `SOFIA_API_SCOPES`. The default is `agent:run,agent:read`. Add `memory:read,memory:write` only when personal memory is intentionally enabled for chat users; the API then scopes memory by each mapped key's authenticated principal. `security:admin`, desktop capabilities, unknown scopes, empty entries, and duplicates are rejected. Invalid messaging scope configuration disables mapped messaging credentials without taking down the core API.
