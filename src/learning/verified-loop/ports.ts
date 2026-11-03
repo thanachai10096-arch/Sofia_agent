@@ -59,6 +59,9 @@ export interface ActiveLearningSkill extends SkillCandidate {
   policyRevision: string;
 }
 export interface LearningTransaction {
+  /** Atomically bind an authoritative per-scope sequence to exactly one receipt ID.
+   * Must execute in the same transaction as insertExperienceIfAbsent when sequence delivery is used. */
+  bindReceiptSequence?(scope: LearningScope, sequence: number, receiptId: string): Promise<void>;
   /** Must atomically enforce uniqueness for (scope, receiptId). */
   insertExperienceIfAbsent(experience: LearningExperience): Promise<boolean>;
   listExperiences(scope: LearningScope, limit: number): Promise<LearningExperience[]>;
