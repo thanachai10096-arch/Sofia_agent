@@ -1116,3 +1116,26 @@ test("DurableJobRuntime accepts an injected JobStateStore without changing the d
   assert.equal(current?.status, "completed");
   assert.equal((await runtime.list()).some((record) => record.id === submitted.id), true);
 });
+
+
+test("DurableJobRuntime scopes job reads and lists to the authenticated owner", async () => {
+  const namespace = "job-runtime-owner-scope-" + randomUUID();
+  const runtime = new DurableJobRuntime(() => ({
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  const ownerA = await runtime.submit({ task: "owner A task", ownerKeyId: "owner-a" });
+  const ownerB = await runtime.submit({ task: "owner B task", ownerKeyId: "owner-b" });
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const [a, b] = await Promise.all([runtime.get(ownerA.id), runtime.get(ownerB.id)]);
+    if (a?.status === "completed" && b?.status === "completed") break;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+
+  assert.equal((await runtime.getForOwner(ownerA.id, "owner-a"))?.ownerKeyId, "owner-a");
+  assert.equal(await runtime.getForOwner(ownerA.id, "owner-b"), undefined);
+  assert.deepEqual((await runtime.listForOwner("owner-a")).map((job) => job.id), [ownerA.id]);
+  assert.deepEqual((await runtime.listForOwner("owner-b")).map((job) => job.id), [ownerB.id]);
+  assert.equal(await runtime.cancelForOwner(ownerA.id, "owner-b"), false);
+});
