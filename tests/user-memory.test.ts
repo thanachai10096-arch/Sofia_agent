@@ -1,6 +1,7 @@
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -97,6 +98,28 @@ test("user memory search supports Thai queries without whitespace segmentation",
     const matches = await store.find("user-th", "โซเฟียตอบไทย");
     assert.equal(matches.length, 1);
     assert.match(matches[0]?.content ?? "", /โซเฟียตอบภาษาไทย/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("corrupt user memory is preserved and cannot be overwritten by save or delete", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-user-memory-corrupt-"));
+  try {
+    const userId = "user-with-corrupt-memory";
+    const file = join(root, createHash("sha256").update(userId).digest("hex") + ".json");
+    const original = '[{"id":"partial-record"';
+    await writeFile(file, original, "utf8");
+    const store = new FileUserMemoryStore(root);
+
+    await assert.rejects(
+      store.save(userId, createUserMemoryEntry("fact", "A new memory")),
+      /memory file is corrupt/,
+    );
+    await assert.rejects(store.delete(userId, "partial-record"), /memory file is corrupt/);
+    assert.equal(await readFile(file, "utf8"), original,
+      "failed mutations must preserve the original corrupt file for recovery");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
