@@ -1,5 +1,3 @@
-import os
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -40,6 +38,7 @@ def test_health_does_not_require_auth_or_load_models(client):
         {"Authorization": "Basic test-secret"},
         {"Authorization": "Bearer"},
         {"Authorization": "Bearer wrong"},
+        {"Authorization": "Bearer tóken"},
     ],
 )
 def test_ai_endpoints_reject_missing_or_invalid_auth(client, headers):
