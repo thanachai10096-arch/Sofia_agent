@@ -1,0 +1,40 @@
+# Follow-up Security Review — Outbox Ownership and Worker Concurrency
+Date: 2026-11-03
+
+## Scope
+
+Reviewed the audit branch `audit/2026-11-runtime-integration-review` after commit `cc5e6a313398202febb4973727a46738970d1fb6`. This is a source review and additive hardening note; it does not authorize migration, merge, deployment, or production changes.
+
+## Confirmed boundaries
+
+- The public `POST /v1/jobs` route derives `ownerKeyId` from the authenticated API key identity. It does not accept `notificationChannelId` from request input.
+- The Discord durable-job adapter derives its owner principal from the Discord author ID and takes its notification channel from the inbound message metadata, after the transport's configured user and channel allowlists.
+- Terminal PostgreSQL job persistence inserts the outbox row from the successfully updated job row, copying its owner and persisted notification destination. The caller cannot choose a different destination in that transaction.
+- Outbox claim uses PostgreSQL `FOR UPDATE SKIP LOCKED`; lease renewal, ACK, and retry are fenced by message ID, processing status, worker token, and an unexpired lease.
+
+## Finding fixed
+
+The standalone `PostgresOutboxStore.enqueue()` path previously inserted the caller-supplied owner and destination directly. Unlike terminal persistence, it did not prove that either value matched the referenced job. A trusted-but-misconfigured internal caller could therefore create an outbox row with a mismatched tenant label or notification destination.
+
+Fix:
+- Changed enqueue to `INSERT ... SELECT` from `sofia_agent_jobs`.
+- It now inserts only if the job ID exists, the supplied owner matches the persisted job owner (including null-safe comparison), and the supplied destination exactly matches the job's persisted `notification_channel_id`.
+- The inserted owner is selected from the job row, not copied from caller input.
+- Added source-level assertions for the owner predicate, destination predicate, and row-derived owner.
+
+This is additive at the code level and does not change the public API. The query contract has not been exercised against a live PostgreSQL instance.
+
+## Remaining security/reliability gates
+
+1. **Discord channel privacy:** user and channel allowlists are currently independent sets. An allowed user can submit in an allowed channel, and results are posted back to that channel. In a channel shared by multiple people, task results may be visible to other channel members. Numeric channel-ID validation and allowlists do not establish exclusive ownership. Before multi-tenant/general availability, choose and enforce an explicit policy: private DM delivery, per-owner channel binding, or an explicit shared-channel consent/visibility model. Do not silently change existing behavior without reviewing the intended product contract.
+2. **Discord owner-scoped operations:** the gateway currently performs a read/check of `ownerKeyId` before calling some unscoped runtime methods (`resume`, `cancel`). IDs are random and ownership is immutable through the store's save predicate, but an atomic owner-scoped resume/cancel operation at the storage boundary is the stronger contract. This remains follow-up work.
+3. **Outbox concurrency:** source inspection confirms `SKIP LOCKED` and lease fencing, but existing tests are SQL-contract/fake-store tests. A real two-connection PostgreSQL test must prove: two workers cannot claim the same live row; an expired processing lease can be reclaimed; the old worker cannot ACK or retry after the new worker takes ownership; and a crash after provider acceptance is handled as at-least-once delivery.
+4. **Outbox history retention:** the migration currently uses `ON DELETE CASCADE` from jobs to outbox rows. Any future job-retention/deletion operation would also delete delivery evidence. No job deletion path was found in this scoped review, but retention policy must preserve audit/dead-letter evidence before adding deletion or cleanup.
+5. **Deployment wiring:** PostgreSQL stores, migration, outbox dispatcher, and worker remain host-injected scaffolding. Vercel runtime is not connected to a shared database or managed daemon in this branch.
+
+## Verification status
+
+- Branch compare and source reads completed.
+- Changed files: `src/brain/postgres-outbox-store.ts`, `src/brain/postgres-outbox-store.test.ts`.
+- Added SQL-contract assertions; tests were not executed.
+- No local build, typecheck, unit test, live PostgreSQL test, migration, Vercel deployment, merge, or production change was performed.
