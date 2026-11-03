@@ -10,6 +10,8 @@ export interface OutboxDeliveryContext {
   eventType: string;
   destination: string;
   payload: unknown;
+  /** Aborted when lease renewal fails or the dispatcher is shutting down. */
+  signal?: AbortSignal;
 }
 export type OutboxSender = (message: OutboxDeliveryContext) => Promise<void>;
 export interface OutboxDispatcherOptions {
@@ -39,8 +41,9 @@ function retryDelay(attempts: number, base: number, maximum: number): number {
 /**
  * Dispatches claimed outbox messages sequentially. Delivery is at-least-once:
  * a crash after the remote side effect but before acknowledgement can redeliver.
- * Receivers should deduplicate using messageId. A lease that expires during a
- * slow send can also cause concurrent redelivery; use bounded transport timeouts.
+ * Receivers should deduplicate using messageId. Stores supporting renewLease
+ * receive periodic lease extensions while a send is in progress. Senders should
+ * honor the supplied AbortSignal and still use bounded transport timeouts.
  */
 export class OutboxDispatcher {
   private readonly workerToken: string;
@@ -75,6 +78,34 @@ export class OutboxDispatcher {
   }
 
   private async dispatchMessage(message: OutboxMessage, report: OutboxDispatchReport): Promise<void> {
+    const controller = new AbortController();
+    let stopRenewal = false;
+    let renewalTimer: ReturnType<typeof setTimeout> | undefined;
+    let leaseLost = false;
+    const renew = this.store.renewLease;
+    const renewalTask = renew ? (async () => {
+      const intervalMs = Math.max(500, Math.floor(this.leaseMs / 3));
+      while (!stopRenewal) {
+        await new Promise<void>((resolve) => {
+          renewalTimer = setTimeout(resolve, intervalMs);
+        });
+        renewalTimer = undefined;
+        if (stopRenewal) return;
+        try {
+          const renewed = await renew.call(this.store, message.id, this.workerToken, this.leaseMs);
+          if (!renewed) {
+            leaseLost = true;
+            controller.abort(new Error("Outbox lease lost during delivery"));
+            return;
+          }
+        } catch {
+          leaseLost = true;
+          controller.abort(new Error("Outbox lease renewal failed"));
+          return;
+        }
+      }
+    })() : Promise.resolve();
+
     try {
       await this.send({
         messageId: message.id,
@@ -83,6 +114,7 @@ export class OutboxDispatcher {
         eventType: message.eventType,
         destination: message.destination,
         payload: message.payload,
+        signal: controller.signal,
       });
       const acknowledged = await this.store.markDelivered(message.id, this.workerToken);
       if (acknowledged) report.delivered += 1;
@@ -92,9 +124,13 @@ export class OutboxDispatcher {
       const updated = await this.store.retry(
         message.id, this.workerToken, safeError(error), delay, this.maxAttempts,
       );
-      if (!updated) report.leaseLost += 1;
+      if (!updated || leaseLost) report.leaseLost += 1;
       else if (message.attempts >= this.maxAttempts) report.failed += 1;
       else report.retried += 1;
+    } finally {
+      stopRenewal = true;
+      if (renewalTimer) clearTimeout(renewalTimer);
+      await renewalTask;
     }
   }
 }
