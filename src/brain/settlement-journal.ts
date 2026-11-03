@@ -259,7 +259,7 @@ export class FileSettlementJournal {
     const noFollow = fsConstants.O_NOFOLLOW ?? 0;
     const handle = await fs.open(
       file,
-      fsConstants.O_CREAT | fsConstants.O_APPEND | fsConstants.O_WRONLY | noFollow,
+      fsConstants.O_CREAT | fsConstants.O_APPEND | fsConstants.O_RDWR | noFollow,
       0o600,
     );
     try {
@@ -267,6 +267,24 @@ export class FileSettlementJournal {
       if (!info.isFile() || (existingInfo &&
           (info.dev !== existingInfo.dev || info.ino !== existingInfo.ino))) {
         throw new Error("Settlement journal record changed during validation");
+      }
+      if (existingInfo) {
+        // Inspect the existing record through the same descriptor that will
+        // receive the append. Never extend a partial/corrupt JSONL tail: doing
+        // so would mutate the original crash evidence and make reconciliation
+        // harder. O_APPEND still guarantees the subsequent write goes to EOF.
+        const existing = await handle.readFile("utf8");
+        if (existing.length === 0 || !existing.endsWith("\n")) {
+          throw new Error("Cannot append to an incomplete settlement journal record");
+        }
+        for (const line of existing.split("\n")) {
+          if (!line) continue;
+          try {
+            JSON.parse(line);
+          } catch {
+            throw new Error("Cannot append to a corrupt settlement journal record");
+          }
+        }
       }
       // chmod the opened inode rather than resolving the path a second time.
       await handle.chmod(0o600);
