@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertNoLegacyPlaintextApiKey, writeSafeLocalConfig } from "./config-file.js";
+import { applySafeLocalConfigEnvironment, assertNoLegacyPlaintextApiKey, writeSafeLocalConfig } from "./config-file.js";
 
 test("local config stores only non-secret metadata with private permissions", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "sofia-cli-config-test-"));
