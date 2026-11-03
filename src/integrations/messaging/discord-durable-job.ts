@@ -10,6 +10,7 @@ export interface DiscordDurableJobResult {
 export interface DiscordDurableJobHandle {
   id: string;
   runtime: JobRuntime;
+  principalId: string;
 }
 
 /** Submit a task without holding the Discord interaction open for the full job. */
@@ -31,7 +32,7 @@ export async function submitDiscordTask(
     ...(metadata.sessionKey ? { sessionKey: metadata.sessionKey } : {}),
     ...(metadata.sessionTask ? { sessionTask: metadata.sessionTask } : {}),
   });
-  return { id: submitted.id, runtime };
+  return { id: submitted.id, runtime, principalId };
 }
 
 /** Poll durable state independently of the short-lived Discord interaction token. */
@@ -60,7 +61,8 @@ export async function waitForDiscordTask(
       if (options.signal?.aborted) onAbort();
     });
     options.signal?.throwIfAborted();
-    current = await handle.runtime.get(handle.id);
+    if (!handle.runtime.getForOwner) throw new Error("Owner-scoped Discord job reads are required.");
+    current = await handle.runtime.getForOwner(handle.id, handle.principalId);
     if (!current) throw new Error("Sofia job state is unavailable.");
   } while (current.status === "queued" || current.status === "running");
 
@@ -90,11 +92,13 @@ export async function runDiscordTaskAsDurableJob(
  * treated as untrusted data, secret-redacted, injection-filtered, and never shared
  * between Discord users or channels.
  */
-export async function buildDiscordSessionContext(runtime: JobRuntime, sessionKey: string, limit = 5): Promise<string> {
+export async function buildDiscordSessionContext(runtime: JobRuntime, principalId: string, sessionKey: string, limit = 5): Promise<string> {
   if (!sessionKey.trim() || sessionKey.length > 1024) throw new Error("Invalid Discord session key.");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10) throw new Error("Invalid Discord session context limit.");
-  const jobs = (await runtime.list())
-    .filter((job) => job.sessionKey === sessionKey && job.status === "completed" && Boolean(job.result?.summary))
+  if (!principalId.trim()) throw new Error("Discord principal is required.");
+  if (!runtime.listForOwner) throw new Error("Owner-scoped Discord job listing is required.");
+  const jobs = (await runtime.listForOwner(principalId, 200))
+    .filter((job) => job.ownerKeyId === principalId && job.sessionKey === sessionKey && job.status === "completed" && Boolean(job.result?.summary))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, limit)
     .reverse();
