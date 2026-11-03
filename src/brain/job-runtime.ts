@@ -552,6 +552,9 @@ export class DurableJobRuntime implements JobRuntime {
 
   async getForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined> {
     const ownedStore = this.state as JobStateStore & Partial<OwnedJobStateStore>;
+    if (!ownedStore.getForOwner && !(this.state instanceof FileJobStateStore)) {
+      throw new Error("Owner-scoped job reads are required for shared storage");
+    }
     const stored = ownedStore.getForOwner
       ? await ownedStore.getForOwner(id, ownerKeyId)
       : await this.state.get(id).then((record) => record?.ownerKeyId === ownerKeyId ? record : undefined);
@@ -568,6 +571,9 @@ export class DurableJobRuntime implements JobRuntime {
   async listForOwner(ownerKeyId: string, limit = 100): Promise<JobRecord[]> {
     const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
     const ownedStore = this.state as JobStateStore & Partial<OwnedJobStateStore>;
+    if (!ownedStore.listForOwner && !(this.state instanceof FileJobStateStore)) {
+      throw new Error("Owner-scoped job listing is required for shared storage");
+    }
     const stored = ownedStore.listForOwner
       ? await ownedStore.listForOwner(ownerKeyId, boundedLimit)
       : (await this.state.list())
@@ -595,6 +601,9 @@ export class DurableJobRuntime implements JobRuntime {
 
   async cancelForOwner(id: string, ownerKeyId: string): Promise<boolean> {
     const ownedStore = this.state as JobStateStore & Partial<OwnedJobStateStore>;
+    if (!ownedStore.cancelForOwner && !(this.state instanceof FileJobStateStore)) {
+      throw new Error("Owner-scoped job cancellation is required for shared storage");
+    }
     const persisted = ownedStore.cancelForOwner
       ? await ownedStore.cancelForOwner(id, ownerKeyId)
       : await this.state.get(id).then(async (record) =>
