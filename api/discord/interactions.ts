@@ -45,10 +45,10 @@ async function readRawBody(req: IncomingMessage): Promise<Buffer | null> {
   return Buffer.concat(chunks);
 }
 
-function allowedIds(envValue: string | undefined): Set<string> {
-  return new Set((envValue ?? "").split(",").map((value) => value.trim()).filter((value) => /^\d{1,24}$/.test(value)));
+function allowedIds(envValue: string | undefined, variableName: string): Set<string> {
+  try { return new Set(parseDiscordIdAllowlist(envValue, variableName)); }
+  catch { return new Set(); }
 }
-
 function isSnowflake(value: unknown): value is string {
   return typeof value === "string" && /^\d{1,24}$/.test(value);
 }
