@@ -525,7 +525,8 @@ export class CronScheduler {
         if (leaseAcquired) {
           const controller = new AbortController();
           this.active.set(schedule.id, controller);
-          void this.monitorRecovered(schedule, execution.id, execution.jobId, leaseToken, controller);
+          const leaseExpiresAt = this.now().getTime() + this.recoveryLeaseMs;
+          void this.monitorRecovered(schedule, execution.id, execution.jobId, leaseToken, leaseExpiresAt, controller);
           monitoring++;
         }
       }
@@ -533,7 +534,14 @@ export class CronScheduler {
     return { reconciled, monitoring, indeterminate };
   }
 
-  private async monitorRecovered(schedule: CronSchedule, executionId: string, jobId: string, leaseToken: string, controller: AbortController): Promise<void> {
+  private async monitorRecovered(
+    schedule: CronSchedule,
+    executionId: string,
+    jobId: string,
+    leaseToken: string,
+    initialLeaseExpiresAt: number,
+    controller: AbortController,
+  ): Promise<void> {
     let status: CronExecution["status"] = "failed";
     let errorText: string | undefined;
     const timeout = new AbortController();
@@ -542,31 +550,47 @@ export class CronScheduler {
     controller.signal.addEventListener("abort", onAbort, { once: true });
     let leaseLost = false;
     let renewingLease = false;
+    // Keep the last confirmed deadline locally. If the store is unavailable
+    // beyond it, stop polling even though we cannot confirm a takeover yet.
+    let leaseExpiresAt = initialLeaseExpiresAt;
+    const loseLease = () => {
+      if (leaseLost) return;
+      leaseLost = true;
+      timeout.abort(new Error("Recovered scheduler monitor lease was lost"));
+    };
     const renewLease = async (): Promise<void> => {
       // Do not queue overlapping heartbeats behind a slow transactional store.
       if (renewingLease || leaseLost) return;
       renewingLease = true;
       try {
-        const renewed = await this.store.transact(state => {
+        const renewedUntil = await this.store.transact(state => {
           const current = state.history.find(item => item.id === executionId);
           if (!current || (current.status !== "claimed" && current.status !== "running") ||
-              current.recoveryLeaseOwnerToken !== leaseToken) return false;
+              current.recoveryLeaseOwnerToken !== leaseToken) return undefined;
           const expiresAt = current.recoveryLeaseExpiresAt ? Date.parse(current.recoveryLeaseExpiresAt) : 0;
-          if (!Number.isFinite(expiresAt) || expiresAt <= this.now().getTime()) return false;
-          current.recoveryLeaseExpiresAt = new Date(this.now().getTime() + this.recoveryLeaseMs).toISOString();
-          return true;
+          const now = this.now().getTime();
+          if (!Number.isFinite(expiresAt) || expiresAt <= now) return undefined;
+          const nextExpiry = now + this.recoveryLeaseMs;
+          current.recoveryLeaseExpiresAt = new Date(nextExpiry).toISOString();
+          return nextExpiry;
         });
-        if (!renewed) {
-          leaseLost = true;
-          timeout.abort(new Error("Recovered scheduler monitor lease was lost"));
+        if (renewedUntil === undefined) {
+          loseLease();
+        } else {
+          leaseExpiresAt = renewedUntil;
         }
+      } catch (error) {
+        // A transient store failure is not proof of lease loss. Retry while
+        // the last confirmed lease is live; never keep polling past its deadline.
+        if (this.now().getTime() >= leaseExpiresAt) loseLease();
+        throw error;
       } finally {
         renewingLease = false;
       }
     };
     const heartbeat = setInterval(() => {
       void renewLease().catch(() => {
-        // A transient store failure is not proof of lease loss; retry on the next heartbeat.
+        // Transient failures are retried on the next heartbeat.
       });
     }, Math.max(1_000, Math.floor(this.recoveryLeaseMs / 3)));
     heartbeat.unref?.();
