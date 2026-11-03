@@ -161,6 +161,33 @@ test("empty local metadata does not erase existing environment configuration", (
   assert.equal(environment.SOFIA_MODEL_NAME, "provider/model");
 });
 
+test("environment provider override does not inherit a mismatched local endpoint or model", () => {
+  const environment: NodeJS.ProcessEnv = {
+    SOFIA_MODEL_PROVIDER: "openai",
+  };
+  applySafeLocalConfigEnvironment({
+    provider: "openai-compatible",
+    baseUrl: "https://private-gateway.example/v1",
+    model: "private-model",
+  }, environment);
+  assert.equal(environment.SOFIA_MODEL_PROVIDER, "openai");
+  assert.equal(environment.SOFIA_MODEL_BASE_URL, undefined);
+  assert.equal(environment.SOFIA_MODEL_NAME, undefined);
+});
+
+test("matching environment provider can reuse its local endpoint and model defaults", () => {
+  const environment: NodeJS.ProcessEnv = {
+    SOFIA_MODEL_PROVIDER: "openai",
+  };
+  applySafeLocalConfigEnvironment({
+    provider: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4.1-mini",
+  }, environment);
+  assert.equal(environment.SOFIA_MODEL_BASE_URL, "https://api.openai.com/v1");
+  assert.equal(environment.SOFIA_MODEL_NAME, "gpt-4.1-mini");
+});
+
 
 test("CLI argv resolves help and supported commands without side effects", () => {
   assert.deepEqual(resolveCliInvocation([]), { command: "help" });
