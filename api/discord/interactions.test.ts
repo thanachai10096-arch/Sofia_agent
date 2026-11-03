@@ -9,7 +9,7 @@ const publicKeyHex = (publicKey.export({ format: "der", type: "spki" }) as Buffe
 type EnvSnapshot = Record<string, string | undefined>;
 const names = [
   "DISCORD_PUBLIC_KEY", "DISCORD_ALLOWED_USER_IDS", "DISCORD_ALLOWED_CHANNEL_IDS",
-  "DISCORD_COMMAND_NAME", "SOFIA_API_BASE_URL", "SOFIA_UPSTREAM_API_KEY",
+  "DISCORD_COMMAND_NAME", "VERCEL_URL", "SOFIA_INTERNAL_API_KEY",
 ] as const;
 const originalEnv: EnvSnapshot = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 const originalFetch = globalThis.fetch;
@@ -30,8 +30,8 @@ function configure(): void {
   process.env.DISCORD_ALLOWED_USER_IDS = "123456789012345678";
   process.env.DISCORD_ALLOWED_CHANNEL_IDS = "234567890123456789";
   process.env.DISCORD_COMMAND_NAME = "run";
-  process.env.SOFIA_API_BASE_URL = "https://sofia.example";
-  process.env.SOFIA_UPSTREAM_API_KEY = "test-upstream-key";
+  process.env.VERCEL_URL = "sofia-preview.example";
+  process.env.SOFIA_INTERNAL_API_KEY = "test-internal-key";
 }
 
 function signedHeaders(rawBody: string): Record<string, string> {
@@ -121,8 +121,8 @@ describe("Vercel Discord interactions endpoint", () => {
     assert.equal(result.status, 200);
     assert.match(String((result.body.data as Record<string, unknown>).content), /run-456/);
     const apiCall = calls[0];
-    assert.equal(apiCall?.url, "https://sofia.example/v1/agent/runs");
-    assert.equal(new Headers(apiCall?.init?.headers).get("authorization"), "Bearer test-upstream-key");
+    assert.equal(apiCall?.url, "https://sofia-preview.example/api/v1/agent/runs");
+    assert.equal(new Headers(apiCall?.init?.headers).get("authorization"), "Bearer test-internal-key");
     assert.match(new Headers(apiCall?.init?.headers).get("idempotency-key") ?? "", /^discord_[a-f0-9]{64}$/);
     assert.equal(JSON.parse(String(apiCall?.init?.body)).task, "Check Sofia status");
   });
