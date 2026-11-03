@@ -51,9 +51,10 @@ test("SQLite transcript pagination and full-text search work", async () => {
   }
 });
 
-test("deleting a SQLite session atomically removes its transcript and search index", async () => {
+test("deleting a SQLite session atomically removes its transcript and search index across restart", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-delete-"));
-  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  const file = path.join(dir, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(file);
   try {
     store.save({
       id: "private-conversation",
@@ -69,6 +70,17 @@ test("deleting a SQLite session atomically removes its transcript and search ind
     assert.deepEqual(store.search("Blue Lantern"), []);
   } finally {
     store.close();
+  }
+
+  // Reopening rebuilds the optional FTS index from durable transcript rows.
+  // A deleted transcript must therefore stay absent after recovery as well.
+  const reopened = await SqliteSessionStore.open(file);
+  try {
+    assert.equal(reopened.get("private-conversation"), undefined);
+    assert.deepEqual(reopened.listMessages("private-conversation"), []);
+    assert.deepEqual(reopened.search("Blue Lantern"), []);
+  } finally {
+    reopened.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
