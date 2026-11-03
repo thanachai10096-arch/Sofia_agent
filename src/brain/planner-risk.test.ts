@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseUnderstanding } from "./planner.js";
+import { parsePlan, parseUnderstanding } from "./planner.js";
 
 const valid = {
   objective: "Say hello",
@@ -32,4 +32,27 @@ test("parseUnderstanding rejects invalid risk with a safe field/type diagnostic"
       },
     );
   }
+});
+
+test("parsePlan reports the invalid field and received type without echoing values", () => {
+  assert.throws(
+    () => parsePlan({ strategy: "invalid-secret-value", reason: "test", steps: [] }, 10),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /field "strategy"/);
+      assert.match(error.message, /received type string/);
+      assert.doesNotMatch(error.message, /invalid-secret-value/);
+      return true;
+    },
+  );
+  assert.throws(
+    () => parsePlan({ strategy: "initial", reason: "test", steps: "secret" }, 10),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /field "steps"/);
+      assert.match(error.message, /received type string/);
+      assert.doesNotMatch(error.message, /secret/);
+      return true;
+    },
+  );
 });
