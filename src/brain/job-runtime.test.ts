@@ -1281,3 +1281,68 @@ test("DurableJobRuntime does not acknowledge a settlement when the Job checkpoin
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("DurableJobRuntime checks persisted job ownership before loading or resuming a checkpoint after restart", async () => {
+  const namespace = "job-runtime-owner-recovery-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "owner-recovery-run-" + randomUUID(),
+    task: "private checkpoint",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "owner-private-checkpoint",
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const persistedRunStore = {
+    async save() {},
+    async load() { return undefined; },
+    async delete() {},
+  };
+  const firstRuntime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async () => {
+      await onRunSnapshot?.(snapshot);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), persistedRunStore, namespace);
+
+  const submitted = await firstRuntime.submit({ task: "private checkpoint", ownerKeyId: "owner-a" });
+  let completed = await firstRuntime.get(submitted.id, "owner-a");
+  for (let attempt = 0; attempt < 100 && completed?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    completed = await firstRuntime.get(submitted.id, "owner-a");
+  }
+  assert.equal(completed?.status, "failed");
+  assert.equal(completed?.snapshot?.checkpointId, "owner-private-checkpoint");
+
+  let snapshotLoads = 0;
+  const restartedRunStore = {
+    async save() {},
+    async load(runId: string) {
+      snapshotLoads += 1;
+      assert.equal(runId, snapshot.runId);
+      return snapshot;
+    },
+    async delete() {},
+  };
+  const restartedRuntime = new DurableJobRuntime(() => ({
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain), restartedRunStore, namespace);
+
+  assert.equal(await restartedRuntime.get(submitted.id, "owner-b"), undefined);
+  assert.deepEqual(await restartedRuntime.list("owner-b"), []);
+  await assert.rejects(() => restartedRuntime.resume(submitted.id, undefined, "owner-b"), /Unknown job/);
+  assert.equal(snapshotLoads, 0, "foreign owners must be rejected before checkpoint files are read");
+
+  const owned = await restartedRuntime.get(submitted.id, "owner-a");
+  assert.equal(owned?.snapshot?.checkpointId, "owner-private-checkpoint");
+  assert.equal(snapshotLoads, 1, "the authenticated owner can recover its checkpoint");
+});
