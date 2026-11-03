@@ -161,6 +161,58 @@ test("startup recovery restores an interrupted file target from a verified durab
   }
 });
 
+
+test("startup recovery verifies every snapshot before mutating any target", async () => {
+  const transactionId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+  const initial = createRestoreJournalRecord({
+    transactionId,
+    createdAt: "2026-11-03T00:00:00.000Z",
+    manifestSha256: "d".repeat(64),
+    targets: [
+      { name: "first", paths: ["first.json"], rollbackSnapshotRef: "a".repeat(64) + "/" + "1".repeat(64) + ".snapshot", rollbackSnapshotSha256: "1".repeat(64) },
+      { name: "second", paths: ["second.json"], rollbackSnapshotRef: "b".repeat(64) + "/" + "2".repeat(64) + ".snapshot", rollbackSnapshotSha256: "2".repeat(64) },
+    ],
+  });
+  const interrupted = advanceRestoreJournal(initial, {
+    phase: "applying",
+    updatedAt: "2026-11-03T00:00:01.000Z",
+    targets: initial.targets.map((target) => ({ ...target, phase: "applied" })),
+  });
+  let current = interrupted;
+  let appendCalls = 0;
+  const journal: RestoreJournalStore = {
+    async create() { throw new Error("not used"); },
+    async append(next, expectedRevision) {
+      assert.equal(current.revision, expectedRevision);
+      current = next;
+      appendCalls += 1;
+    },
+    async read() { return current; },
+    async list() { return [current]; },
+  };
+  const mutations: string[] = [];
+  const snapshotStore = {
+    async write() { throw new Error("not used"); },
+    async read(ref: string) {
+      if (ref.includes("2".repeat(64))) throw new Error("snapshot digest verification failed");
+      return new Uint8Array([1]);
+    },
+  };
+  await assert.rejects(recoverInterruptedRestoreTransaction({
+    transactionId,
+    journal,
+    snapshotStore,
+    adapters: [
+      { name: "first", paths: ["first.json"], async rollbackFromSnapshotBytes() { mutations.push("first"); } },
+      { name: "second", paths: ["second.json"], async rollbackFromSnapshotBytes() { mutations.push("second"); } },
+    ],
+    async withExclusiveLock(_id, operation) { return operation(); },
+  }), /snapshot digest verification failed/);
+  assert.deepEqual(mutations, []);
+  assert.equal(appendCalls, 0);
+  assert.equal(current.phase, "applying");
+});
+
 test("startup recovery refuses to run without the caller's exclusive lock", async () => {
   await assert.rejects(recoverInterruptedRestoreTransaction({
     transactionId: "dddddddd-dddd-dddd-dddd-dddddddddddd",
