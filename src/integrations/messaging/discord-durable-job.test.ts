@@ -17,6 +17,11 @@ function runtimeFor(records: JobRecord[]): JobRuntime {
       records.push(record);
       return { ...record };
     },
+    async getForOwner(id, ownerKeyId) {
+      assert.equal(id, "discord-job-12345678");
+      const record = records[records.length - 1];
+      return record?.ownerKeyId === ownerKeyId ? { ...record } : undefined;
+    },
     async get(id) {
       assert.equal(id, "discord-job-12345678");
       return records[records.length - 1] ? { ...records[records.length - 1]! } : undefined;
@@ -24,6 +29,7 @@ function runtimeFor(records: JobRecord[]): JobRuntime {
     async resume() { throw new Error("not used"); },
     async cancel() { return false; },
     async list() { return records.map((record) => ({ ...record })); },
+    async listForOwner(ownerKeyId) { return records.filter((record) => record.ownerKeyId === ownerKeyId).map((record) => ({ ...record })); },
   };
 }
 
@@ -96,7 +102,7 @@ test("Discord session context is scoped to a session and only uses completed job
       task: "unfinished task", ownerKeyId: "discord:123", sessionKey: "discord-session-a",
     },
   ];
-  const context = await buildDiscordSessionContext(runtimeFor(records), "discord-session-a");
+  const context = await buildDiscordSessionContext(runtimeFor(records), "discord:123", "discord-session-a");
   assert.match(context, /README uses MIT licensing/);
   assert.doesNotMatch(context, /Do not leak this/);
   assert.doesNotMatch(context, /unfinished task/);
