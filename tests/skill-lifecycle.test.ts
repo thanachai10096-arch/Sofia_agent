@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VersionedSkillLifecycle } from "../src/brain/skill-lifecycle.js";
@@ -55,7 +55,6 @@ test("separate lifecycle instances reload under the writer lock and preserve eac
     assert.deepEqual(refreshedWriter.list().map(item => item.id).sort(), [first.id, second.id].sort());
 
     const lockDirectory = file + ".lock";
-    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(lockDirectory);
     assert.throws(
       () => refreshedWriter.propose(pkg("1.0.2"), {
