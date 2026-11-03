@@ -62,3 +62,30 @@ test("outbox lease renewal extends only a live lease owned by the worker",async(
  assert.match(captured,/lease_expires_at>now\(\)/);
  assert.deepEqual(values,[uuidA,uuidB,60000]);
 });
+
+
+test("expired processing leases are reclaimable and replaced with the new worker fencing token",async()=>{
+ let sql="";
+ let values:unknown[]=[];
+ const db:PostgresExecutor={async query(statement,params=[]){sql=statement;values=params;return {rows:[],rowCount:0};}};
+ const store=new PostgresOutboxStore(db);
+ await store.claimBatch(uuidB,1,15000);
+ assert.match(sql,/status='pending' OR \(status='processing' AND lease_expires_at<=now\(\)\)/);
+ assert.match(sql,/FOR UPDATE SKIP LOCKED/);
+ assert.match(sql,/lease_owner_token=\$1::uuid/);
+ assert.match(sql,/lease_expires_at=now\(\)/);
+ assert.deepEqual(values,[uuidB,1,15000]);
+});
+
+test("a stale worker cannot acknowledge or retry after another worker owns the lease",async()=>{
+ const statements:string[]=[];
+ const db:PostgresExecutor={async query(sql){statements.push(sql);return {rows:[],rowCount:0};}};
+ const store=new PostgresOutboxStore(db);
+ assert.equal(await store.markDelivered(uuidA,uuidB),false);
+ assert.equal(await store.retry(uuidA,uuidB,"stale worker",0,8),false);
+ for(const sql of statements){
+  assert.match(sql,/status='processing'/);
+  assert.match(sql,/lease_owner_token=\$2::uuid/);
+  assert.match(sql,/lease_expires_at>now\(\)/);
+ }
+});
