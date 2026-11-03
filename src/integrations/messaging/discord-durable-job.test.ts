@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { JobRecord, JobRuntime } from "../../brain/job-runtime.js";
-import { buildDiscordSessionContext, runDiscordTaskAsDurableJob } from "./discord-durable-job.js";
+import { buildDiscordSessionContext, getDiscordOwnedJob, runDiscordTaskAsDurableJob } from "./discord-durable-job.js";
 
 function runtimeFor(records: JobRecord[]): JobRuntime {
   return {
@@ -102,4 +102,20 @@ test("Discord session context is scoped to a session and only uses completed job
   assert.doesNotMatch(context, /Do not leak this/);
   assert.doesNotMatch(context, /unfinished task/);
   assert.match(context, /untrusted historical data/i);
+});
+
+test("Discord durable job lookup returns only jobs owned by the requesting Discord user", async () => {
+  const records: JobRecord[] = [{
+    id: "discord-job-12345678",
+    status: "completed",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    task: "private task",
+    ownerKeyId: "discord:123",
+  }];
+  const runtime = runtimeFor(records);
+  assert.equal((await getDiscordOwnedJob(runtime, "discord-job-12345678", "discord:123"))?.id, "discord-job-12345678");
+  assert.equal(await getDiscordOwnedJob(runtime, "discord-job-12345678", "discord:456"), undefined);
+  assert.equal(await getDiscordOwnedJob(runtime, "not-a-job-id", "discord:123"), undefined);
+  assert.equal(await getDiscordOwnedJob(runtime, "discord-job-12345678", "api-key:123"), undefined);
 });
