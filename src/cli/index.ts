@@ -8,10 +8,11 @@ import { SofiaAgent } from "../agent/core.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createCliSessionId } from "./session-id.js";
+import { resolveCliInvocation } from "./commands.js";
 import { applySafeLocalConfigEnvironment, assertNoLegacyPlaintextApiKey, writeSafeLocalConfig } from "./config-file.js";
 
-const args = process.argv.slice(2);
-const command = args[0];
+const invocation = resolveCliInvocation(process.argv.slice(2));
+const command = invocation.command;
 const configDir = path.join(os.homedir(), ".sofia");
 const configPath = path.join(configDir, "config.json");
 const sessionPath = path.join(configDir, "sessions.sqlite");
@@ -191,7 +192,7 @@ async function main() {
   }
 
   if (command === "run") {
-    return runLocal(args.slice(1).join(" "), false);
+    return runLocal(invocation.command === "run" ? invocation.task : "", false);
   }
   return help();
 }
