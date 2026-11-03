@@ -162,6 +162,50 @@ test("startup recovery restores an interrupted file target from a verified durab
 });
 
 
+test("startup recovery rejects duplicate adapter paths that omit journal-owned paths", async () => {
+  const transactionId = "abababab-caca-abab-caca-abababababab";
+  const initial = createRestoreJournalRecord({
+    transactionId,
+    createdAt: "2026-11-03T00:00:00.000Z",
+    manifestSha256: "8".repeat(64),
+    targets: [{
+      name: "state",
+      paths: ["state/a.json", "state/b.json"],
+      rollbackSnapshotRef: "snapshots/state",
+      rollbackSnapshotSha256: "a".repeat(64),
+    }],
+  });
+  const applying = advanceRestoreJournal(initial, {
+    phase: "applying",
+    updatedAt: "2026-11-03T00:00:01.000Z",
+    targets: initial.targets.map((target) => ({ ...target, phase: "applied" })),
+  });
+  let snapshotReads = 0;
+  let rollbackCalls = 0;
+  await assert.rejects(recoverInterruptedRestoreTransaction({
+    transactionId,
+    journal: {
+      async create() { throw new Error("not used"); },
+      async append() { throw new Error("not used"); },
+      async read() { return applying; },
+      async list() { return [applying]; },
+    },
+    snapshotStore: {
+      async write() { throw new Error("not used"); },
+      async read() { snapshotReads += 1; return new Uint8Array([1]); },
+    },
+    adapters: [{
+      name: "state",
+      // Same length as the journal list, but duplicates a.json and omits b.json.
+      paths: ["state/a.json", "state/a.json"],
+      async rollbackFromSnapshotBytes() { rollbackCalls += 1; },
+    }],
+    async withExclusiveLock(_id, operation) { return operation(); },
+  }), /does not match journal target/);
+  assert.equal(snapshotReads, 0);
+  assert.equal(rollbackCalls, 0);
+});
+
 test("startup recovery verifies every snapshot before mutating any target", async () => {
   const transactionId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
   const initial = createRestoreJournalRecord({
