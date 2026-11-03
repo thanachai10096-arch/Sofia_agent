@@ -554,8 +554,10 @@ export class CronScheduler {
       status = job.status === "completed" ? "completed" : job.status === "cancelled" ? "cancelled" : "failed";
       errorText = status === "failed" ? job.error ?? "Recovered runtime job failed" : undefined;
     } catch (error) {
-      await this.runtime.cancel(jobId).catch(() => false);
-      status = controller.signal.aborted ? "cancelled" : "failed";
+      // A lost lease means another scheduler may now own monitoring. Do not cancel
+      // the shared runtime job merely because this monitor was fenced out.
+      if (!leaseLost) await this.runtime.cancel(jobId).catch(() => false);
+      status = controller.signal.aborted && !leaseLost ? "cancelled" : "failed";
       errorText = error instanceof Error ? error.message : String(error);
     } finally {
       clearTimeout(timeoutId);
