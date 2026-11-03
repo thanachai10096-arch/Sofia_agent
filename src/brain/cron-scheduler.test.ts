@@ -450,13 +450,17 @@ test("concurrent recovery monitors emit one terminal audit for a shared executio
     status: "running", jobId: "shared-recovered-job", attempt: 1,
   });
 
-  await Promise.all([first.recover(), second.recover()]);
+  const recoveryResults = await Promise.all([first.recover(), second.recover()]);
+  assert.equal(recoveryResults.reduce((total, result) => total + result.monitoring, 0), 1,
+    "a live durable recovery lease must elect exactly one monitor across scheduler instances");
   for (let i = 0; i < 100 && state.history[0]?.status !== "completed"; i++) {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   // Let the losing monitor finish its finalizer after observing the terminal record.
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(state.history[0].status, "completed");
+  assert.equal(state.history[0].recoveryLeaseOwnerToken, undefined, "terminal finalization releases the lease");
+  assert.equal(state.history[0].recoveryLeaseExpiresAt, undefined);
   assert.equal(state.audit.filter((event: any) => event.action === "schedule.recovery.finished").length, 1);
 });
 
