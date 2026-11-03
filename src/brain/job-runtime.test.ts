@@ -997,3 +997,47 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime leases recovered notifications across independent runtime instances", async () => {
+  const root = await (await import("node:fs/promises")).mkdtemp(path.join(os.tmpdir(), "sofia-job-notice-lease-"));
+  const previousRoot = process.env.SOFIA_STATE_DIR;
+  process.env.SOFIA_STATE_DIR = root;
+  const namespace = "job-notice-lease-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed", summary: "completed safely" }),
+  } as unknown as SofiaBrain;
+  const first = new DurableJobRuntime(() => brain, undefined, namespace);
+  const second = new DurableJobRuntime(() => brain, undefined, namespace);
+
+  try {
+    const submitted = await first.submit({ task: "finish and deliver one recovery notice" });
+    let completed = await first.get(submitted.id);
+    for (let attempt = 0; attempt < 100 && completed?.status !== "completed"; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      completed = await first.get(submitted.id);
+    }
+    assert.equal(completed?.status, "completed");
+
+    const claims = await Promise.all([
+      first.claimNotificationDelivery(submitted.id),
+      second.claimNotificationDelivery(submitted.id),
+    ]);
+    assert.equal(claims.filter(Boolean).length, 1, "only one runtime may own the delivery lease");
+
+    const owner = claims[0] ? first : second;
+    const contender = claims[0] ? second : first;
+    await owner.releaseNotificationDelivery(submitted.id);
+    assert.equal(await contender.claimNotificationDelivery(submitted.id), true, "a failed delivery must be retryable");
+
+    await contender.markNotificationDelivered(submitted.id);
+    const reader = new DurableJobRuntime(() => brain, undefined, namespace);
+    const persisted = await reader.get(submitted.id);
+    assert.equal(persisted?.notificationDelivered, true);
+    assert.equal(persisted?.notificationLeaseOwnerToken, undefined, "internal delivery lease tokens must never be public");
+  } finally {
+    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
+    else process.env.SOFIA_STATE_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+});

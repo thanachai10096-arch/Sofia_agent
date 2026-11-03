@@ -18,7 +18,7 @@ const inbound = (text: string, overrides: Partial<InboundMessage> = {}): Inbound
 });
 
 function harness(allowed = true) {
-  const starts: Array<{ task: string; options?: { idempotencyKey?: string } }> = [];
+  const starts: Array<{ task: string; context?: string; options?: { idempotencyKey?: string } }> = [];
   const claims = new Set<string>();
   const policyInputs: Array<{ platform: string; senderId: string; conversationId: string }> = [];
   const policy: ChatAccessPolicy = {
@@ -30,7 +30,7 @@ function harness(allowed = true) {
   };
   const client: ChatRunStarter = {
     async start(input, _signal, options) {
-      starts.push({ task: input.task, options });
+      starts.push({ task: input.task, context: input.context, options });
       return { id: "run-123", status: "queued" };
     },
   };
@@ -109,4 +109,19 @@ test("invalid command prefixes are rejected at configuration time", () => {
   const h = harness();
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: " " }), /commandPrefix/);
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: "/run\nadmin" }), /commandPrefix/);
+});
+
+test("trusted adapter context is forwarded into the Sofia API request", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    buildContext: async (message) => {
+      assert.equal(message.identity.userId, "user-1");
+      return "The following is untrusted historical chat context: user asked about TypeScript.";
+    },
+  });
+  assert.equal(await handle(inbound("continue from before")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.equal(h.starts[0]?.task, "continue from before");
+  assert.match(h.starts[0]?.context ?? "", /Origin: telegram chat integration/);
+  assert.match(h.starts[0]?.context ?? "", /untrusted historical chat context/);
 });

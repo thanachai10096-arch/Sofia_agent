@@ -220,3 +220,73 @@ test("SQLite session storage rejects a directory as a database path", {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("SQLite append is atomic, ordered, and bounds retained conversation history", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-append-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const first = await SqliteSessionStore.open(file);
+  const second = await SqliteSessionStore.open(file);
+  try {
+    first.append("telegram:private-session", "user: first", 3);
+    second.append("telegram:private-session", "assistant: first reply", 3);
+    first.append("telegram:private-session", "user: second", 3);
+    second.append("telegram:private-session", "assistant: second reply", 3);
+    assert.deepEqual(first.get("telegram:private-session")?.messages, [
+      "assistant: first reply", "user: second", "assistant: second reply",
+    ]);
+  } finally {
+    first.close();
+    second.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("deleting a SQLite session atomically removes its transcript and full-text search entries", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-delete-"));
+  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  try {
+    store.save({ id: "erase-me", messages: ["private deletion phrase"], updatedAt: 0 });
+    store.save({ id: "keep-me", messages: ["unrelated retained transcript"], updatedAt: 0 });
+
+    assert.deepEqual(store.search("deletion").map((session) => session.id), ["erase-me"]);
+    store.delete("erase-me");
+
+    assert.equal(store.get("erase-me"), undefined);
+    assert.deepEqual(store.listMessages("erase-me"), []);
+    assert.deepEqual(store.search("deletion"), []);
+    assert.deepEqual(store.get("keep-me")?.messages, ["unrelated retained transcript"]);
+
+    assert.doesNotThrow(() => store.delete("erase-me"));
+    assert.deepEqual(store.get("keep-me")?.messages, ["unrelated retained transcript"]);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("failed session deletion rolls back both transcript and search-index changes", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-delete-rollback-"));
+  const file = path.join(dir, "sessions.sqlite");
+  const store = await SqliteSessionStore.open(file);
+  const db = new DatabaseSync(file);
+  try {
+    store.save({ id: "atomic-erase", messages: ["retain deletion rollback phrase"], updatedAt: 0 });
+    db.exec(`
+      CREATE TRIGGER reject_session_delete
+      BEFORE DELETE ON sessions
+      WHEN OLD.id = 'atomic-erase'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced delete failure');
+      END;
+    `);
+
+    assert.throws(() => store.delete("atomic-erase"), /forced delete failure/);
+    assert.deepEqual(store.get("atomic-erase")?.messages, ["retain deletion rollback phrase"]);
+    assert.deepEqual(store.search("rollback").map((session) => session.id), ["atomic-erase"]);
+  } finally {
+    db.close();
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

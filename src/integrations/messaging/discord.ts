@@ -2,13 +2,19 @@ import type { MessagingAdapter, InboundMessage, DeliveryReceipt, OutboundMessage
 import { splitMessage } from "./format.js";
 
 export interface VerifiedDiscordMessage {
-  /** Must only be emitted by a transport after validating Discord's signature and timestamp. */
-  signatureVerified: true;
+  /** HTTP interaction events must be signature-verified against the raw request and timestamp. */
+  signatureVerified?: true;
+  /** Gateway events are authenticated by the established Discord Gateway session over TLS. */
+  transportVerified?: true;
   id: string;
   channelId: string;
   author: { id: string; username?: string; bot?: boolean };
   content: string;
   createdAt: number;
+  /** Derived from verified Discord channel metadata by the transport. */
+  directMessage?: boolean;
+  /** Derived from verified mentions/replies by the transport. */
+  addressedToBot?: boolean;
   attachments?: Array<{ id: string; filename?: string; contentType?: string; sizeBytes?: number; url?: string }>;
 }
 export interface DiscordTransport {
@@ -16,7 +22,7 @@ export interface DiscordTransport {
   sendMessage(channelId: string, text: string, replyToMessageId?: string, interactionId?: string): Promise<{ messageId: string }>;
   stop(): Promise<void>;
 }
-/** Adapter for a Discord transport that verifies the provider request before emitting events. */
+/** Normalizes only authenticated HTTP interaction or Gateway events. */
 export function createDiscordAdapter(transport: DiscordTransport): MessagingAdapter {
   let running = false;
   return {
@@ -25,7 +31,7 @@ export function createDiscordAdapter(transport: DiscordTransport): MessagingAdap
       if (running) return;
       running = true;
       await transport.start(signal, async (event) => {
-        if (event.signatureVerified !== true || !event.id || !event.channelId || !event.author?.id || event.author.bot) return;
+        if ((event.signatureVerified !== true && event.transportVerified !== true) || !event.id || !event.channelId || !event.author?.id || event.author.bot) return;
         const inbound: InboundMessage = {
           platform: "discord", messageId: event.id,
           identity: { platform: "discord", userId: event.author.id, channelId: event.channelId,
@@ -39,6 +45,8 @@ export function createDiscordAdapter(transport: DiscordTransport): MessagingAdap
             ...(attachment.url ? { url: attachment.url } : {}),
           })),
           receivedAt: event.createdAt,
+          ...(event.directMessage === true ? { directMessage: true } : {}),
+          ...(event.addressedToBot === true ? { addressedToBot: true } : {}),
         };
         await onMessage(inbound);
       });
@@ -52,9 +60,7 @@ export function createDiscordAdapter(transport: DiscordTransport): MessagingAdap
           lastId = sent.messageId;
         }
         return { state: "sent", ...(lastId ? { providerMessageId: lastId } : {}) };
-      } catch {
-        return { state: "failed", errorCode: "discord_delivery_failed" };
-      }
+      } catch { return { state: "failed", errorCode: "discord_delivery_failed" }; }
     },
     async stop() { running = false; await transport.stop(); },
   };

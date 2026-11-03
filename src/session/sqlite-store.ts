@@ -142,6 +142,45 @@ export class SqliteSessionStore {
     return created;
   }
 
+  /** Atomically append one message and retain only the newest bounded transcript entries. */
+  append(id: string, content: string, maxMessages = 20): void {
+    if (!id || id.length > 1024) throw new Error("Session id must be between 1 and 1024 characters.");
+    if (typeof content !== "string" || content.length > 20_000) throw new TypeError("Session message must be a string of at most 20000 characters.");
+    const keep = boundedInteger(maxMessages, 20, 1, 500);
+    const updatedAt = Date.now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        "INSERT INTO sessions(id, updated_at) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
+      ).run(id, updatedAt);
+      const row = this.db.prepare(
+        "SELECT COALESCE(MAX(position), -1) AS position FROM session_messages WHERE session_id = ?",
+      ).get(id) as { position: number };
+      this.db.prepare(
+        "INSERT INTO session_messages(session_id, position, content) VALUES (?, ?, ?)",
+      ).run(id, Number(row.position) + 1, content);
+      this.db.prepare(`
+        DELETE FROM session_messages
+        WHERE session_id = ? AND position NOT IN (
+          SELECT position FROM session_messages WHERE session_id = ?
+          ORDER BY position DESC LIMIT ?
+        )
+      `).run(id, id, keep);
+      if (this.ftsAvailable) {
+        this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
+        this.db.prepare(`
+          INSERT INTO session_messages_fts(session_id, content)
+          SELECT session_id, content FROM session_messages WHERE session_id = ?
+        `).run(id);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    restrictSqlitePermissions(this.filePath);
+  }
+
   save(session: Session): void {
     if (!session.id) throw new Error("Session id must not be empty.");
     if (!Array.isArray(session.messages) || session.messages.some((message) => typeof message !== "string")) {
@@ -229,9 +268,20 @@ export class SqliteSessionStore {
     `).all(pattern, limit, offset) as Array<{ id: string }>).map((row) => row.id);
   }
 
+  /** Atomically erase a transcript and its search index entries. */
   delete(id: string): void {
-    this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-    if (this.ftsAvailable) this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (this.ftsAvailable) {
+        this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
+      }
+      this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    restrictSqlitePermissions(this.filePath);
   }
 
   close(): void { this.db.close(); }

@@ -34,6 +34,18 @@ export async function submitDiscordTask(
   return { id: submitted.id, runtime };
 }
 
+/** Resolve a job only for its immutable Discord owner; invalid IDs fail closed. */
+export async function getDiscordOwnedJob(
+  runtime: JobRuntime,
+  jobId: string,
+  principalId: string,
+): Promise<JobRecord | undefined> {
+  if (!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(jobId) ||
+      !/^discord:\d{1,24}$/.test(principalId)) return undefined;
+  const job = await runtime.get(jobId);
+  return job?.ownerKeyId === principalId ? job : undefined;
+}
+
 /** Poll durable state independently of the short-lived Discord interaction token. */
 export async function waitForDiscordTask(
   handle: DiscordDurableJobHandle,
@@ -65,12 +77,17 @@ export async function waitForDiscordTask(
   } while (current.status === "queued" || current.status === "running");
 
   if (current.status === "completed") {
-    return { id: current.id, status: "completed", summary: current.result?.summary?.trim() || "Sofia completed the task." };
+    const summary = String(redactSecrets(current.result?.summary ?? "")).trim();
+    return { id: current.id, status: "completed", summary: summary || "Sofia completed the task." };
   }
+  // Internal errors can expose provider names, billing state, stack details, or identifiers.
+  // Keep the durable record for authorized diagnostics; return only a public-safe summary.
   return {
     id: current.id,
     status: current.status,
-    summary: current.error?.trim() || (current.status === "cancelled" ? "Sofia job was cancelled." : "Sofia job failed."),
+    summary: current.status === "cancelled"
+      ? "Sofia job was cancelled."
+      : "Sofia could not complete this job. Check the run status in the Sofia dashboard.",
   };
 }
 

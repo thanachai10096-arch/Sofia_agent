@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { JobRecord, JobRuntime } from "../../brain/job-runtime.js";
-import { buildDiscordSessionContext, runDiscordTaskAsDurableJob } from "./discord-durable-job.js";
+import { buildDiscordSessionContext, getDiscordOwnedJob, runDiscordTaskAsDurableJob } from "./discord-durable-job.js";
 
 function runtimeFor(records: JobRecord[]): JobRuntime {
   return {
@@ -41,16 +41,17 @@ test("Discord tasks are submitted with an isolated principal and return the dura
   assert.equal(result.summary, "Repository inspected");
 });
 
-test("Discord durable job adapter returns failed job details without throwing away the job ID", async () => {
+test("Discord durable job adapter hides internal failure details without throwing away the job ID", async () => {
   const records: JobRecord[] = [];
   const runtime = runtimeFor(records);
   const promise = runDiscordTaskAsDurableJob(runtime, "inspect repository", "discord:123", { pollIntervalMs: 0 });
   await new Promise<void>((resolve) => setImmediate(resolve));
   records[0]!.status = "failed";
-  records[0]!.error = "Verification failed";
+  records[0]!.error = "provider_http_402_insufficient_credits";
   const result = await promise;
   assert.equal(result.status, "failed");
-  assert.equal(result.summary, "Verification failed");
+  assert.match(result.summary, /could not complete this job/i);
+  assert.doesNotMatch(result.summary, /provider_http_402|insufficient_credits/);
   assert.equal(result.id, "discord-job-12345678");
 });
 
@@ -101,4 +102,26 @@ test("Discord session context is scoped to a session and only uses completed job
   assert.doesNotMatch(context, /Do not leak this/);
   assert.doesNotMatch(context, /unfinished task/);
   assert.match(context, /untrusted historical data/i);
+});
+
+test("Discord durable job lookup returns only jobs owned by the requesting Discord user", async () => {
+  const records: JobRecord[] = [{
+    id: "discord-job-12345678",
+    status: "completed",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    task: "private task",
+    ownerKeyId: "discord:123",
+  }];
+  const jobId = "12345678-1234-1234-1234-123456789abc";
+  records[0]!.id = jobId;
+  const base = runtimeFor(records);
+  const runtime: JobRuntime = {
+    ...base,
+    async get(id) { return id === jobId ? { ...records[0]! } : undefined; },
+  };
+  assert.equal((await getDiscordOwnedJob(runtime, jobId, "discord:123"))?.id, jobId);
+  assert.equal(await getDiscordOwnedJob(runtime, jobId, "discord:456"), undefined);
+  assert.equal(await getDiscordOwnedJob(runtime, "not-a-job-id", "discord:123"), undefined);
+  assert.equal(await getDiscordOwnedJob(runtime, jobId, "api-key:123"), undefined);
 });

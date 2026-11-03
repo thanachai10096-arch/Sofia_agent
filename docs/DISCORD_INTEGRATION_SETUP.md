@@ -78,7 +78,26 @@ The registration script registers commands individually for the specified guild 
 
 The server exposes the interaction handler at `/v1/integrations/discord/interactions` when Discord is configured. Configure the Discord Developer Portal endpoint to the exact public HTTPS URL and ensure the reverse proxy preserves the request body bytes for signature verification.
 
-## 4. Verify in a private test channel
+## 4. Optional: enable natural chat without /run
+
+Set these additional server-side variables on a test service:
+
+```dotenv
+DISCORD_GATEWAY_ENABLED=true
+DISCORD_BOT_TOKEN=replace-with-the-real-bot-token
+DISCORD_ALLOWED_USER_IDS=111111111111111111
+DISCORD_ALLOWED_CHANNEL_IDS=222222222222222222
+```
+
+Enable the privileged **Message Content Intent** in the Discord Developer Portal. The bot needs permission to view, read, and send messages in the allowed channel. Use a Node.js runtime with global WebSocket support. This Gateway transport is independent of the signed HTTP interactions endpoint.
+
+- In a DM, send ordinary text; no `/run` prefix is required.
+- In a server channel, mention Sofia or reply to one of Sofia's messages.
+- Ordinary group chatter is ignored.
+- Both user and channel allowlists are checked before a job is submitted.
+- Jobs are owned by `discord:<user-id>` and session context remains scoped by user and channel.
+
+## 5. Verify in a private test channel
 
 1. Confirm an allowed user can run `/run task:Reply with exactly SOFIA_DISCORD_SMOKE_OK`.
 2. Confirm the bot acknowledges the request and returns a job ID before the task finishes.

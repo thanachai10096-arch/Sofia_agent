@@ -4,8 +4,9 @@ import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
+import { buildDiscordSessionContext, getDiscordOwnedJob, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 
@@ -24,13 +25,15 @@ const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
 const rawDiscordUserIds = process.env.DISCORD_ALLOWED_USER_IDS;
 const rawDiscordChannelIds = process.env.DISCORD_ALLOWED_CHANNEL_IDS;
 const discordRequested = Boolean(discordPublicKey || discordBotToken || rawDiscordUserIds?.trim() || rawDiscordChannelIds?.trim());
-// Keep the API available when optional Discord configuration is incomplete. Discord remains
-// disabled unless every required credential and both explicit allowlists are configured.
+const discordGatewayRequested = process.env.DISCORD_GATEWAY_ENABLED === "true";
+// Interaction commands and Gateway natural chat have separate enablement requirements.
 const discordConfigured = Boolean(discordPublicKey && discordBotToken && rawDiscordUserIds?.trim() && rawDiscordChannelIds?.trim());
-if (discordRequested && !discordConfigured) {
+const discordGatewayConfigured = Boolean(discordGatewayRequested && discordBotToken && rawDiscordUserIds?.trim() && rawDiscordChannelIds?.trim());
+if (discordRequested && !discordConfigured && !discordGatewayConfigured) {
   console.error("Discord integration disabled: required configuration is incomplete; API will continue without Discord.");
 }
 let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
+let discordGatewayTransport: ReturnType<typeof createDiscordGatewayTransport> | undefined;
 const discordAbort = new AbortController();
 let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -175,28 +178,143 @@ if (discordConfigured) {
     }
   });
 
-  // Retry recovery notifications while the process is alive. A crashed worker may
-  // still have an unexpired lease at startup; periodic list() calls let the runtime
-  // mark it interrupted once that lease expires, then notify the user without a new restart.
+}
+
+
+/** Optional natural-chat Gateway; shares the existing per-user durable job runtime. */
+if (discordGatewayRequested) {
+  const botToken = discordBotToken;
+  try {
+    if (!botToken || !rawDiscordUserIds?.trim() || !rawDiscordChannelIds?.trim()) {
+      throw new Error("bot token and explicit user/channel allowlists are required");
+    }
+    const allowedUsers = new Set(parseDiscordIdAllowlist(rawDiscordUserIds, "DISCORD_ALLOWED_USER_IDS"));
+    const allowedChannels = new Set(parseDiscordIdAllowlist(rawDiscordChannelIds, "DISCORD_ALLOWED_CHANNEL_IDS"));
+    if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable");
+    discordGatewayTransport = createDiscordGatewayTransport({
+      botToken,
+      onError: (event, status) => console.error("Discord Gateway:", event, status ?? ""),
+    });
+    const seenMessageIds = new Set<string>();
+    await discordGatewayTransport.start(discordAbort.signal, async (message) => {
+      if (!allowedUsers.has(message.author.id) || !allowedChannels.has(message.channelId)) return;
+      if (!message.directMessage && !message.addressedToBot) return;
+      const rawText = message.content.trim();
+      if (!rawText) return;
+      if (seenMessageIds.has(message.id)) return;
+      seenMessageIds.add(message.id);
+      if (seenMessageIds.size > 10_000) {
+        const oldest = seenMessageIds.values().next().value;
+        if (oldest) seenMessageIds.delete(oldest);
+      }
+      try {
+        deps.securityController?.assertRunning();
+        const principalId = "discord:" + message.author.id;
+        const commandMatch = rawText.match(/^\/(status|cancel|resume)(?:\s+(.+))?$/);
+        if (commandMatch) {
+          const command = commandMatch[1]!;
+          const jobId = (commandMatch[2] ?? "").replace(/^job_id:/i, "").trim();
+          const job = await getDiscordOwnedJob(deps.jobRuntime!, jobId, principalId);
+          if (!job) {
+            await discordGatewayTransport?.sendMessage(message.channelId, "Job not found or not accessible to this Discord user.", message.id);
+            return;
+          }
+          if (command === "status") {
+            await discordGatewayTransport?.sendMessage(message.channelId,
+              "Sofia job status: " + job.status + "\nJob ID: " + job.id, message.id);
+            return;
+          }
+          if (command === "cancel") {
+            const cancelled = await deps.jobRuntime!.cancel(job.id);
+            await discordGatewayTransport?.sendMessage(message.channelId,
+              cancelled ? "Cancellation requested for job " + job.id + "." : "Job " + job.id + " is already terminal or cannot be cancelled.", message.id);
+            return;
+          }
+          if (!job.snapshot || job.status === "completed" || job.status === "cancelled" || job.status === "running") {
+            await discordGatewayTransport?.sendMessage(message.channelId,
+              "This job cannot be resumed. It must have a saved checkpoint and not be running, completed, or cancelled.", message.id);
+            return;
+          }
+          await discordGatewayTransport?.sendMessage(message.channelId,
+            "Resume requested for job " + job.id + ".", message.id);
+          void deps.jobRuntime!.resume(job.id, discordAbort.signal).then(async (resumed) => {
+            await discordGatewayTransport?.sendMessage(message.channelId,
+              "Sofia resumed job. Status: " + resumed.status + "\nJob ID: " + resumed.id);
+            await deps.jobRuntime?.markNotificationDelivered?.(resumed.id);
+          }).catch(async () => {
+            try { await discordGatewayTransport?.sendMessage(message.channelId, "Sofia could not resume job " + job.id + ". Check the job status and server logs."); } catch { /* durable state remains */ }
+          });
+          return;
+        }
+        if (rawText.startsWith("/") && rawText !== "/run" && !rawText.startsWith("/run ")) return;
+        const task = rawText === "/run" ? "" : rawText.startsWith("/run ") ? rawText.slice(5).trim() : rawText;
+        if (!task) {
+          await discordGatewayTransport?.sendMessage(message.channelId, "Please include a task after /run.", message.id);
+          return;
+        }
+        const sessionKey = messagingSessionKey({ platform: "discord", userId: message.author.id, channelId: message.channelId, conversationId: message.channelId });
+        const sessionContext = await buildDiscordSessionContext(deps.jobRuntime!, sessionKey);
+        const taskWithMemory = sessionContext ? task + "\n\n" + sessionContext : task;
+        const handle = await submitDiscordTask(deps.jobRuntime!, taskWithMemory, principalId, discordAbort.signal, {
+          channelId: message.channelId, sessionKey, sessionTask: task,
+        });
+        await discordGatewayTransport?.sendMessage(message.channelId,
+          "Sofia accepted your message.\nJob ID: " + handle.id + "\nI will send the result here.", message.id);
+        void waitForDiscordTask(handle, { signal: discordAbort.signal }).then(async (result) => {
+          const prefix = result.status === "completed" ? "Sofia completed the task." : "Sofia job " + result.status + ".";
+          const response = prefix + "\nJob ID: " + result.id + "\n" + result.summary;
+          await discordGatewayTransport?.sendMessage(message.channelId, response.length > 1900 ? response.slice(0, 1890) + "… (truncated)" : response);
+          await deps.jobRuntime?.markNotificationDelivered?.(result.id);
+        }).catch(async () => {
+          try { await discordGatewayTransport?.sendMessage(message.channelId, "Sofia could not report the result for job " + handle.id + "."); } catch { /* durable state remains */ }
+        });
+      } catch (error) {
+        console.error("Discord Gateway task failed:", error instanceof Error ? error.name : "UnknownError");
+        try { await discordGatewayTransport?.sendMessage(message.channelId, "Sofia could not process that message. Check server logs for a redacted error.", message.id); } catch { /* best effort */ }
+      }
+    });
+    console.log("Discord Gateway natural chat enabled.");
+  } catch (error) {
+    console.error("Discord Gateway disabled:", error instanceof Error ? error.message : "configuration_error");
+    await discordGatewayTransport?.stop();
+    discordGatewayTransport = undefined;
+  }
+}
+
+// Retry recovery notifications for either Discord transport. This must be
+// outside the interaction-only setup block so Gateway-only deployments recover too.
+if (discordTransport || discordGatewayTransport) {
   const notificationInFlight = new Set<string>();
   const notifyRecoveredJobs = async (): Promise<void> => {
-    if (!deps.jobRuntime || !discordTransport || discordAbort.signal.aborted) return;
+    if (!deps.jobRuntime || discordAbort.signal.aborted) return;
     const recoveredJobs = await deps.jobRuntime.list();
     for (const job of recoveredJobs) {
       if (!job.ownerKeyId?.startsWith("discord:") || !job.notificationChannelId ||
           job.notificationDelivered || job.status === "queued" || job.status === "running" ||
           Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
       notificationInFlight.add(job.id);
+      let deliveryClaimed = false;
       try {
+        if (deps.jobRuntime.claimNotificationDelivery) {
+          deliveryClaimed = await deps.jobRuntime.claimNotificationDelivery(job.id);
+          if (!deliveryClaimed) continue;
+        }
         const message = job.status === "completed"
           ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
           : job.snapshot
             ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
             : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
-        await discordTransport.sendMessage(job.notificationChannelId, message);
+        if (discordTransport) {
+          await discordTransport.sendMessage(job.notificationChannelId, message);
+        } else {
+          await discordGatewayTransport?.sendMessage(job.notificationChannelId, message);
+        }
         await deps.jobRuntime.markNotificationDelivered?.(job.id);
       } catch {
-        // Keep the marker unset so the next retry can attempt delivery again.
+        // Release a cross-process lease so a later poll can retry a failed send.
+        if (deliveryClaimed) {
+          await deps.jobRuntime.releaseNotificationDelivery?.(job.id).catch(() => undefined);
+        }
       } finally {
         notificationInFlight.delete(job.id);
       }
@@ -229,6 +347,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     discordAbort.abort();
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
+    void discordGatewayTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
     server.close();
   });

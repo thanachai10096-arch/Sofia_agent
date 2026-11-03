@@ -1,6 +1,6 @@
 # Messaging Gateway (incremental integration)
 
-Status: opt-in gateway, command bridge, Telegram Bot API long polling transport, and Discord interaction verification/REST transport. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
+Status: opt-in messaging gateway, Telegram Bot API long polling, Discord signed HTTP interactions, and a separate Discord Gateway natural-chat transport. Public factory functions and their configuration types are exported from `src/index.ts`. Live credentials and production route configuration are not included.
 
 ## Safety defaults
 
@@ -11,12 +11,29 @@ Status: opt-in gateway, command bridge, Telegram Bot API long polling transport,
 - Natural-language dispatch does not bypass authorization, deduplication, task-size validation, or the API's normal policy/tool controls. Keep the gateway disabled or restricted by explicit user/channel allowlists; do not expose an unrestricted public bot.
 - Use `createMessagingAccessCheck` to adapt the existing `ChatAccessPolicy` to the gateway allowlist callback. The existing command handler performs its own authorization check too. Do not pass the same deduplicator to both `createMessagingGateway` and `createSofiaMessagingHandler`, because the existing command handler claims the provider/channel/message key itself.
 - Keep bot tokens and Sofia API keys in server-side environment variables or an approved secret provider. Never expose them in client bundles, tests, errors, or logs.
-- The Telegram HTTP transport uses HTTPS long polling against the official Telegram Bot API. Choose either polling or a separately implemented webhook deployment, not both for the same bot.
+- The Telegram HTTP transport uses HTTPS long polling against the official Telegram Bot API. Ordinary text is handled as natural-language tasks without `/run`, while `/run <task>` remains supported. Platform slash commands are ignored by the agent handler. Choose either polling or a separately implemented webhook deployment, not both for the same bot.
 - The Discord interaction transport verifies the signature against the exact raw request body and timestamp before parsing. It can be mounted through the existing `createSofiaApi` using the optional `discordInteractionRoute` config; the route helper preserves raw bytes and enforces the body limit. The route is disabled unless a transport is explicitly configured. The host must expose the route over HTTPS. Unexpected transport errors return a generic 503, and no second server is created.
 - Discord slash commands are deferred immediately. The transport edits the deferred original response and uses interaction webhooks for extra message chunks, clearing the Discord loading state. Register the matching application command (default `/run` with a string option named `task`) in Discord.
 - The standalone API entrypoint requires both `DISCORD_ALLOWED_USER_IDS` and `DISCORD_ALLOWED_CHANNEL_IDS` whenever Discord is enabled. Both must be comma-separated numeric Discord IDs; empty, malformed, or duplicate entries fail startup. Do not omit the user allowlist: channel membership alone must not grant permission to execute Sofia tasks.
 - Treat attachment URLs as untrusted; do not download or open them without a separately secured downloader that blocks private/loopback/link-local destinations, re-checks redirects and DNS, caps response size/time, and avoids forwarding credentials.
 - The default gateway rate limiter is in-memory and per process. For shared deployments, `RedisMessagingRateLimiter` provides an atomic fixed-window implementation using a node-redis v4-compatible `eval(script, { keys, arguments })` client; inject it as `rateLimiter: new RedisMessagingRateLimiter({ client })`. The Lua counter operation is atomic across workers, raw scope identifiers are SHA-256 hashed before being used as Redis keys, and Redis errors fail closed (the message is rate-limited). For cross-worker message deduplication, `RedisChatMessageDeduplicator` provides atomic `SET NX PX` claims and ownership-checked release; inject it into the command handler, not twice in both layers.
+
+## Standalone Discord Gateway natural chat
+
+The API entrypoint supports an additional opt-in Gateway connection. It reuses the existing `DurableJobRuntime` and per-Discord-user owner key (`discord:<user-id>`); it does not create a second Agent runtime.
+
+Set these on a dedicated test service:
+
+- `DISCORD_GATEWAY_ENABLED=true`
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_ALLOWED_USER_IDS` — comma-separated numeric user IDs
+- `DISCORD_ALLOWED_CHANNEL_IDS` — comma-separated numeric channel IDs
+
+Enable the privileged **Message Content Intent** in the Discord Developer Portal. The runtime must provide global WebSocket support. Gateway mode is independent of the signed HTTP interactions endpoint; configure `DISCORD_PUBLIC_KEY` as well only if slash commands are also wanted.
+
+Direct messages accept natural chat without `/run`. In guild channels, Sofia responds only when explicitly mentioned or when the user replies to Sofia. Unaddressed group chatter is ignored. Both allowlists are required. Gateway chat also supports `/status job_id:<id>`, `/cancel job_id:<id>`, and `/resume job_id:<id>`; each command verifies the job's immutable `discord:<user-id>` owner before reading or changing it. Message deduplication in the entrypoint is process-local; use a shared atomic deduplicator before running multiple replicas. Per-user/channel inbound work is serialized with a bounded queue; queue overflow is reported through safe server diagnostics.
+
+Do not enable on Production until a real Discord test bot confirms DM, mention/reply, allowlist denials, reconnect, and completion delivery.
 
 ## Standalone Telegram runtime configuration
 
@@ -28,7 +45,9 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Only explicit `/run <task>` commands dispatch work; ordinary messages do not start runs. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Ordinary text messages dispatch as natural-language tasks without `/run`; `/run <task>` remains supported. Platform slash commands such as `/start`, `/help`, and `/status` are ignored by the agent handler. The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+
+Telegram conversation continuity uses the existing private SQLite session store on the local Sofia state directory. Session keys are derived from the immutable Telegram user ID and chat ID, so two users in the same group do not share transcripts. Only bounded user messages and completed assistant replies are retained; secrets are redacted, prompt-injection-like historical entries are excluded, and retrieved history is explicitly labeled untrusted. This is short-term session context, separate from long-term `USER.md` / `MEMORY.md` memory. SQLite is local to one service instance: before horizontal scaling or running multiple replicas, replace/inject a shared transactional session store and test isolation/retention across workers.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
