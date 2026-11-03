@@ -219,7 +219,7 @@ test("truncated trailing JSONL write is corrupt and cannot be checkpointed or de
       usage: { inputTokens: 4, outputTokens: 3 },
     });
     // Simulate process termination while appending the next JSONL event.
-    await writeFile(journalFile, validStarted + "\\n" + validSettled + "\\n" + '{"version":1,"type":"checkpoint"', { mode: 0o600 });
+    await writeFile(journalFile, validStarted + "\n" + validSettled + "\n" + '{"version":1,"type":"checkpoint"', { mode: 0o600 });
 
     const journal = new FileSettlementJournal(namespace, root);
     const inspection = await journal.inspectRun(runId);
@@ -228,7 +228,7 @@ test("truncated trailing JSONL write is corrupt and cannot be checkpointed or de
     assert.equal(await journal.hasUnresolved(runId), true);
     await assert.rejects(journal.acknowledgeCheckpoint(runId), /corrupt settlement evidence/);
     await assert.rejects(journal.deleteRun(runId), /Cannot delete unresolved settlement evidence/);
-    assert.equal(await readFile(journalFile, "utf8"), validStarted + "\\n" + validSettled + "\\n" + '{"version":1,"type":"checkpoint"',
+    assert.equal(await readFile(journalFile, "utf8"), validStarted + "\n" + validSettled + "\n" + '{"version":1,"type":"checkpoint"',
       "recovery checks must preserve the original partial-write evidence");
   } finally {
     await rm(root, { recursive: true, force: true });
