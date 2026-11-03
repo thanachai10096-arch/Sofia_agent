@@ -203,7 +203,7 @@ export class VerifiedLearningLoop {
 
   async retrieveSkills(scope: LearningScope, query: string): Promise<ActiveLearningSkill[]> {
     if (!validScope(scope)) throw new Error("Invalid authenticated learning scope");
-    const needle = normalizeText(query, 500).toLocaleLowerCase();
+    const needle = normalizeText(query, 500).toLowerCase();
     if (!needle) return [];
     try {
       const policyRevision = await this.host.currentPolicyRevision(scope);
@@ -218,10 +218,15 @@ export class VerifiedLearningLoop {
           skill.scope.tenantId === scope.tenantId &&
           skill.scope.principalId === scope.principalId &&
           skill.scope.projectId === scope.projectId &&
-          (skill.trigger.toLocaleLowerCase().includes(needle) ||
-           skill.name.toLocaleLowerCase().includes(needle) ||
-           skill.procedure.some(step => step.toLocaleLowerCase().includes(needle))),
-        ).slice(0, 12).map(skill => ({ ...skill, procedure: [...skill.procedure] }));
+          (skill.trigger.toLowerCase().includes(needle) ||
+           skill.name.toLowerCase().includes(needle) ||
+           skill.procedure.some(step => step.toLowerCase().includes(needle))),
+        ).slice(0, 12).map(skill => ({
+          ...skill,
+          // Do not leak mutable adapter-owned scope/procedure references to callers.
+          scope: { ...skill.scope },
+          procedure: [...skill.procedure],
+        }));
       });
     } catch (error) {
       throw safeError(this.host, error);
