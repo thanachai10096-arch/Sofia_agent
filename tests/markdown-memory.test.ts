@@ -29,6 +29,48 @@ test("Markdown user memory mirrors explicit entries into private per-user files"
   }
 });
 
+test("concurrent project projection syncs cannot leave an older snapshot on disk", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sofia-markdown-project-race-"));
+  try {
+    const entries: ProjectMemoryEntry[] = [];
+    let firstList = true;
+    const base: ProjectMemoryStore = {
+      async save(entry) {
+        const index = entries.findIndex((item) => item.id === entry.id);
+        if (index < 0) entries.push(entry);
+        else entries[index] = entry;
+      },
+      async list() {
+        const snapshot = [...entries];
+        if (firstList) {
+          firstList = false;
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        }
+        return snapshot;
+      },
+      async find() { return []; },
+    };
+    const store = new MarkdownProjectMemoryStore(base, { root });
+    const now = new Date().toISOString();
+    const makeEntry = (id: string, content: string): ProjectMemoryEntry => ({
+      id, project: "/workspace/race", kind: "decision", content,
+      confidence: 1, createdAt: now, updatedAt: now, uses: 0,
+    });
+
+    await Promise.all([
+      store.save(makeEntry("decision-a", "First concurrent decision")),
+      store.save(makeEntry("decision-b", "Second concurrent decision")),
+    ]);
+
+    const key = createHash("sha256").update("/workspace/race").digest("hex");
+    const projection = await readFile(join(root, "projects", key, "MEMORY.md"), "utf8");
+    assert.match(projection, /First concurrent decision/);
+    assert.match(projection, /Second concurrent decision/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Markdown project memory writes project-scoped MEMORY.md snapshots", async () => {
   const root = await mkdtemp(join(tmpdir(), "sofia-markdown-project-"));
   try {
