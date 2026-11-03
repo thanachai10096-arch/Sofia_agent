@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import { lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -214,13 +215,27 @@ export class EncryptedUserModelProfileStore implements UserModelProfileStore {
 
   private async readState(): Promise<ProfileState> {
     try {
-      // Refuse symlinked or non-regular profile paths before reading credentials.
-      // This mirrors the SQLite session-store path hardening and fails closed.
-      const fileStat = await lstat(this.filePath);
-      if (!fileStat.isFile() || fileStat.isSymbolicLink()) {
-        throw new Error("Model profile storage path must be a regular file, not a symbolic link.");
+      // O_NOFOLLOW closes the lstat/readFile race on platforms that support it.
+      // Keep the lstat guard on Windows, where O_NOFOLLOW is not consistently available.
+      if (process.platform === "win32") {
+        const pathStat = await lstat(this.filePath);
+        if (!pathStat.isFile() || pathStat.isSymbolicLink()) {
+          throw new Error("Model profile storage path must be a regular file, not a symbolic link.");
+        }
       }
-      const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as Partial<ProfileState>;
+      const flags = process.platform === "win32" ? "r" : constants.O_RDONLY | constants.O_NOFOLLOW;
+      const handle = await open(this.filePath, flags);
+      let contents: string;
+      try {
+        const fileStat = await handle.stat();
+        if (!fileStat.isFile()) {
+          throw new Error("Model profile storage path must be a regular file, not a symbolic link.");
+        }
+        contents = await handle.readFile("utf8");
+      } finally {
+        await handle.close();
+      }
+      const parsed = JSON.parse(contents) as Partial<ProfileState>;
       if (parsed.version !== 1 || !parsed.profiles || typeof parsed.profiles !== "object" || Array.isArray(parsed.profiles)) {
         throw new Error("unsupported profile store format");
       }
