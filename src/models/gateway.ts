@@ -55,7 +55,22 @@ interface AnthropicResponse {
   usage?: { input_tokens?: number; output_tokens?: number };
 }
 
-function openAICompatibleMessages(messages: ChatMessage[]): Array<Record<string, unknown>> {
+function providerToolNames(tools: ToolDefinition[] | undefined): { toProvider: Map<string, string>; toSofia: Map<string, string> } {
+  const toProvider = new Map<string, string>();
+  const toSofia = new Map<string, string>();
+  for (const tool of tools ?? []) {
+    const original = tool.function.name;
+    const normalized = original.replace(/[^a-zA-Z0-9_-]/g, "_");
+    if (!normalized || normalized.length > 128) throw new Error("Tool name cannot be represented by the OpenAI-compatible API: " + original);
+    const collision = toSofia.get(normalized);
+    if (collision && collision !== original) throw new Error("Tool names collide after provider normalization: " + collision + " and " + original);
+    toProvider.set(original, normalized);
+    toSofia.set(normalized, original);
+  }
+  return { toProvider, toSofia };
+}
+
+function openAICompatibleMessages(messages: ChatMessage[], names: Map<string, string>): Array<Record<string, unknown>> {
   return messages.map((message) => {
     if (message.role === "assistant" && message.toolCalls?.length) {
       return {
@@ -64,7 +79,7 @@ function openAICompatibleMessages(messages: ChatMessage[]): Array<Record<string,
         tool_calls: message.toolCalls.map((call) => ({
           id: call.id,
           type: "function",
-          function: { name: call.name, arguments: call.arguments },
+          function: { name: names.get(call.name) ?? call.name, arguments: call.arguments },
         })),
       };
     }
@@ -75,6 +90,7 @@ function openAICompatibleMessages(messages: ChatMessage[]): Array<Record<string,
     return { role: message.role, content: message.content };
   });
 }
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -308,6 +324,7 @@ export class SofiaModelGateway implements ModelProvider {
     }
 
     const protocol = config.protocol ?? "openai-compatible";
+    const openAiNames = providerToolNames(tools);
     let endpoint: string;
     let requestHeaders: Record<string, string>;
     let body: Record<string, unknown>;
@@ -343,8 +360,8 @@ export class SofiaModelGateway implements ModelProvider {
       };
       body = {
         model: config.model,
-        messages: openAICompatibleMessages(messages),
-        ...(tools ? { tools, tool_choice: "auto" } : {}),
+        messages: openAICompatibleMessages(messages, openAiNames.toProvider),
+        ...(tools ? { tools: tools.map((tool) => ({ ...tool, function: { ...tool.function, name: openAiNames.toProvider.get(tool.function.name)! } })), tool_choice: "auto" } : {}),
         ...(!tools && brainStructuredOutput ? { response_format: { type: "json_object" as const } } : {}),
         ...(options.maxOutputTokens
           ? { max_tokens: options.maxOutputTokens }
@@ -458,7 +475,8 @@ export class SofiaModelGateway implements ModelProvider {
     }
 
     const calls = (message.tool_calls ?? []).map((call, index) => {
-      const name = call.function?.name ?? "";
+      const providerName = call.function?.name ?? "";
+      const name = protocol === "anthropic-messages" ? providerName : openAiNames.toSofia.get(providerName) ?? providerName;
       let parsed: unknown;
       try {
         parsed = JSON.parse(call.function?.arguments ?? "{}") as unknown;
