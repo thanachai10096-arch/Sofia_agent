@@ -25,7 +25,10 @@ export function parseDiscordUserApiKeys(value: string): Map<string, string> {
 export function matchDiscordUserApiKeys(
   apiKeys: ReadonlyMap<string, string>,
   allowedUserIds: readonly string[],
+  reservedApiKeys: readonly string[] = [],
 ): boolean {
+  const reserved = new Set(reservedApiKeys);
   return allowedUserIds.length > 0 && apiKeys.size === allowedUserIds.length &&
-    allowedUserIds.every((userId) => apiKeys.has(userId));
+    allowedUserIds.every((userId) => apiKeys.has(userId)) &&
+    [...apiKeys.values()].every((apiKey) => !reserved.has(apiKey));
 }
