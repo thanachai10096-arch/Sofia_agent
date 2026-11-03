@@ -179,6 +179,7 @@ export function sqliteFileBackupRestoreAdapter(
       if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
         throw new Error("Persisted SQLite rollback snapshot is invalid.");
       }
+      await ensureDatabasePath();
       await verifySqliteIntegrity(bytes);
       await closeDatabase();
       await replaceDatabase(bytes);
