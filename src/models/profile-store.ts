@@ -231,6 +231,12 @@ export class EncryptedUserModelProfileStore implements UserModelProfileStore {
         if (!fileStat.isFile()) {
           throw new Error("Model profile storage path must be a regular file, not a symbolic link.");
         }
+        if (process.platform !== "win32") {
+          // Tighten an existing credential file without granting missing owner permissions.
+          const currentMode = fileStat.mode & 0o777;
+          const privateMode = currentMode & 0o600;
+          if (privateMode !== currentMode) await handle.chmod(privateMode);
+        }
         contents = await handle.readFile("utf8");
       } finally {
         await handle.close();
