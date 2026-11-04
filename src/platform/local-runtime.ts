@@ -18,12 +18,22 @@ function safeEnv(): NodeJS.ProcessEnv {
 
 const GIT_SUBCOMMANDS = new Set([
   "status", "diff", "log", "show", "rev-parse", "ls-files", "blame", "branch", "tag",
-  "add", "commit", "restore", "switch", "checkout", "stash", "reset", "clean", "merge",
-  "rebase", "remote", "fetch", "pull", "push", "clone", "apply",
+  "add", "commit", "restore", "switch", "stash", "merge",
+  "remote", "fetch", "pull", "push", "clone", "apply",
 ]);
-const GIT_DANGEROUS_ARG = /^--(?:upload-pack|receive-pack|exec|exec-path|ext-diff|textconv|config-env|unsafe-paths)(?:=|$)/i;
+const GIT_DANGEROUS_ARG = /^(?:-c|-C|--config-env|--exec-path|--git-dir|--work-tree|--namespace|--upload-pack|--receive-pack|--exec|--ext-diff|--textconv|--unsafe-paths)(?:=|$)/i;
+const GIT_FORCE_ARG = /^(?:-f|-D|--force|--force-with-lease(?:=.*)?|--mirror|--discard-changes|--merge)$/;
 
-/** Only allow known Git subcommands; reject global options that can alter execution/configuration. */
+/**
+ * Allow known Git subcommands, but fail closed for operations that can discard
+ * local work, delete remote/local refs, or rewrite history. Use `git switch`
+ * instead of `checkout`, and `git restore --staged` only when changing the index.
+ */
+function isGitExecutable(command: string): boolean {
+  const basename = command.replace(/\\/g, "/").split("/").pop()?.toLowerCase();
+  return basename === "git" || basename === "git.exe";
+}
+
 export function assertSafeGitArgs(args: readonly string[]): void {
   const sub = args[0];
   if (typeof sub !== "string" || sub.startsWith("-") || !GIT_SUBCOMMANDS.has(sub)) {
@@ -31,6 +41,27 @@ export function assertSafeGitArgs(args: readonly string[]): void {
   }
   if (args.some((arg) => GIT_DANGEROUS_ARG.test(arg))) {
     throw new Error("Git option is not allowed by Sofia runtime policy.");
+  }
+  if (sub === "restore" && (!args.includes("--staged") || args.includes("--worktree") || args.includes("-W"))) {
+    throw new Error("git restore that changes the working tree is blocked by Sofia runtime policy.");
+  }
+  if (args.some((arg) => GIT_FORCE_ARG.test(arg))) {
+    throw new Error("Destructive or force Git options are blocked by Sofia runtime policy.");
+  }
+  const tail = args.slice(1);
+  const hasAny = (values: readonly string[]) => tail.some((arg) => values.includes(arg));
+  if (sub === "push" && tail.some((arg) => arg.startsWith(":") || arg.startsWith("+:"))) {
+    throw new Error("Deleting remote refs via Git push refspecs is blocked by Sofia runtime policy.");
+  }
+  if (
+    (sub === "branch" && hasAny(["-d", "-D", "--delete"])) ||
+    (sub === "tag" && hasAny(["-d", "--delete"])) ||
+    (sub === "remote" && hasAny(["remove", "rm"])) ||
+    (sub === "stash" && hasAny(["drop", "clear"])) ||
+    (sub === "push" && hasAny(["--delete", "-d"])) ||
+    (sub === "commit" && hasAny(["--amend"]))
+  ) {
+    throw new Error("Git ref deletion, stash deletion, remote deletion, and history rewriting are blocked by Sofia runtime policy.");
   }
 }
 
@@ -96,6 +127,9 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
     const cwd = await contained(options.cwd ?? ".");
     const timeout = options.timeoutMs ?? 60_000;
     try {
+      // Keep the Git policy effective when callers use the generic process API
+      // instead of the dedicated runtime.git method.
+      if (isGitExecutable(command)) assertSafeGitArgs(args);
       if (process.env.SOFIA_SANDBOX_MODE === "docker") {
         const image = process.env.SOFIA_SANDBOX_IMAGE;
         if (!image) {
