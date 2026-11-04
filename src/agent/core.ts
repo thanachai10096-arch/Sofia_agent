@@ -1,5 +1,5 @@
 import { fenceUntrustedOutput } from "../security/untrusted.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
@@ -13,8 +13,16 @@ export class SofiaAgent {
   private readonly sessionTails = new Map<string, Promise<void>>();
 
   async run(request: AgentRequest): Promise<AgentResult> {
-    const sessionId = request.sessionId;
-    if (!sessionId || !this.deps.sessionStore) return this.runUnlocked(request);
+    const requestedSessionId = request.sessionId;
+    if (!requestedSessionId || !this.deps.sessionStore) return this.runUnlocked(request);
+    // Authenticated principals receive separate transcript namespaces even when
+    // they choose the same client-visible session ID. Keep legacy local sessions
+    // unchanged when no principal identity is supplied.
+    const principalId = request.principalId?.trim();
+    const sessionId = principalId
+      ? "principal:" + createHash("sha256").update(JSON.stringify([principalId, requestedSessionId])).digest("hex")
+      : requestedSessionId;
+    const scopedRequest = { ...request, sessionId };
     const previous = this.sessionTails.get(sessionId) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -22,7 +30,7 @@ export class SofiaAgent {
     this.sessionTails.set(sessionId, tail);
     await previous.catch(() => undefined);
     try {
-      return await this.runUnlocked(request);
+      return await this.runUnlocked(scopedRequest);
     } finally {
       release();
       if (this.sessionTails.get(sessionId) === tail) this.sessionTails.delete(sessionId);

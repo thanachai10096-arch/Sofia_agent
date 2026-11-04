@@ -1,5 +1,5 @@
 import type { FailureCategory, Strategy } from "./types.js";
-import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
+import { InMemorySkillLedger, type LearnedSkillCandidate, type SkillLedger } from "./learning.js";
 
 export interface SofiaSkill {
   id: string;
@@ -68,9 +68,29 @@ export function matchSkills(
   ledger?: SkillLedger,
 ): SofiaSkill[] {
   const lower = message.toLowerCase();
+  // SkillLedger is an extension point: revalidate custom implementations
+  // before any learned candidate can enter model context.
+  const validatedLedger = new InMemorySkillLedger();
+  let externalCandidates: readonly LearnedSkillCandidate[] = [];
+  try {
+    const listed: unknown = ledger?.list();
+    if (Array.isArray(listed)) {
+      // Bound work and memory even when a custom ledger is faulty or hostile.
+      externalCandidates = listed.slice(0, 100) as LearnedSkillCandidate[];
+    }
+  } catch {
+    // A broken extension must not prevent built-in recovery skills from working.
+  }
+  for (const candidate of externalCandidates) {
+    try {
+      validatedLedger.record(candidate);
+    } catch {
+      // Ignore malformed or injected candidates; fail closed.
+    }
+  }
   const all = [
     ...BUILTIN_SKILLS,
-    ...(ledger?.list() ?? []).map(learnedToSkill),
+    ...validatedLedger.list().map(learnedToSkill),
   ];
   return all
     .map((skill) => ({

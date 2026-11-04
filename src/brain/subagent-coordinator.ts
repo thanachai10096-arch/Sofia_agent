@@ -1,4 +1,5 @@
 import type { SubagentRequest, SubagentResult, SubagentRuntime, SubagentRole } from "./subagents.js";
+import { redactSecrets } from "../security/guard.js";
 
 export interface SubagentTask {
   id: string;
@@ -18,6 +19,18 @@ export interface SubagentCoordinatorOptions {
   maxContextBytes?: number;
 }
 export type SubagentRuntimeFactory = (task: Readonly<SubagentTask>) => SubagentRuntime;
+
+
+function safeSubagentError(error: unknown): string {
+  let message: string;
+  try {
+    message = error instanceof Error ? error.message : String(error);
+  } catch {
+    message = "Subagent failed with an unreadable error";
+  }
+  const redacted = redactSecrets(message);
+  return (typeof redacted === "string" ? redacted : "Subagent failed").slice(0, 2_000);
+}
 
 function cloneBoundedContext(context: Record<string, unknown> | undefined, maxBytes: number): Record<string, unknown> {
   if (context === undefined) return {};
@@ -145,7 +158,7 @@ export class BoundedSubagentCoordinator {
             if (onAbort) controller.signal.removeEventListener("abort", onAbort);
           }
         } catch (error) {
-          results[index] = { taskId: task.id, error: error instanceof Error ? error.message : String(error) };
+          results[index] = { taskId: task.id, error: safeSubagentError(error) };
         } finally {
           if (acquired) this.releaseSlot();
         }

@@ -1237,7 +1237,8 @@ export class SofiaBrain {
         const evidenceIds = verification.flatMap((item) => item.evidenceIds);
         const learnedCandidate: LearnedSkillCandidate = {
           name: "repair-" + last.category,
-          trigger: last.message.slice(0, 240),
+          // Learned skills are project-shared; never persist raw user diagnostics.
+          trigger: `Detected ${last.category} during a verified repair.`,
           category: last.category,
           strategy,
           procedure: ["inspect trusted failure evidence", "apply the successful repair strategy", "run the failing verification", "confirm full verification passes"],
@@ -1253,15 +1254,24 @@ export class SofiaBrain {
             mayActivate = false;
           }
         }
-        if (mayActivate) this.dependencies.skillLedger.record(learnedCandidate);
+        if (mayActivate) {
+          // Learning is best-effort: a ledger write failure must not turn a verified task into a failed run.
+          try {
+            this.dependencies.skillLedger.record(learnedCandidate);
+            const durableLedger = this.dependencies.skillLedger as SkillLedger & { flush?: () => Promise<void> };
+            if (typeof durableLedger.flush === "function") await durableLedger.flush();
+            this.emit({ type: "brain.learning.recorded" });
+          } catch {
+            // Do not emit "recorded" when persistence failed; the completed task remains successful.
+          }
+        }
         if (this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
-          const entry: ProjectMemoryEntry = { id, project: this.projectContext.root, kind: "repair", content: "Failure: " + last.category + "\nStrategy: " + strategy + "\nResolution: " + last.message.slice(0, 1200), source: "brain-recovery", confidence: 0.85, createdAt: now, updatedAt: now, uses: 0 };
+          const entry: ProjectMemoryEntry = { id, project: this.projectContext.root, kind: "repair", content: "Failure category: " + last.category + "\nStrategy: " + strategy + "\nResolution: verified repair completed; task-specific diagnostic details intentionally omitted.", source: "brain-recovery", confidence: 0.85, createdAt: now, updatedAt: now, uses: 0 };
           await this.wait(() => this.dependencies.projectMemory!.save(entry));
           this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
         }
-        this.emit({ type: "brain.learning.recorded" });
       }
 
       return this.report(

@@ -94,6 +94,15 @@ describe("Sofia security controls",()=>{
     assert.equal(a.requireApproval,true);
     assert.equal(a.actionHash,b.actionHash);
   });
+
+  it("preserves numeric token usage counters while redacting credential values", () => {
+    const value = redactSecrets({
+      usage: { reservedOrUsedTokens: 2048, inputTokens: 128, outputTokens: 64, token: "private-token-value" },
+    });
+    assert.deepEqual(value, {
+      usage: { reservedOrUsedTokens: 2048, inputTokens: 128, outputTokens: 64, token: "[REDACTED]" },
+    });
+  });
   it("redacts secrets before audit/display",()=>{
     const value=redactSecrets({apiKey:"super-secret",message:"Bearer abc123"});
     assert.deepEqual(value,{apiKey:"[REDACTED]",message:"Bearer [REDACTED]"});

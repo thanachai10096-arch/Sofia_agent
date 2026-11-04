@@ -134,6 +134,7 @@ test("DurableJobRuntime resumes a saved checkpoint and passes it to the brain", 
 
   assert.equal(current?.status, "failed");
   assert.equal(current?.snapshot?.checkpointId, "checkpoint-1");
+  assert.equal(current?.snapshot?.usage.reservedOrUsedTokens, 0, "redaction must preserve numeric checkpoint budget counters");
 
   let resumed: Awaited<ReturnType<typeof runtime.resume>> | undefined;
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -149,6 +150,7 @@ test("DurableJobRuntime resumes a saved checkpoint and passes it to the brain", 
   assert.equal(resumed.status, "completed");
   assert.equal(calls, 2);
   assert.equal(receivedResume?.checkpointId, "checkpoint-1");
+  assert.equal(receivedResume?.usage.reservedOrUsedTokens, 0, "resume must retain the original token budget accounting");
   assert.equal((await runtime.get(submitted.id))?.status, "completed");
   assert.equal((await runtime.list()).find((item) => item.id === submitted.id)?.status, "completed");
 });
@@ -997,3 +999,251 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime rebinds the authenticated owner principal when resuming a checkpoint", async () => {
+  const namespace = "job-runtime-resume-principal-" + randomUUID();
+  const ownerKeyId = "authenticated-owner-hash-7f3a";
+  const snapshot = {
+    version: 1,
+    runId: "principal-resume-" + randomUUID(),
+    task: "resume under the authenticated owner",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "owner-bound-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const observedPrincipals: Array<string | undefined> = [];
+  let calls = 0;
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async (input: { principalId?: string; resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      observedPrincipals.push(input.principalId);
+      calls += 1;
+      if (!input.resume) {
+        await onRunSnapshot?.(snapshot);
+        return { completed: false, state: "failed" };
+      }
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  const submitted = await runtime.submit({
+    task: snapshot.task,
+    ownerKeyId,
+  });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "failed");
+  assert.equal(current?.ownerKeyId, ownerKeyId);
+  assert.equal(current?.snapshot?.checkpointId, snapshot.checkpointId);
+
+  const resumed = await runtime.resume(submitted.id);
+  assert.equal(resumed.status, "completed");
+  assert.equal(calls, 2);
+  assert.deepEqual(observedPrincipals, [ownerKeyId, ownerKeyId]);
+});
+
+
+test("DurableJobRuntime ignores a RunStore checkpoint whose embedded runId does not match its lookup key", async () => {
+  const namespace = "job-runtime-checkpoint-identity-" + randomUUID();
+  const embedded = {
+    version: 1,
+    runId: "expected-run-" + randomUUID(),
+    task: "identity-checked checkpoint",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: ["safe-step"],
+    checkpointId: "embedded-trusted-checkpoint",
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const mismatched = {
+    ...embedded,
+    runId: "different-run-" + randomUUID(),
+    checkpointId: "mismatched-checkpoint-must-not-be-used",
+  };
+  let receivedResume: import("./run-state.js").BrainRunSnapshot | undefined;
+  const runStore = {
+    async save() {},
+    async load() { return mismatched as import("./run-state.js").BrainRunSnapshot; },
+    async delete() {},
+  };
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      if (input.resume) {
+        receivedResume = input.resume;
+        return { completed: true, state: "completed" };
+      }
+      await onRunSnapshot?.(embedded);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), runStore, namespace);
+
+  const submitted = await runtime.submit({ task: embedded.task });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "failed");
+  assert.equal(current?.snapshot?.checkpointId, embedded.checkpointId);
+  const resumed = await runtime.resume(submitted.id);
+  assert.equal(resumed.status, "completed");
+  assert.equal(receivedResume?.runId, embedded.runId);
+  assert.equal(receivedResume?.checkpointId, embedded.checkpointId);
+});
+
+
+test("DurableJobRuntime fences duplicate checkpoint resumes across independent runtime instances", async () => {
+  const namespace = "job-runtime-cross-instance-resume-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "cross-instance-" + randomUUID(),
+    task: "resume across independent workers",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "cross-instance-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  let brainCalls = 0;
+  let resumedStarted!: () => void;
+  const resumeStarted = new Promise<void>((resolve) => { resumedStarted = resolve; });
+  let release!: () => void;
+  const releaseResume = new Promise<void>((resolve) => { release = resolve; });
+  const factory = ({ onRunSnapshot }: { onRunSnapshot?: (value: import("./run-state.js").BrainRunSnapshot) => void | Promise<void> }) => ({
+    run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      brainCalls += 1;
+      if (!input.resume) {
+        await onRunSnapshot?.(snapshot);
+        return { completed: false, state: "failed" };
+      }
+      resumedStarted();
+      await releaseResume;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain);
+
+  const creator = new DurableJobRuntime(factory, undefined, namespace);
+  const firstWorker = new DurableJobRuntime(factory, undefined, namespace);
+  const secondWorker = new DurableJobRuntime(factory, undefined, namespace);
+  const submitted = await creator.submit({ task: snapshot.task });
+  let current = await creator.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await creator.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+  assert.equal(current?.snapshot?.checkpointId, snapshot.checkpointId);
+
+  const firstResume = firstWorker.resume(submitted.id);
+  const secondResume = secondWorker.resume(submitted.id);
+  // Attach rejection handlers immediately: the losing worker may conflict before
+  // the winning worker reaches the barrier below.
+  const outcomesPromise = Promise.allSettled([firstResume, secondResume]);
+  await resumeStarted;
+  await new Promise<void>((resolve) => setTimeout(resolve, 30));
+  assert.equal(brainCalls, 2, "only one worker may enter resumed Brain execution");
+  release();
+  const outcomes = await outcomesPromise;
+  assert.equal(brainCalls, 2);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled" && outcome.value.status === "completed").length, 1);
+  const rejected = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+  assert.equal(rejected.length, 1, "the competing resume must not start a second worker");
+  const conflictMessage = rejected[0]?.reason instanceof Error ? rejected[0].reason.message : String(rejected[0]?.reason);
+  assert.match(
+    conflictMessage,
+    /already being resumed|already running|state changed before resume could be scheduled/i,
+    "the losing worker must receive a recognized concurrency conflict",
+  );
+  assert.equal((await creator.get(submitted.id))?.status, "completed");
+});
+
+test("DurableJobRuntime prefers the lease-fenced embedded checkpoint over a stale valid RunStore snapshot", async () => {
+  const namespace = "job-runtime-stale-runstore-" + randomUUID();
+  const runId = "stale-runstore-" + randomUUID();
+  const base = {
+    version: 1 as const,
+    runId,
+    task: "prefer the canonical embedded checkpoint",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  };
+  const staleSnapshot = {
+    ...base,
+    checkpointId: "stale-cache-checkpoint",
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const freshSnapshot = {
+    ...base,
+    checkpointId: "fresh-lease-fenced-checkpoint",
+    completedStepIds: ["fresh-step"],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  let receivedResume: import("./run-state.js").BrainRunSnapshot | undefined;
+  const runStore = {
+    async save() {
+      // Simulate a late stale worker/cache value remaining readable after the
+      // current worker has already persisted its newer embedded checkpoint.
+    },
+    async load() { return staleSnapshot; },
+    async delete() {},
+  };
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      if (input.resume) {
+        receivedResume = input.resume;
+        return { completed: true, state: "completed" };
+      }
+      await onRunSnapshot?.(freshSnapshot);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), runStore, namespace);
+
+  const submitted = await runtime.submit({ task: freshSnapshot.task });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "failed");
+  assert.equal(current?.snapshot?.checkpointId, freshSnapshot.checkpointId);
+  assert.deepEqual(current?.snapshot?.completedStepIds, ["fresh-step"]);
+  const resumed = await runtime.resume(submitted.id);
+  assert.equal(resumed.status, "completed");
+  assert.equal(receivedResume?.checkpointId, freshSnapshot.checkpointId);
+  assert.deepEqual(receivedResume?.completedStepIds, ["fresh-step"]);
+});
+

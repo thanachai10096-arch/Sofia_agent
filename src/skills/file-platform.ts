@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync,
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { SofiaSkill } from "../brain/skills.js";
+import { containsPromptInjection } from "../security/guard.js";
 import type { SkillPackage, SkillsPlatform, SkillSource } from "./platform.js";
 
 interface PersistedSkills {
@@ -26,6 +27,9 @@ function stringArray(value: unknown, allowed?: Set<string>): value is string[] {
 function validateSkillPackage(value: unknown): SkillPackage {
   if (!record(value) || !record(value.skill)) throw new Error("Invalid persisted skill package");
   const skill = value.skill;
+  if (containsPromptInjection({ name: skill.name, description: skill.description, triggers: skill.triggers, procedure: skill.procedure, publisher: value.publisher })) {
+    throw new Error("Skill package rejected by prompt-injection guard");
+  }
   if (!nonEmptyString(skill.id, 160) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(skill.id)) throw new Error("Invalid skill id in skills store");
   if (!nonEmptyString(skill.name, 200) || !nonEmptyString(skill.description, 2_000)) throw new Error("Invalid skill name or description");
   if (!stringArray(skill.triggers) || !stringArray(skill.categories, CATEGORIES) || !STRATEGIES.has(String(skill.strategy)) ||

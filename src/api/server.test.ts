@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
+import type { JobRecord, JobRuntime } from "../brain/job-runtime.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
@@ -62,11 +63,16 @@ test("API sessions are persisted and scoped to the authenticated API key", async
     await startAndWait("key-two", "second user's task");
 
     const idFor = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 32);
-    assert.deepEqual(sessions.get(`${idFor("key-one")}:shared-client-session`)?.messages, [
+    const sessionKeyFor = (key: string) => {
+      const principalId = idFor(key);
+      const apiSessionId = principalId + ":shared-client-session";
+      return "principal:" + createHash("sha256").update(JSON.stringify([principalId, apiSessionId])).digest("hex");
+    };
+    assert.deepEqual(sessions.get(sessionKeyFor("key-one"))?.messages, [
       "user: first user's task",
       "assistant: Task completed.",
     ]);
-    assert.deepEqual(sessions.get(`${idFor("key-two")}:shared-client-session`)?.messages, [
+    assert.deepEqual(sessions.get(sessionKeyFor("key-two"))?.messages, [
       "user: second user's task",
       "assistant: Task completed.",
     ]);
@@ -143,6 +149,87 @@ test("API rejects unknown model routes before starting a run", async () => {
     });
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { error: "invalid_model_route" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API job records and mutations are isolated by authenticated owner key", async () => {
+  const records = new Map<string, JobRecord>();
+  let resumeCalls = 0;
+  let cancelCalls = 0;
+  const jobRuntime: JobRuntime = {
+    async submit(input) {
+      const now = new Date().toISOString();
+      const record: JobRecord = {
+        id: "job-owner-isolation-1",
+        status: "queued",
+        createdAt: now,
+        updatedAt: now,
+        task: input.task,
+        ownerKeyId: input.ownerKeyId,
+      };
+      records.set(record.id, record);
+      return record;
+    },
+    async get(id) { return records.get(id); },
+    async resume(id) {
+      resumeCalls += 1;
+      const record = records.get(id);
+      if (!record) throw new Error("Unknown job");
+      return record;
+    },
+    async cancel(id) {
+      cancelCalls += 1;
+      const record = records.get(id);
+      if (!record) return false;
+      record.status = "cancelled";
+      return true;
+    },
+    async list() { return [...records.values()]; },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    jobRuntime,
+  }, {
+    apiKeys: {
+      "job-owner-one": ["agent:run", "agent:read"],
+      "job-owner-two": ["agent:run", "agent:read"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const request = (key: string, path: string, method = "GET", body?: unknown) =>
+    fetch(baseUrl + path, {
+      method,
+      headers: {
+        authorization: "Bearer " + key,
+        ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+
+  try {
+    const created = await request("job-owner-one", "/v1/jobs", "POST", { task: "private job" });
+    assert.equal(created.status, 202);
+    const job = await created.json() as JobRecord;
+    assert.equal(job.ownerKeyId, createHash("sha256").update("job-owner-one").digest("hex").slice(0, 32));
+
+    assert.equal((await request("job-owner-one", "/v1/jobs/" + job.id)).status, 200);
+    assert.equal((await request("job-owner-two", "/v1/jobs/" + job.id)).status, 404);
+    assert.equal((await request("job-owner-two", "/v1/jobs/" + job.id + "/resume", "POST")).status, 404);
+    assert.equal((await request("job-owner-two", "/v1/jobs/" + job.id + "/cancel", "POST")).status, 404);
+    assert.equal(resumeCalls, 0, "foreign owner must not reach resume()");
+    assert.equal(cancelCalls, 0, "foreign owner must not reach cancel()");
+    assert.equal((await request("job-owner-two", "/v1/jobs")).status, 200);
+    const foreignList = await (await request("job-owner-two", "/v1/jobs")).json() as { jobs: JobRecord[] };
+    assert.deepEqual(foreignList.jobs, []);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
