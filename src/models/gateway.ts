@@ -462,7 +462,7 @@ export class SofiaModelGateway implements ModelProvider {
         // Some Anthropic-compatible providers occasionally return only a
         // thinking block despite thinking being disabled. Retry once without
         // the thinking parameter and explicitly request a user-facing result.
-        const fallbackBody = {
+        const fallbackBody: Record<string, unknown> = {
           ...body,
           // DeepSeek enables thinking by default when this field is omitted.
           // Keep the configured non-thinking mode on the recovery request too.
