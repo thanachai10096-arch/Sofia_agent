@@ -135,6 +135,7 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
   if (!raw || !Array.isArray(raw.content)) throw new Error("Anthropic Messages API returned an invalid response.");
   const textParts: string[] = [];
   const toolCalls: Array<{ id?: string; function?: { name?: string; arguments?: string } }> = [];
+  const hasThinkingBlock = raw.content.some((block) => block?.type === "thinking" || block?.type === "redacted_thinking");
   for (const block of raw.content) {
     if (block?.type === "text" && typeof block.text === "string" && block.text.trim()) {
       textParts.push(block.text.trim());
@@ -147,6 +148,9 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
         function: { name, arguments: JSON.stringify(block.input ?? {}) },
       });
     }
+  }
+  if (hasThinkingBlock && textParts.length === 0 && toolCalls.length === 0) {
+    throw new Error("Anthropic Messages API returned thinking-only content.");
   }
   const usage = raw.usage;
   return {
@@ -325,6 +329,7 @@ export class SofiaModelGateway implements ModelProvider {
         model: config.model,
         max_tokens: options.maxOutputTokens ?? 2_048,
         ...(converted.system ? { system: converted.system } : {}),
+        ...(process.env.SOFIA_MODEL_THINKING?.trim().toLowerCase() === "disabled" ? { thinking: { type: "disabled" } } : {}),
         messages: converted.messages,
         ...(tools ? {
           tools: tools.map((tool) => ({
