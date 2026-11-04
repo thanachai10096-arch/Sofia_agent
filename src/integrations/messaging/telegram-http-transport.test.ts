@@ -92,17 +92,18 @@ test("a failed update handler does not block later updates or repeat the failed 
   assert.deepEqual(errorEvents, ["update_failed"]);
 });
 
-test("Telegram polling stops after HTTP 409 instead of retrying a conflicting getUpdates poller", async () => {
+test("Telegram polling backs off and recovers after a transient HTTP 409 conflict", async () => {
   let pollCount = 0;
-  let conflictResolve!: () => void;
-  const conflict = new Promise<void>((resolve) => { conflictResolve = resolve; });
+  let recoveredResolve!: () => void;
+  const recovered = new Promise<void>((resolve) => { recoveredResolve = resolve; });
   const errorEvents: Array<{ event: string; status?: number }> = [];
   const fetchImpl: typeof fetch = async (input) => {
     if (String(input).endsWith("/deleteWebhook")) return ok(true);
     if (String(input).endsWith("/getUpdates")) {
       pollCount++;
-      conflictResolve();
-      return new Response(JSON.stringify({ ok: false, description: "Conflict: terminated by other getUpdates request" }), { status: 409 });
+      if (pollCount === 1) return new Response(JSON.stringify({ ok: false, description: "Conflict: terminated by other getUpdates request" }), { status: 409 });
+      recoveredResolve();
+      return ok([]);
     }
     throw new Error("Unexpected Telegram endpoint.");
   };
@@ -113,12 +114,34 @@ test("Telegram polling stops after HTTP 409 instead of retrying a conflicting ge
   });
   await transport.start(new AbortController().signal, async () => {});
   await Promise.race([
-    conflict,
-    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for poll conflict")), 1_000)),
+    recovered,
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for poll recovery")), 7_000)),
   ]);
-  await new Promise((resolve) => setTimeout(resolve, 1_100));
-  assert.equal(pollCount, 1);
+  assert.equal(pollCount, 2);
   assert.deepEqual(errorEvents, [{ event: "poll_conflict", status: 409 }]);
+  await transport.stop();
+});
+
+test("Telegram polling stops retrying when bot credentials are unauthorized", async () => {
+  let pollCount = 0;
+  const errorEvents: Array<{ event: string; status?: number }> = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    if (String(input).endsWith("/deleteWebhook")) return ok(true);
+    if (String(input).endsWith("/getUpdates")) {
+      pollCount++;
+      return new Response(JSON.stringify({ ok: false, description: "Unauthorized" }), { status: 401 });
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event, status) { errorEvents.push({ event, ...(status ? { status } : {}) }); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(pollCount, 1);
+  assert.deepEqual(errorEvents, [{ event: "poll_auth_failed", status: 401 }]);
   await transport.stop();
 });
 

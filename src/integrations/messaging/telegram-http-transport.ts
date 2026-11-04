@@ -10,7 +10,7 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "poll_conflict" | "update_failed" | "delivery_failed", status?: number) => void;
+  onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed", status?: number) => void;
 }
 
 /**
@@ -98,14 +98,20 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         if (signal.aborted || stopped) break;
         const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
           ? error.status : undefined;
-        if (status === 409) {
-          // Telegram permits only one active getUpdates poller per bot token.
-          // Retrying a conflict creates a noisy retry loop without resolving the
-          // competing poller; stop this poll loop and require operator recovery.
-          try { options.onError?.("poll_conflict", status); } catch { /* diagnostics must not terminate shutdown */ }
+        if (status === 401 || status === 403) {
+          // Invalid/revoked bot credentials cannot recover by retrying.
+          try { options.onError?.("poll_auth_failed", status); } catch { /* diagnostics must not terminate shutdown */ }
           break;
         }
-        try { options.onError?.("poll_failed", status); } catch { /* logging must not terminate polling */ }
+        if (status === 409) {
+          // During Railway rolling restarts the old long-poll request may still
+          // be draining when the replacement starts. Back off and retry so a
+          // transient overlap self-recovers; a persistent second poller remains
+          // visible as repeated conflict diagnostics without a hot retry loop.
+          try { options.onError?.("poll_conflict", status); } catch { /* diagnostics must not terminate shutdown */ }
+        } else {
+          try { options.onError?.("poll_failed", status); } catch { /* logging must not terminate polling */ }
+        }
         await wait(backoffMs, signal);
         backoffMs = Math.min(30_000, backoffMs * 2);
       }
