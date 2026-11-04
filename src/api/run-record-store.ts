@@ -6,7 +6,7 @@ import type { AgentRunStatus } from "./types.js";
 import type { AgentResult } from "../agent/types.js";
 
 export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; /** SHA-256 of owner-scoped idempotency key; never store the raw key. */ idempotencyId?:string; requestFingerprint?:string; }
-export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; }
+export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; load?(id:string):RunRecord|undefined; }
 const SAFE_ID=/^[A-Za-z0-9-]{8,64}$/;
 const STATUSES=new Set(["queued","running","completed","failed","cancelled"]);
 const KINDS=new Set(["coding","debugging","research","analysis","vision","general"]);
@@ -41,18 +41,27 @@ export class FileRunRecordStore implements RunRecordStore {
  constructor(private readonly directory:string){mkdirSync(directory,{recursive:true,mode:0o700});try{chmodSync(directory,0o700);}catch{/* permissions unavailable on this platform */}}
  private file(id:string){if(!SAFE_ID.test(id))throw new Error("Unsafe run id.");return path.join(this.directory,id+".json");}
  save(record:RunRecord):Promise<void>{
-  this.chain=this.chain.then(async()=>{
+  const operation=this.chain.then(async()=>{
    const target=this.file(record.id),tmp=target+"."+process.pid+"."+randomUUID()+".tmp";
    try{
     await fs.writeFile(tmp,JSON.stringify(record),{encoding:"utf8",mode:0o600});
     try{await fs.chmod(tmp,0o600);}catch{}
     await fs.rename(tmp,target);
-   }catch{/* best effort; in-memory state remains authoritative */}
-   finally{try{await fs.unlink(tmp);}catch{/* renamed or already absent */}}
+   }catch{
+    try{await fs.unlink(tmp);}catch{/* temporary file may already be absent */}
+    throw new Error("Run record persistence failed.");
+   }
   });
-  return this.chain;
+  this.chain=operation.catch(()=>undefined);
+  return operation;
  }
  remove(id:string):Promise<void>{this.chain=this.chain.then(async()=>{try{await fs.unlink(this.file(id));}catch{/* already absent */}});return this.chain;}
+ load(id:string):RunRecord|undefined{
+  if(!SAFE_ID.test(id))return undefined;
+  const filename=id+".json";
+  try{const parsed:unknown=JSON.parse(readFileSync(this.file(id),"utf8"));return validRecord(parsed,filename)?parsed:undefined;}
+  catch{return undefined;}
+ }
  loadAllSync():RunRecord[]{
   const out:RunRecord[]=[];let names:string[];try{names=readdirSync(this.directory);}catch{return out;}
   for(const name of names){const full=path.join(this.directory,name);if(!name.endsWith(".json")){if(name.endsWith(".tmp"))try{if(Date.now()-statSync(full).mtimeMs>24*60*60*1000)unlinkSync(full);}catch{};continue;}

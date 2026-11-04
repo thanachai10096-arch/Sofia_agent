@@ -145,8 +145,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
-  const persist = (run: ActiveRun) => {
-    if (!runStore) return;
+  const persist = (run: ActiveRun): Promise<void> => {
+    if (!runStore) return Promise.resolve();
     const record: RunRecord = {
       id: run.id, status: run.status,
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
@@ -155,7 +155,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(run.idempotencyId ? { idempotencyId: run.idempotencyId } : {}),
       ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
-    void runStore.save(record);
+    return runStore.save(record);
   };
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
@@ -174,7 +174,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(record.idempotencyId ? { idempotencyId: record.idempotencyId } : {}),
       ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
     };
-    runs.set(run.id, run); if (interrupted) persist(run);
+    runs.set(run.id, run); if (interrupted) void persist(run).catch(() => undefined);
   }
   const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   // Rehydrate replay protection from durable run records after a server restart.
@@ -211,7 +211,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
-      persist(run);
+      void persist(run).catch(() => undefined);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
         const result = await agent.run({
@@ -244,7 +244,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       } finally {
         clearTimeout(timer);
         run.updatedAt = Date.now();
-        persist(run);
+        void persist(run).catch(() => undefined);
         const current = activeByKey.get(run.ownerKeyId) ?? 1;
         if (current <= 1) activeByKey.delete(run.ownerKeyId); else activeByKey.set(run.ownerKeyId, current - 1);
       }
@@ -425,7 +425,28 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const id = pathId(req.url);
       if (id && req.method === "GET") {
-        const run = runs.get(id);
+        let run = runs.get(id);
+        // During a rolling restart, the request may reach a new API process
+        // whose in-memory map has not seen a run accepted by the previous one.
+        // Rehydrate from the shared persistent store, and refresh newer records
+        // so status polling follows updates written by the original process.
+        const stored = runStore?.load?.(id);
+        if (stored && (!run || stored.updatedAt > run.updatedAt)) {
+          run = {
+            id: stored.id,
+            status: stored.status,
+            ...(stored.result ? { result: stored.result as unknown as AgentRunResponse["result"] } : {}),
+            ...(stored.error ? { error: stored.error } : {}),
+            controller: new AbortController(),
+            createdAt: stored.createdAt,
+            updatedAt: stored.updatedAt,
+            ownerKeyId: stored.ownerKeyId,
+            desktopCapabilities: stored.desktopCapabilities as DesktopCapability[],
+            ...(stored.idempotencyId ? { idempotencyId: stored.idempotencyId } : {}),
+            ...(stored.requestFingerprint ? { requestFingerprint: stored.requestFingerprint } : {}),
+          };
+          runs.set(id, run);
+        }
         if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
         return json(res, 200, publicResponse(run), origin, config);
       }
@@ -437,7 +458,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.controller.abort();
           run.status = "cancelled";
           run.updatedAt = Date.now();
-          persist(run);
+          void persist(run).catch(() => undefined);
         }
         return json(res, 200, publicResponse(run), origin, config);
       }
@@ -457,7 +478,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
         runs.set(runId, run);
-        persist(run);
+        void persist(run).catch(() => undefined);
         res.writeHead(200, {
           ...headers(origin, config),
           "content-type": "text/event-stream; charset=utf-8",
@@ -500,7 +521,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         send({ type: "done", runId });
         run.updatedAt = Date.now();
-        persist(run);
+        void persist(run).catch(() => undefined);
         clearTimeout(timer);
         res.off("close", abortOnDisconnect);
         if (!res.destroyed) return res.end();
@@ -567,7 +588,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(idempotencyId ? { idempotencyId, requestFingerprint } : {}),
           };
           runs.set(runId, run);
-          persist(run);
+          try {
+            // A 202 response is an acceptance promise: persist the queued record
+            // before acknowledging so a following status poll cannot race the disk write.
+            await persist(run);
+          } catch {
+            runs.delete(runId);
+            return json(res, 503, { error: "run_persistence_unavailable" }, origin, config);
+          }
           if (idempotencyId) idempotency.set(idempotencyId, { runId, fingerprint: requestFingerprint });
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
