@@ -425,7 +425,28 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const id = pathId(req.url);
       if (id && req.method === "GET") {
-        const run = runs.get(id);
+        let run = runs.get(id);
+        // During a rolling restart, the request may reach a new API process
+        // whose in-memory map has not seen a run accepted by the previous one.
+        // Rehydrate from the shared persistent store, and refresh newer records
+        // so status polling follows updates written by the original process.
+        const stored = runStore?.load?.(id);
+        if (stored && (!run || stored.updatedAt > run.updatedAt)) {
+          run = {
+            id: stored.id,
+            status: stored.status,
+            ...(stored.result ? { result: stored.result as unknown as AgentRunResponse["result"] } : {}),
+            ...(stored.error ? { error: stored.error } : {}),
+            controller: new AbortController(),
+            createdAt: stored.createdAt,
+            updatedAt: stored.updatedAt,
+            ownerKeyId: stored.ownerKeyId,
+            desktopCapabilities: stored.desktopCapabilities as DesktopCapability[],
+            ...(stored.idempotencyId ? { idempotencyId: stored.idempotencyId } : {}),
+            ...(stored.requestFingerprint ? { requestFingerprint: stored.requestFingerprint } : {}),
+          };
+          runs.set(id, run);
+        }
         if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
         return json(res, 200, publicResponse(run), origin, config);
       }
