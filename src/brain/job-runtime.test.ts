@@ -488,29 +488,49 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
+  // Let background executions finish so teardown never unlinks a lock that a
+  // submit-triggered worker is still acquiring or releasing.
   const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
+    run: async () => ({ completed: true, state: "completed" }),
   } as unknown as SofiaBrain), undefined, namespace));
 
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
     runtime.submit({ task: "concurrent worker submission " + index }),
   ));
   const reader = new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
+    run: async () => ({ completed: true, state: "completed" }),
   } as unknown as SofiaBrain), undefined, namespace);
-  const persisted = await reader.list();
+
+  let persisted = await reader.list();
+  for (let attempt = 0; attempt < 200 && !persisted.every((record) => record.status === "completed"); attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    persisted = await reader.list();
+  }
   const persistedIds = new Set(persisted.map((record) => record.id));
 
   assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
   for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
+  assert.ok(persisted.every((record) => record.status === "completed"), "all background workers should finish before cleanup");
 
   const file = path.join(
     os.tmpdir(),
     "sofia-agents-jobs",
     createHash("sha256").update(namespace).digest("hex") + ".json",
   );
+  const lockFile = file + ".lock";
+  let lockReleased = false;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      await stat(lockFile);
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      lockReleased = true;
+      break;
+    }
+  }
+  assert.ok(lockReleased, "background workers must release the shared lock before cleanup");
   await rm(file, { force: true });
-  await rm(file + ".lock", { force: true });
 });
 
 
