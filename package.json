@@ -18,7 +18,7 @@
     "discord:register-command": "node scripts/register-discord-command.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22 <25"
   },
   "dependencies": {
     "playwright": "^1.55.0"
