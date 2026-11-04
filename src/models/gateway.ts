@@ -457,10 +457,44 @@ export class SofiaModelGateway implements ModelProvider {
         ? normalizeAnthropicResponse(raw)
         : raw as ChatResponse;
     } catch (error) {
-      if (error instanceof Error && error.message === "provider_thinking_only_output") {
+      if (error instanceof Error && error.message === "provider_thinking_only_output" &&
+          protocol === "anthropic-messages" && !requestSignal.aborted) {
+        // Some Anthropic-compatible providers occasionally return only a
+        // thinking block despite thinking being disabled. Retry once without
+        // the thinking parameter and explicitly request a user-facing result.
+        const fallbackBody = { ...body };
+        delete fallbackBody.thinking;
+        const priorSystem = typeof fallbackBody.system === "string" ? fallbackBody.system : "";
+        fallbackBody.system = [
+          priorSystem,
+          "Return the final user-facing answer now. Do not emit thinking or reasoning blocks. Follow the requested output format exactly.",
+        ].filter(Boolean).join("\n\n");
+        try {
+          const fallbackResponse = await fetch(endpoint, {
+            method: "POST",
+            headers: requestHeaders,
+            body: JSON.stringify(fallbackBody),
+            signal: requestSignal,
+          });
+          if (!fallbackResponse.ok) {
+            const detail = await fallbackResponse.text();
+            const diagnostic = safeProviderErrorDiagnostic(detail);
+            return failResponse(`Model gateway fallback failed (${fallbackResponse.status})${diagnostic ? `: ${diagnostic}` : ""}`);
+          }
+          const fallbackRaw: unknown = await fallbackResponse.json();
+          data = normalizeAnthropicResponse(fallbackRaw);
+        } catch (fallbackError) {
+          return failResponse(
+            fallbackError instanceof Error && fallbackError.message === "provider_thinking_only_output"
+              ? "provider_thinking_only_output_after_fallback"
+              : "Model gateway fallback returned an invalid response.",
+          );
+        }
+      } else if (error instanceof Error && error.message === "provider_thinking_only_output") {
         return failResponse("provider_thinking_only_output");
+      } else {
+        return failResponse("Model gateway returned invalid JSON or an unsupported provider response.");
       }
-      return failResponse("Model gateway returned invalid JSON or an unsupported provider response.");
     }
     const message = data.choices?.[0]?.message;
 
