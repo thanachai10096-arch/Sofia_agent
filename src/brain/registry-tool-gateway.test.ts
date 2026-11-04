@@ -402,3 +402,44 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
 });
+
+
+test("per-tool maximum risk is enforced even when the global policy allows higher risk", async () => {
+  let toolStarted = false;
+  const registry = new MapToolRegistry([{
+    name: "custom.network",
+    description: "A network-capable tool constrained by per-tool risk",
+    effects: ["network"],
+    inputSchema: { type: "object", properties: {} },
+    async execute() {
+      toolStarted = true;
+      return { reached: true };
+    },
+  }]);
+  const policy = {
+    ...defaultPolicy,
+    allowNetwork: true,
+    allowedHosts: ["example.com"],
+    maxRisk: "critical" as const,
+    permissions: {
+      ...defaultPolicy.permissions,
+      "custom.network": { maxRisk: "low" as const },
+    },
+  };
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy);
+
+  const result = await gateway.execute(
+    { tool: "custom.network", input: { url: "https://example.com/resource" } },
+    {
+      runId: "per-tool-risk-limit-test",
+      principalId: "test-user",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.equal(toolStarted, false);
+});

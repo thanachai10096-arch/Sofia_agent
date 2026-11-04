@@ -61,8 +61,15 @@ export class RegistryToolGateway implements ToolGateway {
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:assessment.reason,input:redactSecrets(input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:assessment.reason??"Security policy denied the action."}};
     }
-    if(riskRank[assessment.risk]>riskRank[this.policy.maxRisk]){
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:"Risk exceeds policy maximum.",input:redactSecrets(input)});
+    const effectiveMaxRisk = permission.maxRisk
+      && riskRank[permission.maxRisk] < riskRank[this.policy.maxRisk]
+      ? permission.maxRisk
+      : this.policy.maxRisk;
+    if(riskRank[assessment.risk]>riskRank[effectiveMaxRisk]){
+      const reason = permission.maxRisk && effectiveMaxRisk === permission.maxRisk
+        ? "Risk exceeds per-tool policy maximum."
+        : "Risk exceeds policy maximum.";
+      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason,input:redactSecrets(input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Action risk exceeds Sofia security policy."}};
     }
     const requiresApproval=permission.requireApproval===true||assessment.requireApproval||descriptor.effects.some(x=>x==="write"||x==="shell"||x==="destructive"||x==="browser");
