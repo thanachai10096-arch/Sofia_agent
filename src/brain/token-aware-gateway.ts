@@ -98,7 +98,7 @@ export class GatewayError extends Error {
 function safeProviderFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   const finishReason = message.match(/finish_reason=([a-z_]{1,32})/)?.[1];
-  if (/thinking[-_ ]only|only thinking blocks/i.test(message)) return "provider_thinking_only";
+  if (/provider_thinking_only_output|thinking[-_ ]only|only thinking blocks/i.test(message)) return "provider_thinking_only_output";
   if (/Model gateway returned a refusal response/i.test(message)) return "provider_refusal";
   if (/Provider did not return token usage/i.test(message)) return "provider_missing_usage";
   if (/temporarily unavailable|recovery probe already in progress/i.test(message)) return "provider_circuit_open";
