@@ -97,7 +97,7 @@ export class GatewayError extends Error {
 
 function safeProviderFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
-  const finishReason = message.match(/finish_reason=([^).\\s]+)/i)?.[1];
+  const finishReason = message.match(/finish_reason=([a-z_]{1,32})/)?.[1];
   if (/thinking[-_ ]only|only thinking blocks/i.test(message)) return "provider_thinking_only";
   if (/Model gateway returned a refusal response/i.test(message)) return "provider_refusal";
   if (/Provider did not return token usage/i.test(message)) return "provider_missing_usage";
@@ -108,7 +108,7 @@ function safeProviderFailureReason(error: unknown): string {
       ? `provider_empty_content_finish_${finishReason}`
       : "provider_empty_content";
   }
-  const status = message.match(/Model gateway request failed \\((\\d{3})\\)/i)?.[1];
+  const status = message.match(/Model gateway request failed \((\d{3})\)/i)?.[1];
   if (status) {
     const reasons: Record<string, string> = {
       "400":"provider_http_400_bad_request","401":"provider_http_401_authentication_failed",
