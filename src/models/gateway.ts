@@ -18,6 +18,7 @@ export interface GatewayProviderConfig {
   /** Wire protocol used by this provider. Defaults to OpenAI Chat Completions compatibility. */
   protocol?: "openai-compatible" | "anthropic-messages";
   anthropicVersion?: string;
+  thinkingMode?: "enabled" | "disabled";
 }
 
 interface ChatResponse {
@@ -150,7 +151,7 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
     }
   }
   if (hasThinkingBlock && textParts.length === 0 && toolCalls.length === 0) {
-    throw new Error("Anthropic Messages API returned thinking-only content.");
+    throw new Error("provider_thinking_only_output");
   }
   const usage = raw.usage;
   return {
@@ -329,7 +330,7 @@ export class SofiaModelGateway implements ModelProvider {
         model: config.model,
         max_tokens: options.maxOutputTokens ?? 2_048,
         ...(converted.system ? { system: converted.system } : {}),
-        ...(process.env.SOFIA_MODEL_THINKING?.trim().toLowerCase() === "disabled" ? { thinking: { type: "disabled" } } : {}),
+        ...(config.thinkingMode ? { thinking: { type: config.thinkingMode } } : {}),
         messages: converted.messages,
         ...(tools ? {
           tools: tools.map((tool) => ({
@@ -355,6 +356,7 @@ export class SofiaModelGateway implements ModelProvider {
         ...(options.maxOutputTokens
           ? { max_tokens: options.maxOutputTokens }
           : {}),
+        ...(config.thinkingMode ? { thinking: { type: config.thinkingMode } } : {}),
       };
     }
 
