@@ -101,6 +101,7 @@ export interface TelegramMessagingEnvironment {
   SOFIA_API_KEY?: string;
   SOFIA_API_BASE_URL?: string;
   RAILWAY_PUBLIC_DOMAIN?: string;
+  SOFIA_CHAT_DEDUPE_DIR?: string;
 }
 
 /**
@@ -141,7 +142,8 @@ export function createTelegramMessagingRuntime(
           allowedChats.has(input.conversationId);
       },
     };
-    const deduplicator = new FileChatMessageDeduplicator(path.join(workspace, ".sofia", "chat-dedupe"));
+    const dedupeDirectory = path.resolve(env.SOFIA_CHAT_DEDUPE_DIR ?? path.join(workspace, ".sofia", "chat-dedupe"));
+    const deduplicator = new FileChatMessageDeduplicator(dedupeDirectory);
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
