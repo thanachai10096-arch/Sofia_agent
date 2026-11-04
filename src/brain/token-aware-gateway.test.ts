@@ -4,6 +4,7 @@ import test from "node:test";
 import { TokenBudget } from "./token-budget.js";
 import {
   GatewayError,
+  MeteredProviderError,
   TokenAwareGateway,
   type InferenceRequest,
   type InternalRoute,
@@ -254,3 +255,37 @@ for (const [message, expected] of [
       error instanceof GatewayError && error.message === `model_call_failed: ${expected}`);
   });
 }
+
+
+test("gateway retries a route after its temporary failure cooldown", async () => {
+  const budget = makeBudget();
+  let calls = 0;
+  let shouldFail = true;
+  const gateway = new TokenAwareGateway(
+    budget,
+    [route(async () => {
+      calls += 1;
+      if (shouldFail) throw new MeteredProviderError({ inputTokens: 2, outputTokens: 1 });
+      return {
+        value: { recovered: true },
+        usage: { inputTokens: 2, outputTokens: 2 },
+        finishReason: "complete",
+      };
+    })],
+    5_000,
+    5,
+  );
+
+  await assert.rejects(gateway.generate(request()));
+  await assert.rejects(gateway.generate(request()));
+  await assert.rejects(
+    gateway.generate(request()),
+    (error: unknown) => error instanceof GatewayError && error.code === "no_eligible_route",
+  );
+  assert.equal(calls, 2);
+
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  shouldFail = false;
+  assert.deepEqual(await gateway.generate(request()), { recovered: true });
+  assert.equal(calls, 3);
+});
