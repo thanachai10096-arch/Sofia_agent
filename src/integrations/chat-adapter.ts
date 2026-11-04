@@ -28,6 +28,7 @@ export interface ChatRunStarter {
   start(input: {
     task: string;
     context?: string;
+    sessionId?: string;
   }, signal?: AbortSignal, options?: { idempotencyKey?: string }): Promise<{ id: string; status: string; error?: string }>;
 }
 
@@ -94,8 +95,12 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
       const idempotencyKey = "chat_" + createHash("sha256")
         .update(JSON.stringify([command.platform, command.conversationId, command.messageId]))
         .digest("hex");
+      const sessionId = "chat_" + createHash("sha256")
+        .update(JSON.stringify([command.platform, command.senderId, command.conversationId]))
+        .digest("hex");
       const run = await options.client.start({
         task,
+        sessionId,
         context: `Origin: ${command.platform} chat integration. Conversation ID: ${command.conversationId}.`,
       }, undefined, { idempotencyKey });
       return { status: "accepted", runId: run.id, runStatus: run.status };

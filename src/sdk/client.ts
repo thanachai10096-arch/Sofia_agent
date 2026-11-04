@@ -9,6 +9,8 @@ export interface SofiaClientOptions {
 
 export interface SofiaRunInput {
   task: string;
+  /** Stable per-user conversation identifier for durable transcript continuity. */
+  sessionId?: string;
   workspace?: string;
   context?: string | Record<string, unknown>;
   /** Configured model route ID from listModels(); omit or use auto for automatic selection. */
