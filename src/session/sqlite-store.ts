@@ -204,9 +204,11 @@ export class SqliteSessionStore {
       const ftsQuery = term.split(/\s+/u).filter(Boolean).map((part) => `"${part.replace(/"/gu, '""')}"`).join(" AND ");
       try {
         ids = (this.db.prepare(`
-          SELECT DISTINCT session_id AS id
-          FROM session_messages_fts
+          SELECT DISTINCT s.id AS id
+          FROM session_messages_fts f
+          JOIN sessions s ON s.id = f.session_id
           WHERE session_messages_fts MATCH ?
+          ORDER BY s.updated_at DESC, s.id ASC
           LIMIT ? OFFSET ?
         `).all(ftsQuery, limit, offset) as Array<{ id: string }>).map((row) => row.id);
       } catch {
