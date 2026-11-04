@@ -14,7 +14,7 @@ const message = (overrides: Partial<VerifiedChatCommand> = {}): VerifiedChatComm
 
 function harness(options: { allowed?: boolean; failStart?: boolean; maxTaskCharacters?: number } = {}) {
   const claimed = new Set<string>();
-  const started: Array<{ task: string; context?: string }> = [];
+  const started: Array<{ task: string; context?: string; sessionId?: string }> = [];
   let released = 0;
   const handler = createChatCommandHandler({
     client: {
@@ -48,6 +48,19 @@ test("dispatches a verified command through the shared Sofia client", async () =
   });
   assert.equal(h.started[0]?.task, "inspect the repository");
   assert.match(h.started[0]?.context ?? "", /telegram chat integration/);
+});
+
+test("assigns a stable session ID scoped to platform, sender, and conversation", async () => {
+  const h = harness();
+  await h.handler(message());
+  const firstSessionId = h.started[0]?.sessionId;
+  assert.match(firstSessionId ?? "", /^chat_[a-f0-9]{64}$/);
+
+  await h.handler(message({ messageId: "message-2" }));
+  assert.equal(h.started[1]?.sessionId, firstSessionId);
+
+  await h.handler(message({ messageId: "message-3", senderId: "user-2" }));
+  assert.notEqual(h.started[2]?.sessionId, firstSessionId);
 });
 
 test("rejects senders not allowed by the configured access policy", async () => {
