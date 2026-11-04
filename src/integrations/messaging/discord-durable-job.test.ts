@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { FileUserMemoryStore } from "../../brain/user-memory.js";
 import type { JobRecord, JobRuntime } from "../../brain/job-runtime.js";
-import { buildDiscordSessionContext, runDiscordTaskAsDurableJob } from "./discord-durable-job.js";
+import { buildDiscordSessionContext, buildDiscordUserMemoryContext, runDiscordTaskAsDurableJob, saveExplicitDiscordUserMemory } from "./discord-durable-job.js";
 
 function runtimeFor(records: JobRecord[]): JobRuntime {
   return {
@@ -101,4 +105,50 @@ test("Discord session context is scoped to a session and only uses completed job
   assert.doesNotMatch(context, /Do not leak this/);
   assert.doesNotMatch(context, /unfinished task/);
   assert.match(context, /untrusted historical data/i);
+});
+
+test("Discord persists only explicit remember requests under the user's own principal", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "sofia-discord-memory-"));
+  const store = new FileUserMemoryStore(root);
+  try {
+    assert.equal(await saveExplicitDiscordUserMemory(store, "discord:123", "จำไว้ว่า ฉันชอบคำตอบภาษาไทย"), true);
+    assert.equal(await saveExplicitDiscordUserMemory(store, "discord:123", "I like concise explanations"), false);
+    const alice = await store.list("discord:123");
+    assert.equal(alice.length, 1);
+    assert.equal(alice[0]?.kind, "preference");
+    assert.equal(alice[0]?.content, "คำตอบภาษาไทย");
+    assert.deepEqual(await store.list("discord:456"), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Discord durable jobs receive only matching user's bounded untrusted memory", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "sofia-discord-memory-context-"));
+  const store = new FileUserMemoryStore(root);
+  try {
+    await saveExplicitDiscordUserMemory(store, "discord:123", "จำไว้ว่า ฉันชอบคำตอบภาษาไทย");
+    await saveExplicitDiscordUserMemory(store, "discord:456", "จำไว้ว่า ฉันชอบคำตอบภาษาอังกฤษ");
+    const ownContext = await buildDiscordUserMemoryContext(store, "discord:123", "ตอบเป็นภาษาไทย");
+    const otherContext = await buildDiscordUserMemoryContext(store, "discord:789", "ตอบเป็นภาษาไทย");
+    assert.match(ownContext, /คำตอบภาษาไทย/);
+    assert.match(ownContext, /untrusted reference data/i);
+    assert.doesNotMatch(ownContext, /คำตอบภาษาอังกฤษ/);
+    assert.equal(otherContext, "");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Discord memory retrieval is best-effort and never persists ordinary task text", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "sofia-discord-memory-safe-"));
+  const store = new FileUserMemoryStore(root);
+  try {
+    assert.equal(await saveExplicitDiscordUserMemory(store, "discord:123", "ช่วยตรวจสอบโค้ดให้หน่อย"), false);
+    assert.equal(await buildDiscordUserMemoryContext(store, "discord:123", "ตรวจสอบโค้ด"), "");
+    assert.deepEqual(await store.list("discord:123"), []);
+    assert.equal(await buildDiscordUserMemoryContext(undefined, "discord:123", "ตรวจสอบโค้ด"), "");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

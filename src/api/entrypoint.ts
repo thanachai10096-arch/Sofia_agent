@@ -5,7 +5,7 @@ import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependencies } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
+import { buildDiscordSessionContext, buildDiscordUserMemoryContext, saveExplicitDiscordUserMemory, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
 import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 
@@ -59,6 +59,13 @@ if (discordConfigured) {
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       const principalId = "discord:" + message.author.id;
+      // Save only when the message matches Sofia's explicit "remember" syntax.
+      // Ordinary conversation and task text never become persistent memory implicitly.
+      const savedMemory = await saveExplicitDiscordUserMemory(deps.userMemoryStore, principalId, message.content);
+      if (savedMemory) {
+        await discordTransport?.sendMessage(message.channelId, "Sofia saved that to your private memory.", undefined, message.id);
+        return;
+      }
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
       const argument = message.content.trim().slice(command.length).trim();
       if (command === "/status" || command === "/cancel" || command === "/resume") {
@@ -129,9 +136,13 @@ if (discordConfigured) {
         channelId: message.channelId,
         conversationId: message.channelId,
       });
-      const sessionContext = await buildDiscordSessionContext(deps.jobRuntime, sessionKey);
-      const taskWithMemory = sessionContext
-        ? task + "\n\n" + sessionContext
+      const [sessionContext, userMemoryContext] = await Promise.all([
+        buildDiscordSessionContext(deps.jobRuntime, sessionKey),
+        buildDiscordUserMemoryContext(deps.userMemoryStore, principalId, task),
+      ]);
+      const memoryContext = [userMemoryContext, sessionContext].filter(Boolean).join("\n\n");
+      const taskWithMemory = memoryContext
+        ? task + "\n\n" + memoryContext
         : task;
       const handle = await submitDiscordTask(deps.jobRuntime, taskWithMemory, principalId, discordAbort.signal, {
         channelId: message.channelId,
