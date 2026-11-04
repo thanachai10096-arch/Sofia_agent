@@ -92,6 +92,36 @@ test("a failed update handler does not block later updates or repeat the failed 
   assert.deepEqual(errorEvents, ["update_failed"]);
 });
 
+test("Telegram polling stops after HTTP 409 instead of retrying a conflicting getUpdates poller", async () => {
+  let pollCount = 0;
+  let conflictResolve!: () => void;
+  const conflict = new Promise<void>((resolve) => { conflictResolve = resolve; });
+  const errorEvents: Array<{ event: string; status?: number }> = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    if (String(input).endsWith("/deleteWebhook")) return ok(true);
+    if (String(input).endsWith("/getUpdates")) {
+      pollCount++;
+      conflictResolve();
+      return new Response(JSON.stringify({ ok: false, description: "Conflict: terminated by other getUpdates request" }), { status: 409 });
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event, status) { errorEvents.push({ event, ...(status ? { status } : {}) }); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await Promise.race([
+    conflict,
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for poll conflict")), 1_000)),
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  assert.equal(pollCount, 1);
+  assert.deepEqual(errorEvents, [{ event: "poll_conflict", status: 409 }]);
+  await transport.stop();
+});
+
 test("Telegram transport rejects malformed tokens and poll timeouts", () => {
   assert.throws(() => createTelegramHttpTransport({ token: "not-a-token" }), /token/);
   assert.throws(() => createTelegramHttpTransport({ token, pollTimeoutSeconds: 51 }), /timeout/);
