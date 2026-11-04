@@ -155,7 +155,7 @@ test("Anthropic thinking can be explicitly disabled", async () => {
   process.env.SOFIA_MODEL_THINKING = "disabled";
   globalThis.fetch = async (_input, init) => {
     requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    return new Response(JSON.stringify({ content: [{ type: "text", text: "{\\"ok\\":true}" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } }), { status: 200 });
+    return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ ok: true }) }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } }), { status: 200 });
   };
   try {
     const gateway = new SofiaModelGateway({ coding: { baseUrl: "https://api.anthropic.com/v1", apiKey: "test", model: "deepseek-flash", protocol: "anthropic-messages" } });
