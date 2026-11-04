@@ -242,7 +242,7 @@ test("Anthropic-compatible gateway retries a thinking-only response without thin
     assert.equal(result.text, '{"summary":"ready"}');
     assert.equal(bodies.length, 2);
     assert.deepEqual(bodies[0]?.thinking, { type: "disabled" });
-    assert.equal("thinking" in (bodies[1] ?? {}), false);
+    assert.deepEqual(bodies[1]?.thinking, { type: "disabled" });
     assert.match(String(bodies[1]?.system), /Do not emit thinking or reasoning blocks/);
   } finally {
     globalThis.fetch = originalFetch;
