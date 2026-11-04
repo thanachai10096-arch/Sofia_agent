@@ -195,6 +195,26 @@ for (const protocol of ["openai-compatible", "anthropic-messages"] as const) {
     } finally { globalThis.fetch = originalFetch; }
   });
 
+
+  test(`${protocol} request sends enabled thinking mode when configured`, async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = async (_input, init) => {
+      requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(protocol === "anthropic-messages"
+        ? JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } })
+        : JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
+    };
+    try {
+      const gateway = new SofiaModelGateway({ coding: {
+        baseUrl: protocol === "anthropic-messages" ? "https://api.deepseek.com/anthropic" : "https://api.deepseek.com",
+        apiKey: "test", model: "deepseek-flash", protocol, thinkingMode: "enabled",
+      } });
+      await gateway.generate({ task: "hello", kind: "analysis", step: 1 }, route);
+      assert.deepEqual(requestedBody.thinking, { type: "enabled" });
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   test(`${protocol} request sends configured thinking mode`, async () => {
     const originalFetch = globalThis.fetch;
     let requestedBody: Record<string, unknown> = {};
