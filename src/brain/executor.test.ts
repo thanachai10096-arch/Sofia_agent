@@ -106,6 +106,54 @@ function makeTools(): ToolGateway {
   };
 }
 
+
+test("Brain retries one malformed plan with the strict call schema before failing", async () => {
+  let planCalls = 0;
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string; payload?: Record<string, unknown> };
+      const repair = Boolean(parsed.payload?.outputContractRepair);
+      const value = parsed.phase === "understand"
+        ? {
+            objective: "Write a file", constraints: [], assumptions: [],
+            requiredCapabilities: ["file-write"], requiredTools: ["workspace.write_file"],
+            risk: "low", successCriteria: ["hello.txt exists"], ambiguities: [],
+          }
+        : (() => {
+            planCalls += 1;
+            if (!repair) return {
+              strategy: "initial", reason: "Malformed first model response",
+              steps: [{ id: "write", objective: "Write the file", dependencies: [] }],
+            };
+            return {
+              strategy: "initial", reason: "Corrected schema response",
+              steps: [{ id: "write", objective: "Write the file", dependencies: [],
+                call: { tool: "workspace.write_file", input: { path: "hello.txt", content: "hello" } } }],
+            };
+          })();
+      return {
+        inputTokens: 10,
+        async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
+  });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists", description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) { return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" }; },
+    }],
+  });
+  assert.equal(planCalls, 2);
+  assert.equal(report.completed, true, report.summary);
+});
+
 test("Brain completes a coding loop only after trusted verification", async () => {
   const brain = createSofiaBrain({
     dependencies: {

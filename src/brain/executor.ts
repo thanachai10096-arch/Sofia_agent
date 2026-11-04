@@ -570,6 +570,27 @@ export class SofiaBrain {
     }, principalId);
   }
 
+  private async inferValidatedPlan(
+    phase: "plan" | "replan",
+    payload: Record<string, unknown>,
+  ): Promise<ExecutionPlan> {
+    let value = await this.infer(phase, payload);
+    try {
+      return this.validatePlan(parsePlan(value, this.limits.maxSteps));
+    } catch (firstError) {
+      // Never guess a tool call: request one bounded schema repair, then fail closed.
+      value = await this.infer(phase, {
+        ...payload,
+        outputContractRepair: {
+          error: errorMessage(firstError),
+          invalidResponse: preview(value, 8_000).text,
+          instruction: "Return a complete corrected JSON plan. Every steps[] item MUST include call: { tool: registered tool name, input: object }. Do not omit call, invent tools, or claim execution.",
+        },
+      });
+      return this.validatePlan(parsePlan(value, this.limits.maxSteps));
+    }
+  }
+
   private async plan(
     input: BrainRunInput,
     understanding: TaskUnderstanding,
@@ -580,17 +601,13 @@ export class SofiaBrain {
       );
     }
 
-    const value = await this.infer("plan", {
+    return this.inferValidatedPlan("plan", {
       task: input.task,
       referenceContext: priorReferenceContext(input.context),
       understanding,
       availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
-
-    return this.validatePlan(
-      parsePlan(value, this.limits.maxSteps),
-    );
   }
 
   private async executeStep(step: ExecutionPlan["steps"][number], principalId?: string): Promise<Observation> {
@@ -786,7 +803,7 @@ export class SofiaBrain {
       this.selectedSkillIds.add(skills[0].id);
       this.activeSkillId = skills[0].id;
     }
-    const value = await this.infer("replan", {
+    const plan = await this.inferValidatedPlan("replan", {
       task,
       understanding,
       previousPlan,
@@ -795,10 +812,6 @@ export class SofiaBrain {
       matchedSkills: compactSkillContext(skills),
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
-
-    const plan = this.validatePlan(
-      parsePlan(value, this.limits.maxSteps),
-    );
 
     const previousFingerprint = planFingerprint(previousPlan);
     const nextFingerprint = planFingerprint(plan);
