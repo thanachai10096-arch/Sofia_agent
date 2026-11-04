@@ -71,6 +71,46 @@ function makeBudget(maxTokens = 1_000) {
   );
 }
 
+test("gateway admits Thai short-chat understanding prompts with a bounded tool catalog", async () => {
+  const budget = makeBudget();
+  let calls = 0;
+  const understandingRequest = {
+    ...request(),
+    phase: "understand" as const,
+    core: {
+      ...request().core,
+      task: "โซเฟีย",
+    },
+  };
+  const configuredRoute: InternalRoute = {
+    ...route(async () => {
+      calls += 1;
+      return {
+        value: { objective: "Respond to the user", constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [], risk: "low", successCriteria: ["Reply in Thai"], ambiguities: [] },
+        usage: { inputTokens: 5_600, outputTokens: 80 },
+        finishReason: "complete",
+      };
+    }),
+    contextWindow: 32_000,
+    prepare() {
+      return {
+        // UTF-8 byte upper bound for the Thai task plus compact tool metadata.
+        inputTokensUpperBound: 5_600,
+        invoke: async () => ({
+          value: { objective: "Respond to the user" },
+          usage: { inputTokens: 5_600, outputTokens: 80 },
+          finishReason: "complete" as const,
+        }),
+      };
+    },
+  };
+  const gateway = new TokenAwareGateway(budget, [configuredRoute]);
+  const value = await gateway.generate(understandingRequest);
+  assert.deepEqual(value, { objective: "Respond to the user" });
+  assert.equal(calls, 0);
+  assert.equal(budget.snapshot().calls, 1);
+});
+
 test("gateway meters actual provider usage exactly once", async () => {
   const budget = makeBudget();
   let calls = 0;
