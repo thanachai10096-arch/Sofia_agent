@@ -124,3 +124,25 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
     globalThis.fetch = originalFetch;
   }
 });
+
+test("OpenAI-compatible structured Brain requests explicitly instruct JSON-only output", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 5, completion_tokens: 3 } }), { status: 200 });
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: { baseUrl: "https://api.deepseek.com", apiKey: "test-secret", model: "deepseek-chat" },
+    });
+    await gateway.generate({
+      task: "understand task", kind: "analysis", step: 1,
+      context: JSON.stringify({ phase: "understand", instructions: "Return object", acceptanceCriteria: [] }),
+    }, route, { maxOutputTokens: 256 });
+    assert.deepEqual(requestedBody.response_format, { type: "json_object" });
+    const messages = requestedBody.messages as Array<{ role: string; content: string }>;
+    assert.match(messages[0]?.content ?? "", /JSON/);
+    assert.match(messages[0]?.content ?? "", /exactly one valid JSON object/);
+  } finally { globalThis.fetch = originalFetch; }
+});

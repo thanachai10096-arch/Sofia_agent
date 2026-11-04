@@ -115,7 +115,9 @@ function safeProviderFailureReason(error: unknown): string {
       "503": "provider_http_503_unavailable",
       "504": "provider_http_504_gateway_timeout",
     };
-    return reasons[status] ?? `provider_http_${status}`;
+    const base = reasons[status] ?? `provider_http_${status}`;
+    const diagnostic = message.match(/: ((?:(?:type|code)=[a-zA-Z0-9_.-]+)(?: (?:type|code)=[a-zA-Z0-9_.-]+)*)$/)?.[1];
+    return (diagnostic ? `${base}_${diagnostic.replaceAll(" ", "_")}` : base).slice(0, 300);
   }
   if (/timed? ?out|timeout|aborted/i.test(message)) return "provider_timeout";
   if (/fetch failed|network|econnreset|enotfound|eai_again/i.test(message)) return "provider_network_error";
