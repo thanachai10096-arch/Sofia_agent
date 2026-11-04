@@ -457,8 +457,8 @@ export class SofiaModelGateway implements ModelProvider {
         ? normalizeAnthropicResponse(raw)
         : raw as ChatResponse;
     } catch (error) {
-      if (error instanceof Error && error.message === "Anthropic Messages API returned thinking-only content.") {
-        return failResponse("Anthropic Messages API returned thinking-only content.");
+      if (error instanceof Error && error.message === "provider_thinking_only_output") {
+        return failResponse("provider_thinking_only_output");
       }
       return failResponse("Model gateway returned invalid JSON or an unsupported provider response.");
     }
