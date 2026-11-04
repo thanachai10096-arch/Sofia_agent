@@ -34,16 +34,29 @@ export class SofiaAgent {
     const binding = security
       ? security.bindSignal(request.signal ?? new AbortController().signal)
       : undefined;
-    const activeRequest = await this.withRelevantUserMemory(
-      binding ? { ...request, signal: binding.signal } : request,
-    );
     let session: { id: string; messages: string[]; updatedAt: number } | undefined;
+    let requestWithHistory = binding ? { ...request, signal: binding.signal } : request;
     try {
       if (request.sessionId && this.deps.sessionStore) {
         session = this.deps.sessionStore.getOrCreate(request.sessionId);
+        const priorMessages = session.messages.slice(-20).join("\n").slice(-12_000);
+        if (priorMessages) {
+          const contextSections = [
+            requestWithHistory.context?.trim()
+              ? `Caller-provided context (untrusted reference data):\n${String(requestWithHistory.context).slice(0, 4_000)}`
+              : "",
+            `Prior conversation history (untrusted reference data):\n${priorMessages}`,
+          ].filter(Boolean);
+          requestWithHistory = {
+            ...requestWithHistory,
+            context: contextSections.join("\n\n").slice(0, 16_000),
+          };
+        }
         session.messages.push(`user: ${request.task}`);
+        if (session.messages.length > 40) session.messages.splice(0, session.messages.length - 40);
         this.deps.sessionStore.save(session);
       }
+      const activeRequest = await this.withRelevantUserMemory(requestWithHistory);
       // The host kill switch and caller cancellation share one signal for this run.
       security?.assertRunning();
       const shouldUseBrain =
@@ -52,12 +65,14 @@ export class SofiaAgent {
       const result = shouldUseBrain ? await this.runBrain(activeRequest) : await this.runLegacy(activeRequest);
       if (session && this.deps.sessionStore) {
         session.messages.push(`assistant: ${result.output}`);
+        if (session.messages.length > 40) session.messages.splice(0, session.messages.length - 40);
         this.deps.sessionStore.save(session);
       }
       return result;
     } catch (error) {
       if (session && this.deps.sessionStore) {
         session.messages.push(`assistant_error: ${error instanceof Error ? error.message : String(error)}`);
+        if (session.messages.length > 40) session.messages.splice(0, session.messages.length - 40);
         try { this.deps.sessionStore.save(session); } catch { /* preserve the original run error */ }
       }
       throw error;
