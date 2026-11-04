@@ -241,7 +241,14 @@ export class SofiaClient {
         interval = initialInterval;
       } catch (error) {
         if (options.signal?.aborted) throw abortError(options.signal);
-        if (!isTransient(error)) throw error;
+        // During Railway rolling deploys, a request can briefly reach an
+        // instance that has not yet loaded the just-created run. Treat 404 as
+        // transient only during a short startup/replica handoff grace window.
+        const notFoundDuringHandoff =
+          error instanceof SofiaApiError &&
+          error.status === 404 &&
+          Date.now() - started < 30_000;
+        if (!isTransient(error) && !notFoundDuringHandoff) throw error;
         lastTransientError = error;
         interval = Math.min(maxInterval, Math.max(initialInterval, interval * 2));
       }
