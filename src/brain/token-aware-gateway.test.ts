@@ -92,6 +92,7 @@ test("gateway admits Thai short-chat understanding prompts with a bounded tool c
       };
     }),
     contextWindow: 32_000,
+    maxOutputTokens: 1_000,
     prepare() {
       return {
         // UTF-8 byte upper bound for the Thai task plus compact tool metadata.
