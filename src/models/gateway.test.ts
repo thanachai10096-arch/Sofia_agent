@@ -146,3 +146,33 @@ test("OpenAI-compatible structured Brain requests explicitly instruct JSON-only 
     assert.match(messages[0]?.content ?? "", /exactly one valid JSON object/);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+
+test("Anthropic thinking can be explicitly disabled", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalThinking = process.env.SOFIA_MODEL_THINKING;
+  let requestedBody: Record<string, unknown> = {};
+  process.env.SOFIA_MODEL_THINKING = "disabled";
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ content: [{ type: "text", text: "{\\"ok\\":true}" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } }), { status: 200 });
+  };
+  try {
+    const gateway = new SofiaModelGateway({ coding: { baseUrl: "https://api.anthropic.com/v1", apiKey: "test", model: "deepseek-flash", protocol: "anthropic-messages" } });
+    await gateway.generate({ task: "test", kind: "analysis", step: 1 }, route, { maxOutputTokens: 256 });
+    assert.deepEqual(requestedBody.thinking, { type: "disabled" });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalThinking === undefined) delete process.env.SOFIA_MODEL_THINKING;
+    else process.env.SOFIA_MODEL_THINKING = originalThinking;
+  }
+});
+
+test("Anthropic thinking-only content is preserved as a distinct failure", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ content: [{ type: "thinking", thinking: "private reasoning" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 20 } }), { status: 200 });
+  try {
+    const gateway = new SofiaModelGateway({ coding: { baseUrl: "https://api.anthropic.com/v1", apiKey: "test", model: "deepseek-flash", protocol: "anthropic-messages" } });
+    await assert.rejects(gateway.generate({ task: "test", kind: "analysis", step: 1 }, route), /thinking-only content/);
+  } finally { globalThis.fetch = originalFetch; }
+});
