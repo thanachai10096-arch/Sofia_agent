@@ -245,14 +245,19 @@ function observeWithAbort<T>(
 
 export class TokenAwareGateway {
   private readonly routeFailures = new Map<string, number>();
+  private readonly routeOpenUntil = new Map<string, number>();
 
   constructor(
     private readonly budget: TokenBudget,
     private readonly routes: readonly InternalRoute[],
     private readonly timeoutMs = 45_000,
+    private readonly routeRecoveryCooldownMs = 30_000,
   ) {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) {
       throw new Error("Invalid model timeout");
+    }
+    if (!Number.isSafeInteger(routeRecoveryCooldownMs) || routeRecoveryCooldownMs < 1 || routeRecoveryCooldownMs > 2_147_483_647) {
+      throw new Error("Invalid route recovery cooldown");
     }
   }
 
@@ -284,11 +289,17 @@ export class TokenAwareGateway {
     }> = [];
 
     for (const route of this.routes) {
+      const now = Date.now();
+      const openUntil = this.routeOpenUntil.get(route.id) ?? 0;
+      if (openUntil > now) continue;
+      if (openUntil > 0) {
+        this.routeOpenUntil.delete(route.id);
+        this.routeFailures.delete(route.id);
+      }
       const failures = this.routeFailures.get(route.id) ?? 0;
 
       if (
         !route.hardOutputCap ||
-        failures >= 2 ||
         route.qualityTier < input.minimumQualityTier ||
         !input.requiredCapabilities.every((capability) =>
           route.capabilities.includes(capability),
@@ -369,13 +380,17 @@ export class TokenAwareGateway {
         if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
         if (reply.finishReason !== "complete") throw new GatewayError("incomplete_output");
 
+        this.routeFailures.delete(selection.route.id);
+        this.routeOpenUntil.delete(selection.route.id);
         return { value: reply.value, usage: reply.usage };
       } catch (error: unknown) {
         lease.settle(error instanceof MeteredProviderError ? error.usage : undefined);
 
         if (!signal.aborted) {
           const id = selection.route.id;
-          this.routeFailures.set(id, (this.routeFailures.get(id) ?? 0) + 1);
+          const failures = (this.routeFailures.get(id) ?? 0) + 1;
+          this.routeFailures.set(id, failures);
+          if (failures >= 2) this.routeOpenUntil.set(id, Date.now() + this.routeRecoveryCooldownMs);
         }
 
         const reason = error instanceof GatewayError ? `gateway_${error.code}` : safeProviderFailureReason(error);
