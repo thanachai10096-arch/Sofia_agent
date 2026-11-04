@@ -268,7 +268,7 @@ try {
 }
 ```
 
-Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to record turns. API session identifiers are namespaced by authenticated API key. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Session transcript persistence does not automatically replay history into model context or add transcript retrieval endpoints. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
+Pass a `sessionId` to `SofiaAgent.run()` or the SDK/API run methods to persist and replay recent turns. API session identifiers are namespaced by authenticated API key. Chat integrations derive a stable session ID from platform, sender, and conversation identity. The agent replays a bounded recent transcript as untrusted reference context (up to 20 prior messages / 12,000 characters); it does not grant additional tool permissions. SQLite files are stored under the Sofia state directory by default; use a persistent, access-controlled volume. Opening the SQLite store requires a Node release that provides `node:sqlite` (Node 22.5+).
 
 ## Project memory and learning
 
