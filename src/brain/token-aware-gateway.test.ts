@@ -246,7 +246,7 @@ for (const [message, expected] of [
   ["Model provider fast temporarily unavailable.", "provider_circuit_open"],
   ["Model provider fast recovery probe already in progress.", "provider_circuit_open"],
   ["invalid arguments for tool call workspace.write_file.", "provider_bad_tool_args"],
-  ["Anthropic Messages API returned thinking-only content.", "provider_thinking_only"],
+  ["provider_thinking_only_output", "provider_thinking_only_output"],
 ] as const) {
   test(`gateway safely classifies ${expected}`, async () => {
     const gateway = new TokenAwareGateway(makeBudget(), [route(async () => { throw new Error(message); })]);
