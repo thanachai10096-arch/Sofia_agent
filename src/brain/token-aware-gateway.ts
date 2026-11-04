@@ -287,24 +287,42 @@ export class TokenAwareGateway {
       maxOutputTokens: number;
       score: bigint;
     }> = [];
+    // Keep rejection telemetry aggregate and credential/prompt-free. This makes
+    // no_eligible_route actionable without exposing provider configuration.
+    const rejected = {
+      circuitOpen: 0,
+      outputCap: 0,
+      qualityTier: 0,
+      capabilities: 0,
+      outputLimit: 0,
+      contextTooLarge: 0,
+    };
 
     for (const route of this.routes) {
       const now = Date.now();
       const openUntil = this.routeOpenUntil.get(route.id) ?? 0;
-      if (openUntil > now) continue;
+      if (openUntil > now) {
+        rejected.circuitOpen += 1;
+        continue;
+      }
       if (openUntil > 0) {
         this.routeOpenUntil.delete(route.id);
         this.routeFailures.delete(route.id);
       }
       const failures = this.routeFailures.get(route.id) ?? 0;
 
-      if (
-        !route.hardOutputCap ||
-        route.qualityTier < input.minimumQualityTier ||
-        !input.requiredCapabilities.every((capability) =>
-          route.capabilities.includes(capability),
-        )
-      ) {
+      if (!route.hardOutputCap) {
+        rejected.outputCap += 1;
+        continue;
+      }
+      if (route.qualityTier < input.minimumQualityTier) {
+        rejected.qualityTier += 1;
+        continue;
+      }
+      if (!input.requiredCapabilities.every((capability) =>
+        route.capabilities.includes(capability),
+      )) {
+        rejected.capabilities += 1;
         continue;
       }
 
@@ -312,7 +330,10 @@ export class TokenAwareGateway {
         PHASE_CAPS[input.phase].output,
         route.maxOutputTokens,
       );
-      if (maxOutputTokens < 1) continue;
+      if (maxOutputTokens < 1) {
+        rejected.outputLimit += 1;
+        continue;
+      }
 
       try {
         const prepared = packContext(route, input, maxOutputTokens);
@@ -329,6 +350,7 @@ export class TokenAwareGateway {
         });
       } catch (error: unknown) {
         if (!(error instanceof ContextTooLarge)) throw error;
+        rejected.contextTooLarge += 1;
       }
     }
 
@@ -336,7 +358,16 @@ export class TokenAwareGateway {
       a.score < b.score ? -1 : a.score > b.score ? 1 : 0,
     );
 
-    if (candidates.length === 0) throw new GatewayError("no_eligible_route");
+    if (candidates.length === 0) {
+      const reason = Object.entries(rejected)
+        .filter(([, count]) => count > 0)
+        .map(([category, count]) => category + "=" + count)
+        .join(",");
+      throw new GatewayError(
+        "no_eligible_route",
+        reason ? "route_rejections:" + reason : "no_routes_configured",
+      );
+    }
 
     let chosen: (typeof candidates)[number] | undefined;
     let reservation: Reservation | undefined;
