@@ -4,6 +4,7 @@ import test from "node:test";
 import { TokenBudget } from "./token-budget.js";
 import {
   GatewayError,
+  MeteredProviderError,
   TokenAwareGateway,
   type InferenceRequest,
   type InternalRoute,
@@ -264,7 +265,7 @@ test("gateway retries a route after its temporary failure cooldown", async () =>
     budget,
     [route(async () => {
       calls += 1;
-      if (shouldFail) throw new Error("temporary provider outage");
+      if (shouldFail) throw new MeteredProviderError({ inputTokens: 2, outputTokens: 1 });
       return {
         value: { recovered: true },
         usage: { inputTokens: 2, outputTokens: 2 },
