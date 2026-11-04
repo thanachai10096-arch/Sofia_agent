@@ -5,6 +5,7 @@ export interface SofiaModelProviderConfig {
   apiKey: string;
   model: string;
   protocol?: "openai-compatible" | "anthropic-messages";
+  thinkingMode?: "enabled" | "disabled";
 }
 
 export interface SofiaModelConfig {
@@ -154,6 +155,11 @@ function selectProvider(): ProviderSelection {
  * implement the OpenAI Chat Completions-compatible API.
  */
 export function loadModelConfigFromEnv(): SofiaModelConfig {
+  const thinkingValue = process.env.SOFIA_MODEL_THINKING?.trim().toLowerCase();
+  if (thinkingValue && thinkingValue !== "enabled" && thinkingValue !== "disabled") {
+    throw new Error("SOFIA_MODEL_THINKING must be enabled or disabled when set.");
+  }
+  const thinkingMode = thinkingValue as "enabled" | "disabled" | undefined;
   const selected = selectProvider();
   const definitions = [
     ["fast", ["fast"], 1, 1, 5],
@@ -184,6 +190,7 @@ export function loadModelConfigFromEnv(): SofiaModelConfig {
       apiKey: selected.apiKey,
       model,
       protocol: selected.protocol,
+      ...(thinkingMode ? { thinkingMode } : {}),
     };
   }
 

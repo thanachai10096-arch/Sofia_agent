@@ -236,3 +236,21 @@ test("gateway preserves bounded allowlisted provider type/code diagnostics only"
     return true;
   });
 });
+
+
+for (const [message, expected] of [
+  ["Model gateway returned no usable content (finish_reason=end_turn).", "provider_empty_content_finish_end_turn"],
+  ["Model gateway returned no usable content (finish_reason=STOP).", "provider_empty_content"],
+  ["Model gateway returned a refusal response.", "provider_refusal"],
+  ["Provider did not return token usage", "provider_missing_usage"],
+  ["Model provider fast temporarily unavailable.", "provider_circuit_open"],
+  ["Model provider fast recovery probe already in progress.", "provider_circuit_open"],
+  ["invalid arguments for tool call workspace.write_file.", "provider_bad_tool_args"],
+  ["provider_thinking_only_output", "provider_thinking_only_output"],
+] as const) {
+  test(`gateway safely classifies ${expected}`, async () => {
+    const gateway = new TokenAwareGateway(makeBudget(), [route(async () => { throw new Error(message); })]);
+    await assert.rejects(gateway.generate(request()), (error: unknown) =>
+      error instanceof GatewayError && error.message === `model_call_failed: ${expected}`);
+  });
+}

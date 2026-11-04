@@ -43,6 +43,7 @@ test("Anthropic Messages adapter sends native tool schema and normalizes tool-us
         apiKey: "anthropic-secret",
         model: "claude-test-model",
         protocol: "anthropic-messages",
+        thinkingMode: "disabled",
       },
     });
     const request: ModelRequest = {
@@ -146,3 +147,90 @@ test("OpenAI-compatible structured Brain requests explicitly instruct JSON-only 
     assert.match(messages[0]?.content ?? "", /exactly one valid JSON object/);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+
+test("Anthropic thinking mode is explicitly controlled in the request body", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ ok: true }) }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } }), { status: 200 });
+  };
+  try {
+    const gateway = new SofiaModelGateway({ coding: { baseUrl: "https://api.anthropic.com/v1", apiKey: "test", model: "deepseek-flash", protocol: "anthropic-messages", thinkingMode: "disabled" } });
+    await gateway.generate({ task: "test", kind: "analysis", step: 1 }, route, { maxOutputTokens: 256 });
+    assert.deepEqual(requestedBody.thinking, { type: "disabled" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Anthropic thinking-only content is preserved as a distinct failure", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ content: [{ type: "thinking", thinking: "private reasoning" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 20 } }), { status: 200 });
+  try {
+    const gateway = new SofiaModelGateway({ coding: { baseUrl: "https://api.anthropic.com/v1", apiKey: "test", model: "deepseek-flash", protocol: "anthropic-messages" } });
+    await assert.rejects(gateway.generate({ task: "test", kind: "analysis", step: 1 }, route), /provider_thinking_only_output/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+
+for (const protocol of ["openai-compatible", "anthropic-messages"] as const) {
+  test(`${protocol} request omits thinking when mode is unset`, async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = async (_input, init) => {
+      requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(protocol === "anthropic-messages"
+        ? JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } })
+        : JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
+    };
+    try {
+      const gateway = new SofiaModelGateway({ coding: {
+        baseUrl: protocol === "anthropic-messages" ? "https://api.deepseek.com/anthropic" : "https://api.deepseek.com",
+        apiKey: "test", model: "deepseek-flash", protocol,
+      } });
+      await gateway.generate({ task: "hello", kind: "analysis", step: 1 }, route);
+      assert.equal("thinking" in requestedBody, false);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+
+  test(`${protocol} request sends enabled thinking mode when configured`, async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = async (_input, init) => {
+      requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(protocol === "anthropic-messages"
+        ? JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } })
+        : JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
+    };
+    try {
+      const gateway = new SofiaModelGateway({ coding: {
+        baseUrl: protocol === "anthropic-messages" ? "https://api.deepseek.com/anthropic" : "https://api.deepseek.com",
+        apiKey: "test", model: "deepseek-flash", protocol, thinkingMode: "enabled",
+      } });
+      await gateway.generate({ task: "hello", kind: "analysis", step: 1 }, route);
+      assert.deepEqual(requestedBody.thinking, { type: "enabled" });
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test(`${protocol} request sends configured thinking mode`, async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = async (_input, init) => {
+      requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(protocol === "anthropic-messages"
+        ? JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } })
+        : JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
+    };
+    try {
+      const gateway = new SofiaModelGateway({ coding: {
+        baseUrl: protocol === "anthropic-messages" ? "https://api.deepseek.com/anthropic" : "https://api.deepseek.com",
+        apiKey: "test", model: "deepseek-flash", protocol, thinkingMode: "disabled",
+      } });
+      await gateway.generate({ task: "hello", kind: "analysis", step: 1 }, route);
+      assert.deepEqual(requestedBody.thinking, { type: "disabled" });
+    } finally { globalThis.fetch = originalFetch; }
+  });
+}

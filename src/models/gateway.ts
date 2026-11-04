@@ -18,6 +18,7 @@ export interface GatewayProviderConfig {
   /** Wire protocol used by this provider. Defaults to OpenAI Chat Completions compatibility. */
   protocol?: "openai-compatible" | "anthropic-messages";
   anthropicVersion?: string;
+  thinkingMode?: "enabled" | "disabled";
 }
 
 interface ChatResponse {
@@ -135,6 +136,7 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
   if (!raw || !Array.isArray(raw.content)) throw new Error("Anthropic Messages API returned an invalid response.");
   const textParts: string[] = [];
   const toolCalls: Array<{ id?: string; function?: { name?: string; arguments?: string } }> = [];
+  const hasThinkingBlock = raw.content.some((block) => block?.type === "thinking" || block?.type === "redacted_thinking");
   for (const block of raw.content) {
     if (block?.type === "text" && typeof block.text === "string" && block.text.trim()) {
       textParts.push(block.text.trim());
@@ -147,6 +149,9 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
         function: { name, arguments: JSON.stringify(block.input ?? {}) },
       });
     }
+  }
+  if (hasThinkingBlock && textParts.length === 0 && toolCalls.length === 0) {
+    throw new Error("provider_thinking_only_output");
   }
   const usage = raw.usage;
   return {
@@ -325,6 +330,7 @@ export class SofiaModelGateway implements ModelProvider {
         model: config.model,
         max_tokens: options.maxOutputTokens ?? 2_048,
         ...(converted.system ? { system: converted.system } : {}),
+        ...(config.thinkingMode ? { thinking: { type: config.thinkingMode } } : {}),
         messages: converted.messages,
         ...(tools ? {
           tools: tools.map((tool) => ({
@@ -350,6 +356,7 @@ export class SofiaModelGateway implements ModelProvider {
         ...(options.maxOutputTokens
           ? { max_tokens: options.maxOutputTokens }
           : {}),
+        ...(config.thinkingMode ? { thinking: { type: config.thinkingMode } } : {}),
       };
     }
 
@@ -449,7 +456,10 @@ export class SofiaModelGateway implements ModelProvider {
       data = protocol === "anthropic-messages"
         ? normalizeAnthropicResponse(raw)
         : raw as ChatResponse;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === "provider_thinking_only_output") {
+        return failResponse("provider_thinking_only_output");
+      }
       return failResponse("Model gateway returned invalid JSON or an unsupported provider response.");
     }
     const message = data.choices?.[0]?.message;

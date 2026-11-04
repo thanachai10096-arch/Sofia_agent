@@ -97,23 +97,27 @@ export class GatewayError extends Error {
 
 function safeProviderFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
+  const finishReason = message.match(/finish_reason=([a-z_]{1,32})/)?.[1];
+  if (/provider_thinking_only_output|thinking[-_ ]only|only thinking blocks/i.test(message)) return "provider_thinking_only_output";
+  if (/Model gateway returned a refusal response/i.test(message)) return "provider_refusal";
+  if (/Provider did not return token usage/i.test(message)) return "provider_missing_usage";
+  if (/temporarily unavailable|recovery probe already in progress/i.test(message)) return "provider_circuit_open";
+  if (/invalid arguments for tool call/i.test(message)) return "provider_bad_tool_args";
+  if (/Model gateway returned no usable content/i.test(message)) {
+    return finishReason && /^[a-z_]{1,32}$/.test(finishReason)
+      ? `provider_empty_content_finish_${finishReason}`
+      : "provider_empty_content";
+  }
   const status = message.match(/Model gateway request failed \((\d{3})\)/i)?.[1];
   if (status) {
     const reasons: Record<string, string> = {
-      "400": "provider_http_400_bad_request",
-      "401": "provider_http_401_authentication_failed",
-      "402": "provider_http_402_billing_or_credits",
-      "403": "provider_http_403_access_denied",
-      "404": "provider_http_404_model_or_endpoint_not_found",
-      "408": "provider_http_408_request_timeout",
-      "409": "provider_http_409_conflict",
-      "413": "provider_http_413_request_too_large",
-      "422": "provider_http_422_invalid_request",
-      "429": "provider_http_429_rate_or_quota_limit",
-      "500": "provider_http_500_server_error",
-      "502": "provider_http_502_bad_gateway",
-      "503": "provider_http_503_unavailable",
-      "504": "provider_http_504_gateway_timeout",
+      "400":"provider_http_400_bad_request","401":"provider_http_401_authentication_failed",
+      "402":"provider_http_402_billing_or_credits","403":"provider_http_403_access_denied",
+      "404":"provider_http_404_model_or_endpoint_not_found","408":"provider_http_408_request_timeout",
+      "409":"provider_http_409_conflict","413":"provider_http_413_request_too_large",
+      "422":"provider_http_422_invalid_request","429":"provider_http_429_rate_or_quota_limit",
+      "500":"provider_http_500_server_error","502":"provider_http_502_bad_gateway",
+      "503":"provider_http_503_unavailable","504":"provider_http_504_gateway_timeout",
     };
     const base = reasons[status] ?? `provider_http_${status}`;
     const diagnostic = message.match(/: ((?:(?:type|code)=[a-zA-Z0-9_.-]+)(?: (?:type|code)=[a-zA-Z0-9_.-]+)*)$/)?.[1];
@@ -374,10 +378,12 @@ export class TokenAwareGateway {
           this.routeFailures.set(id, (this.routeFailures.get(id) ?? 0) + 1);
         }
 
+        const reason = error instanceof GatewayError ? `gateway_${error.code}` : safeProviderFailureReason(error);
+        // Only sanitized metadata is logged; never log credentials, prompts, headers,
+        // provider bodies, or raw exception messages.
+        console.error("[Sofia Brain provider failure]", { reason, phase: input.phase, routeId: selection.route.id });
         if (error instanceof GatewayError) throw error;
-        // Preserve only a bounded, allowlisted diagnostic category. Never forward
-        // provider response bodies because they can contain secrets or user data.
-        throw new GatewayError("model_call_failed", safeProviderFailureReason(error));
+        throw new GatewayError("model_call_failed", reason);
       }
     })();
 

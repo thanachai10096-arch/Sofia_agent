@@ -25,6 +25,7 @@ const names = [
   "ANTHROPIC_REASONING_MODEL",
   "ANTHROPIC_VISION_MODEL",
   "SOFIA_MODEL_PROTOCOL",
+  "SOFIA_MODEL_THINKING",
   "SOFIA_MODEL_PROVIDER",
   "SOFIA_BASE_URL",
   "SOFIA_API_KEY",
@@ -219,4 +220,35 @@ test("custom endpoints can opt into the Anthropic Messages protocol", () => {
   const config = loadModelConfigFromEnv();
   assert.equal(config.providers.fast?.protocol, "anthropic-messages");
   assert.equal(config.providers.fast?.baseUrl, "https://anthropic-proxy.example.test/v1");
+});
+
+
+test("SOFIA_MODEL_THINKING disabled is propagated to every provider route", () => {
+  clear();
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.SOFIA_MODEL_THINKING = "disabled";
+  const config = loadModelConfigFromEnv();
+  for (const provider of Object.values(config.providers)) assert.equal(provider.thinkingMode, "disabled");
+});
+
+test("SOFIA_MODEL_THINKING enabled is propagated to every provider route", () => {
+  clear();
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.SOFIA_MODEL_THINKING = "enabled";
+  const config = loadModelConfigFromEnv();
+  for (const provider of Object.values(config.providers)) assert.equal(provider.thinkingMode, "enabled");
+});
+
+test("unset SOFIA_MODEL_THINKING leaves provider thinking mode unspecified", () => {
+  clear();
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  const config = loadModelConfigFromEnv();
+  for (const provider of Object.values(config.providers)) assert.equal(provider.thinkingMode, undefined);
+});
+
+test("invalid SOFIA_MODEL_THINKING is rejected during model configuration startup", () => {
+  clear();
+  process.env.GEMINI_API_KEY = "gemini-test-key";
+  process.env.SOFIA_MODEL_THINKING = "sometimes";
+  assert.throws(loadModelConfigFromEnv, /SOFIA_MODEL_THINKING must be enabled or disabled/);
 });
