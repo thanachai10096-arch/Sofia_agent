@@ -137,9 +137,14 @@ interface PhaseCap {
 }
 
 const PHASE_CAPS: Record<BrainPhase, PhaseCap> = {
-  understand: { input: 5_000, output: 700 },
-  plan: { input: 8_000, output: 1_400 },
-  replan: { input: 9_000, output: 1_800 },
+  // Brain prompts include the registered tool catalog and task context. The
+  // previous 5k/8k byte ceilings rejected ordinary Thai chat requests before
+  // any provider call because UTF-8 byte estimates are intentionally conservative.
+  // Keep these bounded below the default 16k Brain context budget while leaving
+  // room for Thai text and the compact tool catalog.
+  understand: { input: 12_000, output: 700 },
+  plan: { input: 14_000, output: 1_400 },
+  replan: { input: 14_000, output: 1_800 },
   implement: { input: 14_000, output: 4_000 },
   diagnose: { input: 7_000, output: 900 },
   review: { input: 10_000, output: 1_100 },
