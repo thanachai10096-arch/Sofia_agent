@@ -33,27 +33,54 @@ function parsePhase(prompt: PackedPrompt): string {
   return "implement";
 }
 
+function extractJsonDocument(text: string): string | undefined {
+  const start = text.search(/[\[{]/);
+  if (start < 0) return undefined;
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{" || char === "[") stack.push(char);
+    else if (char === "}" || char === "]") {
+      const opening = stack.pop();
+      if ((char === "}" && opening !== "{") || (char === "]" && opening !== "[")) return undefined;
+      if (stack.length === 0) return text.slice(start, index + 1);
+    }
+  }
+  return undefined;
+}
+
 function parseStructured(value: unknown): unknown {
   if (typeof value !== "string") return value;
-  let text = value.trim();
-
-  const fenced = text.match(/^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/i);
-  if (fenced) text = (fenced[1] ?? "").trim();
-
+  let text = value.replace(/^\uFEFF/, "").trim();
+  if (text.startsWith("```") && text.endsWith("```")) {
+    text = text.slice(3, -3).replace(/^json\s*/i, "").trim();
+  }
   try {
-    let parsed: unknown = JSON.parse(text);
-    // Some OpenAI-compatible providers return JSON encoded as a JSON string.
-    // Decode that extra wrapper without coercing primitives or arbitrary text.
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); }
+    catch {
+      const document = extractJsonDocument(text);
+      if (!document) throw new Error("No complete JSON document");
+      parsed = JSON.parse(document);
+    }
     if (typeof parsed === "string") {
       const inner = parsed.trim();
-      if (inner.startsWith("{") || inner.startsWith("[")) {
-        parsed = JSON.parse(inner);
-      }
+      if (inner.startsWith("{") || inner.startsWith("[")) parsed = JSON.parse(inner);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Brain response must be a JSON object");
     }
     return parsed;
-  } catch {
-    throw new Error("Model returned non-JSON Brain output");
-  }
+  } catch { throw new Error("Model returned non-JSON Brain output"); }
 }
 
 export interface InternalRouteAdapterOptions {
