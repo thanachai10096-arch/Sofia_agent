@@ -301,7 +301,12 @@ test("gateway retries a route after its temporary failure cooldown", async () =>
   await assert.rejects(gateway.generate(request()));
   await assert.rejects(
     gateway.generate(request()),
-    (error: unknown) => error instanceof GatewayError && error.code === "no_eligible_route",
+    (error: unknown) => {
+      assert.ok(error instanceof GatewayError);
+      assert.equal(error.code, "no_eligible_route");
+      assert.equal(error.message, "no_eligible_route: route_rejections:circuitOpen=1");
+      return true;
+    },
   );
   assert.equal(calls, 2);
 
