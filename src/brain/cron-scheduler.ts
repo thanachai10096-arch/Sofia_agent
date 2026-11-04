@@ -102,8 +102,22 @@ export class FileCronStore implements CronStore {
               process.kill(owner.pid!, 0);
             } catch (ownerError) {
               if ((ownerError as NodeJS.ErrnoException).code === "ESRCH") {
-                // Never unlink a stale lock based on an earlier read: another process
-                // could replace the path in between and lose its live lock.
+                // The owner closes its handle immediately before unlinking the lock. On
+                // macOS, another process can observe this tiny release window and mistake
+                // the just-released lock for a crash. Re-read after a short grace period;
+                // never remove the path, and retry if it disappeared or was replaced.
+                await new Promise(resolve => setTimeout(resolve, 25));
+                try {
+                  const current = JSON.parse(await fs.readFile(this.lock, "utf8")) as { pid?: number };
+                  if (current.pid !== owner.pid) continue;
+                } catch (lockReadError) {
+                  if ((lockReadError as NodeJS.ErrnoException).code === "ENOENT") continue;
+                  if (lockReadError instanceof SyntaxError) {
+                    if (Date.now() >= deadline) throw new Error("Cron scheduler state lock owner could not be read");
+                    continue;
+                  }
+                  throw lockReadError;
+                }
                 throw new Error("Cron scheduler state lock appears stale; verify no scheduler process is active before removing it: " + this.lock);
               }
               if ((ownerError as NodeJS.ErrnoException).code !== "EPERM") throw ownerError;
