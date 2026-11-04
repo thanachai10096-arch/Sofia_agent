@@ -41,11 +41,19 @@ test("mobile SDK starts and polls a real local Sofia API run end-to-end", async 
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   let transientPollFailure = false;
+  let transientNotFound = false;
   const client = new SofiaClient({
     apiKey: "mobile-e2e-key",
     baseUrl: "http://127.0.0.1:" + address.port,
     fetchImpl: async (input, init) => {
       const url = String(input);
+      if (!transientNotFound && url.includes("/v1/agent/runs/") && init?.method !== "POST") {
+        transientNotFound = true;
+        return new Response(JSON.stringify({ error: "run_not_found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        });
+      }
       if (!transientPollFailure && url.includes("/v1/agent/runs/") && init?.method !== "POST") {
         transientPollFailure = true;
         throw new TypeError("simulated mobile network handoff");
@@ -65,6 +73,7 @@ test("mobile SDK starts and polls a real local Sofia API run end-to-end", async 
 
   assert.equal(finished.status, "completed");
   assert.match(finished.result?.output ?? "", /MOBILE_SDK_E2E_OK/);
+  assert.equal(transientNotFound, true, "polling should tolerate a brief run lookup 404 during deploy handoff");
   assert.equal(transientPollFailure, true, "polling should recover after a simulated network handoff");
   assert.ok(providerCalls >= 1, "the local API should execute the provider");
 });
