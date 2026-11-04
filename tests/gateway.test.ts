@@ -206,6 +206,49 @@ test("gateway requests JSON mode for structured Brain calls without tools", asyn
   }
 });
 
+test("Anthropic-compatible gateway retries a thinking-only response without thinking mode", async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies: Array<Record<string, unknown>> = [];
+  globalThis.fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    bodies.push(body);
+    const payload = bodies.length === 1
+      ? {
+          content: [{ type: "thinking", thinking: "private reasoning" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 2, output_tokens: 4 },
+        }
+      : {
+          content: [{ type: "text", text: '{"summary":"ready"}' }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 2, output_tokens: 3 },
+        };
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      "test-provider": {
+        baseUrl: "https://example.test/v1",
+        apiKey: "test",
+        model: "deepseek-test",
+        protocol: "anthropic-messages",
+        thinkingMode: "disabled",
+      },
+    });
+    const result = await gateway.generate(request, makeRoute());
+    assert.equal(result.text, '{"summary":"ready"}');
+    assert.equal(bodies.length, 2);
+    assert.deepEqual(bodies[0]?.thinking, { type: "disabled" });
+    assert.equal("thinking" in (bodies[1] ?? {}), false);
+    assert.match(String(bodies[1]?.system), /Do not emit thinking or reasoning blocks/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("gateway leaves JSON mode disabled for ordinary chat", async () => {
   const originalFetch = globalThis.fetch;
   let body: Record<string, unknown> | undefined;
