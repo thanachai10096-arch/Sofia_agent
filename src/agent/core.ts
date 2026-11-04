@@ -37,12 +37,19 @@ export class SofiaAgent {
     const activeRequest = await this.withRelevantUserMemory(
       binding ? { ...request, signal: binding.signal } : request,
     );
+    const sessionStore = this.deps.sessionStore;
     let session: { id: string; messages: string[]; updatedAt: number } | undefined;
+    const atomicAppend = Boolean(request.sessionId && sessionStore?.appendMessages);
     try {
-      if (request.sessionId && this.deps.sessionStore) {
-        session = this.deps.sessionStore.getOrCreate(request.sessionId);
-        session.messages.push(`user: ${request.task}`);
-        this.deps.sessionStore.save(session);
+      if (request.sessionId && sessionStore) {
+        if (sessionStore.appendMessages) {
+          session = sessionStore.appendMessages(request.sessionId, [`user: ${request.task}`], 200);
+        } else {
+          // Backward-compatible path for existing custom session-store adapters.
+          session = sessionStore.getOrCreate(request.sessionId);
+          session.messages.push(`user: ${request.task}`);
+          sessionStore.save(session);
+        }
       }
       // The host kill switch and caller cancellation share one signal for this run.
       security?.assertRunning();
@@ -50,15 +57,24 @@ export class SofiaAgent {
         this.deps.brainFactory !== undefined &&
         request.useBrain !== false;
       const result = shouldUseBrain ? await this.runBrain(activeRequest) : await this.runLegacy(activeRequest);
-      if (session && this.deps.sessionStore) {
-        session.messages.push(`assistant: ${result.output}`);
-        this.deps.sessionStore.save(session);
+      if (request.sessionId && sessionStore) {
+        if (atomicAppend) {
+          sessionStore.appendMessages!(request.sessionId, [`assistant: ${result.output}`], 200);
+        } else if (session) {
+          session.messages.push(`assistant: ${result.output}`);
+          sessionStore.save(session);
+        }
       }
       return result;
     } catch (error) {
-      if (session && this.deps.sessionStore) {
-        session.messages.push(`assistant_error: ${error instanceof Error ? error.message : String(error)}`);
-        try { this.deps.sessionStore.save(session); } catch { /* preserve the original run error */ }
+      if (request.sessionId && sessionStore) {
+        const errorMessage = `assistant_error: ${error instanceof Error ? error.message : String(error)}`;
+        if (atomicAppend) {
+          try { sessionStore.appendMessages!(request.sessionId, [errorMessage], 200); } catch { /* preserve the original run error */ }
+        } else if (session) {
+          session.messages.push(errorMessage);
+          try { sessionStore.save(session); } catch { /* preserve the original run error */ }
+        }
       }
       throw error;
     } finally {

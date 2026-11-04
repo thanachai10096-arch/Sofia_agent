@@ -34,6 +34,64 @@ test("SofiaAgent records user and assistant turns when a session store is config
   ]);
 });
 
+test("separate SofiaAgent instances append concurrent turns without losing transcript updates", async () => {
+  const sessions = new MemorySessionStore();
+  const createAgent = (output: string, delayMs: number) => new SofiaAgent({
+    provider: {
+      generate: async () => {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        return { text: output };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+  const first = createAgent("first result", 20);
+  const second = createAgent("second result", 1);
+
+  await Promise.all([
+    first.run({ task: "first request", sessionId: "multi-agent-session" }),
+    second.run({ task: "second request", sessionId: "multi-agent-session" }),
+  ]);
+
+  const messages = sessions.get("multi-agent-session")?.messages ?? [];
+  assert.ok(messages.includes("user: first request"));
+  assert.ok(messages.includes("assistant: first result"));
+  assert.ok(messages.includes("user: second request"));
+  assert.ok(messages.includes("assistant: second result"));
+  assert.equal(messages.length, 4);
+});
+
+test("SofiaAgent preserves compatibility with legacy session stores without appendMessages", async () => {
+  const sessions = new Map<string, { id: string; messages: string[]; updatedAt: number }>();
+  const legacyStore = {
+    getOrCreate(id: string) {
+      const existing = sessions.get(id);
+      if (existing) return existing;
+      const created = { id, messages: [], updatedAt: Date.now() };
+      sessions.set(id, created);
+      return created;
+    },
+    save(session: { id: string; messages: string[]; updatedAt: number }) {
+      session.updatedAt = Date.now();
+      sessions.set(session.id, session);
+    },
+  };
+  const agent = new SofiaAgent({
+    provider: { generate: async () => ({ text: "Legacy adapter works." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: legacyStore,
+  });
+
+  await agent.run({ task: "legacy adapter request", sessionId: "legacy-session" });
+  assert.deepEqual(sessions.get("legacy-session")?.messages, [
+    "user: legacy adapter request",
+    "assistant: Legacy adapter works.",
+  ]);
+});
+
 test("SofiaAgent does not create a session unless sessionId is provided", async () => {
   const sessions = new MemorySessionStore();
   const agent = new SofiaAgent({
