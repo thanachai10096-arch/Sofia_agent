@@ -1,9 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileProjectMemoryStore, memoryEntryFromConvention, memoryEntryFromRepair } from "./project-memory.js";
+
+test("persistent skill ledger reports asynchronous storage failures without unhandled rejections", async () => {
+  const store = {
+    async save() { throw new Error("simulated disk failure"); },
+    async list() { return []; },
+    async find() { return []; },
+  };
+  const ledger = new (await import("./project-memory.js")).PersistentSkillLedger(store);
+  ledger.record({
+    name: "repair-runtime_error",
+    trigger: "recover after a runtime failure",
+    category: "runtime_error",
+    strategy: "initial",
+    procedure: ["inspect evidence", "repair", "verify"],
+    verification: ["test"],
+    evidenceIds: ["evidence-1"],
+  });
+  assert.equal(ledger.list().length, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ledger.persistenceStatus, "failed");
+  await assert.rejects(ledger.flush(), /persistence writes failed/);
+});
 
 test("project memory survives a new store instance", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-test-"));
@@ -15,6 +37,20 @@ test("project memory survives a new store instance", async () => {
   assert.equal(entries.length, 2);
   assert.ok((await second.find("TypeScript")).length > 0);
   assert.ok((await second.find("type_error")).length > 0);
+});
+
+test("concurrent project memory saves do not lose entries across store instances", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-concurrent-writes-"));
+  const writers = Array.from({ length: 24 }, (_, index) => {
+    const store = new FileProjectMemoryStore("concurrent-project", root);
+    return store.save(memoryEntryFromConvention("concurrent-project", `concurrent convention ${index}`));
+  });
+  await Promise.all(writers);
+
+  const reader = new FileProjectMemoryStore("concurrent-project", root);
+  const entries = await reader.list();
+  assert.equal(entries.length, 24);
+  assert.equal(new Set(entries.map((entry) => entry.id)).size, 24);
 });
 
 test("project memory writes valid JSON", async () => {
@@ -39,6 +75,22 @@ test("project memory files use private permissions on POSIX", async () => {
   }
 });
 
+
+test("project memory ignores malformed records without crashing valid memory reads", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-malformed-records-"));
+  const store = new FileProjectMemoryStore("malformed-project", root);
+  await store.save(memoryEntryFromConvention("malformed-project", "Keep this valid memory"));
+  const [filename] = await readdir(root);
+  const file = path.join(root, filename!);
+  const raw = JSON.parse(await readFile(file, "utf8")) as unknown[];
+  raw.push(null, { id: "missing-content", project: "malformed-project", kind: "decision" });
+  await writeFile(file, JSON.stringify(raw), "utf8");
+
+  const entries = await store.list();
+  assert.equal(entries.length, 1);
+  assert.match(entries[0]!.content, /Keep this valid memory/);
+  assert.equal((await store.find("valid memory")).length, 1);
+});
 
 test("project memory ranks exact token and phrase matches above substring false positives", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-ranking-"));

@@ -489,7 +489,11 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
   const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
+    run: async ({ signal }: { signal?: AbortSignal }) => new Promise((resolve) => {
+      const finish = () => resolve({ completed: false, state: "cancelled" });
+      if (signal?.aborted) finish();
+      else signal?.addEventListener("abort", finish, { once: true });
+    }),
   } as unknown as SofiaBrain), undefined, namespace));
 
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
@@ -509,6 +513,9 @@ test("DurableJobRuntime preserves concurrent submissions from independent runtim
     "sofia-agents-jobs",
     createHash("sha256").update(namespace).digest("hex") + ".json",
   );
+  await Promise.all(submitted.map((job, index) => runtimes[index]!.cancel(job.id)));
+  await Promise.all(runtimes.map((runtime) => runtime.waitForIdle()));
+  await reader.waitForIdle();
   await rm(file, { force: true });
   await rm(file + ".lock", { force: true });
 });
