@@ -165,7 +165,7 @@ test("Telegram delivery errors are sanitized and surfaced to the caller", async 
 
 
 
-function waitForAbort(signal?: AbortSignal): Promise<Response> {
+function waitForAbort(signal?: AbortSignal | null): Promise<Response> {
   return new Promise<Response>((_resolve, reject) => {
     if (signal?.aborted) { reject(new Error("aborted")); return; }
     signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
