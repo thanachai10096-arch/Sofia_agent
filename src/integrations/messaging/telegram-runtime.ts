@@ -162,8 +162,10 @@ export function createTelegramMessagingRuntime(
     });
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
       token,
-      onError: (event, status) => onWarning(
-        "Telegram transport " + event + (status ? " (HTTP " + status + ")" : "") + ".",
+      onError: (event, status, failureKind) => onWarning(
+        "Telegram transport " + event +
+        (failureKind ? " [" + failureKind + "]" : "") +
+        (typeof status === "number" ? " (HTTP " + status + ")" : "") + ".",
       ),
     }));
     gateway = createMessagingGateway({
