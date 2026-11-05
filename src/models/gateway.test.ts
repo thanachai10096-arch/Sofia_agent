@@ -274,7 +274,7 @@ test("Anthropic thinking-only recovery explicitly disables provider-default thin
     requestedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
     const response = requestedBodies.length === 1
       ? { content: [{ type: "thinking", thinking: "private reasoning" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 20 } }
-      : { content: [{ type: "text", text: "{\\"ok\\":true}" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } };
+      : { content: [{ type: "text", text: JSON.stringify({ ok: true }) }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } };
     return new Response(JSON.stringify(response), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
@@ -288,7 +288,7 @@ test("Anthropic thinking-only recovery explicitly disables provider-default thin
       },
     });
     const result = await gateway.generate({ task: "test", kind: "analysis", step: 1 }, route);
-    assert.equal(result.text, "{\\"ok\\":true}");
+    assert.equal(result.text, JSON.stringify({ ok: true }));
     assert.equal(requestedBodies.length, 2);
     assert.equal("thinking" in requestedBodies[0]!, false);
     assert.deepEqual(requestedBodies[1]?.thinking, { type: "disabled" });
