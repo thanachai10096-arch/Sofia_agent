@@ -10,7 +10,7 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed", status?: number) => void;
+  onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed", status?: number, failureKind?: "network" | "invalid_json" | "http" | "unknown") => void;
 }
 
 /**
@@ -18,6 +18,15 @@ export interface TelegramHttpTransportOptions {
  * It never logs the bot token or provider response body. Configure a webhook
  * instead of long polling if the deployment requires inbound HTTP callbacks.
  */
+type TelegramRequestFailureKind = "network" | "invalid_json" | "http" | "unknown";
+
+class TelegramRequestError extends Error {
+  constructor(message: string, readonly failureKind: TelegramRequestFailureKind, readonly status?: number) {
+    super(message);
+    this.name = "TelegramRequestError";
+  }
+}
+
 export function createTelegramHttpTransport(options: TelegramHttpTransportOptions): TelegramTransport {
   const token = options.token;
   if (!/^[A-Za-z0-9:_-]{20,256}$/.test(token)) {
@@ -34,22 +43,25 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
   let stopped = true;
 
   async function request<T>(method: string, body: Record<string, unknown> | undefined, signal: AbortSignal): Promise<T> {
-    const response = await fetchImpl(`${endpoint}/${method}`, {
-      method: body ? "POST" : "GET",
-      headers: body ? { "content-type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      signal,
-    });
+    let response: Response;
+    try {
+      response = await fetchImpl(`${endpoint}/${method}`, {
+        method: body ? "POST" : "GET",
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        signal,
+      });
+    } catch {
+      throw new TelegramRequestError("Telegram network request failed.", "network");
+    }
     let data: TelegramApiResponse<T>;
     try {
       data = await response.json() as TelegramApiResponse<T>;
     } catch {
-      throw new Error("Telegram API returned invalid JSON.");
+      throw new TelegramRequestError("Telegram API returned invalid JSON.", "invalid_json", response.status);
     }
     if (!response.ok || data.ok !== true || data.result === undefined) {
-      const error = new Error("Telegram API request failed.");
-      Object.assign(error, { status: response.status });
-      throw error;
+      throw new TelegramRequestError("Telegram API request failed.", "http", response.status);
     }
     return data.result;
   }
@@ -96,11 +108,12 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         backoffMs = 1_000;
       } catch (error) {
         if (signal.aborted || stopped) break;
-        const status = error && typeof error === "object" && "status" in error && typeof error.status === "number"
-          ? error.status : undefined;
+        const status = error instanceof TelegramRequestError ? error.status : undefined;
+        const failureKind: TelegramRequestFailureKind = error instanceof TelegramRequestError
+          ? error.failureKind : "unknown";
         if (status === 401 || status === 403) {
           // Invalid/revoked bot credentials cannot recover by retrying.
-          try { options.onError?.("poll_auth_failed", status); } catch { /* diagnostics must not terminate shutdown */ }
+          try { options.onError?.("poll_auth_failed", status, failureKind); } catch { /* diagnostics must not terminate shutdown */ }
           break;
         }
         if (status === 409) {
@@ -108,9 +121,9 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           // be draining when the replacement starts. Back off and retry so a
           // transient overlap self-recovers; a persistent second poller remains
           // visible as repeated conflict diagnostics without a hot retry loop.
-          try { options.onError?.("poll_conflict", status); } catch { /* diagnostics must not terminate shutdown */ }
+          try { options.onError?.("poll_conflict", status, failureKind); } catch { /* diagnostics must not terminate shutdown */ }
         } else {
-          try { options.onError?.("poll_failed", status); } catch { /* logging must not terminate polling */ }
+          try { options.onError?.("poll_failed", status, failureKind); } catch { /* logging must not terminate polling */ }
         }
         await wait(backoffMs, signal);
         backoffMs = Math.min(30_000, backoffMs * 2);
