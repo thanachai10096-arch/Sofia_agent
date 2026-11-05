@@ -465,8 +465,9 @@ export class SofiaModelGateway implements ModelProvider {
         const fallbackBody: Record<string, unknown> = {
           ...body,
           // DeepSeek enables thinking by default when this field is omitted.
-          // Keep the configured non-thinking mode on the recovery request too.
-          ...(config.thinkingMode === "disabled" ? { thinking: { type: "disabled" } } : {}),
+          // Force non-thinking mode on recovery: DeepSeek-compatible Anthropic
+          // endpoints may enable thinking by default when this field is omitted.
+          thinking: { type: "disabled" },
         };
         const priorSystem = typeof fallbackBody.system === "string" ? fallbackBody.system : "";
         fallbackBody.system = [
