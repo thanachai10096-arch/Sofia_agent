@@ -162,3 +162,67 @@ test("Telegram delivery errors are sanitized and surfaced to the caller", async 
   assert.ok(errorEvents.includes("delivery_failed"));
   await transport.stop();
 });
+
+
+test("Telegram polling reports a sanitized network failure kind", async () => {
+  const events: Array<{ event: string; status?: number; kind?: string }> = [];
+  let pollCount = 0;
+  const fetchImpl: typeof fetch = async (input) => {
+    if (String(input).endsWith("/deleteWebhook")) return ok(true);
+    pollCount++;
+    if (pollCount === 1) throw new Error("secret token and private network details");
+    return new Promise<Response>((_resolve, reject) => {
+      const signal = (arguments as unknown as { signal?: AbortSignal }).signal;
+      if (signal?.aborted) reject(new Error("aborted"));
+    });
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event, status, kind) { events.push({ event, ...(status !== undefined ? { status } : {}), ...(kind ? { kind } : {}) }); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  await transport.stop();
+  assert.equal(events[0]?.event, "poll_failed");
+  assert.equal(events[0]?.kind, "network");
+  assert.equal(events[0]?.status, undefined);
+  assert.equal(JSON.stringify(events).includes("secret"), false);
+});
+
+test("Telegram polling reports invalid JSON separately from HTTP failures", async () => {
+  const events: Array<{ event: string; status?: number; kind?: string }> = [];
+  let pollCount = 0;
+  const fetchImpl: typeof fetch = async (input) => {
+    if (String(input).endsWith("/deleteWebhook")) return ok(true);
+    pollCount++;
+    if (pollCount === 1) return new Response("not-json", { status: 502 });
+    return new Promise<Response>(() => {});
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event, status, kind) { events.push({ event, ...(status !== undefined ? { status } : {}), ...(kind ? { kind } : {}) }); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await transport.stop();
+  assert.deepEqual(events[0], { event: "poll_failed", status: 502, kind: "invalid_json" });
+});
+
+test("Telegram polling reports non-JSON-independent HTTP errors with status", async () => {
+  const events: Array<{ event: string; status?: number; kind?: string }> = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    if (String(input).endsWith("/deleteWebhook")) return ok(true);
+    return new Response(JSON.stringify({ ok: false }), { status: 503 });
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event, status, kind) { events.push({ event, ...(status !== undefined ? { status } : {}), ...(kind ? { kind } : {}) }); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await transport.stop();
+  assert.deepEqual(events[0], { event: "poll_failed", status: 503, kind: "http" });
+});
