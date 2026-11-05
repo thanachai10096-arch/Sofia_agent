@@ -233,6 +233,28 @@ test("gateway fails closed when no route satisfies the requested capabilities", 
 });
 
 
+test("gateway explains safe aggregate route rejection reasons", async () => {
+  const budget = makeBudget();
+  const incapable = route(async () => ({
+    value: { shouldNotRun: true },
+    usage: { inputTokens: 1, outputTokens: 1 },
+    finishReason: "complete",
+  }));
+  const gateway = new TokenAwareGateway(budget, [{
+    ...incapable,
+    capabilities: ["text"],
+  }]);
+
+  await assert.rejects(gateway.generate(request()), (error: unknown) => {
+    assert.ok(error instanceof GatewayError);
+    assert.equal(error.code, "no_eligible_route");
+    assert.equal(error.message, "no_eligible_route: route_rejections:capabilities=1");
+    return true;
+  });
+  assert.equal(budget.snapshot().calls, 0);
+});
+
+
 test("gateway preserves a safe provider status category without leaking response details", async () => {
   const budget = makeBudget();
   const gateway = new TokenAwareGateway(
@@ -324,7 +346,12 @@ test("gateway retries a route after its temporary failure cooldown", async () =>
   await assert.rejects(gateway.generate(request()));
   await assert.rejects(
     gateway.generate(request()),
-    (error: unknown) => error instanceof GatewayError && error.code === "no_eligible_route",
+    (error: unknown) => {
+      assert.ok(error instanceof GatewayError);
+      assert.equal(error.code, "no_eligible_route");
+      assert.equal(error.message, "no_eligible_route: route_rejections:circuitOpen=1");
+      return true;
+    },
   );
   assert.equal(calls, 2);
 
