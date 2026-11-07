@@ -316,8 +316,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const pathname = new URL(req.url, "http://sofia.local").pathname;
         if (req.method === "GET" && (pathname === workspaceRoot || pathname === workspaceRoot + "/")) {
           const identity = workspaceAuth.authenticate(req.headers.cookie);
+          const loginFailed = !identity && new URL(req.url, "http://sofia.local").searchParams.get("auth") === "failed";
           res.writeHead(302, {
-            location: workspaceRoot + (identity ? "/index.html" : "/login.html"),
+            location: workspaceRoot + (identity ? "/index.html" : "/login.html" + (loginFailed ? "?auth=failed" : "")),
             "cache-control": "no-store",
             "referrer-policy": "no-referrer",
           });
