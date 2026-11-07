@@ -11,6 +11,8 @@ import { createDiscordSharedChatHandler } from "../integrations/messaging/discor
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 import { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
+import { CloudBrowserSessionManager } from "../browser/cloud-session-manager.js";
+import { PlaywrightBrowserRuntime } from "../browser/runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -22,6 +24,12 @@ const runStoreDirectory = path.resolve(
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 const desktopCommandBroker = new DesktopCommandBroker();
+const cloudBrowserSessions = process.env.SOFIA_CLOUD_BROWSER_ENABLED === "true"
+  ? new CloudBrowserSessionManager(new PlaywrightBrowserRuntime(), {
+      maxSessionsPerOwner: Number(process.env.SOFIA_CLOUD_BROWSER_MAX_SESSIONS_PER_OWNER ?? 2),
+      idleTimeoutMs: Number(process.env.SOFIA_CLOUD_BROWSER_IDLE_TIMEOUT_MS ?? 900_000),
+    })
+  : undefined;
 const deps = await createSofiaAgentDependenciesWithSessions(workspace, undefined, undefined, desktopCommandBroker);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
@@ -218,6 +226,7 @@ const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
   deps.desktopCommandBroker?.close();
+  void cloudBrowserSessions?.closeAll().catch(() => console.error("Cloud browser shutdown failed."));
   deps.closeSessionStore();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
