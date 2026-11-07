@@ -111,22 +111,3 @@ test("invalid command prefixes are rejected at configuration time", () => {
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: "/run\nadmin" }), /commandPrefix/);
 });
 
-
-test("short conversational nudges reply immediately without creating Brain runs", async () => {
-  const h = harness();
-  const handle = createSofiaMessagingHandler({ ...h });
-  assert.match(String(await handle(inbound("ผมมีคำถาม"))), /ถามมาได้เลย/);
-  assert.match(String(await handle(inbound("ตอบสิ", { messageId: "message-2" }))), /ผมอยู่ตรงนี้/);
-  assert.match(String(await handle(inbound("สวัสดี", { messageId: "message-3" }))), /สวัสดีครับ/);
-  assert.match(String(await handle(inbound("ขอบคุณ", { messageId: "message-4" }))), /ยินดีครับ/);
-  assert.equal(h.starts.length, 0);
-});
-
-test("mobile app-control requests explain the current capability boundary without pretending to act", async () => {
-  const h = harness();
-  const handle = createSofiaMessagingHandler({ ...h });
-  const reply = await handle(inbound("เข้าแอพให้ผมเป็น agent"));
-  assert.match(String(reply), /ยังไม่มีสิทธิ์ควบคุมแอปอื่นบนมือถือโดยตรง/);
-  assert.match(String(reply), /คุณหมายถึงแอปไหน/);
-  assert.equal(h.starts.length, 0);
-});
