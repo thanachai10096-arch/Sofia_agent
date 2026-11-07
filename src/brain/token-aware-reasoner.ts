@@ -47,36 +47,13 @@ function phaseFromRequest(request: string): BrainPhase {
 }
 
 /**
- * Understanding labels describe task intent, while the gateway expects
- * provider-route capabilities. Require capabilities needed by each Brain
- * phase first, then merge task-derived requirements and leave unknown labels
- * intact so the gateway continues to fail closed for unsupported needs.
+ * TaskUnderstanding.requiredCapabilities describes task/tool capabilities
+ * (for example file-write or browser.open), not model-route capabilities.
+ * Mixing those domains rejects every provider route before the planner can
+ * choose registered tools. Route admission is therefore based only on the
+ * current Brain phase; task capabilities remain in the untrusted state passed
+ * to the planner and tool-discovery layer.
  */
-function routeCapabilities(values: unknown): string[] {
-  if (!Array.isArray(values)) return [];
-  const mapped = values
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => {
-      switch (value.trim().toLowerCase()) {
-        case "general":
-        case "conversation":
-          return undefined;
-        case "chat":
-        case "simple-chat":
-          return "fast";
-        case "analysis":
-        case "research":
-          return "reasoning";
-        case "code":
-          return "coding";
-        default:
-          return value.trim();
-      }
-    })
-    .filter((value): value is string => Boolean(value));
-  return [...new Set(mapped)].slice(0, 24);
-}
-
 /** Keep phase-critical work off cheap routes that cannot reliably satisfy its output contract. */
 function phaseCapabilities(phase: BrainPhase): string[] {
   switch (phase) {
@@ -167,14 +144,7 @@ function asInferenceRequest(request: string): InferenceRequest {
     minimumQualityTier: typeof payload.minimumQualityTier === "number"
       ? payload.minimumQualityTier
       : 1,
-    requiredCapabilities: [...new Set([
-      ...phaseCapabilities(phase),
-      ...(phase === "understand" ? [] : routeCapabilities(
-        Array.isArray(payload.requiredCapabilities)
-          ? payload.requiredCapabilities
-          : understanding.requiredCapabilities,
-      )),
-    ])],
+    requiredCapabilities: phaseCapabilities(phase),
     core: {
       instructions: [
         "Return only valid JSON. Do not use Markdown fences or surrounding prose.",
