@@ -14,7 +14,7 @@ import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrateg
 import { compactSkillContext, matchSkills } from "./skills.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
-import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
+import { isSubagentToolAllowed, roleForTask, subagentToolCatalog, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 import type { BrainRunSnapshot } from "./run-state.js";
 import type { RepositoryMap } from "./repository-intelligence.js";
@@ -554,6 +554,7 @@ export class SofiaBrain {
         role,
         task,
         context,
+        availableTools: subagentToolCatalog(this.dependencies.tools),
         signal: this.signal,
       }),
     );
@@ -564,20 +565,10 @@ export class SofiaBrain {
   }
 
   private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string): Promise<boolean> {
-    const descriptor = this.dependencies.tools.describe(proposal.tool);
-    // Specialist output is advisory: reject unknown tools and let the primary
-    // planner recover instead of terminating the parent run.
-    if (!descriptor) return false;
-    const permitted = new Set([
-      "workspace.read_file",
-      "workspace.list_files",
-      "workspace.search",
-      "git.diff",
-      "project.verify",
-      "workspace.write_file",
-      "workspace.apply_patch",
-    ]);
-    if (!permitted.has(proposal.tool)) return false;
+    // The same canonical catalog policy is used when exposing tools to the
+    // specialist and when validating its proposal. ToolGateway remains the
+    // final authority and executeStep still enforces effects/approvals.
+    if (!isSubagentToolAllowed(proposal.tool, this.dependencies.tools)) return false;
     this.move("replanning");
     this.move("executing");
     await this.executeStep({
