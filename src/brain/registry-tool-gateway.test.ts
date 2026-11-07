@@ -125,6 +125,41 @@ test("web search remains disabled by default and runs only with network policy p
   assert.equal(executions, 1);
 });
 
+
+test("HTTP MCP tools are checked against their operator-configured endpoint, not model input", async () => {
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "mcp.docs.lookup",
+    description: "Fixed endpoint MCP lookup",
+    inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false },
+    effects: ["network", "read"] as const,
+    networkUrl: "https://mcp.example.com/mcp",
+    async execute() { executions += 1; return { ok: true }; },
+  }]);
+  const context = {
+    runId: "mcp-fixed-endpoint-test",
+    signal: new AbortController().signal,
+    requireApproval: false,
+    notifyApproval() {},
+  };
+  const blocked = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowedHosts: ["attacker.example"] },
+  );
+  const denied = await blocked.execute({ tool: "mcp.docs.lookup", input: { query: "hello" } }, context);
+  assert.equal(denied.ok, false);
+  assert.match(denied.error?.message ?? "", /allowlisted/i);
+  assert.equal(executions, 0);
+
+  const allowed = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowedHosts: ["mcp.example.com"] },
+  );
+  const result = await allowed.execute({ tool: "mcp.docs.lookup", input: { query: "hello" } }, context);
+  assert.equal(result.ok, true);
+  assert.equal(executions, 1);
+});
+
 test("security kill switch aborts an active tool execution", async () => {
   const rt = runtime();
   const security = new SecurityController();
