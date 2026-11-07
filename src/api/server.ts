@@ -292,10 +292,72 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       if (!req.url?.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, origin, config);
 
+      const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      const desktopPath = requestUrl.pathname;
+      const desktopBroker = config.desktopCommandBroker;
+
+      // The companion uses a separate short-lived bearer token. It never receives
+      // the owner's Sofia API key and can only poll/complete its own claimed work.
+      if (desktopBroker && desktopPath === "/v1/desktop/companion/commands" && req.method === "GET") {
+        const header = req.headers.authorization ?? "";
+        const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+        if (!token) return json(res, 401, { error: "unauthorized" }, origin, config);
+        try {
+          const command = desktopBroker.poll(token);
+          return json(res, 200, { command }, origin, config);
+        } catch {
+          return json(res, 401, { error: "desktop_companion_unauthorized" }, origin, config);
+        }
+      }
+
+      const completeMatch = desktopPath.match(/^\\/v1\\/desktop\\/companion\\/commands\\/([0-9a-f-]{36})\\/complete$/i);
+      if (desktopBroker && completeMatch && req.method === "POST") {
+        const header = req.headers.authorization ?? "";
+        const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+        if (!token) return json(res, 401, { error: "unauthorized" }, origin, config);
+        const raw = await body(req, maxBytes);
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_desktop_completion" }, origin, config);
+        const input = raw as Record<string, unknown>;
+        if (input.error !== undefined && (typeof input.error !== "string" || input.error.length > 1000)) {
+          return json(res, 400, { error: "invalid_desktop_completion" }, origin, config);
+        }
+        let resultSize = 0;
+        try { resultSize = Buffer.byteLength(JSON.stringify(input.result ?? null), "utf8"); } catch {
+          return json(res, 400, { error: "invalid_desktop_completion" }, origin, config);
+        }
+        if (resultSize > maxBytes) return json(res, 413, { error: "desktop_result_too_large" }, origin, config);
+        try {
+          const completed = desktopBroker.complete(token, completeMatch[1]!, input.result ?? null, input.error as string | undefined);
+          return completed
+            ? json(res, 200, { completed: true }, origin, config)
+            : json(res, 404, { error: "desktop_command_not_found" }, origin, config);
+        } catch {
+          return json(res, 401, { error: "desktop_companion_unauthorized" }, origin, config);
+        }
+      }
+
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
-      const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      if (desktopPath.startsWith("/v1/desktop/")) {
+        if (!desktopBroker) return json(res, 503, { error: "desktop_companion_unavailable" }, origin, config);
+        if (!auth.scopes.includes("desktop:connect")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "desktop:connect" }, origin, config);
+        }
+        if (desktopPath === "/v1/desktop/companion/connect" && req.method === "POST") {
+          const session = desktopBroker.connect(auth.keyId);
+          return json(res, 201, { token: session.token, connectedAt: session.connectedAt }, origin, config);
+        }
+        if (desktopPath === "/v1/desktop/companion/status" && req.method === "GET") {
+          return json(res, 200, desktopBroker.getStatus(auth.keyId), origin, config);
+        }
+        if (desktopPath === "/v1/desktop/companion/disconnect" && req.method === "POST") {
+          desktopBroker.disconnect(auth.keyId);
+          return json(res, 200, { disconnected: true }, origin, config);
+        }
+        return json(res, 404, { error: "not_found" }, origin, config);
+      }
+
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
         if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
