@@ -40,8 +40,8 @@ export class RegistryToolGateway implements ToolGateway {
     let reason:string|undefined;
     if(this.security.isKilled()){status="blocked";reason="Sofia security kill switch is active.";}
     else if(!this.policy.allowTools){status="blocked";reason="Tool execution is disabled by policy."; }
+    else if(effects.includes("network")&&!this.policy.allowNetwork){status="blocked";reason="Network access is disabled by execution policy.";}
     else if(permission.allow===false){status="blocked";reason="Disabled by execution policy: "+tool.name;}
-        else if(effects.includes("network")&&!this.policy.allowNetwork){status="blocked";reason="Network access is disabled by execution policy.";}
     else if(effects.includes("network")&&this.policy.allowedHosts.length===0){status="blocked";reason="Network tool has no configured allowed-host list.";}
     else if(permission.requireApproval===true||effects.some(effect=>effect==="write"||effect==="shell"||effect==="destructive"||effect==="browser")){
       status="approval_required";
@@ -82,7 +82,7 @@ export class RegistryToolGateway implements ToolGateway {
           const probe=registered?.probeReadiness;
           if(!probe){
             item.runtimeReadiness="not_probed";
-            item.runtimeReason="No safe browser runtime probe is registered for this tool.";
+            item.runtimeReason="No safe browser-session probe is registered for this tool.";
           }else{
             let pending=browserProbeResults.get(probe);
             if(!pending){
