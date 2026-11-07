@@ -360,3 +360,76 @@ test("gateway retries a route after its temporary failure cooldown", async () =>
   assert.deepEqual(await gateway.generate(request()), { recovered: true });
   assert.equal(calls, 3);
 });
+
+
+test("gateway falls back once to another eligible route after malformed structured output", async () => {
+  const budget = new TokenBudget(
+    { maxTokens: 10_000, maxCostNanoUsd: 1_000_000n, maxCalls: 10, maxInFlight: 1 },
+    ["primary", "fallback"].map((key) => ({
+      key,
+      limit: { maxTokens: 10_000, maxCostNanoUsd: 1_000_000n, maxCalls: 10, maxInFlight: 1 },
+      price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 1n },
+    })),
+  );
+  let primaryCalls = 0;
+  let fallbackCalls = 0;
+  const primary: InternalRoute = {
+    ...route(async () => {
+      primaryCalls += 1;
+      throw new Error("Model returned non-JSON Brain output");
+    }),
+    id: "primary",
+    budgetKey: "primary",
+  };
+  const fallback: InternalRoute = {
+    ...route(async () => {
+      fallbackCalls += 1;
+      return {
+        value: { strategy: "continue safely", steps: [] },
+        usage: { inputTokens: 13, outputTokens: 7 },
+        finishReason: "complete",
+      };
+    }),
+    id: "fallback",
+    budgetKey: "fallback",
+  };
+  const gateway = new TokenAwareGateway(budget, [primary, fallback]);
+  const result = await gateway.generate(request());
+
+  assert.deepEqual(result, { strategy: "continue safely", steps: [] });
+  assert.equal(primaryCalls, 1);
+  assert.equal(fallbackCalls, 1);
+  assert.equal(budget.snapshot().calls, 2);
+  assert.equal(budget.snapshot().reservedTokens, 0);
+});
+
+test("gateway does not fail over on provider authentication or billing errors", async () => {
+  const budget = new TokenBudget(
+    { maxTokens: 10_000, maxCostNanoUsd: 1_000_000n, maxCalls: 10, maxInFlight: 1 },
+    ["primary", "fallback"].map((key) => ({
+      key,
+      limit: { maxTokens: 10_000, maxCostNanoUsd: 1_000_000n, maxCalls: 10, maxInFlight: 1 },
+      price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 1n },
+    })),
+  );
+  let fallbackCalls = 0;
+  const primary: InternalRoute = {
+    ...route(async () => { throw new Error("Model gateway request failed (401): secret"); }),
+    id: "primary",
+    budgetKey: "primary",
+  };
+  const fallback: InternalRoute = {
+    ...route(async () => {
+      fallbackCalls += 1;
+      return { value: { ok: true }, usage: { inputTokens: 1, outputTokens: 1 }, finishReason: "complete" };
+    }),
+    id: "fallback",
+    budgetKey: "fallback",
+  };
+  const gateway = new TokenAwareGateway(budget, [primary, fallback]);
+
+  await assert.rejects(gateway.generate(request()), (error: unknown) =>
+    error instanceof GatewayError && error.message === "model_call_failed: provider_http_401_authentication_failed");
+  assert.equal(fallbackCalls, 0);
+  assert.equal(budget.snapshot().calls, 1);
+});
