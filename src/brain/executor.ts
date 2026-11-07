@@ -509,14 +509,30 @@ export class SofiaBrain {
       return parseUnderstanding(input.understanding);
     }
 
-    const value = await this.infer("understand", {
+    const payload = {
       task: input.task,
       referenceContext: priorReferenceContext(input.context),
       availableTools: this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
-    });
-
-    return parseUnderstanding(value);
+    };
+    let value = await this.infer("understand", payload);
+    try {
+      return parseUnderstanding(value);
+    } catch (firstError) {
+      // Match the bounded plan-repair behavior: request exactly one corrected
+      // understanding, then validate it again. Never infer or fill missing
+      // safety fields locally; malformed risk values and non-list structures
+      // still fail closed if the model cannot repair them.
+      value = await this.infer("understand", {
+        ...payload,
+        outputContractRepair: {
+          error: errorMessage(firstError),
+          invalidResponse: preview(value, 4_000).text,
+          instruction: "Return a complete corrected understanding JSON object. Every list field must be a JSON array of strings (use [] when empty); risk must be exactly low, medium, or high. Do not omit required fields or add prose.",
+        },
+      });
+      return parseUnderstanding(value);
+    }
   }
 
   private async delegateSubagent(
