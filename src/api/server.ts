@@ -429,13 +429,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           const requestBody = req.method === "GET" || req.method === "DELETE" ? undefined : await readRawBody(req, maxBytes);
           const upstream = await fetch("http://127.0.0.1:" + address.port + upstreamUrl.pathname + upstreamUrl.search, {
-            method: req.method,
+            method: req.method ?? "GET",
             headers: {
               authorization: "Bearer " + config.workspaceApiKey,
               ...(requestBody ? { "content-type": req.headers["content-type"] ?? "application/json" } : {}),
               accept: "application/json",
             },
-            ...(requestBody ? { body: requestBody } : {}),
+            ...(requestBody ? { body: new Uint8Array(requestBody) } : {}),
           });
           const responseBody = Buffer.from(await upstream.arrayBuffer());
           res.writeHead(upstream.status, {
