@@ -67,7 +67,12 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
 
     const task = isRunCommand ? text.slice(prefix.length).trim() : text;
     const handleCommand = createChatCommandHandler({
-      client: options.clientForMessage?.(message) ?? options.client,
+      // Resolve sender-specific credentials only when the dispatcher actually
+      // starts an authorized, deduplicated run; denied senders never select a key.
+      client: {
+        start: (input, signal, runOptions) =>
+          (options.clientForMessage?.(message) ?? options.client).start(input, signal, runOptions),
+      },
       accessPolicy: options.accessPolicy,
       deduplicator: options.deduplicator,
       maxTaskCharacters: options.maxTaskCharacters,
