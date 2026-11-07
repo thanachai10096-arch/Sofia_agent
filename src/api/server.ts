@@ -345,6 +345,63 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
+      // Cloud browser sessions let phone-only users interact with a private,
+      // ephemeral browser hosted alongside Sofia. Every operation is owner-scoped.
+      if (requestUrl.pathname.startsWith("/v1/browser/cloud/")) {
+        const manager = config.cloudBrowserSessions;
+        if (!manager) return json(res, 503, { error: "cloud_browser_unavailable" }, origin, config);
+        if (!auth.scopes.includes("browser:cloud")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "browser:cloud" }, origin, config);
+        }
+        const basePath = "/v1/browser/cloud/sessions";
+        if (requestUrl.pathname === basePath && req.method === "POST") {
+          try {
+            const session = await manager.create(auth.keyId);
+            return json(res, 201, { session }, origin, config);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "";
+            const limited = message.includes("limit reached");
+            return json(res, limited ? 429 : 503, { error: limited ? "cloud_browser_session_limit" : "cloud_browser_start_failed" }, origin, config);
+          }
+        }
+        const match = requestUrl.pathname.match(/^\\/v1\\/browser\\/cloud\\/sessions\\/([0-9a-f-]{36})(?:\\/(navigate|action|screenshot))?$/i);
+        if (!match) return json(res, 404, { error: "cloud_browser_session_not_found" }, origin, config);
+        const sessionId = match[1]!;
+        const operation = match[2];
+        try {
+          if (!operation && req.method === "GET") {
+            return json(res, 200, await manager.status(auth.keyId, sessionId), origin, config);
+          }
+          if (operation === "navigate" && req.method === "POST") {
+            const raw = await body(req, maxBytes);
+            if (!raw || typeof raw !== "object" || Array.isArray(raw) || typeof (raw as Record<string, unknown>).url !== "string") {
+              return json(res, 400, { error: "invalid_cloud_browser_navigation" }, origin, config);
+            }
+            return json(res, 200, await manager.navigate(auth.keyId, sessionId, (raw as { url: string }).url), origin, config);
+          }
+          if (operation === "action" && req.method === "POST") {
+            const raw = await body(req, maxBytes);
+            if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_cloud_browser_action" }, origin, config);
+            return json(res, 200, await manager.act(auth.keyId, sessionId, raw as Record<string, unknown>), origin, config);
+          }
+          if (operation === "screenshot" && req.method === "GET") {
+            return json(res, 200, await manager.screenshot(auth.keyId, sessionId), origin, config);
+          }
+          if (!operation && req.method === "DELETE") {
+            await manager.close(auth.keyId, sessionId);
+            return json(res, 200, { closed: true }, origin, config);
+          }
+          return json(res, 405, { error: "method_not_allowed" }, origin, config);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          const notFound = message.includes("not found");
+          const tooLarge = message.includes("too large");
+          return json(res, notFound ? 404 : tooLarge ? 413 : 400, {
+            error: notFound ? "cloud_browser_session_not_found" : tooLarge ? "cloud_browser_screenshot_too_large" : "cloud_browser_action_rejected",
+          }, origin, config);
+        }
+      }
+
       if (desktopPath.startsWith("/v1/desktop/")) {
         if (!desktopBroker) return json(res, 503, { error: "desktop_companion_unavailable" }, origin, config);
         if (!auth.scopes.includes("desktop:connect")) {
