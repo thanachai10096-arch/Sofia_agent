@@ -69,11 +69,16 @@ export class ApprovalInbox {
       status: "pending",
     };
 
+    try { this.options.auditStore?.record({ approvalId: id, ownerId, runId: item.runId, toolName: item.toolName, actionHash: item.actionHash, risk: item.risk, status: "requested", at: now }); }
+    catch { return Promise.resolve(false); }
+
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
         const current = this.pending.get(id);
         if (!current) return;
         this.pending.delete(id);
+        try { this.options.auditStore?.record({ approvalId: id, ownerId, runId: item.runId, toolName: item.toolName, actionHash: item.actionHash, risk: item.risk, status: "expired", at: Date.now() }); }
+        catch { /* request still fails closed */ }
         resolve(false);
       }, ttlMs);
       timer.unref?.();
@@ -97,6 +102,8 @@ export class ApprovalInbox {
     if (entry.item.expiresAt <= Date.now()) {
       clearTimeout(entry.timer);
       this.pending.delete(id);
+      try { this.options.auditStore?.record({ approvalId: id, ownerId, runId: entry.item.runId, toolName: entry.item.toolName, actionHash: entry.item.actionHash, risk: entry.item.risk, status: "expired", at: Date.now() }); }
+      catch { /* expiration remains fail-closed */ }
       entry.resolve(false);
       return false;
     }
@@ -104,6 +111,13 @@ export class ApprovalInbox {
     const supplied = Buffer.from(actionHash, "hex");
     if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) return false;
 
+    try { this.options.auditStore?.record({ approvalId: id, ownerId, runId: entry.item.runId, toolName: entry.item.toolName, actionHash: entry.item.actionHash, risk: entry.item.risk, status: decision === "approve" ? "approved" : "denied", at: Date.now() }); }
+    catch {
+      clearTimeout(entry.timer);
+      this.pending.delete(id);
+      entry.resolve(false);
+      return false;
+    }
     clearTimeout(entry.timer);
     this.pending.delete(id);
     entry.resolve(decision === "approve");
@@ -114,6 +128,8 @@ export class ApprovalInbox {
     for (const [id, entry] of this.pending) {
       clearTimeout(entry.timer);
       this.pending.delete(id);
+      try { this.options.auditStore?.record({ approvalId: id, ownerId: entry.ownerId, runId: entry.item.runId, toolName: entry.item.toolName, actionHash: entry.item.actionHash, risk: entry.item.risk, status: "interrupted", at: Date.now() }); }
+      catch { /* shutdown still fails closed */ }
       entry.resolve(false);
     }
   }
