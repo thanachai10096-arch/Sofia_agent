@@ -171,13 +171,17 @@ export class DesktopCommandBroker {
   }
 
   disconnect(ownerKeyId: string): void {
-    this.store?.delete(ownerKeyId);
+    // Revoke in-memory access and fail closed before touching persistence. A
+    // storage outage must never leave an active local session or queued action
+    // usable in this process. If deletion fails, surface the failure so the API
+    // can report that durable revocation still needs attention.
     this.companions.delete(ownerKeyId);
     for (const [id, command] of this.pending) {
       if (command.ownerKeyId !== ownerKeyId) continue;
       this.removePending(id);
       command.reject(new Error("Paired desktop companion disconnected."));
     }
+    this.store?.delete(ownerKeyId);
   }
 
   getStatus(ownerKeyId: string): { connected: boolean; lastSeenAt?: number; pendingCommands: number } {
