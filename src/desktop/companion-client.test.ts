@@ -132,7 +132,7 @@ test("screen capture requires a separate local capability and explicit approval"
   const store = credentials();
   store.value = "s".repeat(43);
   const calls: string[] = [];
-  let completion: Record<string, unknown> | undefined;
+  const completion: { value?: Record<string, unknown> } = {};
   let approvals = 0;
   const baseDriver = driver(calls);
   const captureDriver: DesktopHostDriver = {
@@ -146,7 +146,7 @@ test("screen capture requires a separate local capability and explicit approval"
     if (String(_input).endsWith("/commands")) return new Response(JSON.stringify({
       command: { id: "00000000-0000-4000-8000-000000000003", createdAt: 123, action: { kind: "screen.capture" } },
     }), { status: 200 });
-    completion = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    completion.value = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify({ completed: true }), { status: 200 });
   };
   const withoutGrant = createDesktopCompanionClient({
