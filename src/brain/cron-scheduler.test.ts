@@ -344,3 +344,49 @@ test("execution timeout cancels the runtime job and records failure", async () =
   assert.equal(state.history[0].status, "failed");
   assert.match(state.history[0].error, /timed out/i);
 });
+
+test("global pause persists, suppresses automatic fires, and resumes with one catch-up run", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  const runtime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      submitted++;
+      return { id: "global-pause-job", status: "completed", task: input.task } as JobRecord;
+    },
+    async get() { return { id: "global-pause-job", status: "completed", task: "task" } as JobRecord; },
+    async cancel() { return true; }, async list() { return []; }, async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  await scheduler.create({
+    name: "paused-canary",
+    task: "run after resume",
+    runAt: "2026-10-17T00:01:00.000Z",
+    timeZone: "UTC",
+    ownerKeyId: "alice",
+    misfirePolicy: "run-once",
+  }, "alice");
+
+  const paused = await scheduler.pauseAll("alice", "Waiting for operator review");
+  assert.equal(paused.paused, true);
+  assert.equal(paused.reason, "Waiting for operator review");
+  now = new Date("2026-10-17T00:05:00.000Z");
+  await scheduler.tick();
+  assert.equal(submitted, 0);
+  assert.equal((await scheduler.schedulerStatus("alice")).paused, true);
+
+  await scheduler.resumeAll("alice");
+  await scheduler.tick();
+  for (let i = 0; i < 30 && state.history[0]?.status !== "completed"; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(submitted, 1);
+  assert.equal(state.history.length, 1);
+  assert.equal(state.history[0].status, "completed");
+  assert.deepEqual(state.audit.filter(item => item.scheduleId === "*").map(item => item.action), [
+    "scheduler.paused",
+    "scheduler.resumed",
+  ]);
+  assert.equal((await scheduler.schedulerStatus("alice")).paused, false);
+});
