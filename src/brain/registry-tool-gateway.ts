@@ -36,17 +36,18 @@ export class RegistryToolGateway implements ToolGateway {
   listTools(){return this.dependencies.tools.list().map((tool)=>{
     const effects=effectiveToolEffects(tool.name,tool.effects);
     const permission=toolPermission(this.policy,tool.name,effects);
-    let status:"available"|"requires_approval"|"disabled"="available";
+    let status:"allowed"|"approval_required"|"blocked"="allowed";
     let reason:string|undefined;
-    if(!this.policy.allowTools){status="disabled";reason="Tool execution is disabled by policy.";}
-    else if(permission.allow===false){status="disabled";reason="Disabled by execution policy: "+tool.name;}
-    else if(effects.includes("network")&&this.policy.allowedHosts.length===0){status="disabled";reason="Network tool has no configured allowed-host list.";}
+    if(this.security.isKilled()){status="blocked";reason="Sofia security kill switch is active.";}
+    else if(!this.policy.allowTools){status="blocked";reason="Tool execution is disabled by policy."; }
+    else if(permission.allow===false){status="blocked";reason="Disabled by execution policy: "+tool.name;}
+    else if(effects.includes("network")&&this.policy.allowedHosts.length===0){status="blocked";reason="Network tool has no configured allowed-host list.";}
     else if(permission.requireApproval===true||effects.some(effect=>effect==="write"||effect==="shell"||effect==="destructive"||effect==="browser")){
-      status="requires_approval";
+      status="approval_required";
       reason=this.approval?"Approval is required before execution.":"Approval is required but no approval handler is configured.";
-      if(!this.approval)status="disabled";
+      if(!this.approval)status="blocked";
     }
-    return{name:tool.name,description:tool.description,effects,availability:{status,reason}};
+    return{name:tool.name,description:tool.description,effects,registered:true,policy:{status,reason},runtimeReadiness:"not_probed"};
   });}
   describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:effectiveToolEffects(name,tool.effects)};}
 
