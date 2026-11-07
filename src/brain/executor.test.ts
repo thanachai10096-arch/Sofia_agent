@@ -1059,6 +1059,62 @@ test("Thai imperative follow-ups such as ทำมา enter the action planner e
 });
 
 
+
+test("Standalone ต่อ follow-up enters the action planner even if understanding labels it conversational", async () => {
+  const phases: string[] = [];
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      phases.push(parsed.phase);
+      const value = parsed.phase === "understand"
+        ? {
+            objective: "Continue the requested implementation",
+            constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [],
+            risk: "low", successCriteria: ["the planned action runs"], ambiguities: [],
+            mode: "conversation", response: "I will do it.",
+          }
+        : parsed.phase === "replan"
+          ? {
+              strategy: "inspect-evidence",
+              reason: "Inspect the result of the requested action.",
+              steps: [{
+                id: "inspect",
+                objective: "Confirm the requested file exists",
+                dependencies: [],
+                call: { tool: "workspace.list_files", input: { path: "." } },
+              }],
+            }
+          : plan;
+      return {
+        inputTokens: 10,
+        async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({
+    task: "ต่อ",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+  assert.ok(phases.includes("plan"), "explicit Thai action follow-up must not be short-circuited as chat");
+  assert.equal(report.completed, true, report.summary);
+});
+
+
 test("Brain planning reuses the runtime readiness results discovered during understanding", async () => {
   let planTools: Array<{ name: string; runtimeReadiness?: string; runtimeReason?: string }> = [];
   const tools = makeTools();
