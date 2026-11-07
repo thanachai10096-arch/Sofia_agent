@@ -12,6 +12,7 @@ import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 import type { ApprovalRecord } from "../agent/approval-queue.js";
+import { renderApprovalInboxPage } from "./approval-inbox-page.js";
 
 interface ActiveRun {
   id: string;
@@ -289,6 +290,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           version: "v1",
           capabilities: { mobile: true, asyncRuns: true, stream: true },
         }, origin, config);
+      }
+
+      if (req.method === "GET" && req.url === "/approvals") {
+        const nonce = randomUUID().replace(/-/g, "");
+        res.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "content-security-policy": "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'nonce-" + nonce + "'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "x-frame-options": "DENY",
+        });
+        res.end(renderApprovalInboxPage(nonce));
+        return;
       }
 
       if (!req.url?.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, origin, config);
