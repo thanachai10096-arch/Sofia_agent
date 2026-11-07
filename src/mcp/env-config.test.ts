@@ -7,7 +7,7 @@ test("MCP runtime bootstrap is disabled without explicit operator configuration"
 });
 
 test("MCP runtime bootstrap requires stdio transport and explicit tool allowlists", () => {
-  assert.throws(() => loadManagedMcpServersFromEnv(JSON.stringify([{ id: "x", transport: "http", endpoint: "https://example.com", allowedTools: ["read"] }])), /transport=stdio/);
+  assert.throws(() => loadManagedMcpServersFromEnv(JSON.stringify([{ id: "x", transport: "http", allowedTools: ["read"] }])), /transport=stdio/);
   assert.throws(() => loadManagedMcpServersFromEnv(JSON.stringify([{ id: "x", transport: "stdio", command: "node" }])), /allowedTools/);
   assert.throws(() => loadManagedMcpServersFromEnv(JSON.stringify([{ id: "x", transport: "stdio", command: "node", allowedTools: ["read"] }, { id: "x", transport: "stdio", command: "node", allowedTools: ["read"] }])), /Duplicate MCP server id/);
 });
