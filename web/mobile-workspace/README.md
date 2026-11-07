@@ -61,7 +61,7 @@ The flow uses OIDC discovery, Authorization Code + PKCE (S256), one-time state, 
 
 Visit `/workspace/` after configuration; unauthenticated visitors are redirected to the OIDC provider. The API serves the static PWA files from `web/mobile-workspace/`.
 
-**Limitations:** login transactions and sessions are process-local and are invalidated by a restart. This first release supports one explicitly allowlisted identity, one server API key and one Railway replica; it does not yet provide user registration, multi-user role management, durable sessions, per-user API keys, or a recovery/session-management UI. Register the exact callback URL with the OIDC provider. Do not enable this for public sign-up or expose the privileged API directly.
+**Limitations:** pending login transactions are process-local and expire after five minutes. Authenticated sessions are stored as opaque-token digests in `.sofia/workspace-sessions/`, survive restarts when the workspace directory is on persistent storage, and expire after eight hours by default. This first release supports one explicitly allowlisted identity, one server API key and one Railway replica; it does not yet provide user registration, multi-user role management, per-user API keys, or a session-management UI. Register the exact callback URL with the OIDC provider. Do not enable this for public sign-up or expose the privileged API directly.
 
 ## Known UI/backend gaps
 
@@ -69,5 +69,5 @@ Visit `/workspace/` after configuration; unauthenticated visitors are redirected
 - The Approval Inbox is connected to the Brain approval callback and exposes owner-scoped, one-time decisions. The UI displays the redacted action input and risk before approval. Pending decisions remain process-local and fail closed on restart; a durable, secret-free append-only audit trail is written to `.sofia/approval-audit.jsonl`. Orphaned requests are marked `interrupted` on startup and are never replayed as actionable. Audit export/retention controls remain future work.
 - Grant `approval:read` and `approval:decide` only to API keys that should review/approve actions. The BFF must preserve these scope checks and validate its CSRF token on decision requests.
 - Browser streaming currently refreshes PNG screenshots on a short polling interval; it is not WebRTC/video streaming.
-- Session cookies are ephemeral and lost on server restart; multi-replica affinity/durable session routing remains future work.
+- Cloud browser sessions and pending approvals are process-local and lost on server restart; only the OIDC login session is persisted. Multi-replica affinity/durable browser routing remains future work.
 - Native browser coordinate actions are only available when the runtime exposes the optional `clickAt` driver; keyboard text requires `typeFocused`.
