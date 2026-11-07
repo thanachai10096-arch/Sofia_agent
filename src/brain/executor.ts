@@ -727,15 +727,19 @@ export class SofiaBrain {
     // Keep this interpretation tool-specific; arbitrary tool payloads may
     // legitimately contain fields such as "passed" or "code".
     let semanticFailure: string | undefined;
-    if (step.call.tool === "project.verify" && result.ok &&
+    const commandTools = new Set(["project.verify", "terminal.run", "git.run", "git.diff"]);
+    if (commandTools.has(step.call.tool) && result.ok &&
       result.data !== null && typeof result.data === "object" && !Array.isArray(result.data)) {
-      const verification = result.data as Record<string, unknown>;
-      if (verification.passed === false || (typeof verification.code === "number" && verification.code !== 0)) {
+      const commandResult = result.data as Record<string, unknown>;
+      const failedVerification = step.call.tool === "project.verify" && commandResult.passed === false;
+      const failedExitCode = typeof commandResult.code === "number" && commandResult.code !== 0;
+      if (failedVerification || failedExitCode) {
         const detail = [
-          typeof verification.stderr === "string" ? verification.stderr.trim() : "",
-          typeof verification.stdout === "string" ? verification.stdout.trim() : "",
+          typeof commandResult.stderr === "string" ? commandResult.stderr.trim() : "",
+          typeof commandResult.stdout === "string" ? commandResult.stdout.trim() : "",
         ].filter(Boolean).join("\\n").slice(0, 2_000);
-        semanticFailure = `Project verification failed (exit code ${typeof verification.code === "number" ? verification.code : "unknown"})${detail ? ": " + detail : "."}`;
+        const label = step.call.tool === "project.verify" ? "Project verification" : `Command ${step.call.tool}`;
+        semanticFailure = `${label} failed (exit code ${typeof commandResult.code === "number" ? commandResult.code : "unknown"})${detail ? ": " + detail : "."}`;
       }
     }
 
