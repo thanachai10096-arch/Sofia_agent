@@ -78,12 +78,22 @@ try {
 
   await assert.rejects(
     restartedLedger.update(executionId, "indeterminate", { status: "accepted" }),
-    /workflow_execution_invalid_transition/,
+    /workflow_reconciliation_required/,
   );
   await assert.rejects(
-    restartedLedger.update(executionId, "indeterminate", { status: "running" }),
-    /workflow_execution_invalid_transition/,
+    restartedLedger.reconcile(executionId, { status: "running" }),
+    /workflow_reconciliation_invalid_outcome/,
   );
+
+  const reconciled = await restartedLedger.reconcile(executionId, {
+    status: "succeeded",
+    providerExecutionId: "provider-execution-1",
+    output: { recovered: true },
+  });
+  assert.equal(reconciled?.status, "succeeded");
+  assert.equal(reconciled?.providerExecutionId, "provider-execution-1");
+  assert.deepEqual(reconciled?.output, { recovered: true });
+  assert.equal((await ledger.get(executionId))?.status, "succeeded");
 
   console.log("PostgreSQL workflow ledger integration passed:", {
     reservationRace: "one created, one existing",
@@ -92,6 +102,7 @@ try {
     restartRecovery: "persisted state recovered",
     reconciliation: "indeterminate execution found",
     unsafeReplay: "rejected",
+    explicitReconciliation: "provider-confirmed terminal result persisted",
   });
 } finally {
   if (pool) await pool.end();
