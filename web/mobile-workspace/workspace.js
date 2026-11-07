@@ -54,7 +54,8 @@
   function showConnected(session) {
     state.sessionId = session.id;
     state.startedAt = session.createdAt || Date.now();
-    state.sessionTimeoutMs = session.expiresInMs || 900000;\n    state.expiresAt = state.startedAt + state.sessionTimeoutMs;
+    state.sessionTimeoutMs = session.expiresInMs || 900000;
+    state.expiresAt = state.startedAt + state.sessionTimeoutMs;
     els.welcome.classList.add("hidden");
     els.screenWrap.classList.remove("hidden");
     els.close.classList.remove("hidden");
@@ -200,7 +201,17 @@
     const y = Math.max(0, Math.min(els.screenshot.naturalHeight, (event.clientY - rect.top) * els.screenshot.naturalHeight / rect.height));
     action({kind:"clickAt",x:Math.round(x),y:Math.round(y)});
   }
-  els.stage.addEventListener("click", event => { if (event.target === els.screenshot && event.detail > 0) clickScreen(event); });\n  els.screenshot.addEventListener("touchstart", event => {\n    const touch = event.touches[0]; if (touch) state.touchStart = {x:touch.clientX,y:touch.clientY};\n  }, {passive:true});\n  els.screenshot.addEventListener("touchend", event => {\n    if (!state.touchStart) return;\n    const touch = event.changedTouches[0]; const start = state.touchStart; state.touchStart = null; if (!touch) return;\n    const dx = touch.clientX - start.x, dy = touch.clientY - start.y;\n    if (Math.abs(dx) > 18 || Math.abs(dy) > 18) { event.preventDefault(); action({kind:"scroll",x:Math.round(-dx),y:Math.round(-dy)}); }\n    else { event.preventDefault(); const rect = els.screenshot.getBoundingClientRect(); const x = Math.max(0, Math.min(els.screenshot.naturalWidth, (touch.clientX - rect.left) * els.screenshot.naturalWidth / rect.width)); const y = Math.max(0, Math.min(els.screenshot.naturalHeight, (touch.clientY - rect.top) * els.screenshot.naturalHeight / rect.height)); action({kind:"clickAt",x:Math.round(x),y:Math.round(y)}); }\n  }, {passive:false});
+  els.stage.addEventListener("click", event => { if (event.target === els.screenshot && event.detail > 0) clickScreen(event); });
+  els.screenshot.addEventListener("touchstart", event => {
+    const touch = event.touches[0]; if (touch) state.touchStart = {x:touch.clientX,y:touch.clientY};
+  }, {passive:true});
+  els.screenshot.addEventListener("touchend", event => {
+    if (!state.touchStart) return;
+    const touch = event.changedTouches[0]; const start = state.touchStart; state.touchStart = null; if (!touch) return;
+    const dx = touch.clientX - start.x, dy = touch.clientY - start.y;
+    if (Math.abs(dx) > 18 || Math.abs(dy) > 18) { event.preventDefault(); action({kind:"scroll",x:Math.round(-dx),y:Math.round(-dy)}); }
+    else { event.preventDefault(); const rect = els.screenshot.getBoundingClientRect(); const x = Math.max(0, Math.min(els.screenshot.naturalWidth, (touch.clientX - rect.left) * els.screenshot.naturalWidth / rect.width)); const y = Math.max(0, Math.min(els.screenshot.naturalHeight, (touch.clientY - rect.top) * els.screenshot.naturalHeight / rect.height)); action({kind:"clickAt",x:Math.round(x),y:Math.round(y)}); }
+  }, {passive:false});
   $("startButton").addEventListener("click", startSession);
   $("goButton").addEventListener("click", navigate);
   els.url.addEventListener("keydown", event => { if (event.key === "Enter") navigate(); });
@@ -208,7 +219,19 @@
   $("backButton").addEventListener("click", () => action({kind:"back"}));
   $("forwardButton").addEventListener("click", () => action({kind:"forward"}));
   els.close.addEventListener("click", closeSession);
-  $("keyboardButton").addEventListener("click", () => {\n    if (!state.sessionId) { toast("Start your cloud browser first."); return; }\n    $("remoteKeyboard").classList.remove("hidden");\n    $("remoteTyping").focus();\n  });\n  $("keyboardClose").addEventListener("click", () => $("remoteKeyboard").classList.add("hidden"));\n  $("remoteTypeSend").addEventListener("click", async () => {\n    const text = $("remoteTyping").value; if (!text) return;\n    await action({kind:"typeFocused",text}); $("remoteTyping").value = ""; $("remoteKeyboard").classList.add("hidden");\n  });\n  $("remoteTyping").addEventListener("keydown", event => {\n    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("remoteTypeSend").click(); }\n  });
+  $("keyboardButton").addEventListener("click", () => {
+    if (!state.sessionId) { toast("Start your cloud browser first."); return; }
+    $("remoteKeyboard").classList.remove("hidden");
+    $("remoteTyping").focus();
+  });
+  $("keyboardClose").addEventListener("click", () => $("remoteKeyboard").classList.add("hidden"));
+  $("remoteTypeSend").addEventListener("click", async () => {
+    const text = $("remoteTyping").value; if (!text) return;
+    await action({kind:"typeFocused",text}); $("remoteTyping").value = ""; $("remoteKeyboard").classList.add("hidden");
+  });
+  $("remoteTyping").addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("remoteTypeSend").click(); }
+  });
   $("fullScreenButton").addEventListener("click", () => els.stage.requestFullscreen?.().catch(() => undefined));
   $("newTabHint").addEventListener("click", () => { els.url.focus(); els.url.value = ""; toast("Enter a website address above."); });
   $("signInHint").addEventListener("click", () => showModal("Sign in safely", "Open the website in the browser and enter your password or verification code directly in that page. Sofia does not ask for, read, or store your passwords or one-time codes."));
