@@ -25,11 +25,11 @@ A graphical session is required (Windows/macOS, or Linux with DISPLAY/WAYLAND_DI
 1. Ask Sofia to sign in to the requested website.
 2. Sofia opens a visible browser window with a new profile.
 3. Complete the site's sign-in directly in that browser window. Enter passwords and OTPs only into the site's own page, never into ChatGPT/Sofia chat.
-4. After successful sign-in, ask Sofia to use the saved profile for later work. Profile IDs are owner-bound and may be listed or revoked through the browser profile tools.
+4. Leave the browser window open while you complete sign-in. Then tell Sofia that login is complete; the authenticated browser context remains managed by the local Desktop host and can be reused by later Brain runs. Profile IDs are owner-bound and may be listed or revoked through the browser profile tools.
 
 The browser profile persists site session data locally (including cookies). Sofia does not return raw cookies, storage state, or the profile directory to the model. This implementation uses filesystem permissions, not application-layer encryption; keep the profile directory private and rely on OS full-disk encryption.
 
-MFA, CAPTCHA, device trust, and re-authentication prompts remain under the user's control. Sofia does not bypass them. Sensitive actions such as sending, purchasing, deleting, or changing account data remain subject to the existing policy and approval path.
+The local host keeps the authenticated browser context open across Brain runs until the profile is revoked or Sofia shuts down. Sofia closes managed profile sessions during graceful process shutdown. MFA, CAPTCHA, device trust, and re-authentication prompts remain under the user's control. Sofia does not bypass them. Sensitive actions such as sending, purchasing, deleting, or changing account data remain subject to the existing policy and approval path.
 
 ## Cloud deployments
 
