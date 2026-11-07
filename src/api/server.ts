@@ -435,7 +435,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               ...(requestBody ? { "content-type": req.headers["content-type"] ?? "application/json" } : {}),
               accept: "application/json",
             },
-            ...(requestBody ? { body: new Uint8Array(requestBody) } : {}),
+            ...(requestBody ? { body: requestBody.toString("utf8") } : {}),
           });
           const responseBody = Buffer.from(await upstream.arrayBuffer());
           res.writeHead(upstream.status, {
