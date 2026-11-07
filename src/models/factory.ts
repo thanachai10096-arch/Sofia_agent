@@ -102,10 +102,14 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
         })
       : [];
+    const runRemoteDesktopTools = principalId && dependencies.desktopCommandBroker
+      ? createRemoteDesktopTools({ broker: dependencies.desktopCommandBroker, ownerKeyId: principalId, capabilities: grantedDesktopCapabilities })
+      : [];
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...runBrowserTools,
       ...runDesktopTools,
+      ...runRemoteDesktopTools,
     ]);
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
