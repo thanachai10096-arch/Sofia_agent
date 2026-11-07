@@ -29,6 +29,8 @@ import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-
 import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
+import { allBuiltinSkills } from "../brain/skills.js";
+import { createSkillsTools } from "../skills/tools.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
@@ -52,7 +54,9 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
-  const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
+  const skillsPlatform = new InMemorySkillsPlatform();
+  for (const skill of allBuiltinSkills()) skillsPlatform.register({ skill, source: "builtin", version: "1.0.0", publisher: "sofia" });
+  const skillLifecycle=new VersionedSkillLifecycle(skillsPlatform, async (candidate) => {
     const checks = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
       { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
@@ -75,18 +79,19 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const gateway=new TokenAwareGateway(budget,selectedRouteAdapters,intEnv("SOFIA_BRAIN_MODEL_TIMEOUT_MS",45000,1));
     const reasoner=new TokenAwareBrainReasoner(gateway);
     const grantedDesktopCapabilities = desktopCapabilities ?? [];
-    const runTools = grantedDesktopCapabilities.length
-      ? createToolRegistry([
-          ...dependencies.tools.list(),
-          ...createDesktopTools({
+    const runTools = createToolRegistry([
+      ...dependencies.tools.list(),
+      ...createSkillsTools(skillsPlatform),
+      ...(grantedDesktopCapabilities.length
+        ? createDesktopTools({
             runtime: new DesktopRuntime({
               workspaceRoot: workspace,
               allowedExecutables: (process.env.SOFIA_DESKTOP_ALLOWED_EXECUTABLES ?? "").split(",").map((value) => value.trim()).filter(Boolean),
             }),
             principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
-          }),
-        ])
-      : dependencies.tools;
+          })
+        : []),
+    ]);
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{

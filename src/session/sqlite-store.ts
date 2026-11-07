@@ -30,6 +30,23 @@ function restrictSqlitePermissions(filePath: string): void {
   restrictFilePermissions(`${filePath}-shm`);
 }
 
+
+function sessionSearchTerms(query: string): string[] {
+  const words = query.toLocaleLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
+  const terms = new Set<string>();
+  for (const word of words) {
+    const chars = Array.from(word);
+    if (chars.length > 1) terms.add(word);
+    if (chars.length >= 4 && /[^\u0000-\u024F]/u.test(word)) {
+      for (let index = 0; index <= chars.length - 3 && terms.size < 32; index += 1) {
+        terms.add(chars.slice(index, index + 3).join(""));
+      }
+    }
+    if (terms.size >= 32) break;
+  }
+  return [...terms].slice(0, 32);
+}
+
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
 /**
@@ -194,41 +211,49 @@ export class SqliteSessionStore {
     return rows.map((row) => this.get(row.id)).filter((session): session is Session => session !== undefined);
   }
 
-  search(query: string, options: { limit?: number; offset?: number } = {}): Session[] {
-    const term = query.trim();
-    if (!term) return [];
+  search(query: string, options: { limit?: number; offset?: number; sessionIdPrefix?: string } = {}): Session[] {
+    const terms = sessionSearchTerms(query);
+    if (terms.length === 0) return [];
     const limit = boundedInteger(options.limit, 20, 1, 100);
     const offset = boundedInteger(options.offset, 0, 0, Number.MAX_SAFE_INTEGER);
-    let ids: string[];
+    let ids: string[] = [];
     if (this.ftsAvailable) {
-      const ftsQuery = term.split(/\s+/u).filter(Boolean).map((part) => `"${part.replace(/"/gu, '""')}"`).join(" AND ");
+      const ftsQuery = terms.map((part) => `"${part.replace(/"/gu, '""')}"`).join(" OR ");
       try {
+        const prefix = options.sessionIdPrefix;
+        const scope = prefix ? "AND substr(session_id, 1, ?) = ?" : "";
+        const args = prefix ? [ftsQuery, prefix.length, prefix, limit, offset] : [ftsQuery, limit, offset];
         ids = (this.db.prepare(`
-          SELECT DISTINCT session_id AS id
+          SELECT session_id AS id
           FROM session_messages_fts
-          WHERE session_messages_fts MATCH ?
+          WHERE session_messages_fts MATCH ? ${scope}
+          GROUP BY session_id
+          ORDER BY MIN(bm25(session_messages_fts)) ASC, session_id ASC
           LIMIT ? OFFSET ?
-        `).all(ftsQuery, limit, offset) as Array<{ id: string }>).map((row) => row.id);
+        `).all(...args) as Array<{ id: string }>).map((row) => row.id);
       } catch {
-        ids = this.searchLike(term, limit, offset);
+        ids = [];
       }
-    } else {
-      ids = this.searchLike(term, limit, offset);
     }
+    if (ids.length === 0) ids = this.searchLike(terms, limit, offset, options.sessionIdPrefix);
     return ids.map((id) => this.get(id)).filter((session): session is Session => session !== undefined);
   }
 
-  private searchLike(term: string, limit: number, offset: number): string[] {
-    const pattern = `%${term.replace(/[\\%_]/gu, "\\$&")}%`;
+  private searchLike(terms: string[], limit: number, offset: number, sessionIdPrefix?: string): string[] {
+    const matches = terms.map(() => "instr(lower(m.content), lower(?)) > 0").join(" OR ");
+    const scope = sessionIdPrefix ? "AND substr(s.id, 1, ?) = ?" : "";
+    const args = sessionIdPrefix
+      ? [...terms, sessionIdPrefix.length, sessionIdPrefix, limit, offset]
+      : [...terms, limit, offset];
     return (this.db.prepare(`
-      SELECT DISTINCT s.id
+      SELECT s.id
       FROM sessions s JOIN session_messages m ON m.session_id = s.id
-      WHERE m.content LIKE ? ESCAPE '\\'
-      ORDER BY s.updated_at DESC, s.id ASC
+      WHERE (${matches}) ${scope}
+      GROUP BY s.id
+      ORDER BY MAX(s.updated_at) DESC, s.id ASC
       LIMIT ? OFFSET ?
-    `).all(pattern, limit, offset) as Array<{ id: string }>).map((row) => row.id);
+    `).all(...args) as Array<{ id: string }>).map((row) => row.id);
   }
-
   delete(id: string): void {
     this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
     if (this.ftsAvailable) this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);

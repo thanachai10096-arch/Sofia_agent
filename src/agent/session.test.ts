@@ -163,3 +163,49 @@ test("user-memory retrieval failure does not prevent a normal agent run", async 
   assert.match(contexts[0] ?? "", /Keep the existing task context/);
   assert.doesNotMatch(contexts[0] ?? "", /Relevant user memory/);
 });
+
+test("Sofia recalls relevant prior sessions for the same authenticated principal", async () => {
+  const sessions = new MemorySessionStore();
+  sessions.save({
+    id: "owner-a:old-chat",
+    updatedAt: Date.now(),
+    messages: [
+      "user: The Sofia project uses a Railway deployment with a Telegram gateway",
+      "assistant: I will keep the existing Railway service and Telegram integration",
+    ],
+  });
+  sessions.save({
+    id: "owner-b:private-chat",
+    updatedAt: Date.now(),
+    messages: ["user: Sofia Railway secret private conversation"],
+  });
+  const contexts: string[] = [];
+  const agent = new SofiaAgent({
+    provider: { generate: async (request) => { contexts.push(request.context ?? ""); return { text: "Found it." }; } },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await agent.run({ task: "What did we decide about the Sofia Railway deployment?", principalId: "owner-a", sessionId: "owner-a:new-chat" });
+  assert.match(contexts[0] ?? "", /Relevant prior sessions/);
+  assert.match(contexts[0] ?? "", /existing Railway service and Telegram integration/);
+  assert.doesNotMatch(contexts[0] ?? "", /private conversation/);
+});
+
+test("session recall is disabled without an authenticated principal and degrades on search failure", async () => {
+  const contexts: string[] = [];
+  const store = {
+    getOrCreate: (id: string) => ({ id, messages: [], updatedAt: Date.now() }),
+    save: () => undefined,
+    search: () => { throw new Error("temporary search failure"); },
+  };
+  const agent = new SofiaAgent({
+    provider: { generate: async (request) => { contexts.push(request.context ?? ""); return { text: "OK" }; } },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: store,
+  });
+  await agent.run({ task: "Recall something", sessionId: "owner-a:current" });
+  assert.doesNotMatch(contexts[0] ?? "", /Relevant prior sessions/);
+});

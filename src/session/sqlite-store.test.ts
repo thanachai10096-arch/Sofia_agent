@@ -220,3 +220,33 @@ test("SQLite session storage rejects a directory as a database path", {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("SQLite session recall scopes results to an authenticated owner's session prefix", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-owner-recall-"));
+  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  try {
+    store.save({ id: "owner-a:old", messages: ["Sofia Railway deployment uses Telegram"], updatedAt: 1 });
+    store.save({ id: "owner-b:private", messages: ["Sofia Railway deployment secret"], updatedAt: 2 });
+    assert.deepEqual(
+      store.search("Sofia Railway", { sessionIdPrefix: "owner-a:" }).map((session) => session.id),
+      ["owner-a:old"],
+    );
+    assert.deepEqual(store.search("Sofia Railway", { sessionIdPrefix: "owner-c:" }), []);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("SQLite session recall can find Thai phrase fragments when FTS tokenization has no exact match", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-thai-recall-"));
+  const store = await SqliteSessionStore.open(path.join(dir, "sessions.sqlite"));
+  try {
+    store.save({ id: "owner-a:thai", messages: ["เราตกลงใช้ระบบค้นหาความจำข้ามบทสนทนา"], updatedAt: 1 });
+    const results = store.search("ค้นหาความจำ", { sessionIdPrefix: "owner-a:" });
+    assert.deepEqual(results.map((session) => session.id), ["owner-a:thai"]);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
