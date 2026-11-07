@@ -24,7 +24,7 @@ The browser UI intentionally does not accept, store, or embed a Sofia master API
 
 1. Authenticates the user with the product's existing login/session cookie (HttpOnly, Secure, SameSite) and sets a separate `sofia_csrf` double-submit cookie (Secure, SameSite, readable by this same-origin UI).
 2. Authorizes the signed-in user for browser and agent-run scopes.
-3. Proxies only the allowed `/v1/browser/cloud/*` and `/v1/agent/runs*` requests to Sofia, injecting the API key server-side.
+3. Proxies only the allowed `/v1/browser/cloud/*`, `/v1/agent/runs*`, and `/v1/approvals*` requests to Sofia, injecting the API key server-side and preserving the approval scopes.
 4. Validates the `x-csrf-token` request header against the `sofia_csrf` cookie on mutating requests, validates Origin/Host, applies per-user rate limits, and never logs credentials or request bodies containing user data.
 5. Does not expose a generic URL-forwarding proxy or allow the client to choose API keys, provider URLs, or arbitrary headers.
 
