@@ -101,3 +101,29 @@ test("Desktop Companion clears revoked credentials and rejects insecure remote H
     requestApproval: async () => true,
   }), /requires HTTPS/);
 });
+
+test("stopping keeps the OS credential; explicit disconnect revokes server pairing and clears it", async () => {
+  const store = credentials();
+  store.value = "f".repeat(43);
+  const calls: Array<{ url: string; authorization?: string }> = [];
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver([]),
+    allowedCapabilities: [],
+    requestApproval: async () => false,
+    fetchImpl: async (input, init) => {
+      calls.push({
+        url: String(input),
+        authorization: (init?.headers as Record<string, string> | undefined)?.authorization,
+      });
+      return new Response(JSON.stringify({ disconnected: true }), { status: 200 });
+    },
+  });
+  client.stop();
+  assert.equal(store.value, "f".repeat(43));
+  await client.disconnect("owner-api-secret");
+  assert.equal(store.value, null);
+  assert.equal(calls[0]?.url, "https://sofia.example.com/v1/desktop/companion/disconnect");
+  assert.equal(calls[0]?.authorization, "Bearer owner-api-secret");
+});
