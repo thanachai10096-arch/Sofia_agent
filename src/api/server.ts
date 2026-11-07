@@ -115,7 +115,8 @@ async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buff
 function sameOriginRequest(req: IncomingMessage): boolean {
   const origin = req.headers.origin;
   const host = req.headers.host;
-  if (typeof origin !== "string" || typeof host !== "string" || host.includes(",")) return false;
+  if (typeof host !== "string" || host.includes(",")) return false;
+  if (typeof origin !== "string") return req.headers["sec-fetch-site"] === "same-origin";
   try {
     const parsed = new URL(origin);
     const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
@@ -371,7 +372,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const file = path.resolve(directory, asset);
           if (!file.startsWith(directory + path.sep)) return json(res, 404, { error: "not_found" }, origin, config);
           try {
-            const content = readFileSync(file);
+            if (asset === "index.html" && !workspaceAuth.authenticate(req.headers.cookie)) {
+            res.writeHead(302, { location: workspaceRoot + "/auth/login", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          }
+          const content = readFileSync(file);
             const types: Record<string, string> = {
               ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
               ".js": "text/javascript; charset=utf-8", ".webmanifest": "application/manifest+json",
