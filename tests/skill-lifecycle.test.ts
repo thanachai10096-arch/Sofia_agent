@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { VersionedSkillLifecycle } from "../src/brain/skill-lifecycle.js";
+import { VersionedSkillLifecycle, getSkillCandidateDigest } from "../src/brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../src/skills/platform.js";
 import type { SkillPackage } from "../src/skills/platform.js";
 
@@ -14,7 +14,18 @@ function pkg(version: string): SkillPackage {
   } };
 }
 function dir(): string { return mkdtempSync(path.join(os.tmpdir(), "sofia-skill-life-")); }
-const passing = async () => ({ passed: true, checks: [{ name: "regression", passed: true }, { name: "policy", passed: true }] });
+const passing = async (candidate: SkillPackage) => ({
+  passed: true,
+  checks: [{ name: "regression", passed: true }, { name: "policy", passed: true }],
+  runtimeVerification: {
+    candidateDigest: getSkillCandidateDigest(candidate),
+    runnerId: "test-isolated-runner",
+    isolatedWorkspaceId: "test-workspace",
+    isolated: true as const,
+    executedChecks: candidate.skill.verification.map((name) => ({ name, passed: true })),
+    completedAt: new Date().toISOString(),
+  },
+});
 
 test("skill lifecycle requires evaluation and confidence before promotion", async () => {
   const root = dir();
@@ -187,6 +198,34 @@ test("skill lifecycle never promotes when runtime verification is unavailable", 
     assert.equal(evaluated.status, "rejected");
     assert.equal(evaluated.evaluation?.passed, false);
     assert.throws(() => lifecycle.promote(candidate.id), /evaluated/);
+    assert.equal(platform.get("repair-skill"), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("skill lifecycle rejects missing or mismatched isolated runtime evidence", async () => {
+  const root = dir();
+  try {
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, async (candidate) => ({
+      passed: true,
+      checks: [{ name: "metadata", passed: true }],
+      runtimeVerification: {
+        candidateDigest: "0".repeat(64),
+        runnerId: "claimed-runner",
+        isolatedWorkspaceId: "claimed-workspace",
+        isolated: true,
+        executedChecks: candidate.skill.verification.map((name) => ({ name, passed: true })),
+        completedAt: new Date().toISOString(),
+      },
+    }), { file: path.join(root, "mismatched-evidence.json") });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["candidate-binding"], confidence: 1,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.throws(() => lifecycle.promote(candidate.id), /isolated runtime verification/);
     assert.equal(platform.get("repair-skill"), undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
