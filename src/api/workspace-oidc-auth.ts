@@ -1,6 +1,7 @@
 import {
   createHash, createPublicKey, randomBytes, timingSafeEqual, verify as verifySignature,
 } from "node:crypto";
+import { FileWorkspaceSessionStore } from "./workspace-session-store.js";
 
 type JsonObject = Record<string, unknown>;
 interface OidcDiscovery {
@@ -26,6 +27,7 @@ export interface WorkspaceAuthOptions {
   clientSecret: string;
   redirectUri: string;
   allowedSubject: string;
+  sessionDirectory: string;
   sessionTtlMs?: number;
   loginTtlMs?: number;
   cookieName?: string;
@@ -53,7 +55,7 @@ function tokenTooLong(value: string): boolean { return value.length > 4096; }\nf
 /**
  * Minimal single-operator OIDC Authorization Code + PKCE integration.
  * It deliberately has no password database and admits only one configured subject.
- * Sessions and login transactions are process-local; a restart invalidates them.
+ * Login transactions are process-local; persistent opaque sessions survive restarts.
  */
 export class WorkspaceOidcAuth {
   readonly cookieName: string;
@@ -68,11 +70,14 @@ export class WorkspaceOidcAuth {
   private readonly now: () => number;
   private discovery?: OidcDiscovery;
   private readonly logins = new Map<string, PendingLogin>();
-  private readonly sessions = new Map<string, { subject: string; expiresAt: number }>();
+  private readonly sessions: FileWorkspaceSessionStore;
   private readonly loginStarts: number[] = [];
 
   constructor(options: WorkspaceAuthOptions) {
     this.issuer = requiredString(options.issuer).replace(/\/$/, "");
+    const issuerUrl = new URL(this.issuer);
+    if (issuerUrl.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(issuerUrl.hostname)) throw new Error("Workspace OIDC issuer must use HTTPS.");
+    if (issuerUrl.username || issuerUrl.password || issuerUrl.hash) throw new Error("Invalid workspace OIDC issuer.");
     this.clientId = requiredString(options.clientId);
     this.clientSecret = requiredString(options.clientSecret);
     this.redirectUri = requiredString(options.redirectUri);
@@ -84,6 +89,7 @@ export class WorkspaceOidcAuth {
       throw new Error("Invalid workspace OIDC timeout configuration.");
     }
     const redirect = new URL(this.redirectUri);
+    if (redirect.username || redirect.password || redirect.hash) throw new Error("Invalid workspace OIDC redirect URI.");
     if (redirect.protocol !== "https:" && redirect.hostname !== "localhost" && redirect.hostname !== "127.0.0.1") {
       throw new Error("Workspace OIDC redirect URI must use HTTPS.");
     }
@@ -91,6 +97,7 @@ export class WorkspaceOidcAuth {
     if (!/^__Host-[A-Za-z0-9_-]+$/.test(this.cookieName)) throw new Error("Workspace session cookie must use the __Host- prefix.");
     this.fetcher = options.fetcher ?? fetch;
     this.now = options.now ?? Date.now;
+    this.sessions = new FileWorkspaceSessionStore(options.sessionDirectory, this.now);
   }
 
   private async provider(): Promise<OidcDiscovery> {
@@ -161,10 +168,8 @@ export class WorkspaceOidcAuth {
     const idToken = requiredString(tokenData.id_token);
     const subject = await this.verifyIdToken(idToken, provider, pending.nonce);
     if (!equalText(subject, this.allowedSubject)) throw new Error("This identity is not allowed to access Sofia Workspace.");
-    const sessionId = b64url(randomBytes(32));
-    const expiresAt = this.now() + this.sessionTtlMs;
-    this.sessions.set(sessionId, { subject, expiresAt });
-    return { subject, sessionId, expiresAt };
+    const created = this.sessions.create(subject, this.sessionTtlMs);
+    return { subject, sessionId: created.sessionId, expiresAt: created.session.expiresAt };
   }
 
   private async verifyIdToken(token: string, provider: OidcDiscovery, nonce: string): Promise<string> {
@@ -206,7 +211,7 @@ export class WorkspaceOidcAuth {
     const sessionId = cookie.slice(this.cookieName.length + 1);
     if (!/^[A-Za-z0-9_-]{40,}$/.test(sessionId)) return null;
     const session = this.sessions.get(sessionId);
-    if (!session || session.expiresAt <= this.now()) return null;
+    if (!session) return null;
     return { subject: session.subject, sessionId, expiresAt: session.expiresAt };
   }
 
@@ -223,6 +228,6 @@ export class WorkspaceOidcAuth {
   private prune(): void {
     const now = this.now();
     for (const [state, login] of this.logins) if (login.expiresAt <= now) this.logins.delete(state);
-    for (const [id, session] of this.sessions) if (session.expiresAt <= now) this.sessions.delete(id);
+    this.sessions.prune();
   }
 }
