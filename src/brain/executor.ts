@@ -1266,7 +1266,7 @@ export class SofiaBrain {
         for (const skillId of this.selectedSkillIds) {
           this.dependencies.evolution.recordSuccess(
             skillId,
-            this.skillExecutionMetrics.get(skillId)?.toolCalls ?? 1,
+            this.usage.steps,
             recoveryRounds,
             taskType,
             this.skillExecutionMetrics.get(skillId) ?? {},
