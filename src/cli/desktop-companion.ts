@@ -3,6 +3,7 @@ import { createDesktopCompanionClient } from "../desktop/companion-client.js";
 import { createLocalGuiApproval } from "../desktop/gui-approval.js";
 import { OsDesktopCredentialStore } from "../desktop/os-credential-store.js";
 import { createAllowlistedDesktopHostDriver, parseDesktopApplicationAllowlist } from "../desktop/local-host.js";
+import { createPlatformDesktopHostDriver } from "../desktop/platform-host.js";
 
 async function readSecret(prompt: string): Promise<string> {
   const input = process.stdin;
@@ -56,13 +57,21 @@ export async function runDesktopCompanion(): Promise<void> {
     throw new Error("No local apps are allowlisted. Set SOFIA_DESKTOP_ALLOWED_APPS to a JSON object of app IDs and absolute executable paths.");
   }
   const credentials = new OsDesktopCredentialStore();
-  const driver = createAllowlistedDesktopHostDriver(applications);
+  const allowlistedDriver = createAllowlistedDesktopHostDriver(applications);
+  const nativeDriver = createPlatformDesktopHostDriver();
+  const driver = { ...nativeDriver, launchApplication: allowlistedDriver.launchApplication };
+  const enableInput = process.env.SOFIA_DESKTOP_ENABLE_INPUT?.trim().toLowerCase() === "true";
+  const enableScreenCapture = process.env.SOFIA_DESKTOP_ENABLE_SCREEN_CAPTURE?.trim().toLowerCase() === "true";
   const approval = createLocalGuiApproval();
   const client = createDesktopCompanionClient({
     apiBaseUrl,
     credentials,
     driver,
-    allowedCapabilities: ["app:launch"],
+    allowedCapabilities: [
+      "app:launch",
+      ...(enableInput ? ["input:control" as const] : []),
+      ...(enableScreenCapture ? ["screen:capture" as const] : []),
+    ],
     allowedApplications: Object.keys(applications),
     requestApproval: (action, signal) => approval.requestApproval(action, signal),
     pollIntervalMs: 1500,
@@ -81,7 +90,10 @@ export async function runDesktopCompanion(): Promise<void> {
       console.log("Found a saved Sofia Companion token in the OS credential store; attempting to resume pairing.");
     }
     console.log("Allowed applications:", Object.keys(applications).join(", "));
-    console.log("GUI approval opens locally in your browser. Screen/mouse/keyboard remain disabled.");
+    console.log("GUI approval opens locally in your browser. App launch is enabled.");
+    console.log("Native input:", enableInput ? "enabled by local operator" : "disabled (set SOFIA_DESKTOP_ENABLE_INPUT=true to enable)");
+    console.log("Screen capture:", enableScreenCapture ? "enabled by local operator" : "disabled (set SOFIA_DESKTOP_ENABLE_SCREEN_CAPTURE=true to enable)");
+    console.log("Platform driver limitations (e.g. Wayland or missing xdotool/scrot/cliclick) fail closed.");
     console.log("Stop: Ctrl+C (keeps the pairing). Revoke: sofia desktop companion disconnect");
     while (!controller.signal.aborted) {
       try {
