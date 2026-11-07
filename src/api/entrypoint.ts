@@ -226,6 +226,7 @@ const server = createSofiaApi(deps, {
   runStore: new FileRunRecordStore(runStoreDirectory),
   desktopCommandBroker,
   approvalInbox,
+  approvalAuditStore,
   ...(cloudBrowserSessions ? { cloudBrowserSessions } : {}),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
