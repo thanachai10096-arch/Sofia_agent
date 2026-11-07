@@ -55,3 +55,14 @@ See [web/mobile-workspace/README.md](../web/mobile-workspace/README.md) for stat
 ## Important limitations
 
 This first backend slice is process-local and ephemeral: no durable session recovery, multi-replica routing, persistent cloud profiles, video streaming, or mobile UI is included yet. It is not production-ready until the mobile UI, deployment affinity/durable routing strategy, and end-to-end security tests are complete.
+## Brain-connected Approval Inbox
+
+The same API runtime now wires an owner-bound `ApprovalInbox` into the existing Brain approval callback. The inbox is not a second execution path: the Brain's existing `RegistryToolGateway` still validates policy, risk, immutable action input, and the approval hash immediately before executing the tool.
+
+- `GET /v1/approvals` — lists only pending approvals for the authenticated API-key owner. Requires `approval:read` or `approval:decide`.
+- `POST /v1/approvals/:id/decision` — body `{"decision":"approve"|"deny","actionHash":"<sha256>" }`; requires `approval:decide`.
+- Decisions are one-time, owner-bound, expire after two minutes, and must match the exact SHA-256 action hash.
+- Displayed inputs are secret-redacted. Approval requests without an authenticated principal fail closed.
+- The mobile workspace polls the inbox and renders action details with explicit Approve/Deny controls.
+
+This first implementation is process-local. Pending requests are denied on process shutdown/restart and are not recovered from disk. It is a safe first integration, not yet a durable multi-replica approval service. Grant `approval:read` and `approval:decide` only to trusted owner keys. The cookie-authenticated BFF must enforce its CSRF/Origin checks before proxying decision requests.
