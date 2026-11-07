@@ -47,7 +47,7 @@ export class RegistryToolGateway implements ToolGateway {
       reason=this.approval?"Approval is required before execution.":"Approval is required but no approval handler is configured.";
       if(!this.approval)status="blocked";
     }
-    return{name:tool.name,description:tool.description,effects,registered:true,policy:{status,reason},runtimeReadiness:"not_probed"};
+    return{name:tool.name,description:tool.description,effects,registered:true,policy:{status,reason},runtimeReadiness:"not_probed" as const};
   });}
   describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:effectiveToolEffects(name,tool.effects)};}
 
