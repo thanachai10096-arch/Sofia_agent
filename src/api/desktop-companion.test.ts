@@ -170,6 +170,7 @@ test("Desktop Companion API returns 503 for transient store failures without rev
 
 
 test("Desktop Companion disconnect revokes in-memory access when durable deletion fails", async () => {
+  let failDelete = false;
   const records = new Map<string, { ownerKeyId: string; tokenDigest: string; connectedAt: number; lastSeenAt: number }>();
   const store = {
     loadAll: () => [...records.values()],
@@ -197,6 +198,7 @@ test("Desktop Companion disconnect revokes in-memory access when durable deletio
     assert.equal(paired.status, 201);
     const { token } = await paired.json() as { token: string };
     const pending = broker.dispatch(ownerKeyId, { kind: "input.key", key: "Enter" });
+    failDelete = true;
     const claimed = broker.poll(token);
     assert.ok(claimed);
 
