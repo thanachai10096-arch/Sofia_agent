@@ -26,27 +26,37 @@ export const SUBAGENT_TOOL_ALLOWLIST = [
   "workspace.apply_patch",
 ] as const;
 
-export function isSubagentToolAllowed(name: string, tools: ToolGateway): boolean {
-  return SUBAGENT_TOOL_ALLOWLIST.includes(name as (typeof SUBAGENT_TOOL_ALLOWLIST)[number])
-    && tools.describe(name) !== undefined;
+export function subagentToolCatalog(tools: ToolGateway): SubagentToolDescriptor[] {
+  // Fail closed: a subagent only sees tools enumerated by the live registry.
+  // Do not synthesize catalog entries from a static list or a partial describe()
+  // implementation; the advertised contract must come from the executor's
+  // canonical registry snapshot.
+  const registered = tools.listTools?.() ?? [];
+  return registered.flatMap((tool) => {
+    if (!SUBAGENT_TOOL_ALLOWLIST.includes(tool.name as (typeof SUBAGENT_TOOL_ALLOWLIST)[number])) {
+      return [];
+    }
+    const descriptor = tools.describe(tool.name);
+    if (!descriptor) return [];
+
+    // Require the live policy descriptor to agree with the registry snapshot.
+    // A mismatch is treated as unavailable rather than exposing stale metadata.
+    const effects = [...tool.effects].sort();
+    const liveEffects = [...descriptor.effects].sort();
+    if (effects.length !== liveEffects.length ||
+        effects.some((effect, index) => effect !== liveEffects[index])) {
+      return [];
+    }
+    return [{
+      name: tool.name,
+      description: tool.description,
+      effects: descriptor.effects,
+    }];
+  });
 }
 
-export function subagentToolCatalog(tools: ToolGateway): SubagentToolDescriptor[] {
-  const registered = tools.listTools?.();
-  if (registered) {
-    return registered.filter((tool) =>
-      SUBAGENT_TOOL_ALLOWLIST.includes(tool.name as (typeof SUBAGENT_TOOL_ALLOWLIST)[number])
-      && tools.describe(tool.name) !== undefined,
-    );
-  }
-
-  // Compatibility for ToolGateway implementations that predate listTools().
-  return SUBAGENT_TOOL_ALLOWLIST.flatMap((name) => {
-    const descriptor = tools.describe(name);
-    return descriptor
-      ? [{ name, description: "Registered tool; description unavailable.", effects: descriptor.effects }]
-      : [];
-  });
+export function isSubagentToolAllowed(name: string, tools: ToolGateway): boolean {
+  return subagentToolCatalog(tools).some((tool) => tool.name === name);
 }
 
 export interface SubagentRequest {
