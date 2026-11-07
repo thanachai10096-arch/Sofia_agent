@@ -204,13 +204,13 @@ export function createTelegramMessagingRuntime(
       // The command handler owns the shared dedupe claim. Do not claim it twice in the gateway.
       maxMessagesPerWindow: 5,
       rateWindowMs: 60_000,
-      onMessage: (message) => {
+      onMessage: async (message) => {
         const approvalReply = approvalBroker?.handleCommand({
           userId: message.identity.userId,
           conversationId: message.identity.conversationId,
           text: message.text,
         });
-        return approvalReply ?? handler(message);
+        return approvalReply ?? await handler(message);
       },
       logger: {
         info: (event) => onWarning("Telegram messaging event: " + event + "."),
