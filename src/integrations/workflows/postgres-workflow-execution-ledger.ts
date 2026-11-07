@@ -143,7 +143,7 @@ export class PostgresWorkflowExecutionLedger implements WorkflowExecutionLedger 
             SET status = $3,
                 provider_execution_id = COALESCE($4, provider_execution_id),
                 output_json = CASE WHEN $5::boolean THEN $6::jsonb ELSE output_json END,
-                safe_error_code = $7,
+                safe_error_code = CASE WHEN $7::boolean THEN $8 ELSE safe_error_code END,
                 updated_at = NOW()
           WHERE execution_id = $1 AND status = $2
           RETURNING execution_id, workflow_id, idempotency_key, payload_hash,
@@ -156,6 +156,7 @@ export class PostgresWorkflowExecutionLedger implements WorkflowExecutionLedger 
           patch.providerExecutionId ?? null,
           Object.prototype.hasOwnProperty.call(patch, "output"),
           patch.output === undefined ? null : JSON.stringify(patch.output),
+          Object.prototype.hasOwnProperty.call(patch, "safeErrorCode"),
           patch.safeErrorCode ?? null,
         ],
       );
