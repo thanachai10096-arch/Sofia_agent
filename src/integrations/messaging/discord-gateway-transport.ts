@@ -12,7 +12,7 @@ export interface DiscordGatewayTransportOptions {
   WebSocketImpl?: typeof WebSocket;
   gatewayUrl?: string;
   heartbeatAckTimeoutMs?: number;
-  onError?: (event: "gateway_connect_failed" | "gateway_disconnected" | "gateway_auth_failed" | "gateway_invalid_session" | "message_handler_failed" | "delivery_failed", status?: number) => void;
+  onError?: (event: "gateway_ready" | "gateway_connect_failed" | "gateway_disconnected" | "gateway_auth_failed" | "gateway_invalid_session" | "message_handler_failed" | "delivery_failed", status?: number) => void;
 }
 type CloseReason = "reconnect" | "invalid_session" | "stopped";
 const DISCORD_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
@@ -148,6 +148,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
           const candidate = payload.d?.resume_gateway_url;
           resumeUrl = typeof candidate === "string" && candidate.startsWith("wss://") ? candidate + "?v=10&encoding=json" : undefined;
           botUserId = typeof payload.d?.user?.id === "string" ? payload.d.user.id : undefined;
+          notify("gateway_ready");
           return;
         }
         if (payload.t !== "MESSAGE_CREATE") return;
