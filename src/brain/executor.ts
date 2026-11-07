@@ -578,12 +578,15 @@ export class SofiaBrain {
       "workspace.apply_patch",
     ]);
     if (!permitted.has(proposal.tool)) return false;
+    this.move("replanning");
+    this.move("executing");
     await this.executeStep({
       id: "delegated-" + this.usage.steps,
       objective: proposal.reason,
       dependencies: [],
       call: { tool: proposal.tool, input: proposal.input },
     }, principalId);
+    this.move("observing");
     return true;
   }
 
