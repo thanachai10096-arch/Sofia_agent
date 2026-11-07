@@ -71,3 +71,18 @@ test("dispatch rejects when no companion is paired", async () => {
   await assert.rejects(broker.dispatch("owner-a", action), /No paired desktop companion/);
   broker.close();
 });
+
+test("dispatch rejects malformed native actions before they enter the queue", async () => {
+  const broker = new DesktopCommandBroker();
+  broker.connect("owner-a");
+  await assert.rejects(
+    broker.dispatch("owner-a", { kind: "input.click", x: -1, y: 0, button: "left" } as never),
+    /Invalid desktop click action/,
+  );
+  await assert.rejects(
+    broker.dispatch("owner-a", { kind: "input.key", key: "Ctrl+Alt+Delete" } as never),
+    /Invalid desktop key input action/,
+  );
+  assert.equal(broker.getStatus("owner-a").pendingCommands, 0);
+  broker.close();
+});
