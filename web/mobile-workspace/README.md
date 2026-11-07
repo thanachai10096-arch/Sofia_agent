@@ -8,7 +8,8 @@ A responsive, installable PWA workspace for people who use Sofia from a phone an
 - Private cloud browser start/close, address navigation, back/forward/reload.
 - Screenshot refresh with tap-to-click coordinate mapping and touch-drag scrolling.
 - Remote keyboard panel that types into the currently focused remote browser element.
-- Sofia task composer using the async Agent Runs API and reconnectable status polling.\n- PWA manifest, custom app icon, and offline caching for the static app shell (API responses are never cached).
+- Sofia task composer using the async Agent Runs API and reconnectable status polling.
+- PWA manifest, custom app icon, and offline caching for the static app shell (API responses are never cached).
 - Session countdown, connection states, error feedback, privacy/sign-in guidance and responsive mobile navigation.
 
 ## Run as static assets
