@@ -101,3 +101,45 @@ test("mock engine requires a non-empty idempotency and correlation identity", as
     /workflow_request_identity_required/,
   );
 });
+
+
+test("mock engine rejects reuse of an idempotency key with a different payload", async () => {
+  let calls = 0;
+  const engine = new MockWorkflowEngine({
+    workflows: new Map([["daily-report", async () => {
+      calls++;
+      return { ok: true };
+    }]]),
+  });
+  const base = {
+    workflowId: "daily-report",
+    input: { range: "today" },
+    idempotencyKey: "same-key",
+    correlationId: "same-correlation",
+  };
+
+  await engine.start(base);
+  await assert.rejects(
+    engine.start({ ...base, input: { range: "all-time" } }),
+    /workflow_idempotency_conflict/,
+  );
+  assert.equal(calls, 1);
+});
+
+test("mock engine rejects reuse of an idempotency key with a different correlation ID", async () => {
+  const engine = new MockWorkflowEngine({
+    workflows: new Map([["daily-report", async () => ({ ok: true })]]),
+  });
+  const base = {
+    workflowId: "daily-report",
+    input: { range: "today" },
+    idempotencyKey: "same-key",
+    correlationId: "first-correlation",
+  };
+
+  await engine.start(base);
+  await assert.rejects(
+    engine.start({ ...base, correlationId: "other-correlation" }),
+    /workflow_idempotency_conflict/,
+  );
+});
