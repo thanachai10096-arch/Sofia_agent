@@ -58,9 +58,8 @@ export function parseDesktopApplicationAllowlist(raw: string | undefined): Deskt
 }
 
 /**
- * A deliberately narrow first local host: it can launch only explicitly
- * allowlisted executables. Input control and screen capture stay unavailable
- * until a platform-native, separately reviewed driver is installed.
+ * Narrow application-launch driver. Screen capture and input are provided
+ * separately by the platform-native driver after explicit local opt-in.
  */
 export function createAllowlistedDesktopHostDriver(
   applications: DesktopApplicationAllowlist,
@@ -126,8 +125,8 @@ export function describeDesktopAction(action: DesktopAction): string {
         "Application ID: " + action.applicationId,
         "Arguments: " + (action.args.length ? JSON.stringify(action.args) : "(none)"),
       ].join("\n");
-    case "input.click": return "Mouse click (" + action.x + ", " + action.y + ") — not supported by this host.";
-    case "input.type": return "Type text — not supported by this host.";
-    case "input.key": return "Press key " + action.key + " — not supported by this host.";
+    case "input.click": return "Click the local desktop at (" + action.x + ", " + action.y + ") using " + action.button + " button.";
+    case "input.type": return "Type the requested text into the currently focused local application.";
+    case "input.key": return "Press the " + action.key + " key in the currently focused local application.";
   }
 }
