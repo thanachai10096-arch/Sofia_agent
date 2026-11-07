@@ -6,10 +6,7 @@ import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
 import { SqliteApprovalQueue } from "../agent/approval-queue.js";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { SqliteApprovalQueue } from "../agent/approval-queue.js";
+
 
 const route: ModelRoute = {
   id: "api-session-test",
@@ -220,68 +217,3 @@ test("approval inbox is API-key scoped and requires an exact owner-bound action 
 });
 
 
-test("API approval inbox is owner-scoped and decisions require the exact action hash and scopes", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "sofia-api-approvals-"));
-  const queue = await SqliteApprovalQueue.open(path.join(directory, "approvals.sqlite"));
-  const ownerId = createHash("sha256").update("owner-key").digest("hex").slice(0, 32);
-  const actionHash = "a".repeat(64);
-  const pending = queue.create({
-    runId: "run-approval",
-    principalId: ownerId,
-    toolName: "workspace.write",
-    input: { path: "notes.txt", content: "safe" },
-    actionHash,
-    risk: "high",
-  });
-  const server = createSofiaApi({
-    provider: { generate: async () => ({ text: "unused" }) },
-    router: { select: () => route, markUnhealthy: () => undefined },
-    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
-    approvalQueue: queue,
-  }, {
-    apiKeys: {
-      "owner-key": ["approval:read", "approval:decide"],
-      "other-key": ["approval:read", "approval:decide"],
-      "read-only-key": ["approval:read"],
-    },
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  assert.ok(address && typeof address !== "string");
-  const baseUrl = "http://127.0.0.1:" + address.port;
-  const auth = (key: string) => ({ authorization: "Bearer " + key, "content-type": "application/json" });
-  try {
-    const other = await fetch(baseUrl + "/v1/approvals", { headers: auth("other-key") });
-    assert.deepEqual(await other.json(), { approvals: [] });
-
-    const listed = await fetch(baseUrl + "/v1/approvals", { headers: auth("owner-key") });
-    assert.equal(listed.status, 200);
-    const payload = await listed.json() as { approvals: Array<{ id: string; actionHash: string }> };
-    assert.equal(payload.approvals[0]?.id, pending.id);
-    assert.equal(payload.approvals[0]?.actionHash, actionHash);
-
-    const forbidden = await fetch(baseUrl + "/v1/approvals/" + pending.id + "/decision", {
-      method: "POST", headers: auth("read-only-key"),
-      body: JSON.stringify({ actionHash, approved: true }),
-    });
-    assert.equal(forbidden.status, 403);
-
-    const wrongHash = await fetch(baseUrl + "/v1/approvals/" + pending.id + "/decision", {
-      method: "POST", headers: auth("owner-key"),
-      body: JSON.stringify({ actionHash: "b".repeat(64), approved: true }),
-    });
-    assert.equal(wrongHash.status, 409);
-    assert.equal(queue.get(pending.id, ownerId)?.status, "pending");
-
-    const approved = await fetch(baseUrl + "/v1/approvals/" + pending.id + "/decision", {
-      method: "POST", headers: auth("owner-key"),
-      body: JSON.stringify({ actionHash, approved: true }),
-    });
-    assert.equal(approved.status, 200);
-    assert.equal(queue.get(pending.id, ownerId)?.status, "approved");
-  } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-    queue.close();
-    await rm(directory, { recursive: true, force: true });
-  }
-});
