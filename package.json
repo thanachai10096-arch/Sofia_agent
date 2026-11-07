@@ -11,7 +11,7 @@
     "license:check": "node scripts/check-license.mjs",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/run-tests.mjs && node --check web/mobile-workspace/workspace.js",
+    "test": "node scripts/run-tests.mjs && node --check web/mobile-workspace/workspace.js && node --check web/mobile-workspace/service-worker.js",
     "cli": "tsx src/cli/index.ts",
     "start": "node dist/api/entrypoint.js",
     "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs",
