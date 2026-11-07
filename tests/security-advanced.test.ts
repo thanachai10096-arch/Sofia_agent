@@ -55,6 +55,10 @@ describe("advanced security",()=>{
   assert.match(denied.reason??"",/allowlisted/i);
   const missing=assessAction(action,[],[]);
   assert.equal(missing.allowed,false);
+  const newsAction={...action,toolName:"web.search_news"};
+  const newsAllowed=assessAction(newsAction,[],["api.search.brave.com"]);
+  assert.equal(newsAllowed.allowed,true);
+  assert.equal(newsAllowed.risk,"low");
  });
  it("fails closed for production security configuration",()=>{
   const old={...process.env};
