@@ -201,21 +201,19 @@ export class SqliteSessionStore {
     const offset = boundedInteger(options.offset, 0, 0, Number.MAX_SAFE_INTEGER);
     let ids: string[];
     if (this.ftsAvailable) {
-      const ftsQuery = term.split(/\s+/u).filter(Boolean).map((part) => \`"\${part.replace(/"/gu, '""')}"\`).join(" AND ");
+      const ftsQuery = term.split(/\s+/u).filter(Boolean).map((part) => `"${part.replace(/"/gu, '""')}"`).join(" AND ");
       try {
         const prefix = options.sessionIdPrefix;
         const scope = prefix ? "AND substr(session_id, 1, ?) = ?" : "";
-        const args = prefix
-          ? [ftsQuery, prefix.length, prefix, limit, offset]
-          : [ftsQuery, limit, offset];
-        ids = (this.db.prepare(\`
+        const args = prefix ? [ftsQuery, prefix.length, prefix, limit, offset] : [ftsQuery, limit, offset];
+        ids = (this.db.prepare(`
           SELECT session_id AS id
           FROM session_messages_fts
-          WHERE session_messages_fts MATCH ? \${scope}
+          WHERE session_messages_fts MATCH ? ${scope}
           GROUP BY session_id
           ORDER BY MIN(bm25(session_messages_fts)) ASC, session_id ASC
           LIMIT ? OFFSET ?
-        \`).all(...args) as Array<{ id: string }>).map((row) => row.id);
+        `).all(...args) as Array<{ id: string }>).map((row) => row.id);
       } catch {
         ids = this.searchLike(term, limit, offset, options.sessionIdPrefix);
       }
@@ -226,20 +224,16 @@ export class SqliteSessionStore {
   }
 
   private searchLike(term: string, limit: number, offset: number, sessionIdPrefix?: string): string[] {
-    const pattern = \`%\${term.replace(/[\\\\%_]/gu, "\\\\$&")}%\`;
     const scope = sessionIdPrefix ? "AND substr(s.id, 1, ?) = ?" : "";
-    const args = sessionIdPrefix
-      ? [pattern, sessionIdPrefix.length, sessionIdPrefix, limit, offset]
-      : [pattern, limit, offset];
-    return (this.db.prepare(\`
+    const args = sessionIdPrefix ? [term, sessionIdPrefix.length, sessionIdPrefix, limit, offset] : [term, limit, offset];
+    return (this.db.prepare(`
       SELECT DISTINCT s.id
       FROM sessions s JOIN session_messages m ON m.session_id = s.id
-      WHERE m.content LIKE ? ESCAPE '\\\\' \${scope}
+      WHERE instr(lower(m.content), lower(?)) > 0 ${scope}
       ORDER BY s.updated_at DESC, s.id ASC
       LIMIT ? OFFSET ?
-    \`).all(...args) as Array<{ id: string }>).map((row) => row.id);
+    `).all(...args) as Array<{ id: string }>).map((row) => row.id);
   }
-
   delete(id: string): void {
     this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
     if (this.ftsAvailable) this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);
