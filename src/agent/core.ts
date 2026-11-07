@@ -308,6 +308,7 @@ export class SofiaAgent {
 
             if (requiresApproval && this.deps.approval) {
               const approved = await this.deps.approval({
+                requestId: randomUUID(),
                 runId,
                 principalId: request.principalId,
                 toolName: call.name,
