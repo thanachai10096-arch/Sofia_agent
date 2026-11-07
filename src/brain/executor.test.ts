@@ -81,6 +81,12 @@ function makeTools(): ToolGateway {
   });
 
   return {
+    listTools() {
+      return [
+        { name: "workspace.write_file", description: "Write a file", effects: ["write"] as const },
+        { name: "workspace.list_files", description: "List files", effects: ["read"] as const },
+      ];
+    },
     describe(name) {
       return name === "workspace.write_file" || name === "workspace.list_files"
         ? { effects: name === "workspace.write_file" ? ["write"] : ["read"] }
@@ -294,6 +300,10 @@ test("Brain feeds a failed verification into a specialist and executes its valid
     async run(request) {
       assert.equal(request.role, "debugger");
       assert.equal(request.context && typeof request.context === "object", true);
+      assert.deepEqual(request.availableTools?.map((tool) => tool.name), [
+        "workspace.write_file",
+        "workspace.list_files",
+      ]);
       return {
         role: "debugger",
         summary: "Retry the file write.",
