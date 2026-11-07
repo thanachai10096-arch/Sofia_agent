@@ -131,7 +131,7 @@ export function parseTelegramUserApiKeys(value: string, allowedUsers: ReadonlySe
   if (allowedUsers.size === 0 || entries.length !== allowedUsers.size ||
       entries.some(([userId, key]) => !allowedUsers.has(userId) || typeof key !== "string" || !key.trim()) ||
       new Set(entries.map(([, key]) => (key as string).trim())).size !== entries.length) throw invalid();
-  return new Map(entries.map(([userId, key]) => [userId, (key as string).trim()]));
+  return new Map<string, string>(entries.map(([userId, key]) => [userId, (key as string).trim()] as const));
 }
 
 export interface TelegramMessagingEnvironment {
