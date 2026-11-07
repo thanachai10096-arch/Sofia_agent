@@ -45,11 +45,42 @@ function phaseFromRequest(request: string): BrainPhase {
   }
 }
 
+/**
+ * Understanding labels describe task intent, while the gateway expects
+ * provider-route capabilities. Keep ordinary conversation unconstrained;
+ * translate common task labels to the route vocabulary and leave unknown
+ * labels intact so the gateway continues to fail closed for unsupported needs.
+ */
+function routeCapabilities(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  const mapped = values
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => {
+      switch (value.trim().toLowerCase()) {
+        case "general":
+        case "conversation":
+          return undefined;
+        case "chat":
+        case "simple-chat":
+          return "fast";
+        case "analysis":
+        case "research":
+          return "reasoning";
+        case "code":
+          return "coding";
+        default:
+          return value.trim();
+      }
+    })
+    .filter((value): value is string => Boolean(value));
+  return [...new Set(mapped)].slice(0, 24);
+}
+
 function outputContractFor(phase: BrainPhase): string {
   if (phase === "understand") return [
     "Return this exact JSON object shape:",
     '{"objective":"non-empty string","constraints":["string"],"assumptions":["string"],"requiredCapabilities":["string"],"requiredTools":["string"],"risk":"low|medium|high","successCriteria":["string"],"ambiguities":["string"]}',
-    "All fields are required. Every list field must be a JSON array, even when it has one item or no items (use [] for empty). risk must be exactly one of low, medium, or high.",
+    "All fields are required. Every list field must be a JSON array, even when it has one item or no items (use [] for empty). requiredCapabilities must use only fast, reasoning, coding, vision, long-context, or tool-use; use [] for ordinary conversation/general questions. risk must be exactly one of low, medium, or high.",
   ].join("\n");
   if (phase === "plan" || phase === "replan") return [
     "Return this exact JSON object shape:",
@@ -111,11 +142,11 @@ function asInferenceRequest(request: string): InferenceRequest {
     minimumQualityTier: typeof payload.minimumQualityTier === "number"
       ? payload.minimumQualityTier
       : 1,
-    requiredCapabilities: (Array.isArray(payload.requiredCapabilities)
-      ? payload.requiredCapabilities
-      : Array.isArray(understanding.requiredCapabilities)
-        ? understanding.requiredCapabilities
-        : []).filter((value): value is string => typeof value === "string").slice(0, 24),
+    requiredCapabilities: routeCapabilities(
+      Array.isArray(payload.requiredCapabilities)
+        ? payload.requiredCapabilities
+        : understanding.requiredCapabilities,
+    ),
     core: {
       instructions: [
         "Return only valid JSON. Do not use Markdown fences or surrounding prose.",
