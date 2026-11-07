@@ -122,6 +122,16 @@ npx playwright install chromium
 
 Only enable browser capability in environments where its permissions and policy are configured appropriately. Playwright traffic is routed through a local egress proxy that validates DNS answers and connects to the selected numeric IP, blocks private/internal destinations, and limits web traffic to HTTP port 80 and HTTPS port 443. Chromium QUIC and non-proxied WebRTC UDP are disabled to reduce direct-network bypasses. Sites that require non-standard ports may not work. Keep host/container egress controls enabled for defense in depth.
 
+## `> Mobile Workspace (phone-only access)`
+
+Sofia includes a responsive mobile-first Cloud Browser workspace for users who do not own a computer. It lives in `web/mobile-workspace/` and provides a browser surface, address navigation, touch interaction, remote keyboard, session controls, and a Sofia task composer.
+
+- UI source: [web/mobile-workspace](web/mobile-workspace/)
+- Hosting and authenticated BFF requirements: [Mobile Workspace README](web/mobile-workspace/README.md)
+- Cloud Browser backend: [Mobile Cloud Browser](docs/MOBILE_CLOUD_BROWSER.md)
+
+The UI must be hosted behind a same-origin, cookie-authenticated Backend-for-Frontend (BFF) that injects Sofia API keys server-side. Do not place a master API key in browser JavaScript, localStorage, sessionStorage, or URLs. The BFF/login integration and real approval inbox are not yet implemented in this repository; the UI source is not yet a production-ready signed-in surface.
+
 ## `> API — reconnectable runs`
 
 Sofia supports long-running work for desktop and mobile browser clients:
