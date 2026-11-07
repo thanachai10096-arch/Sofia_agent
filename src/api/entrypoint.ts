@@ -10,6 +10,7 @@ import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplica
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { TelegramApprovalBroker } from "../integrations/messaging/telegram-approval-broker.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -20,9 +21,12 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+const telegramApprovalEnabled = process.env.SOFIA_MESSAGING_ENABLED === "true" &&
+  Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim() && process.env.TELEGRAM_ALLOWED_USER_IDS?.trim() && process.env.TELEGRAM_ALLOWED_CHAT_IDS?.trim());
+const approvalBroker = telegramApprovalEnabled ? new TelegramApprovalBroker() : undefined;
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalBroker?.handleApproval);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
-const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
+const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace, undefined, approvalBroker);
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -223,6 +227,7 @@ server.listen(port, "0.0.0.0", () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     discordAbort.abort();
+    approvalBroker?.close();
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
     void discordGatewayTransport?.stop();

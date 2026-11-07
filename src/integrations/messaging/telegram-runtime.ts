@@ -7,6 +7,7 @@ import { createTelegramAdapter } from "./telegram.js";
 import { createTelegramHttpTransport } from "./telegram-http-transport.js";
 import type { OutboundMessage } from "./types.js";
 import { redactSecrets } from "../../security/guard.js";
+import type { TelegramApprovalBroker } from "./telegram-approval-broker.js";
 
 export interface TelegramMessagingRuntime {
   start(): Promise<void>;
@@ -138,6 +139,7 @@ export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
   workspace = process.cwd(),
   onWarning: (message: string) => void = (message) => console.error(message),
+  approvalBroker?: TelegramApprovalBroker,
 ): TelegramMessagingRuntime | undefined {
   const requested = env.SOFIA_MESSAGING_ENABLED === "true";
   if (!requested) return undefined;
@@ -172,6 +174,7 @@ export function createTelegramMessagingRuntime(
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
       onAccepted: ({ runId, runStatus, message }) => {
+        approvalBroker?.registerRun(runId, { userId: message.identity.userId, conversationId: message.identity.conversationId });
         onWarning("Telegram messaging event: telegram_run_accepted run_id=" + runId + " status=" + runStatus + ".");
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
@@ -183,7 +186,7 @@ export function createTelegramMessagingRuntime(
             : Promise.resolve(false),
           onWarning: (event) => onWarning("Telegram messaging warning: " + event + "."),
           onEvent: (event) => onWarning("Telegram messaging event: " + event + "."),
-        });
+        }).finally(() => approvalBroker?.releaseRun(runId));
       },
     });
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
@@ -201,15 +204,23 @@ export function createTelegramMessagingRuntime(
       // The command handler owns the shared dedupe claim. Do not claim it twice in the gateway.
       maxMessagesPerWindow: 5,
       rateWindowMs: 60_000,
-      onMessage: (message) => handler(message),
+      onMessage: async (message) => {
+        const approvalReply = approvalBroker?.handleCommand({
+          userId: message.identity.userId,
+          conversationId: message.identity.conversationId,
+          text: message.text,
+        });
+        return approvalReply ?? await handler(message);
+      },
       logger: {
         info: (event) => onWarning("Telegram messaging event: " + event + "."),
         warn: (event) => onWarning("Telegram messaging warning: " + event + "."),
       },
     });
+    approvalBroker?.setSender(async (conversationId, text) => gateway ? gateway.send("telegram", { conversationId, text }) : false);
     return {
       start: () => gateway.start(),
-      stop: () => gateway.stop(),
+      stop: async () => { await gateway.stop(); approvalBroker?.close(); },
     };
   } catch (error) {
     // Report only the static validation message from our own constructors. Never log
