@@ -214,7 +214,7 @@ const rawTelegramUserApiKeys = process.env.TELEGRAM_USER_API_KEYS_JSON?.trim();
 if (rawTelegramUsers && rawTelegramUserApiKeys) {
   try {
     const telegramUsers = parseTelegramUserAllowlist(rawTelegramUsers);
-    const telegramKeys = parseTelegramUserApiKeys(rawTelegramUserApiKeys, telegramUsers);
+    const telegramKeys = parseTelegramUserApiKeys(rawTelegramUserApiKeys, telegramUsers, new Set([apiKey]));
     for (const key of telegramKeys.values()) apiKeys[key] = scopes;
   } catch {
     // Telegram remains fail-closed in its runtime; do not log credential values.
