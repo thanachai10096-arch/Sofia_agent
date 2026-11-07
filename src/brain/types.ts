@@ -93,7 +93,7 @@ export interface WorkspaceSnapshot {
 }
 
 export interface ToolGateway {
-  listTools?(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[] }>;
+  listTools?(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[]; availability?: { status: "available" | "requires_approval" | "disabled"; reason?: string } }>;
   describe(name: string): {
     effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[];
   } | undefined;
