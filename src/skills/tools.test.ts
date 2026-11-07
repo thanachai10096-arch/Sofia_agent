@@ -31,30 +31,47 @@ test("advanced skill tools expose only registered verified handlers", async () =
 test("advanced skill tool effects preserve declared risk for the policy gateway", () => {
   const readOnly = ADVANCED_SKILLS.find((skill) => skill.risk === "read-only" && skill.status === "verified");
   const mayWrite = ADVANCED_SKILLS.find((skill) => skill.risk === "may-write" && skill.status === "verified");
+  const privileged = ADVANCED_SKILLS.find((skill) => skill.risk === "privileged" && skill.status === "verified");
   assert.ok(readOnly);
   assert.ok(mayWrite);
   const registry = new AdvancedSkillRegistry();
   registry.register(readOnly, async () => "read");
   registry.register(mayWrite, async () => "write");
+  if (privileged) registry.register(privileged, async () => "privileged");
   const tools = createAdvancedSkillTools(registry, "principal-test");
 
   assert.deepEqual(tools.find((tool) => tool.name === `skill.${readOnly.id}`)?.effects, ["read"]);
   assert.deepEqual(tools.find((tool) => tool.name === `skill.${mayWrite.id}`)?.effects, ["write"]);
+  if (privileged) {
+    assert.deepEqual(tools.find((tool) => tool.name === `skill.${privileged.id}`)?.effects, ["destructive"]);
+  }
 });
 
-test("approval-required skills stay fail-closed when no trusted approval is provided", async () => {
-  const definition = ADVANCED_SKILLS.find((skill) => skill.status === "verified" && skill.requiresApproval);
-  if (!definition) {
-    // The current verified catalog has no approval-required entries; this test
-    // still guards the registry contract when one is added in a future revision.
-    return;
-  }
+test("approval-required skills fail closed without trusted action-bound approval evidence", async () => {
+  const base = ADVANCED_SKILLS.find((skill) => skill.status === "verified");
+  assert.ok(base);
+  // Use synthetic metadata so this contract remains tested even while the
+  // current verified catalog intentionally contains no approval-required skill.
+  const definition = {
+    ...base,
+    id: "test.approval-required",
+    risk: "privileged" as const,
+    requiresApproval: true,
+  };
+  let handlerCalled = false;
   const registry = new AdvancedSkillRegistry();
-  registry.register(definition, async () => "must not run");
-  const tool = createAdvancedSkillTools(registry, "principal-test").find((item) => item.name === `skill.${definition.id}`);
+  registry.register(definition, async () => {
+    handlerCalled = true;
+    return "must not run";
+  });
+  const tool = createAdvancedSkillTools(registry, "principal-test").find(
+    (item) => item.name === `skill.${definition.id}`,
+  );
   assert.ok(tool);
+  assert.deepEqual(tool.effects, ["destructive"]);
   await assert.rejects(
     () => tool.execute({}, { runtime: {} as never, signal: new AbortController().signal }),
     { code: "APPROVAL_REQUIRED" },
   );
+  assert.equal(handlerCalled, false);
 });
