@@ -94,7 +94,7 @@ export function compactSkillContext(skills: readonly SofiaSkill[]): unknown[] {
     // tools and pass the normal gateway policy.
     if (skill.id.startsWith("learned:")) {
       return {
-        id: skill.id.slice(0, 160),
+        id: `learned-guidance:${skill.categories[0] ?? "unknown"}`,
         source: "learned-guidance",
         trusted: false,
         strategy: skill.strategy,
