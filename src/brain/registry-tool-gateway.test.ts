@@ -402,3 +402,194 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
 });
+
+
+test("trusted network target permits fixed workflow endpoints without model-controlled URLs", async () => {
+  let executed = 0;
+  let approvedHash = "";
+  let approvedTargets: readonly string[] | undefined;
+  const registry = new MapToolRegistry([{
+    name: "workflow.execute",
+    description: "Execute an operator-configured workflow",
+    inputSchema: {
+      type: "object",
+      properties: { workflowId: { type: "string", enum: ["daily-report"] } },
+      required: ["workflowId"],
+      additionalProperties: false,
+    },
+    effects: ["network"] as const,
+    trustedNetworkTargets: ["https://n8n.internal/api/v1/workflows/daily-report/run"],
+    async execute(input) { executed += 1; return { workflowId: input.workflowId }; },
+  }]);
+  const policy = { ...defaultPolicy, allowNetwork: true, allowedHosts: ["n8n.internal"] };
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    policy,
+    async (request) => { approvedHash = request.actionHash; approvedTargets = request.trustedNetworkTargets; return true; },
+  );
+
+  const result = await gateway.execute(
+    { tool: "workflow.execute", input: { workflowId: "daily-report" } },
+    {
+      runId: "trusted-workflow-target",
+      principalId: "test-principal",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(executed, 1);
+  assert.match(approvedHash, /^[a-f0-9]{64}$/);
+  assert.deepEqual(approvedTargets, ["https://n8n.internal/api/v1/workflows/daily-report/run"]);
+});
+
+test("approval displays the exact trusted targets hashed before an approval wait", async () => {
+  const rt = runtime();
+  const targets = ["https://n8n.internal/api/run"];
+  let notifyApprovalReached!: () => void;
+  const approvalReached = new Promise<void>((resolve) => { notifyApprovalReached = resolve; });
+  let releaseApproval!: (approved: boolean) => void;
+  const approvalDecision = new Promise<boolean>((resolve) => { releaseApproval = resolve; });
+  let displayedTargets: readonly string[] | undefined;
+  const registry = new MapToolRegistry([{
+    name: "workflow.execute",
+    description: "Execute an operator-configured workflow",
+    inputSchema: { type: "object" },
+    effects: ["network"] as const,
+    trustedNetworkTargets: targets,
+    async execute() { return { ok: true }; },
+  }]);
+  const policy = { ...defaultPolicy, allowNetwork: true, allowedHosts: ["n8n.internal"] };
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    policy,
+    async (request) => {
+      displayedTargets = request.trustedNetworkTargets;
+      notifyApprovalReached();
+      return approvalDecision;
+    },
+  );
+
+  const execution = gateway.execute(
+    { tool: "workflow.execute", input: {} },
+    {
+      runId: "trusted-target-snapshot",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  await approvalReached;
+  targets[0] = "https://attacker.example/changed-after-hash";
+  releaseApproval(true);
+  const result = await execution;
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(displayedTargets, ["https://n8n.internal/api/run"]);
+});
+
+test("trusted network target is still rejected when its host is not allowlisted", async () => {
+  let executed = false;
+  const registry = new MapToolRegistry([{
+    name: "workflow.execute",
+    description: "Execute an operator-configured workflow",
+    inputSchema: { type: "object" },
+    effects: ["network"] as const,
+    trustedNetworkTargets: ["https://untrusted.example/api/run"],
+    async execute() { executed = true; return { ok: true }; },
+  }]);
+  const policy = { ...defaultPolicy, allowNetwork: true, allowedHosts: ["n8n.internal"] };
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    policy,
+    async () => true,
+  );
+
+  const result = await gateway.execute(
+    { tool: "workflow.execute", input: {} },
+    {
+      runId: "untrusted-workflow-target",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.match(result.error?.message ?? "", /not allowlisted/i);
+  assert.equal(executed, false);
+});
+
+test("model-supplied URL cannot escape the trusted workflow host allowlist", async () => {
+  let executed = false;
+  const registry = new MapToolRegistry([{
+    name: "workflow.execute",
+    description: "Execute an operator-configured workflow",
+    inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+    effects: ["network"] as const,
+    trustedNetworkTargets: ["https://n8n.internal/api/run"],
+    async execute() { executed = true; return { ok: true }; },
+  }]);
+  const policy = { ...defaultPolicy, allowNetwork: true, allowedHosts: ["n8n.internal"] };
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    policy,
+    async () => true,
+  );
+
+  const result = await gateway.execute(
+    { tool: "workflow.execute", input: { url: "https://attacker.example/collect" } },
+    {
+      runId: "model-url-escape",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.match(result.error?.message ?? "", /not allowlisted/i);
+  assert.equal(executed, false);
+});
+
+
+test("trusted workflow targets reject plain HTTP and embedded credentials", async () => {
+  for (const target of [
+    "http://n8n.internal/api/run",
+    "https://user:password@n8n.internal/api/run",
+  ]) {
+    let executed = false;
+    const registry = new MapToolRegistry([{
+      name: "workflow.execute",
+      description: "Execute an operator-configured workflow",
+      inputSchema: { type: "object" },
+      effects: ["network"] as const,
+      trustedNetworkTargets: [target],
+      async execute() { executed = true; return { ok: true }; },
+    }]);
+    const policy = { ...defaultPolicy, allowNetwork: true, allowedHosts: ["n8n.internal"] };
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      policy,
+      async () => true,
+    );
+    const result = await gateway.execute(
+      { tool: "workflow.execute", input: {} },
+      {
+        runId: "unsafe-trusted-target",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.category, "permission_error");
+    assert.match(result.error?.message ?? "", /HTTPS URLs/i);
+    assert.equal(executed, false);
+  }
+});
