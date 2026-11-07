@@ -32,6 +32,7 @@ import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
+import { createAdvancedSkillTools } from "../skills/tool-adapter.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -104,6 +105,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       ...dependencies.tools.list(),
       ...runBrowserTools,
       ...runDesktopTools,
+      ...createAdvancedSkillTools({ projectMemoryStore: projectMemory, securityController: dependencies.security, principalId: principalId ?? "local-agent" }),
     ]);
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
