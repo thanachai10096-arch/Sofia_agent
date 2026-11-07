@@ -84,6 +84,7 @@ function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapabi
     "desktop:process:execute": "process:execute",
     "desktop:remote:app:launch": "app:launch",
     "desktop:remote:input:control": "input:control",
+    "desktop:remote:screen:capture": "screen:capture",
   };
   const remoteEnabled = scopes.includes("desktop:connect");
   return [...new Set(scopes
@@ -511,7 +512,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const header = req.headers.authorization ?? "";
         const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
         if (!token) return json(res, 401, { error: "unauthorized" }, origin, config);
-        const raw = await body(req, maxBytes);
+        const raw = await body(req, Math.max(maxBytes, 6 * 1024 * 1024));
         if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_desktop_completion" }, origin, config);
         const input = raw as Record<string, unknown>;
         if (input.error !== undefined && (typeof input.error !== "string" || input.error.length > 1000)) {
@@ -521,7 +522,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try { resultSize = Buffer.byteLength(JSON.stringify(input.result ?? null), "utf8"); } catch {
           return json(res, 400, { error: "invalid_desktop_completion" }, origin, config);
         }
-        if (resultSize > maxBytes) return json(res, 413, { error: "desktop_result_too_large" }, origin, config);
+        if (resultSize > 5_500_000) return json(res, 413, { error: "desktop_result_too_large" }, origin, config);
         try {
           const completed = desktopBroker.complete(token, completeMatch[1]!, input.result ?? null, input.error as string | undefined);
           return completed
