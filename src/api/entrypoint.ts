@@ -4,9 +4,9 @@ import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
+import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { buildDiscordSessionContext, submitDiscordTask, waitForDiscordTask } from "../integrations/messaging/discord-durable-job.js";
-import { messagingSessionKey } from "../integrations/messaging/session-key.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 
 const processStartedAt = Date.now();
@@ -54,6 +54,9 @@ if (discordConfigured) {
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
   });
+  const discordDeduplicator = new FileChatMessageDeduplicator(
+    path.resolve(process.env.SOFIA_CHAT_DEDUPE_DIR ?? path.join(workspace, ".sofia", "chat-dedupe")),
+  );
   await discordTransport.start(discordAbort.signal, async (message) => {
     try {
       deps.securityController?.assertRunning();
@@ -117,51 +120,21 @@ if (discordConfigured) {
         );
         return;
       }
-      const prefix = "/run";
-      const task = message.content.startsWith(prefix) ? message.content.slice(prefix.length).trim() : "";
-      if (!task) {
-        await discordTransport?.sendMessage(message.channelId, "Please provide a task using /run task:<description>.", undefined, message.id);
-        return;
+      const handleDiscordChat = createDiscordSharedChatHandler({
+        runtime: deps.jobRuntime,
+        sender: discordTransport!,
+        deduplicator: discordDeduplicator,
+        allowedUserIds: discordUserIds,
+        allowedChannelIds: discordChannelIds,
+        signal: discordAbort.signal,
+        onError: (kind) => console.error("Discord messaging event:", kind),
+      });
+      const reply = await handleDiscordChat(message);
+      if (reply) {
+        // The shared dispatcher returns the normal acceptance acknowledgement;
+        // edit the deferred interaction while its short-lived token is valid.
+        await discordTransport?.sendMessage(message.channelId, reply, undefined, message.id);
       }
-      const sessionKey = messagingSessionKey({
-        platform: "discord",
-        userId: message.author.id,
-        channelId: message.channelId,
-        conversationId: message.channelId,
-      });
-      const sessionContext = await buildDiscordSessionContext(deps.jobRuntime, sessionKey);
-      const taskWithMemory = sessionContext
-        ? task + "\n\n" + sessionContext
-        : task;
-      const handle = await submitDiscordTask(deps.jobRuntime, taskWithMemory, principalId, discordAbort.signal, {
-        channelId: message.channelId,
-        sessionKey,
-        sessionTask: task,
-      });
-      // Acknowledge while the interaction token is valid; final delivery uses the bot API
-      // so jobs longer than Discord's interaction-token lifetime still report completion.
-      await discordTransport?.sendMessage(
-        message.channelId,
-        "Sofia accepted your task.\nJob ID: " + handle.id + "\nI will post the result when it finishes.",
-        undefined,
-        message.id,
-      );
-      void waitForDiscordTask(handle, { signal: discordAbort.signal }).then(async (result) => {
-        const prefix = result.status === "completed" ? "Sofia completed the task." : "Sofia job " + result.status + ".";
-        const response = prefix + "\nJob ID: " + result.id + "\n" + result.summary;
-        const safeResponse = response.length > 1700 ? response.slice(0, 1690) + "… (truncated)" : response;
-        await discordTransport?.sendMessage(message.channelId, safeResponse);
-        await deps.jobRuntime?.markNotificationDelivered?.(result.id);
-      }).catch(async () => {
-        try {
-          await discordTransport?.sendMessage(
-            message.channelId,
-            "Sofia could not report the final result for job " + handle.id + ". Check server logs for a redacted error.",
-          );
-        } catch {
-          // Delivery may be unavailable during shutdown; durable job state remains persisted.
-        }
-      });
     } catch (error) {
       // Log only the error class, never task text, credentials, interaction tokens, or raw provider messages.
       console.error("Discord command handler failed:", error instanceof Error ? error.name : "UnknownError");
