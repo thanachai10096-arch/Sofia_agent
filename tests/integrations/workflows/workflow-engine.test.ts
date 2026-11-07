@@ -5,7 +5,7 @@ import type {
   WorkflowStartRequest,
   WorkflowStartResult,
   WorkflowStatusResult,
-} from "../../src/integrations/workflows/workflow-engine.js";
+} from "../../../src/integrations/workflows/workflow-engine.js";
 
 class FakeWorkflowEngine implements WorkflowEngine {
   private nextId = 1;
