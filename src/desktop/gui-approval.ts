@@ -72,6 +72,13 @@ export function createLocalGuiApproval(options: LocalGuiApprovalOptions = {}): L
           "referrer-policy": "no-referrer",
           "cross-origin-resource-policy": "same-origin",
         };
+        // Reject unexpected Host headers on every route, including the HTML
+        // document. This prevents DNS-rebinding hosts from reading local action
+        // details through a browser that resolves an attacker-controlled name
+        // to the loopback listener.
+        if (req.headers.host !== `127.0.0.1:${address?.port}`) {
+          res.writeHead(403, headers); res.end("Forbidden"); return;
+        }
         if (req.method === "GET" && req.url === "/") {
           res.writeHead(200, { ...headers, "content-type": "text/html; charset=utf-8" });
           res.end(html);
@@ -80,8 +87,7 @@ export function createLocalGuiApproval(options: LocalGuiApprovalOptions = {}): L
         if (req.method !== "POST" || req.url !== "/decision") {
           res.writeHead(404, headers); res.end("Not found"); return;
         }
-        if (req.headers.host !== `127.0.0.1:${address?.port}` ||
-            req.headers.origin !== origin ||
+        if (req.headers.origin !== origin ||
             req.headers["content-type"] !== "application/json") {
           res.writeHead(403, headers); res.end("Forbidden"); return;
         }
