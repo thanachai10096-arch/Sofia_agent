@@ -5,6 +5,7 @@ import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
+import { SqliteApprovalQueue } from "../agent/approval-queue.js";
 
 const route: ModelRoute = {
   id: "api-session-test",
@@ -145,5 +146,71 @@ test("API rejects unknown model routes before starting a run", async () => {
     assert.deepEqual(await response.json(), { error: "invalid_model_route" });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("approval inbox is API-key scoped and requires an exact owner-bound action hash", async () => {
+  const queue = await SqliteApprovalQueue.open(":memory:");
+  const ownerId = createHash("sha256").update("approval-key-one").digest("hex").slice(0, 32);
+  const pending = queue.create({
+    runId: "run-approval-1",
+    principalId: ownerId,
+    toolName: "skill.lifecycle.promote",
+    input: { candidateId: "candidate-1", skillId: "learned:test" },
+    actionHash: "c".repeat(64),
+    risk: "high",
+  });
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    approvalQueue: queue,
+  }, {
+    apiKeys: {
+      "approval-key-one": ["approval:read", "approval:decide"],
+      "approval-key-two": ["approval:read", "approval:decide"],
+      "approval-readonly": ["approval:read"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const headers = (key: string) => ({ authorization: "Bearer " + key, "content-type": "application/json" });
+  try {
+    const ownList = await fetch(baseUrl + "/v1/approvals", { headers: headers("approval-key-one") });
+    assert.equal(ownList.status, 200);
+    const ownPayload = await ownList.json() as { approvals: Array<{ id: string; actionHash: string }> };
+    assert.equal(ownPayload.approvals.length, 1);
+    assert.equal(ownPayload.approvals[0]?.id, pending.id);
+
+    const otherList = await fetch(baseUrl + "/v1/approvals", { headers: headers("approval-key-two") });
+    assert.equal(otherList.status, 200);
+    assert.deepEqual((await otherList.json() as { approvals: unknown[] }).approvals, []);
+
+    const wrongOwner = await fetch(baseUrl + "/v1/approvals/" + pending.id + "/decision", {
+      method: "POST", headers: headers("approval-key-two"),
+      body: JSON.stringify({ actionHash: pending.actionHash, approved: true }),
+    });
+    assert.equal(wrongOwner.status, 409);
+    assert.equal(queue.get(pending.id, ownerId)?.status, "pending");
+
+    const readonlyDecision = await fetch(baseUrl + "/v1/approvals/" + pending.id + "/decision", {
+      method: "POST", headers: headers("approval-readonly"),
+      body: JSON.stringify({ actionHash: pending.actionHash, approved: true }),
+    });
+    assert.equal(readonlyDecision.status, 403);
+
+    const approved = await fetch(baseUrl + "/v1/approvals/" + pending.id + "/decision", {
+      method: "POST", headers: headers("approval-key-one"),
+      body: JSON.stringify({ actionHash: pending.actionHash, approved: true }),
+    });
+    assert.equal(approved.status, 200);
+    assert.equal(queue.get(pending.id, ownerId)?.status, "approved");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    queue.close();
   }
 });
