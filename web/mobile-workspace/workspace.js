@@ -318,6 +318,16 @@
   $("newTabHint").addEventListener("click", () => { els.url.focus(); els.url.value = ""; toast("Enter a website address above."); });
   $("signInHint").addEventListener("click", () => showModal("Sign in safely", "Open the website in the browser and enter your password or verification code directly in that page. Sofia does not ask for, read, or store your passwords or one-time codes."));
   $("privacyHint").addEventListener("click", () => showModal("Private by design", "Your cloud browser session is isolated to your account, expires after inactivity, and is closed when you end it. This initial version does not preserve cookies after a server restart."));
+  $("workspaceLogout").addEventListener("click", async () => {
+    try {
+      const response = await fetch("/workspace/auth/logout", {
+        method: "POST", credentials: "same-origin",
+        headers: { "x-csrf-token": csrfToken() }
+      });
+      if (!response.ok) throw new Error("Sign out could not be completed.");
+      location.assign("/workspace/login.html");
+    } catch (error) { toast(error.message || "Sign out failed."); }
+  });
   $("helpButton").addEventListener("click", () => showModal("Your Sofia workspace", "Start a cloud browser to browse from your phone. Tap the page to click, use the address bar to navigate, and ask Sofia to research or complete tasks. Some sensitive actions may require a separate confirmation."));
   $("copilotInfo").addEventListener("click", () => showModal("Sofia AI companion", "Sofia can work on your request through the agent API. Browser interaction and AI task execution share your authenticated Sofia account but use separate session controls."));
   $("modalClose").addEventListener("click", () => els.modal.close());
