@@ -74,8 +74,9 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     // Browser tools own mutable page/session handles. Construct them per Brain run,
     // never on the process-wide dependency registry, so concurrent users/runs cannot
     // address each other's tabs or reuse each other's authenticated browser context.
+    const browserCleanups: Array<() => Promise<void>> = [];
     const runBrowserTools = dependencies.policy.allowBrowser
-      ? createBrowserTools(new PlaywrightBrowserRuntime())
+      ? createBrowserTools(new PlaywrightBrowserRuntime(), (cleanup) => browserCleanups.push(cleanup))
       : [];
     const grantedDesktopCapabilities = desktopCapabilities ?? [];
     const runDesktopTools = grantedDesktopCapabilities.length
