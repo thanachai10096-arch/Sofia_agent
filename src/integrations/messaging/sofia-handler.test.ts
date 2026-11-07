@@ -40,7 +40,7 @@ function harness(allowed = true) {
 test("ordinary natural-language messages start Sofia without /run by default", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
-  assert.equal(await handle(inbound("hello Sofia, help me build the project")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.equal(await handle(inbound("hello Sofia, help me build the project")), "รับคำขอแล้วครับ กำลังเริ่มทำงาน (รหัสงาน: run-123)");
   assert.deepEqual(h.starts.map((entry) => entry.task), ["hello Sofia, help me build the project"]);
   assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
 });
@@ -49,7 +49,7 @@ test("command-only mode can be enabled for deployments that require it", async (
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, naturalLanguageEnabled: false });
   assert.equal(await handle(inbound("hello Sofia")), undefined);
-  assert.equal(await handle(inbound("/run build the project")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.equal(await handle(inbound("/run build the project")), "รับคำขอแล้วครับ กำลังเริ่มทำงาน (รหัสงาน: run-123)");
   assert.deepEqual(h.starts.map((entry) => entry.task), ["build the project"]);
 });
 
@@ -65,7 +65,7 @@ test("provider slash commands and attachment-only messages never start tasks", a
 test("command prefix can be configured for a bot mention", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, commandPrefix: "/run@SofiaBot" });
-  assert.equal(await handle(inbound("/run@SofiaBot inspect logs")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.equal(await handle(inbound("/run@SofiaBot inspect logs")), "รับคำขอแล้วครับ กำลังเริ่มทำงาน (รหัสงาน: run-123)");
   assert.equal(await handle(inbound("/run inspect logs")), undefined);
 });
 
@@ -90,7 +90,7 @@ test("empty and overlong tasks are rejected by existing dispatcher", async () =>
 test("duplicate provider message is not started twice", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
-  assert.equal(await handle(inbound("do work")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.equal(await handle(inbound("do work")), "รับคำขอแล้วครับ กำลังเริ่มทำงาน (รหัสงาน: run-123)");
   assert.equal(await handle(inbound("do work")), undefined);
   assert.equal(h.starts.length, 1);
 });
@@ -110,3 +110,4 @@ test("invalid command prefixes are rejected at configuration time", () => {
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: " " }), /commandPrefix/);
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: "/run\nadmin" }), /commandPrefix/);
 });
+

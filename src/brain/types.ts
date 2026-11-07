@@ -44,6 +44,8 @@ export interface TaskUnderstanding {
   ambiguities: string[];
   /** Explicitly separates conversational replies from tasks that require execution. */
   mode?: "conversation" | "action";
+  /** Optional user-facing response returned by the same understanding call for fast conversational turns. */
+  response?: string;
 }
 
 export interface ToolCall {

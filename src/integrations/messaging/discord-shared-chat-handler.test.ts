@@ -62,7 +62,7 @@ test("Discord run requests use the shared chat dispatcher and preserve session-s
   const h = harness();
   const handle = h.create();
   const reply = await handle(message("interaction-1", "user-1", "channel-1", "/run summarize the project"));
-  assert.match(reply ?? "", /Sofia accepted the task/);
+  assert.match(reply ?? "", /รับคำขอแล้วครับ กำลังเริ่มทำงาน/);
   assert.equal(h.submissions.length, 1);
   assert.equal(h.submissions[0]?.task, "summarize the project");
   assert.equal(h.submissions[0]?.ownerKeyId, "discord:user-1");
@@ -94,7 +94,7 @@ test("shared Discord handler accepts ordinary natural language and rechecks allo
   const h = harness();
   const handle = h.create();
   const reply = await handle(message("interaction-3", "user-1", "channel-1", "Please inspect this error"));
-  assert.match(reply ?? "", /Sofia accepted the task/);
+  assert.match(reply ?? "", /รับคำขอแล้วครับ กำลังเริ่มทำงาน/);
   const denied = await handle(message("interaction-4", "outsider", "channel-1", "/run do something"));
   assert.equal(denied, "Access denied.");
   assert.equal(h.submissions.length, 1);

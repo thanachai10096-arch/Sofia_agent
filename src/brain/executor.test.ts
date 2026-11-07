@@ -925,6 +925,7 @@ test("Brain answers explicit conversational turns without entering the coding or
       const value = parsed.phase === "understand"
         ? {
             mode: "conversation",
+            response: "สวัสดีครับ มีอะไรให้ช่วยได้บ้างครับ?",
             objective: "Answer a greeting",
             constraints: [],
             assumptions: [],
@@ -951,7 +952,8 @@ test("Brain answers explicit conversational turns without entering the coding or
   assert.equal(report.completed, true);
   assert.equal(report.state, "completed");
   assert.match(report.summary, /สวัสดีครับ/);
-  assert.deepEqual(phases, ["understand", "respond"]);
+  assert.deepEqual(phases, ["understand"], "conversation should complete in one provider call");
+  assert.equal(report.usage.modelCalls, 1);
   assert.equal(snapshots, 0);
   assert.equal(toolExecutions, 0);
   assert.equal(report.usage.toolCalls, 0);

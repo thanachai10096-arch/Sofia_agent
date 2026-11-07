@@ -85,7 +85,7 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
         } catch {
           // Completion notifications must never prevent the normal acceptance acknowledgement.
         }
-        return `Sofia accepted the task (run ${result.runId}, status: ${result.runStatus}).`;
+        return `รับคำขอแล้วครับ กำลังเริ่มทำงาน (รหัสงาน: ${result.runId.slice(0, 8)})`;
       case "forbidden":
         return "Access denied.";
       case "rejected":
