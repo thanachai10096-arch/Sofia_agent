@@ -103,10 +103,19 @@ export class FileDesktopCompanionStore implements DesktopCompanionStore {
   }
 
   delete(ownerKeyId: string): void {
-    try { unlinkSync(this.filename(ownerKeyId)); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw new Error("Desktop companion revocation could not be persisted.");
-      }
+    const target = this.filename(ownerKeyId);
+    const revoked = target + "." + process.pid + "." + randomBytes(8).toString("hex") + ".revoked";
+    try {
+      // Atomically move the live credential out of the loadable *.json namespace.
+      // Cleanup of the tombstone is best-effort: even if unlink is denied, a
+      // restart will never load the renamed record as an active pairing.
+      renameSync(target, revoked);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw new Error("Desktop companion revocation could not be persisted.");
+    }
+    try { unlinkSync(revoked); } catch {
+      // The .revoked file is deliberately ignored by loadAll().
     }
   }
 }
