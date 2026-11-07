@@ -61,9 +61,30 @@ export function parseDesktopApplicationAllowlist(raw: string | undefined): Deskt
  * Narrow application-launch driver. Screen capture and input are provided
  * separately by the platform-native driver after explicit local opt-in.
  */
+interface DesktopLaunchChild {
+  once(event: "spawn", listener: () => void): this;
+  once(event: "error", listener: (error: Error) => void): this;
+  kill(): boolean;
+  unref(): void;
+}
+
+type DesktopLaunchSpawn = (
+  command: string,
+  args: readonly string[],
+  options: {
+    detached: boolean;
+    shell: false;
+    stdio: "ignore";
+    windowsHide: boolean;
+    env: NodeJS.ProcessEnv;
+  },
+) => DesktopLaunchChild;
+
 export function createAllowlistedDesktopHostDriver(
   applications: DesktopApplicationAllowlist,
+  options: { spawnImpl?: DesktopLaunchSpawn } = {},
 ): DesktopHostDriver {
+  const spawnProcess = options.spawnImpl ?? (spawn as unknown as DesktopLaunchSpawn);
   return {
     async captureScreen() {
       throw new Error("Screen capture is not enabled in the initial local companion host.");
@@ -77,7 +98,7 @@ export function createAllowlistedDesktopHostDriver(
     async pressKey() {
       throw new Error("Keyboard control is not enabled in the initial local companion host.");
     },
-    async launchApplication(applicationId, args = []) {
+    async launchApplication(applicationId, args = [], signal) {
       const executable = applications[applicationId];
       if (!executable) throw new Error("Application is not allowlisted by the local operator.");
       if (!Array.isArray(args) || args.length > 32 ||
@@ -87,7 +108,8 @@ export function createAllowlistedDesktopHostDriver(
       const macApplicationBundle = process.platform === "darwin" && executable.toLowerCase().endsWith(".app");
       const launchCommand = macApplicationBundle ? "/usr/bin/open" : executable;
       const launchArgs = macApplicationBundle ? ["-a", executable, "--args", ...args] : args;
-      const child = spawn(launchCommand, launchArgs, {
+      if (signal?.aborted) throw signal.reason ?? new Error("Desktop application launch aborted.");
+      const child = spawnProcess(launchCommand, launchArgs, {
         detached: true,
         shell: false,
         stdio: "ignore",
@@ -95,10 +117,31 @@ export function createAllowlistedDesktopHostDriver(
         env: safeLaunchEnvironment(),
       });
       await new Promise<void>((resolve, reject) => {
-        child.once("spawn", () => resolve());
-        child.once("error", reject);
+        let settled = false;
+        const cleanup = () => signal?.removeEventListener("abort", onAbort);
+        const onAbort = () => {
+          if (settled) return;
+          settled = true;
+          child.kill();
+          cleanup();
+          reject(signal?.reason ?? new Error("Desktop application launch aborted."));
+        };
+        child.once("spawn", () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          child.unref();
+          resolve();
+        });
+        child.once("error", (error) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(error);
+        });
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) onAbort();
       });
-      child.unref();
       return { launched: true, applicationId };
     },
   };

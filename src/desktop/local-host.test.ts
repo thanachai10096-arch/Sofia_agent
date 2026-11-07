@@ -58,3 +58,23 @@ test("local desktop capabilities allow screen-only and input-only setups without
   assert.deepEqual(resolveLocalDesktopCapabilities({ editor: "/usr/bin/code" }, { enableInput: false, enableScreenCapture: false }), ["app:launch"]);
   assert.deepEqual(resolveLocalDesktopCapabilities({ editor: "/usr/bin/code" }, { enableInput: true, enableScreenCapture: true }), ["app:launch", "input:control", "screen:capture"]);
 });
+
+
+test("allowlisted local host aborts a pending application spawn", async () => {
+  const applications = Object.freeze({ harmless: "/usr/bin/true" });
+  let killed = false;
+  let unrefed = false;
+  const driver = createAllowlistedDesktopHostDriver(applications, {
+    spawnImpl: () => ({
+      once() { return this; },
+      kill() { killed = true; return true; },
+      unref() { unrefed = true; },
+    }),
+  });
+  const controller = new AbortController();
+  const launching = driver.launchApplication("harmless", [], controller.signal);
+  controller.abort(new Error("operator cancelled"));
+  await assert.rejects(launching, /operator cancelled/);
+  assert.equal(killed, true);
+  assert.equal(unrefed, false);
+});
