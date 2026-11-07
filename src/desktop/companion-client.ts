@@ -23,6 +23,7 @@ export interface DesktopCompanionClient {
   pollOnce(signal?: AbortSignal): Promise<boolean>;
   start(signal?: AbortSignal): Promise<void>;
   stop(): void;
+  disconnect(apiKey: string): Promise<void>;
 }
 
 function normalizeBaseUrl(value: string): string {
@@ -198,7 +199,18 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
       }
     },
     stop() {
+      // Stopping the local process is not the same as revoking the paired device.
+      // The restricted token remains in the OS credential store for a later restart.
       activeController?.abort(new Error("Desktop Companion stopped by local operator."));
+    },
+    async disconnect(apiKey: string) {
+      if (!apiKey || apiKey.length > 4096) throw new Error("A Sofia API key is required to revoke this pairing.");
+      activeController?.abort(new Error("Desktop Companion disconnected by local operator."));
+      const response = await fetcher(baseUrl + "/v1/desktop/companion/disconnect", {
+        method: "POST", redirect: "error", headers: { authorization: "Bearer " + apiKey },
+      });
+      if (!response.ok) throw new Error("Desktop Companion disconnect failed with HTTP " + response.status + ".");
+      await clearToken();
     },
   };
 }
