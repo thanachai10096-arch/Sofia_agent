@@ -94,7 +94,7 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
 
     // Answer obvious conversational nudges locally. They are not agent tasks
     // and must never spawn a new run or consume model/tool budget.
-    if (!isRunCommand && text && !text.startsWith("/")) {
+    if (naturalLanguageEnabled && !isRunCommand && text && !text.startsWith("/")) {
       const quickReply = quickConversationReply(text);
       if (quickReply) return quickReply;
     }
