@@ -123,6 +123,11 @@ test("Mobile Workspace serves protected PWA and proxies only same-origin scoped 
       headers: { cookie, origin, "sec-fetch-site": "same-origin" },
     });
     assert.equal(forbiddenPath.status, 404);
+
+    const unreviewedQuery = await fetch(base + "/api/sofia/v1/approvals/audit?include=secrets", {
+      headers: { cookie, origin, "sec-fetch-site": "same-origin" },
+    });
+    assert.equal(unreviewedQuery.status, 404);
   } finally {
     inbox.close();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
