@@ -543,6 +543,7 @@ export class SofiaBrain {
       task: input.task,
       referenceContext: priorReferenceContext(input.context),
       availableTools: this.dependencies.tools.listTools?.() ?? [],
+      capabilityDiscovery: { source: "current_brain_run_registry_and_execution_policy", tools: this.dependencies.tools.listTools?.() ?? [] },
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     };
     let value = await this.infer("understand", payload);
