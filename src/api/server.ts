@@ -80,8 +80,14 @@ function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapabi
     "desktop:workspace:read": "workspace:read",
     "desktop:workspace:write": "workspace:write",
     "desktop:process:execute": "process:execute",
+    "desktop:remote:app:launch": "app:launch",
+    "desktop:remote:input:control": "input:control",
   };
-  return [...new Set(scopes.map((scope) => mapping[scope]).filter((capability): capability is DesktopCapability => capability !== undefined))];
+  const remoteEnabled = scopes.includes("desktop:connect");
+  return [...new Set(scopes
+    .filter((scope) => remoteEnabled || !scope.startsWith("desktop:remote:"))
+    .map((scope) => mapping[scope])
+    .filter((capability): capability is DesktopCapability => capability !== undefined))];
 }
 
 function normalizeContext(context: AgentRunInput["context"]): string | undefined {
