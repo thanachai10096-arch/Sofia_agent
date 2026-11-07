@@ -315,7 +315,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (workspaceAuth && req.url && (req.url === workspaceRoot || req.url.startsWith(workspaceRoot + "/"))) {
         const pathname = new URL(req.url, "http://sofia.local").pathname;
         if (req.method === "GET" && (pathname === workspaceRoot || pathname === workspaceRoot + "/")) {
-          res.writeHead(302, { location: workspaceRoot + "/", "cache-control": "no-store" });
+          const identity = workspaceAuth.authenticate(req.headers.cookie);
+          res.writeHead(302, {
+            location: workspaceRoot + (identity ? "/index.html" : "/login.html"),
+            "cache-control": "no-store",
+            "referrer-policy": "no-referrer",
+          });
           return res.end();
         }
         if (req.method === "GET" && pathname === workspaceRoot + "/auth/login") {
@@ -366,8 +371,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (pathname.startsWith("/workspace/") && req.method === "GET") {
           const asset = pathname.slice((workspaceRoot + "/").length);
-          const allowedAssets = new Set(["index.html", "workspace.css", "workspace.js", "manifest.webmanifest", "sofia-icon.svg", "service-worker.js"]);
+          const allowedAssets = new Set(["index.html", "login.html", "workspace.css", "workspace.js", "manifest.webmanifest", "sofia-icon.svg", "service-worker.js"]);
           if (!allowedAssets.has(asset)) return json(res, 404, { error: "not_found" }, origin, config);
+          const identity = workspaceAuth.authenticate(req.headers.cookie);
+          if (asset === "index.html" && !identity) {
+            res.writeHead(302, { location: workspaceRoot + "/login.html", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          }
+          if (asset === "login.html" && identity) {
+            res.writeHead(302, { location: workspaceRoot + "/index.html", "cache-control": "no-store" });
+            return res.end();
+          }
           const directory = path.resolve(config.workspaceStaticDirectory ?? path.resolve(process.cwd(), "web/mobile-workspace"));
           const file = path.resolve(directory, asset);
           if (!file.startsWith(directory + path.sep)) return json(res, 404, { error: "not_found" }, origin, config);
