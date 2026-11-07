@@ -37,7 +37,7 @@ export function createRemoteDesktopTools(options: {
           throw new Error("Invalid application identifier.");
         }
         const args = input.args === undefined ? [] : input.args;
-        if (!Array.isArray(args) || args.length > 32 || args.some((arg) => typeof arg !== "string" || arg.length > 1000 || arg.includes("\\0"))) {
+        if (!Array.isArray(args) || args.length > 32 || args.some((arg) => typeof arg !== "string" || arg.length > 1000 || arg.includes("\0"))) {
           throw new Error("Invalid application arguments.");
         }
         return dispatch({ kind: "app.launch", applicationId: input.applicationId, args: args as string[] }, context);
@@ -77,7 +77,7 @@ export function createRemoteDesktopTools(options: {
         inputSchema: { type: "object", properties: { text: string("Text to type; max 2000 characters") }, required: ["text"], additionalProperties: false },
         async execute(input, context: ToolContext) {
           require("input:control");
-          if (typeof input.text !== "string" || input.text.length > 2000 || input.text.includes("\\0")) {
+          if (typeof input.text !== "string" || input.text.length > 2000 || input.text.includes("\0")) {
             throw new Error("Text must be a string of at most 2000 characters.");
           }
           return dispatch({ kind: "input.type", text: input.text }, context);
