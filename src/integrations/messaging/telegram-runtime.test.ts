@@ -71,6 +71,36 @@ test("complete Telegram configuration constructs a runtime without starting netw
   assert.deepEqual(warnings, []);
 });
 
+test("Telegram refuses a shared API key when multiple users are allowed", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    SOFIA_API_KEY: "shared-key",
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.match(warnings[0] ?? "", /Per-user Telegram API keys are required/);
+  assert.doesNotMatch(warnings.join(" "), /shared-key/);
+});
+
+test("Telegram accepts distinct per-user API keys without a shared fallback key", async () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    TELEGRAM_USER_API_KEYS_JSON: '{"123":"key-one","456":"key-two"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.ok(runtime);
+  await runtime.stop();
+  assert.deepEqual(warnings, []);
+});
+
 
 test("Telegram run completion sends the real completed output to the originating chat", async () => {
   const sent: Array<{ conversationId: string; text: string }> = [];
