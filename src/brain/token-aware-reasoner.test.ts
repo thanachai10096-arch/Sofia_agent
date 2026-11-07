@@ -123,7 +123,7 @@ test("ordinary conversation task labels do not reject every model route", async 
     payload: { task: "ตอบว่า 2+2 เท่ากับเท่าไร", requiredCapabilities: ["general"] },
   }), { signal: controller.signal, maxContextTokens: 16_000 });
   await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
-  assert.deepEqual(captured?.requiredCapabilities, []);
+  assert.deepEqual(captured?.requiredCapabilities, ["reasoning"]);
 });
 
 test("task intent labels map to supported provider capabilities", async () => {
