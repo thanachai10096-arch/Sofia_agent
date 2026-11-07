@@ -413,7 +413,13 @@ export class SofiaBrain {
           observations: recent,
           diagnoses: this.diagnoses,
           decisions: this.decisions,
-          projectContext: this.projectContext ? compactProjectContext(this.projectContext) : undefined,
+          projectContext: this.projectContext ? {
+            root: this.projectContext.root,
+            files: this.projectContext.files.slice(0, 10).map((file) => ({
+              path: file.path,
+              content: file.content.slice(0, 1_200),
+            })),
+          } : undefined,
           projectMemory: this.projectMemory.slice(0, 12).map((entry) => ({ kind: entry.kind, content: entry.content, confidence: entry.confidence, source: entry.source })),
         },
       });
