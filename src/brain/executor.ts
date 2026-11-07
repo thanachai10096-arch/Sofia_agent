@@ -563,9 +563,11 @@ export class SofiaBrain {
     return result;
   }
 
-  private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string): Promise<void> {
+  private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string): Promise<boolean> {
     const descriptor = this.dependencies.tools.describe(proposal.tool);
-    if (!descriptor) throw new RecoverableFailure("tool_error", "Unknown delegated tool");
+    // Specialist output is advisory: reject unknown tools and let the primary
+    // planner recover instead of terminating the parent run.
+    if (!descriptor) return false;
     const permitted = new Set([
       "workspace.read_file",
       "workspace.list_files",
@@ -575,15 +577,14 @@ export class SofiaBrain {
       "workspace.write_file",
       "workspace.apply_patch",
     ]);
-    if (!permitted.has(proposal.tool)) {
-      throw new RecoverableFailure("tool_error", "Delegated tool is outside Brain scope");
-    }
+    if (!permitted.has(proposal.tool)) return false;
     await this.executeStep({
       id: "delegated-" + this.usage.steps,
       objective: proposal.reason,
       dependencies: [],
       call: { tool: proposal.tool, input: proposal.input },
     }, principalId);
+    return true;
   }
 
   private async inferValidatedPlan(
@@ -1119,30 +1120,27 @@ export class SofiaBrain {
           ) : undefined;
 
           if (specialist?.proposedAction) {
-            recoveryRounds += 1;
-            if (recoveryRounds > this.limits.maxReplans + 1) {
+            if (recoveryRounds + 1 > this.limits.maxReplans + 1) {
               throw new Stop("Recovery round budget exhausted");
             }
-
             if (recoveryFingerprints.has(diagnosis.fingerprint)) {
-              throw new Stop(
-                `Recovery repeated the same failure: ${diagnosis.fingerprint}`,
-              );
+              throw new Stop("Recovery repeated the same failure: " + diagnosis.fingerprint);
             }
-            recoveryFingerprints.add(diagnosis.fingerprint);
 
-            // Recovery actions still flow through the Brain state machine and
-            // the main ToolGateway. After the specialist proposes a repair,
-            // verify it immediately instead of paying for an unnecessary plan.
-            this.move("replanning");
-            this.move("executing");
-            await this.applySubagentProposal(specialist.proposedAction, input.principalId);
-            this.move("observing");
-
-            this.emit({ type: "brain.coding.loop.repaired", count: recoveryRounds });
-            completedStepIds = new Set(currentPlan.steps.map((step) => step.id));
-            await checkpointState(currentPlan);
-            continue;
+            // Only registered, explicitly permitted proposals enter ToolGateway.
+            // Invalid proposals fall through to the primary planner's bounded replan.
+            const applied = await this.applySubagentProposal(specialist.proposedAction, input.principalId);
+            if (applied) {
+              recoveryRounds += 1;
+              recoveryFingerprints.add(diagnosis.fingerprint);
+              this.move("replanning");
+              this.move("executing");
+              this.move("observing");
+              this.emit({ type: "brain.coding.loop.repaired", count: recoveryRounds });
+              completedStepIds = new Set(currentPlan.steps.map((step) => step.id));
+              await checkpointState(currentPlan);
+              continue;
+            }
           }
 
           if (diagnosis.repeated > 1) {
