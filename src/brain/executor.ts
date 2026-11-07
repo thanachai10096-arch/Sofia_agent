@@ -1059,11 +1059,19 @@ export class SofiaBrain {
           this.move("observing");
 
           const criteria = input.acceptanceCriteria ?? [];
-          if (criteria.length === 0) {
+          const changedFiles = baselineId
+            ? await this.io(() =>
+                this.dependencies.tools.changedFiles(baselineId!, this.signal),
+              )
+            : [];
+          if (criteria.length > 0) {
+            verification = await this.verify(criteria, input.principalId);
+          } else if (changedFiles.length > 0) {
+            // Run project-level checks only when this task actually changed
+            // workspace files. Research, browser, and other read-only actions
+            // must not fail because their workspace has no package/test setup.
             this.move("verifying");
             this.emit({ type: "brain.verification.started" });
-            // A coding task gets a bounded trusted verification pipeline by default.
-            // Custom acceptance criteria still take precedence for domain-specific work.
             verification = await runVerification(
               this.dependencies.tools,
               ["typecheck", "test", "build"],
@@ -1080,49 +1088,67 @@ export class SofiaBrain {
               passed: verification.every((item) => item.passed),
             });
           } else {
-            verification = await this.verify(criteria, input.principalId);
+            // A non-mutating action is verified by successful tool execution
+            // evidence, not by unrelated project build/test commands.
+            this.move("verifying");
+            this.emit({ type: "brain.verification.started" });
+            const snapshot = await this.io(() => this.dependencies.tools.snapshot(this.signal));
+            const evidenceIds = this.observations.filter((item) => item.ok).map((item) => item.evidenceId);
+            const passed = this.observations.length > 0 &&
+              this.observations.every((item) => item.ok) &&
+              evidenceIds.length === this.observations.length &&
+              evidenceIds.every((id) => Boolean(id));
+            verification = [{
+              criterionId: "tool-execution",
+              passed,
+              detail: passed
+                ? "All planned tool calls completed successfully; execution evidence was recorded."
+                : "The action has no complete successful tool-execution evidence.",
+              evidenceIds,
+              workspaceRevision: snapshot.revision,
+            }];
+            this.emit({ type: "brain.verification.completed", passed });
           }
 
           if (verification.every((item) => item.passed)) {
-            const changedFiles = baselineId
-              ? await this.io(() =>
-                  this.dependencies.tools.changedFiles(baselineId!, this.signal),
-                )
-              : [];
-            const diffResult = await this.io(() =>
-              this.dependencies.tools.execute(
-                { tool: "git.diff", input: {} },
-                {
-                  runId: this.runId,
-                  signal: this.signal,
-                  requireApproval: false,
-                  notifyApproval: () => {},
-                },
-              ),
-            );
-            const diff =
-              diffResult.ok && diffResult.data
-                ? JSON.stringify(diffResult.data)
-                : undefined;
-            const review = reviewCodeChange({
-              task: input.task,
-              changedFiles,
-              verification,
-              diff,
-              acceptanceCriteria: (input.acceptanceCriteria ?? []).map(
-                (criterion) => criterion.description,
-              ),
-            });
-            this.emit({
-              type: "brain.review.completed",
-              passed: review.approved,
-              count: codingIteration,
-            });
-            if (!review.approved) {
-              throw new RecoverableFailure(
-                review.repairCategory ?? "incomplete_solution",
-                review.reason,
+            if (changedFiles.length > 0) {
+              const diffResult = await this.io(() =>
+                this.dependencies.tools.execute(
+                  { tool: "git.diff", input: {} },
+                  {
+                    runId: this.runId,
+                    signal: this.signal,
+                    requireApproval: false,
+                    notifyApproval: () => {},
+                  },
+                ),
               );
+              const diff =
+                diffResult.ok && diffResult.data
+                  ? JSON.stringify(diffResult.data)
+                  : undefined;
+              const review = reviewCodeChange({
+                task: input.task,
+                changedFiles,
+                verification,
+                diff,
+                acceptanceCriteria: (input.acceptanceCriteria ?? []).map(
+                  (criterion) => criterion.description,
+                ),
+              });
+              this.emit({
+                type: "brain.review.completed",
+                passed: review.approved,
+                count: codingIteration,
+              });
+              if (!review.approved) {
+                throw new RecoverableFailure(
+                  review.repairCategory ?? "incomplete_solution",
+                  review.reason,
+                );
+              }
+            } else {
+              this.emit({ type: "brain.review.completed", passed: true, count: codingIteration });
             }
 
             this.move("completed");
