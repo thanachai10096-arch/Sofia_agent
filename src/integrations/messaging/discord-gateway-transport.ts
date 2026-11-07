@@ -89,9 +89,18 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
       current.addEventListener("close", (event) => {
         if (settled) return;
         const code = (event as CloseEvent).code;
-        if (code === 4004) notify("gateway_auth_failed", code);
-        else notify("gateway_disconnected", code);
-        finish(code === 4004 ? "stopped" : "reconnect");
+        if (code === 4004 || code === 4013 || code === 4014) {
+          notify("gateway_auth_failed", code);
+          finish("stopped");
+          return;
+        }
+        if (code === 4007 || code === 4009) {
+          sessionId = undefined;
+          resumeUrl = undefined;
+          sequence = null;
+        }
+        notify("gateway_disconnected", code);
+        finish("reconnect");
       });
       current.addEventListener("message", (event) => {
         if (settled) return;
