@@ -569,7 +569,6 @@ export class SofiaBrain {
     // planner recover instead of terminating the parent run.
     if (!descriptor) return false;
     if (!SUBAGENT_ALLOWED_TOOLS.has(proposal.tool)) return false;
-    if (!permitted.has(proposal.tool)) return false;
     this.move("replanning");
     this.move("executing");
     await this.executeStep({
