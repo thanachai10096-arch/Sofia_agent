@@ -343,3 +343,38 @@ test("Anthropic thinking-only recovery explicitly disables provider-default thin
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("OpenAI-compatible gateway preserves length finish reason for non-empty output", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: "{\"partial\":true}" }, finish_reason: "length" }],
+    usage: { prompt_tokens: 10, completion_tokens: 20 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const gateway = new SofiaModelGateway({ coding: {
+      baseUrl: "https://api.example.com/v1", apiKey: "test", model: "test-model",
+    } });
+    const result = await gateway.generate({ task: "test", kind: "analysis", step: 1 }, route);
+    assert.equal(result.text, "{\"partial\":true}");
+    assert.equal(result.finishReason, "length");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("Anthropic max_tokens stop reason is normalized to length", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    content: [{ type: "text", text: "{\"partial\":true}" }],
+    stop_reason: "max_tokens",
+    usage: { input_tokens: 10, output_tokens: 20 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const gateway = new SofiaModelGateway({ coding: {
+      baseUrl: "https://api.anthropic.com/v1", apiKey: "test", model: "claude-test-model",
+      protocol: "anthropic-messages",
+    } });
+    const result = await gateway.generate({ task: "test", kind: "analysis", step: 1 }, route);
+    assert.equal(result.text, "{\"partial\":true}");
+    assert.equal(result.finishReason, "length");
+  } finally { globalThis.fetch = originalFetch; }
+});
