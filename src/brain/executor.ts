@@ -854,7 +854,7 @@ export class SofiaBrain {
     diagnosis: Diagnosis,
   ): Promise<ExecutionPlan> {
     if (this.usage.replans >= this.limits.maxReplans) {
-      throw new Stop("Replan budget exhausted");
+      throw new Stop(diagnosis.message || "Replan budget exhausted");
     }
 
     this.usage.replans += 1;
