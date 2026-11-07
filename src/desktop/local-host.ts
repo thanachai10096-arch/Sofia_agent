@@ -22,6 +22,15 @@ export function parseDesktopApplicationAllowlist(raw: string | undefined): Deskt
       throw new Error("Desktop application entries require a short ID and an absolute executable path.");
     }
     const canonical = realpathSync(executable);
+    const executableName = path.basename(canonical).toLowerCase();
+    const blockedLaunchers = new Set([
+      "sh", "bash", "zsh", "dash", "fish", "cmd", "cmd.exe", "powershell", "powershell.exe",
+      "pwsh", "pwsh.exe", "wscript", "wscript.exe", "cscript", "cscript.exe", "node", "node.exe",
+      "python", "python.exe", "python3", "ruby", "perl", "php", "osascript", "expect", "busybox",
+    ]);
+    if (blockedLaunchers.has(executableName)) {
+      throw new Error("General-purpose command interpreters cannot be allowlisted as desktop applications.");
+    }
     const info = statSync(canonical);
     if (!info.isFile()) throw new Error("Allowlisted desktop executable is not a regular file: " + id);
     if (process.platform !== "win32") accessSync(canonical, constants.X_OK);
