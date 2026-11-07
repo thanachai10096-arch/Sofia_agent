@@ -25,7 +25,8 @@ Environment:
 
 async function main() {
   if (!command || command === "help" || command === "--help") return help();
-  if (command === "desktop" && args[1] === "companion" && args[2] === "disconnect") return disconnectDesktopCompanion();\n  if (command === "desktop" && args[1] === "companion") return runDesktopCompanion();
+  if (command === "desktop" && args[1] === "companion" && args[2] === "disconnect") return disconnectDesktopCompanion();
+  if (command === "desktop" && args[1] === "companion") return runDesktopCompanion();
 
   const runtime = createNodeWorkspaceRuntime();
   if (command === "init") {
