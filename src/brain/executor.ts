@@ -56,8 +56,9 @@ const DEFAULT_LIMITS: BrainLimits = {
 
 const TRANSITIONS: Record<BrainState, readonly BrainState[]> = {
   idle: ["understanding"],
-  understanding: ["planning"],
+  understanding: ["planning", "responding"],
   planning: ["executing"],
+  responding: ["completed"],
   executing: ["observing", "waiting_approval", "diagnosing"],
   observing: ["executing", "verifying", "diagnosing"],
   verifying: ["waiting_approval", "diagnosing", "completed"],
@@ -342,7 +343,7 @@ export class SofiaBrain {
   }
 
   private async infer(
-    phase: "understand" | "plan" | "replan" | "subagent",
+    phase: "understand" | "respond" | "plan" | "replan" | "subagent",
     payload: Record<string, unknown>,
   ): Promise<unknown> {
     if (this.usage.modelCalls >= this.limits.maxModelCalls) {
@@ -502,6 +503,22 @@ export class SofiaBrain {
     }
 
     return plan;
+  }
+
+  private async respond(input: BrainRunInput, understanding: TaskUnderstanding): Promise<string> {
+    const value = await this.infer("respond", {
+      task: input.task,
+      referenceContext: priorReferenceContext(input.context),
+      understanding,
+    });
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Stop("Conversational response must be a JSON object");
+    }
+    const response = (value as Record<string, unknown>).response;
+    if (typeof response !== "string" || !response.trim()) {
+      throw new Stop("Conversational response was empty or malformed");
+    }
+    return response.trim().slice(0, 12_000);
   }
 
   private async understand(input: BrainRunInput): Promise<TaskUnderstanding> {
@@ -938,6 +955,18 @@ export class SofiaBrain {
         this.emit({
           type: "brain.understanding.completed",
         });
+
+        // Conversational turns bypass workspace snapshots, plans, tools,
+        // coding verification, git diff, and code review entirely.
+        if (understanding.mode === "conversation" &&
+            (input.acceptanceCriteria ?? []).length === 0 &&
+            input.plan === undefined) {
+          this.move("responding");
+          const response = await this.respond(input, understanding);
+          this.emit({ type: "brain.response.completed" });
+          this.move("completed");
+          return this.report(true, response, [], [], false, []);
+        }
 
         baselineId = (
           await this.io(() => this.dependencies.tools.snapshot(this.signal))
