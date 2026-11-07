@@ -126,7 +126,7 @@ test("web search remains disabled by default and runs only with network policy p
 });
 
 
-test("HTTP MCP tools are checked against their operator-configured endpoint, not model input", async () => {
+test("HTTP MCP tools validate both fixed endpoint and model-supplied URLs", async () => {
   let executions = 0;
   const registry = new MapToolRegistry([{
     name: "mcp.docs.lookup",
@@ -155,7 +155,12 @@ test("HTTP MCP tools are checked against their operator-configured endpoint, not
     { runtime: runtime(), tools: registry },
     { ...defaultPolicy, allowNetwork: true, allowedHosts: ["mcp.example.com"] },
   );
-  const result = await allowed.execute({ tool: "mcp.docs.lookup", input: { query: "hello", url: "https://attacker.example" } }, context);
+  const modelUrlDenied = await allowed.execute({ tool: "mcp.docs.lookup", input: { query: "hello", url: "https://attacker.example" } }, context);
+  assert.equal(modelUrlDenied.ok, false);
+  assert.match(modelUrlDenied.error?.message ?? "", /allowlisted/i);
+  assert.equal(executions, 0);
+
+  const result = await allowed.execute({ tool: "mcp.docs.lookup", input: { query: "hello" } }, context);
   assert.equal(result.ok, true);
   assert.equal(executions, 1);
 });
