@@ -203,9 +203,9 @@ export function createPlatformDesktopHostDriver(options: {
   const run = options.run ?? runNativeCommand;
   const call = (command: string, args: string[], extra: NodeJS.ProcessEnv = {}, timeoutMs = 15_000) =>
     run(command, args, { env: minimalEnvironment(extra), timeoutMs, maxOutputBytes: 6 * 1024 * 1024 });
-  const powershell = (operation: string, extra: NodeJS.ProcessEnv = {}) =>
+  const powershell = (operation: string, extra: NodeJS.ProcessEnv = {}, timeoutMs = 20_000) =>
     call("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_SCRIPT],
-      { ...extra, SOFIA_NATIVE_OPERATION: operation }, 20_000);
+      { ...extra, SOFIA_NATIVE_OPERATION: operation }, timeoutMs);
 
   return {
     async captureScreen(options) {
