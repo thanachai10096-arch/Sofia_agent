@@ -1002,3 +1002,59 @@ test("explicit Thai file-edit requests stay on the action path even if the model
   assert.ok(!phases.includes("respond"));
   assert.ok(report.usage.toolCalls > 0);
 });
+
+
+test("Thai imperative follow-ups such as ทำมา enter the action planner even if understanding labels them conversational", async () => {
+  const phases: string[] = [];
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      phases.push(parsed.phase);
+      const value = parsed.phase === "understand"
+        ? {
+            objective: "Continue the requested implementation",
+            constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [],
+            risk: "low", successCriteria: ["the planned action runs"], ambiguities: [],
+            mode: "conversation", response: "I will do it.",
+          }
+        : plan;
+      return {
+        inputTokens: 10,
+        async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({ task: "ทำมา" });
+  assert.ok(phases.includes("plan"), "explicit Thai action follow-up must not be short-circuited as chat");
+  assert.equal(report.completed, true, report.summary);
+});
+
+
+test("Thai why-questions remain conversational and are not forced into tool execution", async () => {
+  const phases: string[] = [];
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      phases.push(parsed.phase);
+      const value = {
+        objective: "Explain the reason", constraints: [], assumptions: [], requiredCapabilities: [],
+        requiredTools: [], risk: "low", successCriteria: [], ambiguities: [],
+        mode: "conversation", response: "เพราะต้องตรวจสอบก่อน",
+      };
+      return { inputTokens: 10, async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; } };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({ task: "ทำไมยังไม่เสร็จ" });
+  assert.equal(report.completed, true, report.summary);
+  assert.deepEqual(phases, ["understand"]);
+});
