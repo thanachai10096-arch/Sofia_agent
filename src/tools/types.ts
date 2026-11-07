@@ -7,6 +7,8 @@ export interface SofiaTool {
   inputSchema: Record<string, unknown>;
   /** Explicit security effects for policy/approval; inferred from name when omitted. */
   effects?: readonly ToolEffect[];
+  /** Fixed operator-configured endpoint for network-backed tools; never model-controlled. */
+  networkUrl?: string;
   execute(input: Record<string, unknown>, context: ToolContext): Promise<unknown>;
 }
 export interface ToolRegistry { get(name: string): SofiaTool | undefined; list(): SofiaTool[]; }
