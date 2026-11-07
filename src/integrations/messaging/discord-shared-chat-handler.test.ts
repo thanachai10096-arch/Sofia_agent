@@ -133,5 +133,5 @@ test("Discord tasks continue when the user memory store is unavailable", async (
   const reply = await h.create()(message("memory-failure", "user-1", "channel-1", "Continue without memory"));
   assert.match(reply ?? "", /รับคำขอแล้วครับ กำลังเริ่มทำงาน/);
   assert.equal(h.submissions.length, 1);
-  assert.equal(h.submissions[0]?.context, undefined);
+  assert.equal(h.submissions[0]?.context, "Origin: discord chat integration. Conversation ID: channel-1.");
 });
