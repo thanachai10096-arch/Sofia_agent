@@ -89,6 +89,18 @@ describe("Sofia security controls",()=>{
   });
 
 
+  it("rejects trusted targets that are not HTTPS or contain URL credentials", () => {
+    for (const target of ["http://trusted.example/run", "https://user:pass@trusted.example/run"]) {
+      const decision = assessAction(
+        { runId: "r", toolName: "workflow.execute", input: {}, trustedNetworkTargets: [target], effects: ["network"] },
+        [],
+        ["trusted.example"],
+      );
+      assert.equal(decision.allowed, false);
+      assert.match(decision.reason ?? "", /valid HTTPS URLs/i);
+    }
+  });
+
   it("binds trusted network destinations into approvals while preserving legacy hashes", () => {
     const input = { workflowId: "daily-report" };
     const legacy = actionHash("run", "workflow.execute", input, "principal");
