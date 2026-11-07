@@ -144,7 +144,12 @@ export class SqliteApprovalQueue {
       const now = Date.now();
       if (record.status !== "pending" || record.expiresAt <= now || !sameHash(record.actionHash, input.actionHash)) {
         if (record.status === "pending" && record.expiresAt <= now) {
-          this.db.prepare("UPDATE approvals SET status='expired',decided_at=? WHERE id=? AND status='pending'").run(now, record.id);
+          const expired = this.db.prepare("UPDATE approvals SET status='expired',decided_at=?,decided_by='system:expiry' WHERE id=? AND owner_id=? AND status='pending'")
+            .run(now, record.id, input.ownerId);
+          if (Number(expired.changes) === 1) {
+            this.db.prepare("INSERT INTO approval_audit(id,approval_id,owner_id,decision,decided_by,action_hash,created_at) VALUES(?,?,?,?,?,?,?)")
+              .run(randomUUID(), record.id, input.ownerId, "expired", "system:expiry", record.actionHash, now);
+          }
         }
         this.db.exec("COMMIT");
         return undefined;
@@ -167,8 +172,22 @@ export class SqliteApprovalQueue {
   }
 
   private expirePending(): void {
-    this.db.prepare("UPDATE approvals SET status='expired',decided_at=? WHERE status='pending' AND expires_at<=?")
-      .run(Date.now(), Date.now());
+    const now = Date.now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const expired = this.db.prepare("SELECT id,owner_id,action_hash FROM approvals WHERE status='pending' AND expires_at<=?")
+        .all(now) as Array<{ id: string; owner_id: string; action_hash: string }>;
+      const update = this.db.prepare("UPDATE approvals SET status='expired',decided_at=?,decided_by='system:expiry' WHERE id=? AND status='pending'");
+      const audit = this.db.prepare("INSERT INTO approval_audit(id,approval_id,owner_id,decision,decided_by,action_hash,created_at) VALUES(?,?,?,?,?,?,?)");
+      for (const record of expired) {
+        if (Number(update.run(now, record.id).changes) !== 1) continue;
+        audit.run(randomUUID(), record.id, record.owner_id, "expired", "system:expiry", record.action_hash, now);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   close(): void { this.db.close(); }
