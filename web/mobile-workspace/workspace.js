@@ -251,5 +251,8 @@
   $("approvalReview").addEventListener("click", () => showModal("Approval required", "This workspace build does not yet include the approval inbox UI. High-impact actions must remain blocked until a real approval flow is connected."));
   $("chatInput").addEventListener("focus", () => { if (window.matchMedia("(max-width:600px)").matches) setTimeout(() => els.chat.scrollIntoView({behavior:"smooth",block:"center"}),150); });
   window.addEventListener("beforeunload", () => { clearInterval(state.refreshTimer); clearInterval(state.clockTimer); });
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
+    navigator.serviceWorker.register("./service-worker.js").catch(() => { /* Offline shell is an enhancement, not a blocker. */ });
+  }
   setStatus(false, "Not connected");
 })();
