@@ -70,15 +70,18 @@ export class RegistryToolGateway implements ToolGateway {
     const capability=capabilitySecret?issueCapability({principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret):undefined;
     if(capabilitySecret && capability && !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret)) return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability verification failed."}};
     await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:requiresApproval?"approval_required":"allow",input:redactSecrets(input)});
+    let approvalEvidence: {requestId:string;runId:string;principalId:string;toolName:string;actionHash:string}|undefined;
     if(requiresApproval){
       if(!this.approval)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is required for this tool."}};
       context.notifyApproval(true);
       try{
-        const approved=await this.approval({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk});
+        const requestId=randomUUID();
+        const approved=await this.approval({requestId,runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk});
         if(!approved){
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
         }
+        approvalEvidence={requestId,runId:context.runId,principalId:context.principalId??"anonymous",toolName:call.tool,actionHash:assessment.actionHash};
       }finally{context.notifyApproval(false);}
     }
     try{
@@ -93,7 +96,7 @@ export class RegistryToolGateway implements ToolGateway {
       const boundSignal=this.security.bindSignal(context.signal);
       let data:unknown;
       try {
-        data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
+        data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal,approval:approvalEvidence});
       } finally {
         boundSignal.dispose();
       }

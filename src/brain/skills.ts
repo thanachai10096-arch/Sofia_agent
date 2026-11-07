@@ -86,12 +86,32 @@ export function matchSkills(
 }
 
 export function compactSkillContext(skills: readonly SofiaSkill[]): unknown[] {
-  return skills.map((skill) => ({
-    id: skill.id,
-    strategy: skill.strategy,
-    procedure: skill.procedure,
-    verification: skill.verification,
-  }));
+  return skills.map((skill) => {
+    // Learned repair records are model-authored memory, not executable or
+    // trusted instructions. Never replay their free-form procedure/trigger/
+    // description text into a future planner prompt. Only expose the bounded
+    // strategy/category hint; actual actions must still come from registered
+    // tools and pass the normal gateway policy.
+    if (skill.id.startsWith("learned:")) {
+      return {
+        id: `learned-guidance:${skill.categories[0] ?? "unknown"}`,
+        source: "learned-guidance",
+        trusted: false,
+        strategy: skill.strategy,
+        categories: [...skill.categories],
+        procedure: [],
+        verification: [],
+      };
+    }
+    return {
+      id: skill.id,
+      source: "builtin",
+      trusted: true,
+      strategy: skill.strategy,
+      procedure: [...skill.procedure],
+      verification: [...skill.verification],
+    };
+  });
 }
 
 export function allBuiltinSkills(): SofiaSkill[] {

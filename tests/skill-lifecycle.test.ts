@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { VersionedSkillLifecycle } from "../src/brain/skill-lifecycle.js";
+import { VersionedSkillLifecycle, getSkillCandidateDigest } from "../src/brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../src/skills/platform.js";
 import type { SkillPackage } from "../src/skills/platform.js";
 
@@ -14,7 +14,18 @@ function pkg(version: string): SkillPackage {
   } };
 }
 function dir(): string { return mkdtempSync(path.join(os.tmpdir(), "sofia-skill-life-")); }
-const passing = async () => ({ passed: true, checks: [{ name: "regression", passed: true }, { name: "policy", passed: true }] });
+const passing = async (candidate: SkillPackage) => ({
+  passed: true,
+  checks: [{ name: "regression", passed: true }, { name: "policy", passed: true }],
+  runtimeVerification: {
+    candidateDigest: getSkillCandidateDigest(candidate),
+    runnerId: "test-isolated-runner",
+    isolatedWorkspaceId: "test-workspace",
+    isolated: true as const,
+    executedChecks: candidate.skill.verification.map((name) => ({ name, passed: true })),
+    completedAt: new Date().toISOString(),
+  },
+});
 
 test("skill lifecycle requires evaluation and confidence before promotion", async () => {
   const root = dir();
@@ -27,6 +38,28 @@ test("skill lifecycle requires evaluation and confidence before promotion", asyn
     lifecycle.promote(candidate.id);
     assert.equal(platform.get("repair-skill")?.version, "1.0.0");
     assert.equal(lifecycle.active("repair-skill")?.status, "active");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill lifecycle rejects missing, blank, or duplicate provenance evidence", () => {
+  const root = dir();
+  try {
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, {
+      file: path.join(root, "lifecycle.json"),
+    });
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.0"), { source: "repair", evidenceIds: [], confidence: 1 }),
+      /Invalid skill provenance/,
+    );
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.1"), { source: "repair", evidenceIds: ["  "], confidence: 1 }),
+      /Invalid skill provenance/,
+    );
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.2"), { source: "repair", evidenceIds: ["e1", "e1"], confidence: 1 }),
+      /Invalid skill provenance/,
+    );
+    assert.equal(lifecycle.list().length, 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -141,5 +174,93 @@ test("skill lifecycle validates all persisted active skills before mutating the 
     );
     assert.equal(conflictingPlatform.get("repair-skill"), undefined, "failed restore must not partially register earlier active skills");
     assert.equal(conflictingPlatform.get("second-skill")?.version, "0.9.0");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("skill lifecycle never promotes when runtime verification is unavailable", async () => {
+  const root = dir();
+  try {
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, async () => ({
+      passed: false,
+      checks: [
+        { name: "skill-metadata", passed: true },
+        { name: "procedure", passed: true },
+        { name: "verification-requirements", passed: true },
+        { name: "runtime-verification", passed: false, detail: "No isolated verifier is configured." },
+      ],
+    }), { file: path.join(root, "runtime-unverified.json") });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["metadata-only"], confidence: 1,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.throws(() => lifecycle.promote(candidate.id), /evaluated/);
+    assert.equal(platform.get("repair-skill"), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("skill lifecycle rejects missing or mismatched isolated runtime evidence", async () => {
+  const root = dir();
+  try {
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, async (candidate) => ({
+      passed: true,
+      checks: [{ name: "metadata", passed: true }],
+      runtimeVerification: {
+        candidateDigest: "0".repeat(64),
+        runnerId: "claimed-runner",
+        isolatedWorkspaceId: "claimed-workspace",
+        isolated: true,
+        executedChecks: candidate.skill.verification.map((name) => ({ name, passed: true })),
+        completedAt: new Date().toISOString(),
+      },
+    }), { file: path.join(root, "mismatched-evidence.json") });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["candidate-binding"], confidence: 1,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.throws(() => lifecycle.promote(candidate.id), /isolated runtime verification/);
+    assert.equal(platform.get("repair-skill"), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("skill lifecycle deactivates legacy active records without isolated evidence during restore", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "legacy-lifecycle.json");
+    const originalPlatform = new InMemorySkillsPlatform();
+    const original = new VersionedSkillLifecycle(originalPlatform, passing, { file });
+    const candidate = original.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["legacy-record"], confidence: 1,
+    });
+    await original.evaluate(candidate.id);
+    original.promote(candidate.id);
+
+    const persisted = JSON.parse(readFileSync(file, "utf8")) as {
+      records: Array<{ evaluation?: { runtimeVerification?: unknown } }>;
+    };
+    delete persisted.records[0].evaluation?.runtimeVerification;
+    writeFileSync(file, JSON.stringify(persisted), "utf8");
+
+    const restoredPlatform = new InMemorySkillsPlatform();
+    const restored = new VersionedSkillLifecycle(restoredPlatform, passing, { file });
+    assert.equal(restored.active("repair-skill"), undefined);
+    assert.equal(restoredPlatform.get("repair-skill"), undefined);
+    assert.equal(restored.list("repair-skill")[0]?.status, "rejected");
+
+    const migrated = JSON.parse(readFileSync(file, "utf8")) as {
+      activeBySkill: Record<string, string>;
+      records: Array<{ status: string; evaluation?: { passed: boolean } }>;
+    };
+    assert.equal(migrated.activeBySkill["repair-skill"], undefined);
+    assert.equal(migrated.records[0]?.status, "rejected");
+    assert.equal(migrated.records[0]?.evaluation?.passed, false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

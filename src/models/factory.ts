@@ -32,6 +32,8 @@ import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
+import { createAdvancedSkillRegistry } from "../skills/advanced-skill-registry.js";
+import { createAdvancedSkillTools } from "../skills/tools.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -54,10 +56,15 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
     const checks = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
-      { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
-      { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
+      { name: "procedure", passed: candidate.skill.procedure.length >= 2 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
+      { name: "verification-requirements", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
+      // Listing desired checks is not proof that they ran. Until the lifecycle is
+      // wired to an isolated verifier that executes the candidate against a
+      // controlled workspace and records fresh results, production promotion
+      // must fail closed rather than label metadata-only inspection "verified".
+      { name: "runtime-verification", passed: false, detail: "No isolated skill verification runner is configured; metadata checks cannot establish executable correctness." },
     ];
-    return { passed: checks.every((check) => check.passed), checks };
+    return { passed: false, checks };
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
@@ -100,12 +107,59 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
         })
       : [];
+    // The advanced catalog/handlers were previously exported but never mounted
+    // into the live Brain tool registry. Build a run-scoped, guarded registry and
+    // expose only verified handlers through the same policy-enforced gateway.
+    // Approval evidence is scoped to this Brain run and consumed once by the
+    // privileged skill verifier. It is created only after the existing approval
+    // handler approves the exact immutable gateway action.
+    const skillApprovalEvidence = new Map<string, {
+      runId: string; principalId: string; toolName: string; actionHash: string;
+    }>();
+    const advancedSkillRegistry = createAdvancedSkillRegistry({
+      projectMemoryStore: projectMemory,
+      securityController: dependencies.security,
+      verifyApproval: (request) => {
+        const evidence = skillApprovalEvidence.get(request.requestId);
+        if (!evidence) return false;
+        // Consume on first verification attempt, including mismatches, so an
+        // approval token can never be replayed against a modified action.
+        skillApprovalEvidence.delete(request.requestId);
+        return evidence.runId === request.runId &&
+          evidence.principalId === request.principalId &&
+          evidence.toolName === request.toolName &&
+          evidence.toolName === `skill.${request.skillId}` &&
+          evidence.actionHash === request.actionHash;
+      },
+    });
+    const runSkillTools = createAdvancedSkillTools(advancedSkillRegistry, principalId ?? "anonymous");
+    const approvalHandler: AgentDependencies["approval"] = dependencies.approval
+      ? async (request) => {
+          const approved = await dependencies.approval!(request);
+          if (approved && request.toolName.startsWith("skill.")) {
+            const skill = advancedSkillRegistry.list().find((item) =>
+              `skill.${item.id}` === request.toolName &&
+              (item.requiresApproval || item.risk === "privileged"),
+            );
+            if (skill) {
+              skillApprovalEvidence.set(request.requestId, {
+                runId: request.runId,
+                principalId: request.principalId ?? "anonymous",
+                toolName: request.toolName,
+                actionHash: request.actionHash,
+              });
+            }
+          }
+          return approved;
+        }
+      : undefined;
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...runBrowserTools,
       ...runDesktopTools,
+      ...runSkillTools,
     ]);
-    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
+    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,approvalHandler,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
       maxConcurrency:intEnv("SOFIA_SUBAGENT_MAX_CONCURRENCY",3,1),

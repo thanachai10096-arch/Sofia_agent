@@ -1,12 +1,40 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { SkillPackage, SkillsPlatform } from "../skills/platform.js";
 import { redactSecrets } from "../security/guard.js";
 
 export type SkillLifecycleStatus = "candidate" | "verified" | "rejected" | "active" | "superseded" | "rolled_back";
 export interface SkillEvaluationCheck { name: string; passed: boolean; detail?: string; }
-export interface SkillEvaluationResult { passed: boolean; checks: SkillEvaluationCheck[]; evaluatedAt?: string; }
+export interface SkillRuntimeVerificationEvidence {
+  candidateDigest: string;
+  runnerId: string;
+  isolatedWorkspaceId: string;
+  isolated: true;
+  executedChecks: Array<{ name: string; passed: boolean }>;
+  completedAt: string;
+}
+export interface SkillEvaluationResult {
+  passed: boolean;
+  checks: SkillEvaluationCheck[];
+  runtimeVerification?: SkillRuntimeVerificationEvidence;
+  evaluatedAt?: string;
+}
+export function getSkillCandidateDigest(candidate: SkillPackage): string {
+  return createHash("sha256").update(JSON.stringify(candidate)).digest("hex");
+}
+function hasValidRuntimeEvidence(candidate: SkillPackage, evidence: SkillRuntimeVerificationEvidence | undefined): evidence is SkillRuntimeVerificationEvidence {
+  if (!evidence || evidence.isolated !== true || evidence.candidateDigest !== getSkillCandidateDigest(candidate) ||
+      typeof evidence.runnerId !== "string" || !evidence.runnerId.trim() ||
+      typeof evidence.isolatedWorkspaceId !== "string" || !evidence.isolatedWorkspaceId.trim() ||
+      typeof evidence.completedAt !== "string" || !Number.isFinite(Date.parse(evidence.completedAt)) ||
+      !Array.isArray(evidence.executedChecks) ||
+      !evidence.executedChecks.every((item) => isRecord(item) && typeof item.name === "string" && typeof item.passed === "boolean")) return false;
+  const names = evidence.executedChecks.map((item) => item.name);
+  return new Set(names).size === names.length &&
+    candidate.skill.verification.every((required) =>
+      evidence.executedChecks.some((item) => item.name === required && item.passed === true));
+}
 export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; }
 export interface SkillLifecycleRecord {
   id: string;
@@ -81,7 +109,9 @@ export class VersionedSkillLifecycle {
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
     const safePackage = validatePackage(skillPackage);
     if (!isRecord(provenance) || typeof provenance.source !== "string" || !provenance.source.trim() ||
-        !Array.isArray(provenance.evidenceIds) || !provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
+        !Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length === 0 ||
+        !provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
+        new Set(provenance.evidenceIds).size !== provenance.evidenceIds.length ||
         !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1) {
       throw new Error("Invalid skill provenance");
     }
@@ -117,7 +147,12 @@ export class VersionedSkillLifecycle {
     const before = clone(this.snapshot);
     const record = this.requireRecord(candidateId);
     record.evaluation = {
-      passed: result.passed === true && result.checks.every((check) => check.passed === true),
+      passed: result.passed === true &&
+        result.checks.every((check) => check.passed === true) &&
+        hasValidRuntimeEvidence(candidate.package, result.runtimeVerification),
+      ...(hasValidRuntimeEvidence(candidate.package, result.runtimeVerification)
+        ? { runtimeVerification: clone(result.runtimeVerification) }
+        : {}),
       checks: result.checks.map((check) => ({
         name: check.name.slice(0, 200),
         passed: check.passed,
@@ -134,7 +169,10 @@ export class VersionedSkillLifecycle {
 
   promote(candidateId: string): SkillLifecycleRecord {
     const candidate = this.requireRecord(candidateId);
-    if (candidate.status !== "verified" || candidate.evaluation?.passed !== true) throw new Error("Only successfully evaluated candidates can be promoted");
+    if (candidate.status !== "verified" || candidate.evaluation?.passed !== true ||
+        !hasValidRuntimeEvidence(candidate.package, candidate.evaluation.runtimeVerification)) {
+      throw new Error("Only candidates with valid isolated runtime verification can be promoted");
+    }
     if (candidate.provenance.confidence < this.minimumConfidence) throw new Error("Skill candidate confidence is below the promotion threshold");
     const before = clone(this.snapshot);
     const previousPackage = this.platform.get(candidate.skillId);
@@ -220,6 +258,7 @@ export class VersionedSkillLifecycle {
     if (!isRecord(parsed) || parsed.schemaVersion !== 1 || !Array.isArray(parsed.records) || !isRecord(parsed.activeBySkill)) {
       throw new Error("Unsupported or corrupt skill lifecycle store");
     }
+    const legacyUnverifiedIds = new Set<string>();
     const records: SkillLifecycleRecord[] = parsed.records.map((item) => {
       if (!isRecord(item) || typeof item.id !== "string" || !item.id.trim() || item.id.length > 200 ||
           typeof item.skillId !== "string" || !item.skillId.trim() ||
@@ -240,20 +279,36 @@ export class VersionedSkillLifecycle {
           throw new Error("Invalid skill lifecycle evaluation");
         }
       }
+      const restored = { ...(clone(item) as unknown as SkillLifecycleRecord), package: safePackage };
       if (item.status === "active" &&
           (!isRecord(item.evaluation) || item.evaluation.passed !== true ||
            !Array.isArray(item.evaluation.checks) || item.evaluation.checks.length === 0 ||
            !item.evaluation.checks.every((check) => isRecord(check) && check.passed === true) ||
+           !hasValidRuntimeEvidence(safePackage, item.evaluation.runtimeVerification as SkillRuntimeVerificationEvidence | undefined) ||
            item.provenance.confidence < this.minimumConfidence)) {
-        throw new Error("Active skill lifecycle record lacks valid evaluation or confidence");
+        // Schema-v1 records created before package-bound runtime evidence existed
+        // must not keep executing, but must not make the whole agent fail to boot.
+        restored.status = "rejected";
+        restored.evaluation = {
+          passed: false,
+          checks: [
+            ...(restored.evaluation?.checks ?? []),
+            { name: "legacy-runtime-evidence", passed: false, detail: "Deactivated during migration: no package-bound isolated runtime evidence." },
+          ],
+          evaluatedAt: new Date().toISOString(),
+        };
+        restored.updatedAt = new Date().toISOString();
+        legacyUnverifiedIds.add(restored.id);
       }
-      return { ...(clone(item) as unknown as SkillLifecycleRecord), package: safePackage };
+      return restored;
     });
     const activeBySkill: Record<string, string> = {};
     for (const [skillId, recordId] of Object.entries(parsed.activeBySkill)) {
       if (typeof recordId !== "string" || !recordId.trim()) throw new Error("Invalid skill lifecycle active pointer");
-      const record = records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
+      const record = records.find((item) => item.id === recordId && item.skillId === skillId);
       if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
+      if (legacyUnverifiedIds.has(recordId)) continue;
+      if (record.status !== "active") throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
       if (Object.prototype.hasOwnProperty.call(activeBySkill, skillId)) throw new Error("Duplicate skill lifecycle active pointer");
       activeBySkill[skillId] = recordId;
     }
@@ -263,6 +318,7 @@ export class VersionedSkillLifecycle {
       }
     }
     this.snapshot = { schemaVersion: 1, records, activeBySkill };
+    if (legacyUnverifiedIds.size > 0) this.persist();
   }
   private persist(): void {
     const directory = path.dirname(this.file);
