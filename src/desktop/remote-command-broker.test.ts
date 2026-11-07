@@ -86,3 +86,16 @@ test("dispatch rejects malformed native actions before they enter the queue", as
   assert.equal(broker.getStatus("owner-a").pendingCommands, 0);
   broker.close();
 });
+
+test("a saved local pairing survives ordinary desktop restarts within the idle retention window", () => {
+  let now = 1_000_000;
+  const broker = new DesktopCommandBroker({ now: () => now });
+  const { token } = broker.connect("owner-a");
+  now += 6 * 24 * 60 * 60 * 1_000;
+  assert.equal(broker.poll(token), null);
+  assert.equal(broker.getStatus("owner-a").connected, true);
+  now += 2 * 24 * 60 * 60 * 1_000;
+  assert.equal(broker.getStatus("owner-a").connected, false);
+  assert.throws(() => broker.poll(token), /not paired/);
+  broker.close();
+});
