@@ -562,9 +562,10 @@ export class SofiaBrain {
     task: string,
     context: Record<string, unknown>,
     failureCategory?: string,
+    requiredTools: readonly string[] = [],
   ): Promise<SubagentResult | undefined> {
     const runtime = this.dependencies.subagents;
-    if (!runtime || !isSubagentWorthyTask(task)) return undefined;
+    if (!runtime || !isSubagentWorthyTask(task, requiredTools)) return undefined;
 
     if (this.usage.modelCalls >= this.limits.maxModelCalls) {
       throw new Stop("Model-call budget exhausted");
@@ -1149,6 +1150,7 @@ export class SofiaBrain {
                 : undefined,
             },
             diagnosis.category,
+            understanding?.requiredTools ?? [],
           ) : undefined;
 
           if (specialist?.proposedAction) {
