@@ -2,6 +2,11 @@ import { promises as fs, readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
+export interface SkillOutcomeMetrics {
+  durationMs?: number;
+  toolCalls?: number;
+}
+
 export interface SkillPerformance {
   id: string;
   attempts: number;
@@ -10,11 +15,13 @@ export interface SkillPerformance {
   confidence: number;
   avgSteps: number;
   avgRecoveryRounds: number;
+  avgDurationMs: number;
+  avgToolCalls: number;
   lastSuccessAt?: string;
   lastFailureAt?: string;
   lastFailure?: string;
-  successHistory: Array<{ at: string; steps: number; recoveryRounds: number }>;
-  failureHistory: Array<{ at: string; message: string }>;
+  successHistory: Array<{ at: string; steps: number; recoveryRounds: number; durationMs?: number; toolCalls?: number }>;
+  failureHistory: Array<{ at: string; message: string; durationMs?: number; toolCalls?: number }>;
   taskTypes: Record<string, { attempts: number; successes: number; failures: number }>;
 }
 
@@ -80,6 +87,8 @@ export class EvolutionEngine {
           skills: Object.fromEntries(Object.entries(skills).map(([id, skill]) => [id, {
             ...skill,
             id: skill.id ?? id,
+            avgDurationMs: Number.isFinite(skill.avgDurationMs) ? skill.avgDurationMs : 0,
+            avgToolCalls: Number.isFinite(skill.avgToolCalls) ? skill.avgToolCalls : 0,
             taskTypes: skill.taskTypes ?? {},
             successHistory: skill.successHistory ?? [],
             failureHistory: skill.failureHistory ?? [],
@@ -98,6 +107,7 @@ export class EvolutionEngine {
     const created: SkillPerformance = {
       id, attempts: 0, successes: 0, failures: 0,
       confidence: 0.5, avgSteps: 0, avgRecoveryRounds: 0,
+      avgDurationMs: 0, avgToolCalls: 0,
       successHistory: [], failureHistory: [], taskTypes: {},
     };
     setOwnValue(this.snapshot.skills, id, created);
@@ -128,7 +138,7 @@ export class EvolutionEngine {
     return this.rank(ids, taskType)[0]?.id;
   }
 
-  recordSuccess(id: string, steps: number, recoveryRounds = 0, taskType = "general"): void {
+  recordSuccess(id: string, steps: number, recoveryRounds = 0, taskType = "general", metrics: SkillOutcomeMetrics = {}): void {
     const s = this.get(id);
     s.attempts++;
     s.successes++;
@@ -143,13 +153,17 @@ export class EvolutionEngine {
     s.confidence = clamp(s.confidence * 0.8 + 0.2, 0, 1);
     s.avgSteps = s.attempts === 1 ? steps : ((s.avgSteps * (s.attempts - 1)) + steps) / s.attempts;
     s.avgRecoveryRounds = s.attempts === 1 ? recoveryRounds : ((s.avgRecoveryRounds * (s.attempts - 1)) + recoveryRounds) / s.attempts;
+    const durationMs = Number.isFinite(metrics.durationMs) ? Math.max(0, metrics.durationMs!) : 0;
+    const toolCalls = Number.isFinite(metrics.toolCalls) ? Math.max(0, metrics.toolCalls!) : 0;
+    s.avgDurationMs = s.attempts === 1 ? durationMs : ((s.avgDurationMs * (s.attempts - 1)) + durationMs) / s.attempts;
+    s.avgToolCalls = s.attempts === 1 ? toolCalls : ((s.avgToolCalls * (s.attempts - 1)) + toolCalls) / s.attempts;
     s.lastSuccessAt = new Date().toISOString();
-    s.successHistory.push({ at: s.lastSuccessAt, steps, recoveryRounds });
+    s.successHistory.push({ at: s.lastSuccessAt, steps, recoveryRounds, durationMs, toolCalls });
     s.successHistory = s.successHistory.slice(-20);
     void this.persist();
   }
 
-  recordFailure(id: string, message: string, taskType = "general"): void {
+  recordFailure(id: string, message: string, taskType = "general", metrics: SkillOutcomeMetrics = {}): void {
     const s = this.get(id);
     s.attempts++;
     s.failures++;
@@ -164,7 +178,11 @@ export class EvolutionEngine {
     s.confidence = clamp(s.confidence * 0.75 - 0.05, 0.05, 0.95);
     s.lastFailureAt = new Date().toISOString();
     s.lastFailure = message.slice(0, 500);
-    s.failureHistory.push({ at: s.lastFailureAt, message: s.lastFailure });
+    const durationMs = Number.isFinite(metrics.durationMs) ? Math.max(0, metrics.durationMs!) : 0;
+    const toolCalls = Number.isFinite(metrics.toolCalls) ? Math.max(0, metrics.toolCalls!) : 0;
+    s.avgDurationMs = s.attempts === 1 ? durationMs : ((s.avgDurationMs * (s.attempts - 1)) + durationMs) / s.attempts;
+    s.avgToolCalls = s.attempts === 1 ? toolCalls : ((s.avgToolCalls * (s.attempts - 1)) + toolCalls) / s.attempts;
+    s.failureHistory.push({ at: s.lastFailureAt, message: s.lastFailure, durationMs, toolCalls });
     s.failureHistory = s.failureHistory.slice(-20);
     void this.persist();
   }
