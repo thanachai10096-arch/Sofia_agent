@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   BudgetError,
   TokenBudget,
+  type Reservation,
   type TokenUsage,
 } from "./token-budget.js";
 
@@ -383,7 +384,7 @@ export class TokenAwareGateway {
     // retry the same route (which could duplicate cost without new evidence).
     for (const candidate of candidates) {
       signal.throwIfAborted();
-      let lease;
+      let lease: Reservation;
       try {
         lease = this.budget.reserve(candidate.route.budgetKey, {
           inputTokens: candidate.prepared.inputTokensUpperBound,
