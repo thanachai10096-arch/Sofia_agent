@@ -15,6 +15,12 @@ test("local desktop allowlist accepts only existing absolute executable files", 
     assert.equal(parsed.editor, executable);
     assert.throws(() => parseDesktopApplicationAllowlist(JSON.stringify({ editor: "relative/app" })), /absolute executable/);
     assert.throws(() => parseDesktopApplicationAllowlist(JSON.stringify({ editor: path.join(directory, "missing") })));
+    if (process.platform !== "win32") {
+      assert.throws(
+        () => parseDesktopApplicationAllowlist(JSON.stringify({ shell: "/bin/sh" })),
+        /command interpreters/,
+      );
+    }
     assert.throws(() => parseDesktopApplicationAllowlist("[]"), /JSON object/);
     assert.throws(() => parseDesktopApplicationAllowlist("{"), /JSON object/);
   } finally {
