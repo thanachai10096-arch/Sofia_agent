@@ -115,6 +115,163 @@ test("gateway admits Thai short-chat understanding prompts with a bounded tool c
   assert.equal(budget.snapshot().calls, 1);
 });
 
+test("gateway removes oversized supplemental state before rejecting a route", async () => {
+  const budget = makeBudget(10_000);
+  let capturedState: unknown;
+  const oversizedState = {
+    phase: "understand",
+    oldConversation: "x".repeat(5_000),
+    runtimeSnapshot: "y".repeat(5_000),
+  };
+  const configuredRoute: InternalRoute = {
+    ...route(async () => ({
+      value: { ok: true },
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: "complete",
+    })),
+    prepare(prompt) {
+      capturedState = prompt.core.state;
+      const inputTokensUpperBound =
+        prompt.core.instructions.length +
+        prompt.core.task.length +
+        JSON.stringify(prompt.core.state).length;
+      return {
+        inputTokensUpperBound,
+        invoke: async () => ({
+          value: { ok: true },
+          usage: { inputTokens: 10, outputTokens: 5 },
+          finishReason: "complete" as const,
+        }),
+      };
+    },
+  };
+  const gateway = new TokenAwareGateway(budget, [configuredRoute]);
+  assert.deepEqual(await gateway.generate({
+    ...request(),
+    core: { ...request().core, task: "ตอบผู้ใช้เป็นภาษาไทย", state: oversizedState },
+  }), { ok: true });
+  assert.equal((capturedState as Record<string, unknown>).phase, "understand");
+  assert.equal("oldConversation" in (capturedState as Record<string, unknown>), false);
+  assert.equal("runtimeSnapshot" in (capturedState as Record<string, unknown>), false);
+});
+
+test("gateway does not truncate the user task when core context cannot fit", async () => {
+  const budget = makeBudget();
+  const configuredRoute: InternalRoute = {
+    ...route(async () => ({
+      value: {},
+      usage: { inputTokens: 1, outputTokens: 1 },
+      finishReason: "complete",
+    })),
+    prepare(prompt) {
+      return {
+        inputTokensUpperBound: prompt.core.task.length + prompt.core.instructions.length,
+        invoke: async () => ({
+          value: {},
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "complete" as const,
+        }),
+      };
+    },
+  };
+  const gateway = new TokenAwareGateway(budget, [configuredRoute]);
+  await assert.rejects(
+    gateway.generate({
+      ...request(),
+      core: { ...request().core, task: "z".repeat(5_000) },
+    }),
+    (error: unknown) =>
+      error instanceof GatewayError &&
+      error.code === "no_eligible_route" &&
+      error.message.includes("contextTooLarge=1"),
+  );
+});
+
+test("gateway preserves task and phase constraints while compacting supplemental state", async () => {
+  const budget = makeBudget(10_000);
+  let capturedState: Record<string, unknown> | undefined;
+  const protectedState = {
+    phase: "understand",
+    task: "user's original task",
+    minimumQualityTier: 1,
+    requiredCapabilities: ["structured-output"],
+    understanding: { objective: "preserve this objective" },
+    oldConversation: "x".repeat(5_000),
+    runtimeSnapshot: "y".repeat(5_000),
+  };
+  const configuredRoute: InternalRoute = {
+    ...route(async () => ({
+      value: { ok: true },
+      usage: { inputTokens: 10, outputTokens: 5 },
+      finishReason: "complete",
+    })),
+    prepare(prompt) {
+      capturedState = prompt.core.state as Record<string, unknown>;
+      const inputTokensUpperBound =
+        prompt.core.instructions.length +
+        prompt.core.task.length +
+        JSON.stringify(prompt.core.state).length;
+      return {
+        inputTokensUpperBound,
+        invoke: async () => ({
+          value: { ok: true },
+          usage: { inputTokens: 10, outputTokens: 5 },
+          finishReason: "complete" as const,
+        }),
+      };
+    },
+  };
+  const gateway = new TokenAwareGateway(budget, [configuredRoute]);
+  await gateway.generate({
+    ...request(),
+    core: { ...request().core, state: protectedState },
+  });
+  assert.equal(capturedState?.phase, "understand");
+  assert.equal(capturedState?.task, "user's original task");
+  assert.deepEqual(capturedState?.requiredCapabilities, ["structured-output"]);
+  assert.deepEqual(capturedState?.understanding, { objective: "preserve this objective" });
+  assert.equal("oldConversation" in (capturedState ?? {}), false);
+  assert.equal("runtimeSnapshot" in (capturedState ?? {}), false);
+});
+
+test("gateway rejects when only protected state fields exceed the context window", async () => {
+  const budget = makeBudget();
+  const configuredRoute: InternalRoute = {
+    ...route(async () => ({
+      value: {},
+      usage: { inputTokens: 1, outputTokens: 1 },
+      finishReason: "complete",
+    })),
+    prepare(prompt) {
+      return {
+        inputTokensUpperBound:
+          prompt.core.instructions.length +
+          prompt.core.task.length +
+          JSON.stringify(prompt.core.state).length,
+        invoke: async () => ({
+          value: {},
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "complete" as const,
+        }),
+      };
+    },
+  };
+  const gateway = new TokenAwareGateway(budget, [configuredRoute]);
+  await assert.rejects(
+    gateway.generate({
+      ...request(),
+      core: {
+        ...request().core,
+        state: { understanding: { objective: "x".repeat(5_000) } },
+      },
+    }),
+    (error: unknown) =>
+      error instanceof GatewayError &&
+      error.code === "no_eligible_route" &&
+      error.message.includes("contextTooLarge=1"),
+  );
+});
+
 test("gateway meters actual provider usage exactly once", async () => {
   const budget = makeBudget();
   let calls = 0;
