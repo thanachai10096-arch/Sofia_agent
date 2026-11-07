@@ -546,8 +546,8 @@ test("network capability discovery explains missing host allowlist", () => {
     { ...defaultPolicy, allowNetwork: true, allowedHosts: [] },
   );
   const capability = gateway.listTools()[0];
-  assert.equal(capability.policy?.status, "blocked");
-  assert.match(capability.policy?.reason ?? "", /allowed-host/i);
+  assert.equal(capability?.policy?.status, "blocked");
+  assert.match(capability?.policy?.reason ?? "", /allowed-host/i);
 });
 
 
@@ -558,11 +558,11 @@ test("capability discovery never claims runtime readiness and reflects the secur
   const security = new SecurityController();
   const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, defaultPolicy, undefined, undefined, security);
   const before = gateway.listTools()[0];
-  assert.equal(before.registered, true);
-  assert.equal(before.policy?.status, "allowed");
-  assert.equal(before.runtimeReadiness, "not_probed");
+  assert.equal(before?.registered, true);
+  assert.equal(before?.policy?.status, "allowed");
+  assert.equal(before?.runtimeReadiness, "not_probed");
   security.kill("operator emergency stop");
   const after = gateway.listTools()[0];
-  assert.equal(after.policy?.status, "blocked");
-  assert.match(after.policy?.reason ?? "", /kill switch/i);
+  assert.equal(after?.policy?.status, "blocked");
+  assert.match(after?.policy?.reason ?? "", /kill switch/i);
 });
