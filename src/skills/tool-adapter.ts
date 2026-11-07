@@ -12,6 +12,7 @@ import type { SecurityController } from "../security/controller.js";
 export function createAdvancedSkillTools(options: {
   projectMemoryStore?: ProjectMemoryStore;
   securityController: SecurityController;
+  principalId: string;
 }): SofiaTool[] {
   // The registry's approval verifier is intentionally satisfied only here:
   // this registry is private to the Brain run and its tools are reachable only
@@ -36,7 +37,7 @@ export function createAdvancedSkillTools(options: {
       effects,
       async execute(input, context) {
         const executionContext: AdvancedSkillExecutionContext = {
-          principalId: options.securityController.isRunning() ? "sofia-runtime" : "sofia-stopped",
+          principalId: options.principalId,
           signal: context.signal ?? new AbortController().signal,
         };
         return registry.execute(definition.id, input, executionContext);
