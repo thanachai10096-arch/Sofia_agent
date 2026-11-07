@@ -371,7 +371,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (pathname.startsWith("/workspace/") && req.method === "GET") {
           const asset = pathname.slice((workspaceRoot + "/").length);
-          const allowedAssets = new Set(["index.html", "login.html", "login.js", "workspace.css", "workspace.js", "manifest.webmanifest", "sofia-icon.svg", "service-worker.js"]);
+          const allowedAssets = new Set(["index.html", "login.html", "login.js", "login.css", "workspace.css", "workspace.js", "manifest.webmanifest", "sofia-icon.svg", "service-worker.js"]);
           if (!allowedAssets.has(asset)) return json(res, 404, { error: "not_found" }, origin, config);
           const identity = workspaceAuth.authenticate(req.headers.cookie);
           if (asset === "index.html" && !identity) {
