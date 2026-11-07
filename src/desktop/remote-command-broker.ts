@@ -35,7 +35,7 @@ export interface DesktopCommandBrokerConfig {
  * In-memory relay between a cloud Brain and one explicitly paired local desktop.
  * The companion authenticates with a high-entropy bearer token; only its digest is
  * retained. Commands are owner-bound, single-claim, single-completion, bounded,
- * and fail closed on disconnect, timeout, or process restart.
+ * and fail closed on disconnect, timeout, or process restart. Paired tokens\n * may remain idle for up to seven days so a locally stored OS-keychain token\n * can survive a normal desktop shutdown/restart; broker state is still lost\n * when the Sofia API process itself restarts.
  *
  * This class is transport-neutral. An API route must authenticate the Sofia API
  * key and its desktop:connect scope before calling connect/poll/complete.
@@ -51,7 +51,7 @@ export class DesktopCommandBroker {
   constructor(config: DesktopCommandBrokerConfig = {}) {
     this.now = config.now ?? Date.now;
     this.commandTimeoutMs = clamp(config.commandTimeoutMs ?? 30_000, 1_000, 120_000);
-    this.idleTimeoutMs = clamp(config.companionIdleTimeoutMs ?? 45_000, 5_000, 300_000);
+    this.idleTimeoutMs = clamp(config.companionIdleTimeoutMs ?? 7 * 24 * 60 * 60 * 1_000, 5_000, 30 * 24 * 60 * 60 * 1_000);
     this.maxPending = clamp(config.maxPendingPerOwner ?? 8, 1, 64);
   }
 
