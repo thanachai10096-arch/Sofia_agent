@@ -721,10 +721,29 @@ export class SofiaBrain {
       throw new RecoverableFailure(failureCategory(error), errorMessage(error));
     }
 
+    // Some tools report transport/execution success while their domain operation
+    // failed. project.verify is one such contract: the command runner itself
+    // completed, but a non-zero exit code means the requested check failed.
+    // Keep this interpretation tool-specific; arbitrary tool payloads may
+    // legitimately contain fields such as "passed" or "code".
+    let semanticFailure: string | undefined;
+    if (step.call.tool === "project.verify" && result.ok &&
+      result.data !== null && typeof result.data === "object" && !Array.isArray(result.data)) {
+      const verification = result.data as Record<string, unknown>;
+      if (verification.passed === false || (typeof verification.code === "number" && verification.code !== 0)) {
+        const detail = [
+          typeof verification.stderr === "string" ? verification.stderr.trim() : "",
+          typeof verification.stdout === "string" ? verification.stdout.trim() : "",
+        ].filter(Boolean).join("\\n").slice(0, 2_000);
+        semanticFailure = `Project verification failed (exit code ${typeof verification.code === "number" ? verification.code : "unknown"})${detail ? ": " + detail : "."}`;
+      }
+    }
+
+    const toolOk = result.ok && !semanticFailure;
     const p = preview(result.data);
     const fenced = fenceUntrustedOutput(step.call.tool, p.text);
     const observation: Observation = {
-      stepId: step.id, tool: step.call.tool, ok: result.ok, evidenceId: result.evidenceId,
+      stepId: step.id, tool: step.call.tool, ok: toolOk, evidenceId: result.evidenceId,
       preview: fenced.text, truncated: p.truncated,
       ...(fenced.suspicious ? { suspicious: true } : {}),
     };
@@ -733,7 +752,7 @@ export class SofiaBrain {
     this.evidenceIndex.push(result.evidenceId);
 
     this.emit({
-      type: result.ok ? "brain.tool.completed" : "brain.tool.failed",
+      type: toolOk ? "brain.tool.completed" : "brain.tool.failed",
       stepId: step.id,
     });
 
@@ -742,10 +761,10 @@ export class SofiaBrain {
       stepId: step.id,
     });
 
-    if (!result.ok) {
+    if (!toolOk) {
       throw new RecoverableFailure(
         result.error?.category ?? "tool_error",
-        result.error?.message ?? "Tool execution failed",
+        semanticFailure ?? result.error?.message ?? "Tool execution failed",
       );
     }
 
