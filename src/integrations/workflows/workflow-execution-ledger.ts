@@ -51,6 +51,12 @@ export interface WorkflowExecutionLedger {
     patch: Pick<WorkflowExecutionRecord, "status"> &
       Partial<Pick<WorkflowExecutionRecord, "providerExecutionId" | "output" | "safeErrorCode">>,
   ): Promise<WorkflowExecutionRecord | undefined>;
+  /** Resolve an indeterminate dispatch only after provider-side evidence is checked. */
+  reconcile(
+    executionId: string,
+    patch: Pick<WorkflowExecutionRecord, "status"> &
+      Partial<Pick<WorkflowExecutionRecord, "providerExecutionId" | "output" | "safeErrorCode">>,
+  ): Promise<WorkflowExecutionRecord | undefined>;
   get(executionId: string): Promise<WorkflowExecutionRecord | undefined>;
   findByIdempotency(
     workflowId: string,
