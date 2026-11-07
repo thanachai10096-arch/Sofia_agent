@@ -46,7 +46,7 @@ The BFF is a required integration; do not expose the privileged Sofia API direct
 ## Known UI/backend gaps
 
 - No authentication/login product or BFF implementation is included in this repository slice.
-- The Approval Inbox is connected to the Brain approval callback and exposes owner-scoped, one-time decisions. The UI displays the redacted action input and risk before approval. It is process-local and pending approvals fail closed on server restart; durable approval recovery and audit retention remain future work.
+- The Approval Inbox is connected to the Brain approval callback and exposes owner-scoped, one-time decisions. The UI displays the redacted action input and risk before approval. Pending decisions remain process-local and fail closed on restart; a durable, secret-free append-only audit trail is written to `.sofia/approval-audit.jsonl`. Orphaned requests are marked `interrupted` on startup and are never replayed as actionable. Audit export/retention controls remain future work.
 - Grant `approval:read` and `approval:decide` only to API keys that should review/approve actions. The BFF must preserve these scope checks and validate its CSRF token on decision requests.
 - Browser streaming currently refreshes PNG screenshots on a short polling interval; it is not WebRTC/video streaming.
 - Session cookies are ephemeral and lost on server restart; multi-replica affinity/durable session routing remains future work.
