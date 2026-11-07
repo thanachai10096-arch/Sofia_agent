@@ -158,6 +158,10 @@ test("Desktop Companion API returns 503 for transient store failures without rev
       headers: { authorization: "Bearer " + "x".repeat(43) },
     });
     assert.equal(invalidToken.status, 401);
+    const oversizedToken = await fetch(base + "/v1/desktop/companion/commands", {
+      headers: { authorization: "Bearer " + "z".repeat(257) },
+    });
+    assert.equal(oversizedToken.status, 401, "malformed bearer tokens are authentication failures, not storage outages");
   } finally {
     broker.close();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
