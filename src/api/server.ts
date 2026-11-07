@@ -406,7 +406,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         const upstreamPath = req.url.slice("/api/sofia".length);
         const upstreamUrl = new URL(upstreamPath, "http://sofia.local");
-        const allowedPath = /^\/v1\/(?:browser\/cloud\/sessions(?:\/[0-9a-f-]{36}(?:\/(?:navigate|action))?)?|agent\/runs(?:\/[0-9a-f-]{36})?|approvals(?:\/audit|\/[0-9a-f-]{36}\/decision)?)$/i.test(upstreamUrl.pathname);
+        const allowedPath = /^\/v1\/(?:browser\/cloud\/sessions(?:\/[0-9a-f-]{36}(?:\/(?:navigate|action|screenshot))?)?|agent\/runs(?:\/[0-9a-f-]{36})?|approvals(?:\/audit|\/[0-9a-f-]{36}\/decision)?)$/i.test(upstreamUrl.pathname);
         if (!allowedPath || !["GET", "POST", "DELETE"].includes(req.method ?? "")) {
           return json(res, 404, { error: "workspace_route_not_allowed" }, origin, config);
         }
