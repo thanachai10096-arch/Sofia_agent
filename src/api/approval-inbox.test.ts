@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { FileApprovalAuditStore } from "../agent/approval-audit-store.js";
 import test from "node:test";
 import { ApprovalInbox } from "../agent/approval-inbox.js";
 import { createSofiaApi } from "./server.js";
@@ -12,7 +16,9 @@ const ownerId = (key: string) => createHash("sha256").update(key).digest("hex").
 const hash = createHash("sha256").update("the exact action").digest("hex");
 
 test("approval API lists and decides only the authenticated owner's pending actions", async () => {
-  const inbox = new ApprovalInbox();
+  const auditDirectory = mkdtempSync(path.join(os.tmpdir(), "sofia-approval-api-"));
+  const auditStore = new FileApprovalAuditStore(auditDirectory);
+  const inbox = new ApprovalInbox({ auditStore });
   const waiting = inbox.request({
     principalId: ownerId("owner-key"), runId: "run-1", toolName: "browser.click",
     input: { selector: "#save" }, actionHash: hash, risk: "medium",
@@ -28,6 +34,7 @@ test("approval API lists and decides only the authenticated owner's pending acti
       "read-only-key": ["approval:read"],
     },
     approvalInbox: inbox,
+    approvalAuditStore: auditStore,
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -40,6 +47,11 @@ test("approval API lists and decides only the authenticated owner's pending acti
     const payload = await list.json() as { approvals: Array<{ id: string; actionHash: string }> };
     assert.equal(payload.approvals.length, 1);
     const item = payload.approvals[0]!;
+    const audit = await fetch(base + "/v1/approvals/audit", { headers: auth("owner-key") });
+    assert.equal(audit.status, 200);
+    assert.deepEqual((await audit.json() as { events: Array<{ status: string }> }).events.map((event) => event.status), ["requested"]);
+    const otherAudit = await fetch(base + "/v1/approvals/audit", { headers: auth("other-key") });
+    assert.equal((await otherAudit.json() as { events: unknown[] }).events.length, 0);
     const other = await fetch(base + "/v1/approvals", { headers: auth("other-key") });
     assert.equal((await other.json() as { approvals: unknown[] }).approvals.length, 0);
 
@@ -61,6 +73,8 @@ test("approval API lists and decides only the authenticated owner's pending acti
     });
     assert.equal(approved.status, 200);
     assert.equal(await waiting, true);
+    const decidedAudit = await fetch(base + "/v1/approvals/audit?limit=10", { headers: auth("owner-key") });
+    assert.deepEqual((await decidedAudit.json() as { events: Array<{ status: string }> }).events.map((event) => event.status), ["approved", "requested"]);
     const replay = await fetch(base + "/v1/approvals/" + item.id + "/decision", {
       method: "POST", headers: { ...auth("owner-key"), "content-type": "application/json" },
       body: JSON.stringify({ decision: "approve", actionHash: hash }),
@@ -69,5 +83,6 @@ test("approval API lists and decides only the authenticated owner's pending acti
   } finally {
     inbox.close();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(auditDirectory, { recursive: true, force: true });
   }
 });
