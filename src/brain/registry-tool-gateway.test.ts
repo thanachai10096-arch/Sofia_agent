@@ -521,19 +521,19 @@ test("capability discovery reports policy availability instead of exposing every
     { ...defaultPolicy, allowNetwork: true, allowShell: true, allowFileWrite: true, allowedHosts: ["api.search.brave.com"] },
     async () => true,
   );
-  const capabilities = Object.fromEntries(gateway.listTools().map(tool => [tool.name, tool.availability]));
-  assert.deepEqual(capabilities["workspace.search"], { status: "available", reason: undefined });
-  assert.deepEqual(capabilities["web.search"], { status: "available", reason: undefined });
-  assert.deepEqual(capabilities["workspace.write_file"], { status: "requires_approval", reason: "Approval is required before execution." });
-  assert.deepEqual(capabilities["terminal.run"], { status: "requires_approval", reason: "Approval is required before execution." });
+  const capabilities = Object.fromEntries(gateway.listTools().map(tool => [tool.name, tool.policy]));
+  assert.deepEqual(capabilities["workspace.search"], { status: "allowed", reason: undefined });
+  assert.deepEqual(capabilities["web.search"], { status: "allowed", reason: undefined });
+  assert.deepEqual(capabilities["workspace.write_file"], { status: "approval_required", reason: "Approval is required before execution." });
+  assert.deepEqual(capabilities["terminal.run"], { status: "approval_required", reason: "Approval is required before execution." });
 
   const noApproval = new RegistryToolGateway(
     { runtime: runtime(), tools: registry },
     { ...defaultPolicy, allowFileWrite: true },
   );
   const write = noApproval.listTools().find(tool => tool.name === "workspace.write_file");
-  assert.equal(write?.availability?.status, "disabled");
-  assert.match(write?.availability?.reason ?? "", /no approval handler/i);
+  assert.equal(write?.policy?.status, "blocked");
+  assert.match(write?.policy?.reason ?? "", /no approval handler/i);
 });
 
 
@@ -546,6 +546,23 @@ test("network capability discovery explains missing host allowlist", () => {
     { ...defaultPolicy, allowNetwork: true, allowedHosts: [] },
   );
   const capability = gateway.listTools()[0];
-  assert.equal(capability.availability?.status, "disabled");
-  assert.match(capability.availability?.reason ?? "", /allowed-host/i);
+  assert.equal(capability.policy?.status, "blocked");
+  assert.match(capability.policy?.reason ?? "", /allowed-host/i);
+});
+
+
+test("capability discovery never claims runtime readiness and reflects the security kill switch", () => {
+  const registry = new MapToolRegistry([
+    { name: "workspace.search", description: "Search workspace", inputSchema: { type: "object" }, effects: ["read"] as const, async execute() { return {}; } },
+  ]);
+  const security = new SecurityController();
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, defaultPolicy, undefined, undefined, security);
+  const before = gateway.listTools()[0];
+  assert.equal(before.registered, true);
+  assert.equal(before.policy?.status, "allowed");
+  assert.equal(before.runtimeReadiness, "not_probed");
+  security.kill("operator emergency stop");
+  const after = gateway.listTools()[0];
+  assert.equal(after.policy?.status, "blocked");
+  assert.match(after.policy?.reason ?? "", /kill switch/i);
 });
