@@ -61,6 +61,13 @@ export class RegistryToolGateway implements ToolGateway {
     const browserProbeResults=new Map<() => Promise<{ok:boolean;reason:string}>,Promise<{ok:boolean;reason:string}>>();
     for(const item of catalog){
       if(item.name.startsWith("workspace.")||item.name==="project.verify"){
+        // Discovery must not touch workspace state when policy has already
+        // blocked the capability (including the global tools kill switch).
+        if(item.policy?.status==="blocked"){
+          item.runtimeReadiness="not_probed";
+          item.runtimeReason="Workspace probe skipped because execution policy blocks this tool.";
+          continue;
+        }
         if(!workspaceReady){
           try{
             const root=await this.dependencies.runtime.cwd();
