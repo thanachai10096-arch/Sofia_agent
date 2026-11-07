@@ -54,3 +54,34 @@ test("managed MCP bridge rejects unsafe namespace", async () => {
   await assert.rejects(connectManagedMcpServer(transport, { id: "../docs", allowedTools: ["lookup"] }), /lowercase slug/);
   assert.equal(transport.calls.length, 0);
 });
+
+test("managed MCP tools bind fixed trusted targets for Sofia network guard", async () => {
+  const transport = fakeTransport();
+  const target = "https://automation.example.com/mcp-server/http";
+  const connected = await connectManagedMcpServer(transport, {
+    id: "n8n",
+    allowedTools: ["lookup"],
+    trustedNetworkTargets: [target],
+  });
+  assert.deepEqual(connected.tools[0]?.trustedNetworkTargets, [target]);
+  await connected.close();
+});
+
+test("managed MCP rejects non-HTTPS or credential-bearing trusted targets", async () => {
+  const httpTransport = fakeTransport();
+  await assert.rejects(
+    connectManagedMcpServer(httpTransport, {
+      id: "n8n", allowedTools: ["lookup"], trustedNetworkTargets: ["http://automation.example.com/mcp"],
+    }),
+    /HTTPS URLs/,
+  );
+  assert.equal(httpTransport.calls.length, 0);
+  const credentialTransport = fakeTransport();
+  await assert.rejects(
+    connectManagedMcpServer(credentialTransport, {
+      id: "n8n", allowedTools: ["lookup"], trustedNetworkTargets: ["https://user:pass@automation.example.com/mcp"],
+    }),
+    /without embedded credentials/,
+  );
+  assert.equal(credentialTransport.calls.length, 0);
+});
