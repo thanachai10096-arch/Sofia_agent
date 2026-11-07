@@ -46,6 +46,27 @@ class MemoryLedger implements WorkflowExecutionLedger {
     patch: Pick<WorkflowExecutionRecord, "status"> &
       Partial<Pick<WorkflowExecutionRecord, "providerExecutionId" | "output" | "safeErrorCode">>,
   ) {
+    if (expectedStatus === "indeterminate") throw new Error("workflow_reconciliation_required");
+    return this.applyUpdate(executionId, expectedStatus, patch);
+  }
+
+  async reconcile(
+    executionId: string,
+    patch: Pick<WorkflowExecutionRecord, "status"> &
+      Partial<Pick<WorkflowExecutionRecord, "providerExecutionId" | "output" | "safeErrorCode">>,
+  ) {
+    if (!["succeeded", "failed", "cancelled"].includes(patch.status)) {
+      throw new Error("workflow_reconciliation_invalid_outcome");
+    }
+    return this.applyUpdate(executionId, "indeterminate", patch);
+  }
+
+  private async applyUpdate(
+    executionId: string,
+    expectedStatus: WorkflowExecutionState,
+    patch: Pick<WorkflowExecutionRecord, "status"> &
+      Partial<Pick<WorkflowExecutionRecord, "providerExecutionId" | "output" | "safeErrorCode">>,
+  ) {
     const current = this.records.get(executionId);
     if (!current || current.status !== expectedStatus) return undefined;
     if (!canTransitionWorkflowExecution(current.status, patch.status)) {
@@ -142,9 +163,19 @@ test("ledger update is compare-and-set and preserves indeterminate outcomes", as
       "indeterminate",
       { status: "running" },
     ),
-    /workflow_execution_invalid_transition/,
+    /workflow_reconciliation_required/,
   );
-  assert.equal((await ledger.get(reservation.record.executionId))?.status, "indeterminate");
+  await assert.rejects(
+    ledger.reconcile(reservation.record.executionId, { status: "running" }),
+    /workflow_reconciliation_invalid_outcome/,
+  );
+  const resolved = await ledger.reconcile(
+    reservation.record.executionId,
+    { status: "succeeded", output: { recovered: true } },
+  );
+  assert.equal(resolved?.status, "succeeded");
+  assert.deepEqual(resolved?.output, { recovered: true });
+  assert.equal((await ledger.get(reservation.record.executionId))?.status, "succeeded");
 });
 
 test("only one concurrent worker can claim an accepted execution for dispatch", async () => {
