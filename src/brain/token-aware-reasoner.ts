@@ -48,9 +48,9 @@ function phaseFromRequest(request: string): BrainPhase {
 
 /**
  * Understanding labels describe task intent, while the gateway expects
- * provider-route capabilities. Keep ordinary conversation unconstrained;
- * translate common task labels to the route vocabulary and leave unknown
- * labels intact so the gateway continues to fail closed for unsupported needs.
+ * provider-route capabilities. Require capabilities needed by each Brain
+ * phase first, then merge task-derived requirements and leave unknown labels
+ * intact so the gateway continues to fail closed for unsupported needs.
  */
 function routeCapabilities(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
@@ -75,6 +75,25 @@ function routeCapabilities(values: unknown): string[] {
     })
     .filter((value): value is string => Boolean(value));
   return [...new Set(mapped)].slice(0, 24);
+}
+
+/** Keep phase-critical work off cheap routes that cannot reliably satisfy its output contract. */
+function phaseCapabilities(phase: BrainPhase): string[] {
+  switch (phase) {
+    case "understand":
+    case "plan":
+    case "replan":
+    case "diagnose":
+    case "review":
+      return ["reasoning"];
+    case "implement":
+      return ["coding"];
+    case "respond":
+    case "finalize":
+      return ["fast"];
+    case "subagent":
+      return [];
+  }
 }
 
 function outputContractFor(phase: BrainPhase): string {
@@ -147,11 +166,14 @@ function asInferenceRequest(request: string): InferenceRequest {
     minimumQualityTier: typeof payload.minimumQualityTier === "number"
       ? payload.minimumQualityTier
       : 1,
-    requiredCapabilities: routeCapabilities(
-      Array.isArray(payload.requiredCapabilities)
-        ? payload.requiredCapabilities
-        : understanding.requiredCapabilities,
-    ),
+    requiredCapabilities: [...new Set([
+      ...phaseCapabilities(phase),
+      ...routeCapabilities(
+        Array.isArray(payload.requiredCapabilities)
+          ? payload.requiredCapabilities
+          : understanding.requiredCapabilities,
+      ),
+    ])],
     core: {
       instructions: [
         "Return only valid JSON. Do not use Markdown fences or surrounding prose.",
