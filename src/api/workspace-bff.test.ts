@@ -42,7 +42,7 @@ test("Mobile Workspace serves protected PWA and proxies only same-origin scoped 
     reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
   }, {
     apiKeys: { "server-key": ["approval:read", "approval:decide"] },
-    approvalInbox, approvalAuditStore: auditStore,
+    approvalInbox: inbox, approvalAuditStore: auditStore,
     workspaceAuth: fakeAuth, workspaceApiKey: "server-key", workspaceStaticDirectory: assets,
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
