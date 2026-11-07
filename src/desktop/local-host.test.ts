@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, chmodSync, realpathSync } from "nod
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createAllowlistedDesktopHostDriver, describeDesktopAction, parseDesktopApplicationAllowlist } from "./local-host.js";
+import { createAllowlistedDesktopHostDriver, describeDesktopAction, parseDesktopApplicationAllowlist, resolveLocalDesktopCapabilities } from "./local-host.js";
 
 test("local desktop allowlist accepts only existing absolute executable files", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-local-host-"));
@@ -48,4 +48,13 @@ test("initial local host fails closed for screen and input controls", async () =
 test("local approval summary never hides the target application or arguments", () => {
   assert.match(describeDesktopAction({ kind: "app.launch", applicationId: "editor", args: ["--safe"] }), /editor/);
   assert.match(describeDesktopAction({ kind: "app.launch", applicationId: "editor", args: ["--safe"] }), /--safe/);
+});
+
+test("local desktop capabilities allow screen-only and input-only setups without app launch", () => {
+  assert.deepEqual(resolveLocalDesktopCapabilities({}, { enableInput: false, enableScreenCapture: true }), ["screen:capture"]);
+  assert.deepEqual(resolveLocalDesktopCapabilities({}, { enableInput: true, enableScreenCapture: false }), ["input:control"]);
+  assert.deepEqual(resolveLocalDesktopCapabilities({}, { enableInput: true, enableScreenCapture: true }), ["input:control", "screen:capture"]);
+  assert.throws(() => resolveLocalDesktopCapabilities({}, { enableInput: false, enableScreenCapture: false }), /No local desktop capability/);
+  assert.deepEqual(resolveLocalDesktopCapabilities({ editor: "/usr/bin/code" }, { enableInput: false, enableScreenCapture: false }), ["app:launch"]);
+  assert.deepEqual(resolveLocalDesktopCapabilities({ editor: "/usr/bin/code" }, { enableInput: true, enableScreenCapture: true }), ["app:launch", "input:control", "screen:capture"]);
 });
