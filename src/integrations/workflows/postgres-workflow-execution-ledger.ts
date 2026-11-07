@@ -186,6 +186,34 @@ export class PostgresWorkflowExecutionLedger implements WorkflowExecutionLedger 
     }
   }
 
+  async listForReconciliation(
+    olderThan: string,
+    limit: number,
+  ): Promise<readonly WorkflowExecutionRecord[]> {
+    const cutoff = new Date(olderThan);
+    if (!Number.isFinite(cutoff.getTime())) throw new Error("workflow_reconciliation_cutoff_invalid");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error("workflow_reconciliation_limit_invalid");
+    }
+    const client = await this.pool.connect();
+    try {
+      const response = await client.query<WorkflowLedgerRow>(
+        `SELECT execution_id, workflow_id, idempotency_key, payload_hash,
+                correlation_id, status, created_at, updated_at,
+                provider_execution_id, output_json, safe_error_code
+           FROM sofia_workflow_executions
+          WHERE status IN ('running', 'indeterminate')
+            AND updated_at <= $1::timestamptz
+          ORDER BY updated_at ASC, execution_id ASC
+          LIMIT $2`,
+        [cutoff.toISOString(), limit],
+      );
+      return response.rows.map(fromRow);
+    } finally {
+      client.release();
+    }
+  }
+
   async findByIdempotency(
     workflowId: string,
     idempotencyKey: string,
