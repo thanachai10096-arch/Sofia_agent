@@ -29,8 +29,6 @@
     </form>
     <div class="note">Your password and verification codes are handled by your identity provider. Sofia never asks you to send them in chat.</div>
   </main>
-  <script>
-    if (new URLSearchParams(location.search).get("auth") === "failed") document.getElementById("error").style.display = "block";
-  </script>
+  <script src="./login.js" defer></script>
 </body>
 </html>
