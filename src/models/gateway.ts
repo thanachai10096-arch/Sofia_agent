@@ -156,7 +156,7 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
   const usage = raw.usage;
   return {
     choices: [{
-      finish_reason: raw.stop_reason ?? null,
+      finish_reason: raw.stop_reason === "max_tokens" ? "length" : raw.stop_reason ?? null,
       message: {
         content: textParts.join("\n") || null,
         tool_calls: toolCalls,
@@ -602,6 +602,7 @@ export class SofiaModelGateway implements ModelProvider {
         })),
       },
       ...(usage ? { usage } : {}),
+      finishReason: data.choices?.[0]?.finish_reason === "length" ? "length" : "complete",
     };
   }
 }
