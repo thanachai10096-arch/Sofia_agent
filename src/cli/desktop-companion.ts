@@ -2,7 +2,7 @@ import { createInterface } from "node:readline";
 import { createDesktopCompanionClient } from "../desktop/companion-client.js";
 import { createLocalGuiApproval } from "../desktop/gui-approval.js";
 import { OsDesktopCredentialStore } from "../desktop/os-credential-store.js";
-import { createAllowlistedDesktopHostDriver, parseDesktopApplicationAllowlist } from "../desktop/local-host.js";
+import { createAllowlistedDesktopHostDriver, parseDesktopApplicationAllowlist, resolveLocalDesktopCapabilities } from "../desktop/local-host.js";
 import { createPlatformDesktopHostDriver } from "../desktop/platform-host.js";
 
 async function readSecret(prompt: string): Promise<string> {
@@ -53,25 +53,19 @@ export async function runDesktopCompanion(): Promise<void> {
   const apiBaseUrl = process.env.SOFIA_API_URL;
   if (!apiBaseUrl) throw new Error("Set SOFIA_API_URL to your Sofia server HTTPS URL first.");
   const applications = parseDesktopApplicationAllowlist(process.env.SOFIA_DESKTOP_ALLOWED_APPS);
-  if (Object.keys(applications).length === 0) {
-    throw new Error("No local apps are allowlisted. Set SOFIA_DESKTOP_ALLOWED_APPS to a JSON object of app IDs and absolute executable paths.");
-  }
   const credentials = new OsDesktopCredentialStore();
   const allowlistedDriver = createAllowlistedDesktopHostDriver(applications);
   const nativeDriver = createPlatformDesktopHostDriver();
   const driver = { ...nativeDriver, launchApplication: allowlistedDriver.launchApplication };
   const enableInput = process.env.SOFIA_DESKTOP_ENABLE_INPUT?.trim().toLowerCase() === "true";
   const enableScreenCapture = process.env.SOFIA_DESKTOP_ENABLE_SCREEN_CAPTURE?.trim().toLowerCase() === "true";
+  const allowedCapabilities = resolveLocalDesktopCapabilities(applications, { enableInput, enableScreenCapture });
   const approval = createLocalGuiApproval();
   const client = createDesktopCompanionClient({
     apiBaseUrl,
     credentials,
     driver,
-    allowedCapabilities: [
-      "app:launch",
-      ...(enableInput ? ["input:control" as const] : []),
-      ...(enableScreenCapture ? ["screen:capture" as const] : []),
-    ],
+    allowedCapabilities,
     allowedApplications: Object.keys(applications),
     requestApproval: (action, signal) => approval.requestApproval(action, signal),
     pollIntervalMs: 1500,
