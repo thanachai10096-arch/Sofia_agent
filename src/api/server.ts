@@ -140,7 +140,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try { usage.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
-  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
+  const cronScheduler = deps.cronScheduler ?? (deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined);
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
