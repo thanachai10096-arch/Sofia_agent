@@ -38,10 +38,10 @@ export async function connectN8nOfficialMcp(
   const token = env.SOFIA_N8N_MCP_BEARER_TOKEN?.trim();
   if (!endpoint || !token) throw new Error("n8n MCP requires SOFIA_N8N_MCP_URL and SOFIA_N8N_MCP_BEARER_TOKEN");
   const parsed = new URL(endpoint);
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash ||
+      !parsed.pathname.replace(/\/+$/, "").endsWith("/mcp-server/http")) {
       !parsed.pathname.replace(/\\/+$/, "").endsWith("/mcp-server/http")) {
     throw new Error("SOFIA_N8N_MCP_URL must be an HTTPS n8n /mcp-server/http endpoint without credentials, query, or fragment");
-  }
+  if (/[\r\n]/.test(token)) throw new Error("SOFIA_N8N_MCP_BEARER_TOKEN contains invalid header characters");
   if (/[\\r\\n]/.test(token)) throw new Error("SOFIA_N8N_MCP_BEARER_TOKEN contains invalid header characters");
   if (!policy.allowTools || !policy.allowNetwork) {
     throw new Error("n8n MCP requires SOFIA_ALLOW_TOOLS=true and SOFIA_ALLOW_NETWORK=true");
