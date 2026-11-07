@@ -79,5 +79,6 @@ test("shared delegated tool runtime only exposes and accepts registered allowlis
 test("ordinary chat is not eligible for coding subagent recovery", () => {
   assert.equal(isSubagentWorthyTask("สวัสดี Sofia ช่วยตอบว่า 2+2 เท่ากับเท่าไร"), false);
   assert.equal(isSubagentWorthyTask("fix the failing TypeScript build"), true);
+  assert.equal(isSubagentWorthyTask("Create hello.txt", ["workspace.write_file"]), true);
   assert.equal(isSubagentWorthyTask("ช่วยแก้โค้ดใน repository"), true);
 });
