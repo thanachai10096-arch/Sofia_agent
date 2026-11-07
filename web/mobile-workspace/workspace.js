@@ -21,8 +21,8 @@
     toast.timer = setTimeout(() => els.toast.classList.remove("show"), 3000);
   }
   function setStatus(connected, label) {
-    els.statusDot.style.background = connected ? "var(--mint2)" : "#7c879e";
-    els.statusDot.style.boxShadow = connected ? "0 0 12px #4ed8a477" : "none";
+    els.statusDot.classList.toggle("is-connected", connected);
+    els.statusDot.classList.toggle("is-disconnected", !connected);
     els.statusText.textContent = label;
     els.browserState.textContent = connected ? "Cloud browser connected" : "Waiting for connection";
   }
@@ -243,7 +243,7 @@
       await pollRun(started.id, progress);
     } catch (error) {
       progress.textContent = error.message;
-      progress.style.color = "#ffabb5";
+      progress.classList.add("is-error");
     } finally { state.busy = false; els.send.disabled = false; }
   }
   async function pollRun(id, progress) {
@@ -254,19 +254,19 @@
       if (result.status === "completed") {
         const summary = result.result?.summary || result.result?.response || "Task completed.";
         progress.textContent = "✓ " + String(summary);
-        progress.style.color = "var(--mint)";
+        progress.classList.add("is-success");
         return;
       }
       if (result.status === "failed" || result.status === "cancelled") {
         progress.textContent = result.error || "Sofia could not complete this task.";
-        progress.style.color = "#ffabb5";
+        progress.classList.add("is-error");
         return;
       }
       progress.textContent = "Sofia is working · " + result.status + "…";
     }
     progress.textContent = "This task is still running. You can check its status in Activity.";
   }
-  function resizeChat() { els.chat.style.height = "auto"; els.chat.style.height = Math.min(els.chat.scrollHeight, 100) + "px"; }
+  function resizeChat() { els.chat.rows = Math.min(5, Math.max(1, els.chat.value.split("\n").length)); }
   function openKeyboard() { els.chat.focus(); toast("Type a message to Sofia, or tap a field in the browser to enter text."); }
   function clickScreen(event) {
     if (!state.sessionId || !els.screenshot.naturalWidth) return;
