@@ -407,6 +407,7 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
 test("trusted network target permits fixed workflow endpoints without model-controlled URLs", async () => {
   let executed = 0;
   let approvedHash = "";
+  let approvedTargets: readonly string[] | undefined;
   const registry = new MapToolRegistry([{
     name: "workflow.execute",
     description: "Execute an operator-configured workflow",
@@ -424,7 +425,7 @@ test("trusted network target permits fixed workflow endpoints without model-cont
   const gateway = new RegistryToolGateway(
     { runtime: runtime(), tools: registry },
     policy,
-    async (request) => { approvedHash = request.actionHash; return true; },
+    async (request) => { approvedHash = request.actionHash; approvedTargets = request.trustedNetworkTargets; return true; },
   );
 
   const result = await gateway.execute(
@@ -441,6 +442,7 @@ test("trusted network target permits fixed workflow endpoints without model-cont
   assert.equal(result.ok, true);
   assert.equal(executed, 1);
   assert.match(approvedHash, /^[a-f0-9]{64}$/);
+  assert.deepEqual(approvedTargets, ["https://n8n.internal/api/v1/workflows/daily-report/run"]);
 });
 
 test("trusted network target is still rejected when its host is not allowlisted", async () => {
