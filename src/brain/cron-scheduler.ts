@@ -614,7 +614,7 @@ export class CronScheduler {
           break;
         }
         try {
-          const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId });
+          const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId, cronExecution: true });
           job = submitted;
           if (controller.signal.aborted) {
             await this.runtime.cancel(submitted.id).catch(() => false);
