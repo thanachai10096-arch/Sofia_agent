@@ -48,6 +48,7 @@ export class McpClient {
       clientInfo: { name: this.clientInfo.name, version: this.clientInfo.version },
     }, signal), "initialize result");
     if (typeof response.protocolVersion !== "string" || !response.serverInfo) throw new Error("Invalid MCP initialize response: missing protocolVersion or serverInfo");
+    if (response.protocolVersion !== this.clientInfo.protocolVersion) throw new Error("MCP server selected an unsupported protocol version");
     this.transport.setProtocolVersion?.(response.protocolVersion);
     await this.transport.notify("notifications/initialized");
     this.initialized = true;
