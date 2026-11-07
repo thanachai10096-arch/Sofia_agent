@@ -539,11 +539,19 @@ export class SofiaBrain {
       return parseUnderstanding(input.understanding);
     }
 
+    // Probe only safe, read-only runtime capabilities before presenting them to the planner.
+    // Tool registration and policy permission alone never imply runtime readiness.
+    const discoveredTools = this.dependencies.tools.probeReadiness
+      ? await this.wait(() => this.dependencies.tools.probeReadiness!())
+      : this.dependencies.tools.listTools?.() ?? [];
     const payload = {
       task: input.task,
       referenceContext: priorReferenceContext(input.context),
-      availableTools: this.dependencies.tools.listTools?.() ?? [],
-      capabilityDiscovery: { source: "current_brain_run_registry_and_execution_policy", tools: this.dependencies.tools.listTools?.() ?? [] },
+      availableTools: discoveredTools,
+      capabilityDiscovery: {
+        source: "current_brain_run_registry_policy_and_safe_runtime_probes",
+        tools: discoveredTools,
+      },
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     };
     let value = await this.infer("understand", payload);
