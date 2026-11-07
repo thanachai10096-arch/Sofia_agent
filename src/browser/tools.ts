@@ -159,5 +159,27 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       },
     });
   }
+  const probeReadiness = async (): Promise<{ ok: boolean; reason: string }> => {
+    let probeSession: Awaited<ReturnType<BrowserRuntime["launch"]>> | undefined;
+    try {
+      // Launch and close an isolated headless session without opening a page or
+      // navigating to a URL. This verifies the browser binary/runtime itself.
+      probeSession = await runtime.launch({ headless: true });
+      if (!probeSession || typeof probeSession.close !== "function") {
+        throw new Error("Browser runtime did not return a closable session.");
+      }
+      await probeSession.close();
+      return { ok: true, reason: "Isolated headless browser launch and clean shutdown passed." };
+    } catch (error) {
+      await probeSession?.close().catch(() => undefined);
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : "Browser runtime probe failed.",
+      };
+    }
+  };
+  for (const tool of tools) {
+    if (tool.name.startsWith("browser.")) tool.probeReadiness = probeReadiness;
+  }
   return tools;
 }
