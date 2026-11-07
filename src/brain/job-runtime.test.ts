@@ -512,13 +512,8 @@ test("DurableJobRuntime preserves concurrent submissions from independent runtim
   for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
   assert.ok(persisted.every((record) => record.status === "completed"), "all background workers must settle before cleanup");
 
-  const file = path.join(
-    os.tmpdir(),
-    "sofia-agents-jobs",
-    createHash("sha256").update(namespace).digest("hex") + ".json",
-  );
-  await rm(file, { force: true });
-  await rm(file + ".lock", { force: true });
+  // Keep the unique temporary namespace isolated; do not unlink its lock file
+  // while a just-completed worker may still be unwinding its heartbeat promise.
 });
 
 
