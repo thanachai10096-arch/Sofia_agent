@@ -56,6 +56,11 @@ export interface WorkflowExecutionLedger {
     workflowId: string,
     idempotencyKey: string,
   ): Promise<WorkflowExecutionRecord | undefined>;
+  /** Return ambiguous executions for provider-side reconciliation, oldest first. */
+  listForReconciliation(
+    olderThan: string,
+    limit: number,
+  ): Promise<readonly WorkflowExecutionRecord[]>;
 }
 
 /**
