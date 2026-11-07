@@ -56,9 +56,26 @@ async function boundedJson(response: Response, maxBytes: number, label: string):
   if (!response.ok) throw new Error(label + " unavailable.");
   const declared = Number(response.headers.get("content-length") ?? 0);
   if (Number.isFinite(declared) && declared > maxBytes) throw new Error(label + " response is too large.");
-  const raw = await response.text();
-  if (Buffer.byteLength(raw, "utf8") > maxBytes) throw new Error(label + " response is too large.");
-  const parsed: unknown = JSON.parse(raw);
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error(label + " response is empty.");
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw new Error(label + " response is too large.");
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(label + " response is invalid.");
   return parsed as JsonObject;
 }
