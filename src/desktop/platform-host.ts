@@ -5,17 +5,21 @@ interface CommandOutput { stdout: Buffer; stderr: Buffer }
 export type NativeCommandRunner = (
   command: string,
   args: readonly string[],
-  options?: { env?: NodeJS.ProcessEnv; timeoutMs?: number; maxOutputBytes?: number },
+  options?: { env?: NodeJS.ProcessEnv; timeoutMs?: number; maxOutputBytes?: number; signal?: AbortSignal },
 ) => Promise<CommandOutput>;
 
 function runNativeCommand(
   command: string,
   args: readonly string[],
-  options: { env?: NodeJS.ProcessEnv; timeoutMs?: number; maxOutputBytes?: number } = {},
+  options: { env?: NodeJS.ProcessEnv; timeoutMs?: number; maxOutputBytes?: number; signal?: AbortSignal } = {},
 ): Promise<CommandOutput> {
   const timeoutMs = options.timeoutMs ?? 15_000;
   const maxOutputBytes = options.maxOutputBytes ?? 6 * 1024 * 1024;
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(new Error("Native desktop command aborted."));
+      return;
+    }
     const child = spawn(command, [...args], {
       shell: false,
       windowsHide: true,
@@ -26,10 +30,15 @@ function runNativeCommand(
     const stderr: Buffer[] = [];
     let total = 0;
     let settled = false;
+    const onAbort = () => {
+      child.kill();
+      finish(new Error("Native desktop command aborted."));
+    };
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
       if (error) reject(error);
       else resolve({ stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });
     };
@@ -37,6 +46,8 @@ function runNativeCommand(
       child.kill();
       finish(new Error("Native desktop command timed out."));
     }, timeoutMs);
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
     child.stdout.on("data", (chunk: Buffer) => {
       total += chunk.length;
       if (total > maxOutputBytes) {
@@ -201,20 +212,20 @@ export function createPlatformDesktopHostDriver(options: {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const run = options.run ?? runNativeCommand;
-  const call = (command: string, args: string[], extra: NodeJS.ProcessEnv = {}, timeoutMs = 15_000) =>
-    run(command, args, { env: minimalEnvironment(extra), timeoutMs, maxOutputBytes: 6 * 1024 * 1024 });
-  const powershell = (operation: string, extra: NodeJS.ProcessEnv = {}, timeoutMs = 20_000) =>
+  const call = (command: string, args: string[], extra: NodeJS.ProcessEnv = {}, timeoutMs = 15_000, signal?: AbortSignal) =>
+    run(command, args, { env: minimalEnvironment(extra), timeoutMs, maxOutputBytes: 6 * 1024 * 1024, signal });
+  const powershell = (operation: string, extra: NodeJS.ProcessEnv = {}, timeoutMs = 20_000, signal?: AbortSignal) =>
     call("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_SCRIPT],
-      { ...extra, SOFIA_NATIVE_OPERATION: operation }, timeoutMs);
+      { ...extra, SOFIA_NATIVE_OPERATION: operation }, timeoutMs, signal);
 
   return {
-    async captureScreen(options) {
+    async captureScreen(options, signal) {
       if (options?.displayId !== undefined) throw new Error("Selecting an individual display is not supported; capture the full virtual desktop instead.");
       let data: Buffer;
       if (platform === "darwin") {
-        ({ stdout: data } = await call("/usr/sbin/screencapture", ["-x", "-"]));
+        ({ stdout: data } = await call("/usr/sbin/screencapture", ["-x", "-"], {}, 15_000, signal));
       } else if (platform === "win32") {
-        const output = (await powershell("capture")).stdout.toString("utf8").trim();
+        const output = (await powershell("capture", {}, 20_000, signal)).stdout.toString("utf8").trim();
         const parts = output.split(",");
         if (parts.length !== 3) throw new Error("Windows screen capture returned an invalid response.");
         const width = Number(parts[0]); const height = Number(parts[1]);
@@ -224,7 +235,7 @@ export function createPlatformDesktopHostDriver(options: {
         return { mimeType: "image/png", data, width, height };
       } else if (platform === "linux") {
         if (env.WAYLAND_DISPLAY && !env.DISPLAY) throw new Error("Screen capture on Wayland is not enabled in this build; configure an approved Wayland capture backend.");
-        ({ stdout: data } = await call("scrot", ["-"]));
+        ({ stdout: data } = await call("scrot", ["-"], {}, 15_000, signal));
       } else {
         throw new Error("Native screen capture is not supported on this operating system.");
       }
@@ -234,41 +245,41 @@ export function createPlatformDesktopHostDriver(options: {
     async launchApplication() {
       throw new Error("Application launch must use the separate allowlisted local host driver.");
     },
-    async click(point) {
+    async click(point, signal) {
       if (platform === "linux") {
         if (env.WAYLAND_DISPLAY && !env.DISPLAY) throw new Error("Input control on Wayland is not enabled in this build.");
         const button = point.button === "right" ? "3" : point.button === "middle" ? "2" : "1";
-        await call("xdotool", ["mousemove", "--sync", String(point.x), String(point.y), "click", button]);
+        await call("xdotool", ["mousemove", "--sync", String(point.x), String(point.y), "click", button], {}, 15_000, signal);
       } else if (platform === "darwin") {
         const command = point.button === "right" ? "rc" : point.button === "middle" ? "mc" : "c";
-        await call("cliclick", ["m:" + point.x + "," + point.y, command + ":" + point.x + "," + point.y]);
+        await call("cliclick", ["m:" + point.x + "," + point.y, command + ":" + point.x + "," + point.y], {}, 15_000, signal);
       } else if (platform === "win32") {
         await powershell("click", {
           SOFIA_NATIVE_X: String(point.x), SOFIA_NATIVE_Y: String(point.y), SOFIA_NATIVE_BUTTON: point.button ?? "left",
-        });
+        }, 20_000, signal);
       } else throw new Error("Native mouse control is not supported on this operating system.");
     },
-    async typeText(text) {
+    async typeText(text, signal) {
       if (platform === "linux") {
         if (env.WAYLAND_DISPLAY && !env.DISPLAY) throw new Error("Keyboard control on Wayland is not enabled in this build.");
-        await call("xdotool", ["type", "--clearmodifiers", "--delay", "1", "--", text], {}, 20_000);
+        await call("xdotool", ["type", "--clearmodifiers", "--delay", "1", "--", text], {}, 20_000, signal);
       } else if (platform === "darwin") {
-        await call("cliclick", ["t:" + text], {}, 20_000);
+        await call("cliclick", ["t:" + text], {}, 20_000, signal);
       } else if (platform === "win32") {
-        await powershell("type", { SOFIA_NATIVE_TEXT: text }, 20_000);
+        await powershell("type", { SOFIA_NATIVE_TEXT: text }, 20_000, signal);
       } else throw new Error("Native keyboard control is not supported on this operating system.");
     },
-    async pressKey(key) {
+    async pressKey(key, signal) {
       if (platform === "linux") {
         if (env.WAYLAND_DISPLAY && !env.DISPLAY) throw new Error("Keyboard control on Wayland is not enabled in this build.");
-        await call("xdotool", ["key", "--clearmodifiers", xdotoolKey(key)]);
+        await call("xdotool", ["key", "--clearmodifiers", xdotoolKey(key)], {}, 15_000, signal);
       } else if (platform === "darwin") {
-        await call("cliclick", macKey(key));
+        await call("cliclick", macKey(key), {}, 15_000, signal);
       } else if (platform === "win32") {
         const parsed = windowsKey(key);
         await powershell("key", {
           SOFIA_NATIVE_VK: String(parsed.vk), SOFIA_NATIVE_MODIFIERS: parsed.modifiers.join(","),
-        });
+        }, 20_000, signal);
       } else throw new Error("Native keyboard control is not supported on this operating system.");
     },
   };

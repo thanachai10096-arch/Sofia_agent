@@ -53,11 +53,11 @@ export interface DesktopCommandResult {
 
 /** Platform-native implementation supplied by the trusted local desktop host. */
 export interface DesktopHostDriver {
-  captureScreen(options?: { displayId?: string }): Promise<{ mimeType: "image/png" | "image/jpeg"; data: Uint8Array; width: number; height: number }>;
-  launchApplication(applicationId: string, args?: string[]): Promise<{ launched: boolean; applicationId: string }>;
-  click(point: { x: number; y: number; button?: "left" | "right" | "middle" }): Promise<void>;
-  typeText(text: string): Promise<void>;
-  pressKey(key: string): Promise<void>;
+  captureScreen(options?: { displayId?: string }, signal?: AbortSignal): Promise<{ mimeType: "image/png" | "image/jpeg"; data: Uint8Array; width: number; height: number }>;
+  launchApplication(applicationId: string, args?: string[], signal?: AbortSignal): Promise<{ launched: boolean; applicationId: string }>;
+  click(point: { x: number; y: number; button?: "left" | "right" | "middle" }, signal?: AbortSignal): Promise<void>;
+  typeText(text: string, signal?: AbortSignal): Promise<void>;
+  pressKey(key: string, signal?: AbortSignal): Promise<void>;
 }
 
 export type DesktopAction =

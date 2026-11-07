@@ -129,7 +129,7 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
     if (signal?.aborted) throw signal.reason ?? new Error("Desktop action aborted.");
     switch (action.kind) {
       case "screen.capture": {
-        const capture = await config.driver.captureScreen();
+        const capture = await config.driver.captureScreen(undefined, signal);
         if (capture.data.byteLength > 3.75 * 1024 * 1024) throw new Error("Screen capture exceeds the 5 MiB limit.");
         if (!Number.isInteger(capture.width) || !Number.isInteger(capture.height) || capture.width < 1 || capture.height < 1 || capture.width > 16384 || capture.height > 16384) {
           throw new Error("Desktop driver returned invalid screen dimensions.");
@@ -139,13 +139,13 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
       case "app.launch":
         return config.driver.launchApplication(action.applicationId, action.args);
       case "input.click":
-        await config.driver.click({ x: action.x, y: action.y, button: action.button });
+        await config.driver.click({ x: action.x, y: action.y, button: action.button }, signal);
         return { ok: true };
       case "input.type":
-        await config.driver.typeText(action.text);
+        await config.driver.typeText(action.text, signal);
         return { ok: true };
       case "input.key":
-        await config.driver.pressKey(action.key);
+        await config.driver.pressKey(action.key, signal);
         return { ok: true };
     }
   };

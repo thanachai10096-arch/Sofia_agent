@@ -89,3 +89,25 @@ test("unsupported platforms fail closed", async () => {
   await assert.rejects(driver.captureScreen(), /not supported/);
   await assert.rejects(driver.click({ x: 1, y: 1 }), /not supported/);
 });
+
+
+test("native desktop commands are killed when their approval/run signal is aborted", async () => {
+  let observedSignal: AbortSignal | undefined;
+  const run: NativeCommandRunner = async (_command, _args, options) => {
+    observedSignal = options?.signal;
+    return await new Promise((_, reject) => {
+      const abort = () => reject(new Error("Native desktop command aborted."));
+      if (options?.signal?.aborted) abort();
+      else options?.signal?.addEventListener("abort", abort, { once: true });
+    });
+  };
+  const controller = new AbortController();
+  const driver = createPlatformDesktopHostDriver({
+    platform: "linux", env: { DISPLAY: ":0" }, run,
+  });
+  const pending = driver.typeText("must stop", controller.signal);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(observedSignal, controller.signal);
+  controller.abort();
+  await assert.rejects(pending, /aborted/);
+});
