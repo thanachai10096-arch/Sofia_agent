@@ -2,6 +2,8 @@ import type { ManagedMcpServerConfig } from "./registry.js";
 import { McpHttpTransport, McpStdioTransport } from "./transports.js";
 
 type JsonRecord = Record<string, unknown>;
+const SAFE_ID = /^[a-z][a-z0-9_-]{0,47}$/;
+const SAFE_TOOL = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 type ParsedServer =
   | { id: string; allowedTools: string[]; transport: { type: "stdio"; command: string; args?: string[]; cwd?: string; inheritEnv?: string[]; env?: Record<string, string> } }
   | { id: string; allowedTools: string[]; transport: { type: "http"; endpoint: string; headers?: Record<string, string> } };
@@ -33,15 +35,25 @@ export function loadMcpServerConfigsFromEnv(env: NodeJS.ProcessEnv = process.env
   if (!Array.isArray(parsed)) throw new Error("SOFIA_MCP_SERVERS_JSON must be a JSON array");
 
   // Validate the complete configuration before spawning any stdio child process.
+  const seenNames = new Set<string>();
   const validated: ParsedServer[] = parsed.map((entry, index) => {
     const item = record(entry, "MCP server entry " + index);
-    if (typeof item.id !== "string") throw new Error("MCP server entry " + index + " requires an id");
+    if (typeof item.id !== "string" || !SAFE_ID.test(item.id)) throw new Error("MCP server entry " + index + " requires a lowercase slug id");
     const allowedTools = strings(item.allowedTools, "MCP allowedTools");
     if (!allowedTools?.length) throw new Error("MCP server " + item.id + " requires a non-empty allowedTools list");
+    for (const name of allowedTools) {
+      if (!SAFE_TOOL.test(name)) throw new Error("Invalid MCP tool name in allowlist");
+      const qualifiedName = "mcp." + item.id + "." + name;
+      if (seenNames.has(qualifiedName)) throw new Error("Duplicate MCP tool in configuration: " + qualifiedName);
+      seenNames.add(qualifiedName);
+    }
     const transport = record(item.transport, "MCP transport");
     if (transport.type === "stdio") {
       if (typeof transport.command !== "string" || !transport.command.trim()) throw new Error("MCP stdio transport requires a command");
       if (transport.cwd !== undefined && typeof transport.cwd !== "string") throw new Error("MCP stdio cwd must be a string");
+      const inherited = strings(transport.inheritEnv, "MCP stdio inheritEnv", true);
+      const stdioEnv = stringMap(transport.env, "MCP stdio env");
+      if (Object.keys(stdioEnv ?? {}).some((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) throw new Error("Invalid MCP environment variable name");
       return {
         id: item.id,
         allowedTools,
@@ -50,13 +62,17 @@ export function loadMcpServerConfigsFromEnv(env: NodeJS.ProcessEnv = process.env
           command: transport.command,
           ...(strings(transport.args, "MCP stdio args", true) ? { args: strings(transport.args, "MCP stdio args", true)! } : {}),
           ...(typeof transport.cwd === "string" ? { cwd: transport.cwd } : {}),
-          ...(strings(transport.inheritEnv, "MCP stdio inheritEnv", true) ? { inheritEnv: strings(transport.inheritEnv, "MCP stdio inheritEnv", true)! } : {}),
-          ...(stringMap(transport.env, "MCP stdio env") ? { env: stringMap(transport.env, "MCP stdio env")! } : {}),
+          ...(inherited ? { inheritEnv: inherited } : {}),
+          ...(stdioEnv ? { env: stdioEnv } : {}),
         },
       };
     }
     if (transport.type === "http") {
       if (typeof transport.endpoint !== "string" || !transport.endpoint.trim()) throw new Error("MCP HTTP transport requires an endpoint");
+      const endpoint = new URL(transport.endpoint);
+      if ((endpoint.protocol !== "https:" && endpoint.protocol !== "http:") || endpoint.username || endpoint.password) {
+        throw new Error("MCP HTTP endpoint must use HTTP(S) and must not embed credentials");
+      }
       const headers = stringMap(transport.headers, "MCP HTTP headers");
       return { id: item.id, allowedTools, transport: { type: "http", endpoint: transport.endpoint, ...(headers ? { headers } : {}) } };
     }
