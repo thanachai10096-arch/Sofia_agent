@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { createSofiaBrain } from "./executor.js";
 import { InMemorySkillLedger } from "./learning.js";
+import { EvolutionEngine } from "./evolution.js";
 import type { BrainReasoner, ToolGateway, ToolResult } from "./types.js";
 import type { SubagentRuntime } from "./subagents.js";
 import type { ProjectMemoryEntry, ProjectMemoryStore } from "./project-memory.js";
@@ -92,13 +93,15 @@ function makeTools(includeSkills = false): ToolGateway {
       ];
     },
     describe(name) {
-      return name === "workspace.write_file" || name === "workspace.list_files"
+      return name === "workspace.write_file" || name === "workspace.list_files" ||
+        (includeSkills && name === "skill.files.inspect")
         ? { effects: name === "workspace.write_file" ? ["write"] : ["read"] }
         : undefined;
     },
     async execute(call) {
       if (call.tool === "workspace.write_file") return result({ ok: true });
       if (call.tool === "workspace.list_files") return result(["hello.txt"]);
+      if (includeSkills && call.tool === "skill.files.inspect") return result({ inspected: true });
       return { ok: false, data: null, evidenceId: `e-${++revision}`, error: { category: "tool_error", message: "unknown" } };
     },
     async snapshot() {
@@ -145,6 +148,54 @@ test("Brain planner receives registered skill tools and explicit execution/verif
   assert.equal(policy.discoveryTool, "skills.search");
   assert.ok(policy.instructions.some((item) => item.includes("independent verification")));
   assert.ok(policy.instructions.some((item) => item.includes("normal tool gateway")));
+});
+
+test("Evolution credits a skill only after its actual tool call and trusted task verification", async () => {
+  const evolution = new EvolutionEngine();
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      const value = parsed.phase === "understand"
+        ? {
+            objective: "Inspect workspace evidence",
+            constraints: [], assumptions: [], requiredCapabilities: ["file-inspection"],
+            requiredTools: ["skill.files.inspect"], risk: "low",
+            successCriteria: ["hello.txt exists"], ambiguities: [],
+          }
+        : {
+            strategy: "initial",
+            reason: "Use the registered file inspection skill, then verify the requested file.",
+            steps: [{
+              id: "inspect",
+              objective: "Inspect workspace",
+              dependencies: [],
+              call: { tool: "skill.files.inspect", input: { path: "." } },
+            }],
+          };
+      return {
+        inputTokens: 10,
+        async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(true), evolution, allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
+  });
+  const report = await brain.run({
+    task: "Inspect the workspace and confirm hello.txt exists",
+    acceptanceCriteria: [{
+      id: "file-exists", description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) { return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" }; },
+    }],
+  });
+  assert.equal(report.completed, true, report.summary);
+  const performance = evolution.getSkill("files.inspect");
+  assert.equal(performance?.attempts, 1);
+  assert.equal(performance?.successes, 1);
+  assert.equal(performance?.failures, 0);
 });
 
 test("Brain retries one malformed plan with the strict call schema before failing", async () => {
