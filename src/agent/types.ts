@@ -50,5 +50,6 @@ export interface AgentDependencies {
  userMemoryStore?: import("../brain/user-memory.js").UserMemoryStore;
  sessionStore?: { getOrCreate(id: string): { id: string; messages: string[]; updatedAt: number }; save(session: { id: string; messages: string[]; updatedAt: number }): void };
  learningDiagnostics?: () => unknown;
+ closeBrowserProfiles?: () => Promise<void>;
 }
 export type { ToolCall };
