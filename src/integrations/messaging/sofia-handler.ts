@@ -9,6 +9,8 @@ import type { InboundMessage } from "./types.js";
 export interface SofiaMessagingHandlerOptions {
   /** Existing Sofia SDK/API client; credentials remain server-side. */
   client: ChatRunStarter;
+  /** Select a server-side client using the verified inbound platform identity. */
+  clientForMessage?: (message: InboundMessage) => ChatRunStarter;
   /** Existing access policy and atomic deduplicator from chat-adapter.ts. */
   accessPolicy: ChatAccessPolicy;
   deduplicator: ChatMessageDeduplicator;
@@ -51,12 +53,6 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
     throw new Error("commandPrefix must be a non-empty single-line command.");
   }
   const naturalLanguageEnabled = options.naturalLanguageEnabled ?? true;
-  const handleCommand = createChatCommandHandler({
-    client: options.client,
-    accessPolicy: options.accessPolicy,
-    deduplicator: options.deduplicator,
-    maxTaskCharacters: options.maxTaskCharacters,
-  });
 
   return async function onMessage(message: InboundMessage): Promise<string | void> {
     const text = message.text.trim();
@@ -70,6 +66,12 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
     if (!text) return;
 
     const task = isRunCommand ? text.slice(prefix.length).trim() : text;
+    const handleCommand = createChatCommandHandler({
+      client: options.clientForMessage?.(message) ?? options.client,
+      accessPolicy: options.accessPolicy,
+      deduplicator: options.deduplicator,
+      maxTaskCharacters: options.maxTaskCharacters,
+    });
     const result = await handleCommand({
       platform: message.platform,
       messageId: message.messageId,
