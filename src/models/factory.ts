@@ -56,10 +56,15 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
     const checks = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
-      { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
-      { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
+      { name: "procedure", passed: candidate.skill.procedure.length >= 2 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
+      { name: "verification-requirements", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
+      // Listing desired checks is not proof that they ran. Until the lifecycle is
+      // wired to an isolated verifier that executes the candidate against a
+      // controlled workspace and records fresh results, production promotion
+      // must fail closed rather than label metadata-only inspection "verified".
+      { name: "runtime-verification", passed: false, detail: "No isolated skill verification runner is configured; metadata checks cannot establish executable correctness." },
     ];
-    return { passed: checks.every((check) => check.passed), checks };
+    return { passed: false, checks };
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
