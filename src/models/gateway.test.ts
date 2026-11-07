@@ -266,3 +266,34 @@ test("Anthropic thinking-only recovery preserves explicitly disabled thinking mo
     globalThis.fetch = originalFetch;
   }
 });
+
+test("Anthropic thinking-only recovery explicitly disables provider-default thinking", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedBodies: Array<Record<string, unknown>> = [];
+  globalThis.fetch = async (_input, init) => {
+    requestedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    const response = requestedBodies.length === 1
+      ? { content: [{ type: "thinking", thinking: "private reasoning" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 20 } }
+      : { content: [{ type: "text", text: JSON.stringify({ ok: true }) }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } };
+    return new Response(JSON.stringify(response), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://api.deepseek.com/anthropic",
+        apiKey: "test",
+        model: "deepseek-chat",
+        protocol: "anthropic-messages",
+        // Deliberately unset: recovery must override provider-default thinking.
+      },
+    });
+    const result = await gateway.generate({ task: "test", kind: "analysis", step: 1 }, route);
+    assert.equal(result.text, JSON.stringify({ ok: true }));
+    assert.equal(requestedBodies.length, 2);
+    assert.equal("thinking" in requestedBodies[0]!, false);
+    assert.deepEqual(requestedBodies[1]?.thinking, { type: "disabled" });
+    assert.match(String(requestedBodies[1]?.system), /Return the final user-facing answer now/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
