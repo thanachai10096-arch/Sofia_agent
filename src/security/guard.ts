@@ -110,6 +110,10 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
   }
 }
 
+const TRUSTED_READ_ONLY_NETWORK_ENDPOINTS: Record<string, string> = {
+  "web.search": "https://api.search.brave.com/res/v1/llm/context",
+};
+
 function isGitNetworkCommand(input: Record<string, unknown>): boolean {
   const commandText = [input.command, input.args]
     .filter((value) => value !== undefined)
@@ -124,8 +128,11 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
   const hash = actionHash(action.runId, action.toolName, action.input, action.principalId);
   const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;
   if (action.effects.includes("network") || action.effects.includes("browser")) {
-    const explicitUrl = typeof action.input.url === "string" ? action.input.url : undefined;
-    const discoveredUrls = collectHttpUrls(action.input).filter((url) => url !== explicitUrl);
+    const trustedSearchEndpoint = TRUSTED_READ_ONLY_NETWORK_ENDPOINTS[action.toolName];
+    const explicitUrl = typeof action.input.url === "string" ? action.input.url : trustedSearchEndpoint;
+    const discoveredUrls = trustedSearchEndpoint
+      ? []
+      : collectHttpUrls(action.input).filter((url) => url !== explicitUrl);
     const urls = [...(explicitUrl ? [explicitUrl] : []), ...discoveredUrls];
     const opaqueGitNetworkOperation = action.toolName === "git.run" && isGitNetworkCommand(action.input);
     if (urls.length === 0 && action.toolName !== "terminal.run" && !(action.toolName === "git.run" && !opaqueGitNetworkOperation)) {
@@ -161,7 +168,12 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
     return { allowed: false, risk: "critical", requireApproval: true, reason: "Suspicious instruction pattern in tool parameters.", actionHash: hash };
   }
 
-  const risk = riskFor(action.effects, action.input);
+  // The search tool can only call the fixed Brave endpoint above. It remains
+  // gated by allowNetwork + the endpoint host allowlist, but read-only lookups
+  // do not require a per-query approval prompt. Operators can still force one
+  // through the named tool permission override.
+  const fixedReadOnlySearch = Object.prototype.hasOwnProperty.call(TRUSTED_READ_ONLY_NETWORK_ENDPOINTS, action.toolName);
+  const risk = fixedReadOnlySearch ? "low" : riskFor(action.effects, action.input);
   const requireApproval = risk === "medium" || risk === "high" || risk === "critical";
   return { allowed: true, risk, requireApproval, actionHash: hash };
 }
