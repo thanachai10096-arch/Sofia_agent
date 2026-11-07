@@ -26,6 +26,36 @@ export interface SofiaMessagingHandlerOptions {
 }
 
 /** Maps the gateway identity to Sofia's existing chat authorization contract. */
+/**
+ * Short conversational nudges must not create expensive Brain runs.
+ * These are deliberately narrow phrase matches; substantive questions and
+ * requests continue through the normal Brain dispatcher.
+ */
+function quickConversationReply(text: string): string | undefined {
+  const normalized = text
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[\\s\\u200b]+/g, "")
+    .replace(/[!?！？。，,、.]+/g, "");
+
+  if (/^(ผมมีคำถาม|ฉันมีคำถาม|มีคำถาม|ขอถามหน่อย|ถามหน่อย|ขอถาม|ถามได้ไหม|ขอถามได้ไหม)$/.test(normalized)) {
+    return "ได้เลยครับ 😊 ถามมาได้เลย ผมจะช่วยตอบให้ตรงประเด็นครับ";
+  }
+  if (/^(ตอบสิ|ตอบหน่อย|ช่วยตอบหน่อย|ตอบด้วย|ตอบลิ|ตอบดิ|ว่าไง|อยู่ไหม|ยังอยู่ไหม)$/.test(normalized)) {
+    return "ขอโทษครับ 😊 ผมอยู่ตรงนี้แล้ว ส่งคำถามหรือบอกได้เลยว่าต้องการให้ผมตอบเรื่องไหน";
+  }
+  if (/^(สวัสดี|หวัดดี|hello|hi|hey)$/.test(normalized)) {
+    return "สวัสดีครับ 😊 มีอะไรให้ผมช่วย บอกได้เลยครับ";
+  }
+  if (/^(ขอบคุณ|ขอบใจ|thanks|thankyou|โอเค|ok)$/.test(normalized)) {
+    return "ยินดีครับ 😊";
+  }
+  if (/(เข้าแอพ|เข้าแอป|เปิดแอพ|เปิดแอป|ควบคุมแอพ|ควบคุมแอป|กดในแอพ|กดในแอป)/.test(normalized)) {
+    return "ผมช่วยวางแผนและสั่งงานผ่านเครื่องมือที่ Sofia เชื่อมต่อได้ครับ แต่ตอนนี้ยังไม่มีสิทธิ์ควบคุมแอปอื่นบนมือถือโดยตรง คุณหมายถึงแอปไหน และต้องการให้ทำอะไรในแอปนั้นครับ?";
+  }
+  return undefined;
+}
+
 export function createMessagingAccessCheck(policy: ChatAccessPolicy) {
   return async (input: { platform: "telegram" | "discord" | "slack"; userId: string; channelId: string }) =>
     policy.isAllowed({
@@ -62,6 +92,13 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
     const text = message.text.trim();
     const isRunCommand = text === prefix || text.startsWith(prefix + " ") || text.startsWith(prefix + "\t");
 
+    // Answer obvious conversational nudges locally. They are not agent tasks
+    // and must never spawn a new run or consume model/tool budget.
+    if (!isRunCommand && text && !text.startsWith("/")) {
+      const quickReply = quickConversationReply(text);
+      if (quickReply) return quickReply;
+    }
+
     // Preserve provider commands such as /start, /help, and /status for the
     // adapter/platform instead of accidentally treating them as agent tasks.
     if (!isRunCommand && text.startsWith("/")) return;
@@ -85,7 +122,7 @@ export function createSofiaMessagingHandler(options: SofiaMessagingHandlerOption
         } catch {
           // Completion notifications must never prevent the normal acceptance acknowledgement.
         }
-        return `Sofia accepted the task (run ${result.runId}, status: ${result.runStatus}).`;
+        return `รับคำขอแล้วครับ กำลังเริ่มทำงาน (รหัสงาน: ${result.runId.slice(0, 8)})`;
       case "forbidden":
         return "Access denied.";
       case "rejected":
