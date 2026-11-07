@@ -71,7 +71,7 @@ export class RegistryToolGateway implements ToolGateway {
         }
         item.runtimeReadiness=workspaceReady.ok?"ready":"unavailable";
         item.runtimeReason=workspaceReady.reason;
-      }else if(item.effects.includes("browser")){
+      }else if(item.effects.includes("browser")||item.name.startsWith("browser.")){
         item.runtimeReadiness="not_probed";
         item.runtimeReason="Browser readiness requires a real browser-session probe; no session was opened during discovery.";
       }else if(item.effects.includes("shell")){
