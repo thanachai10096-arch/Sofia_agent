@@ -11,6 +11,7 @@ import { createDiscordSharedChatHandler } from "../integrations/messaging/discor
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 import { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
+import { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -21,7 +22,8 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+const desktopCommandBroker = new DesktopCommandBroker();
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, undefined, undefined, desktopCommandBroker);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -205,7 +207,6 @@ if (discordConfigured) {
   discordRecoveryTimer.unref?.();
 }
 
-const desktopCommandBroker = new DesktopCommandBroker();
 const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
@@ -217,7 +218,7 @@ const server = createSofiaApi(deps, {
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
-  desktopCommandBroker.close();
+  deps.desktopCommandBroker?.close();
   deps.closeSessionStore();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
