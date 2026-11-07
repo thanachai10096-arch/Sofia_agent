@@ -106,6 +106,8 @@ export interface BrainRunInput {
   /** Prior conversation/project context; always passed to the model as untrusted reference data. */
   context?: string;
   principalId?: string;
+  /** Trusted runtime marker: prevents scheduled runs from recursively managing cron. */
+  cronExecution?: boolean;
   understanding?: unknown;
   plan?: unknown;
   acceptanceCriteria?: AcceptanceCriterion[];
