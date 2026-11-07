@@ -7,12 +7,12 @@ const source = readFileSync(new URL("../../web/mobile-workspace/service-worker.j
 
 function harness(fetcher: typeof fetch = fetch) {
   const handlers = new Map<string, (event: any) => void>();
-  const cachedAssets: string[][] = [];
+  const cachedAssets: string[][] = [];\n  const deletedCaches: string[] = [];
   const cache = { addAll: async (assets: string[]) => { cachedAssets.push(assets); }, put: async () => undefined };
   const cacheApi = {
     open: async () => cache,
-    keys: async () => ["sofia-mobile-workspace-v1", "sofia-mobile-workspace-v2"],
-    delete: async () => true,
+    keys: async () => ["sofia-mobile-workspace-v1", "sofia-mobile-workspace-v2", "other-app-cache"],
+    delete: async (key: string) => { deletedCaches.push(key); return true; },
     match: async () => undefined,
   };
   const scope = {
@@ -22,7 +22,7 @@ function harness(fetcher: typeof fetch = fetch) {
     addEventListener: (name: string, handler: (event: any) => void) => handlers.set(name, handler),
   };
   runInNewContext(source, { self: scope, caches: cacheApi, fetch: fetcher, URL, Response, Promise });
-  return { handlers, cachedAssets };
+  return { handlers, cachedAssets, deletedCaches };
 }
 
 test("workspace service worker caches only public static assets, never HTML", async () => {
@@ -47,4 +47,14 @@ test("workspace navigation never falls back to a cached authenticated page", asy
   assert.equal(response.status, 503);
   assert.match(response.headers.get("cache-control") ?? "", /no-store/);
   assert.match(await response.text(), /Reconnect to sign in/);
+});
+
+
+test("workspace activation deletes only its own previous cache versions", async () => {
+  const { handlers, deletedCaches } = harness();
+  let activation: Promise<unknown> | undefined;
+  handlers.get("activate")!({ waitUntil: (promise: Promise<unknown>) => { activation = promise; } });
+  await activation;
+  assert.deepEqual(deletedCaches, ["sofia-mobile-workspace-v1"]);
+  assert.ok(!deletedCaches.includes("other-app-cache"));
 });
