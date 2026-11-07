@@ -65,7 +65,7 @@ test("provider slash commands and attachment-only messages never start tasks", a
 test("command prefix can be configured for a bot mention", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, commandPrefix: "/run@SofiaBot" });
-  assert.equal(await handle(inbound("/run@SofiaBot inspect logs")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.equal(await handle(inbound("/run@SofiaBot inspect logs")), "รับคำขอแล้วครับ กำลังเริ่มทำงาน (รหัสงาน: run-123)");
   assert.equal(await handle(inbound("/run inspect logs")), undefined);
 });
 
@@ -90,7 +90,7 @@ test("empty and overlong tasks are rejected by existing dispatcher", async () =>
 test("duplicate provider message is not started twice", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
-  assert.equal(await handle(inbound("do work")), "Sofia accepted the task (run run-123, status: queued).");
+  assert.equal(await handle(inbound("do work")), "รับคำขอแล้วครับ กำลังเริ่มทำงาน (รหัสงาน: run-123)");
   assert.equal(await handle(inbound("do work")), undefined);
   assert.equal(h.starts.length, 1);
 });
@@ -116,9 +116,9 @@ test("short conversational nudges reply immediately without creating Brain runs"
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h });
   assert.match(String(await handle(inbound("ผมมีคำถาม"))), /ถามมาได้เลย/);
-  assert.match(String(await handle(inbound("ตอบสิ", { messageId: "message-2" })), /ผมอยู่ตรงนี้/);
-  assert.match(String(await handle(inbound("สวัสดี", { messageId: "message-3" })), /สวัสดีครับ/);
-  assert.match(String(await handle(inbound("ขอบคุณ", { messageId: "message-4" })), /ยินดีครับ/);
+  assert.match(String(await handle(inbound("ตอบสิ", { messageId: "message-2" }))), /ผมอยู่ตรงนี้/);
+  assert.match(String(await handle(inbound("สวัสดี", { messageId: "message-3" }))), /สวัสดีครับ/);
+  assert.match(String(await handle(inbound("ขอบคุณ", { messageId: "message-4" }))), /ยินดีครับ/);
   assert.equal(h.starts.length, 0);
 });
 
