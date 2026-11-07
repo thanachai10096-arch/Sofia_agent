@@ -10,7 +10,6 @@ export interface DiscordGatewayTransportOptions {
   botToken: string;
   fetchImpl?: typeof fetch;
   WebSocketImpl?: typeof WebSocket;
-  gatewayUrl?: string;
   heartbeatAckTimeoutMs?: number;
   onError?: (event: "gateway_ready" | "gateway_connect_failed" | "gateway_disconnected" | "gateway_auth_failed" | "gateway_invalid_session" | "message_handler_failed" | "delivery_failed", status?: number) => void;
 }
@@ -35,8 +34,6 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
   let socket: WebSocket | undefined;
   let callback: ((message: VerifiedDiscordMessage) => Promise<void>) | undefined;
   let sequence: number | null = null;
-  let sessionId: string | undefined;
-  let resumeUrl: string | undefined;
   let botUserId: string | undefined;
 
   function notify(event: Parameters<NonNullable<DiscordGatewayTransportOptions["onError"]>>[0], status?: number): void {
@@ -60,7 +57,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
     socket.send(JSON.stringify(payload));
   }
 
-  async function connectOnce(url: string, signal: AbortSignal): Promise<CloseReason> {
+  async function connectOnce(signal: AbortSignal): Promise<CloseReason> {
     return new Promise<CloseReason>((resolve) => {
       let settled = false;
       let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
@@ -68,7 +65,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
       let heartbeatInterval = 0;
       let awaitingAck = false;
       let identified = false;
-      const current = new WebSocketImpl(url);
+      const current = new WebSocketImpl(DISCORD_GATEWAY_URL);
       socket = current;
       const finish = (reason: CloseReason) => {
         if (settled) return;
@@ -95,8 +92,6 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
           return;
         }
         if (code === 4007 || code === 4009) {
-          sessionId = undefined;
-          resumeUrl = undefined;
           sequence = null;
         }
         notify("gateway_disconnected", code);
@@ -123,15 +118,11 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
           };
           heartbeatTimer = setInterval(heartbeat, heartbeatInterval);
           heartbeat();
-          if (sessionId && sequence !== null && resumeUrl) {
-            send({ op: 6, d: { token: options.botToken, session_id: sessionId, seq: sequence } });
-          } else {
-            send({ op: 2, d: {
-              token: options.botToken,
-              intents: REQUIRED_INTENTS,
-              properties: { os: process.platform, browser: "sofia-agent", device: "sofia-agent" },
-            } });
-          }
+          send({ op: 2, d: {
+            token: options.botToken,
+            intents: REQUIRED_INTENTS,
+            properties: { os: process.platform, browser: "sofia-agent", device: "sofia-agent" },
+          } });
           identified = true;
           return;
         }
@@ -147,15 +138,12 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
         }
         if (payload.op === 7) return finish("reconnect");
         if (payload.op === 9) {
-          if (!payload.d) { sessionId = undefined; resumeUrl = undefined; sequence = null; }
+          if (!payload.d) sequence = null;
           notify("gateway_invalid_session");
           return finish("invalid_session");
         }
         if (payload.op !== 0 || !identified) return;
         if (payload.t === "READY") {
-          sessionId = typeof payload.d?.session_id === "string" ? payload.d.session_id : undefined;
-          const candidate = payload.d?.resume_gateway_url;
-          resumeUrl = typeof candidate === "string" && candidate.startsWith("wss://") ? candidate + "?v=10&encoding=json" : undefined;
           botUserId = typeof payload.d?.user?.id === "string" ? payload.d.user.id : undefined;
           notify("gateway_ready");
           return;
@@ -193,18 +181,15 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
 
   async function run(signal: AbortSignal): Promise<void> {
     let backoffMs = 1_000;
-    let url = options.gatewayUrl ?? DISCORD_GATEWAY_URL;
     while (!signal.aborted && !stopped) {
       let reason: CloseReason;
-      try { reason = await connectOnce(url, signal); }
+      try { reason = await connectOnce(signal); }
       catch { notify("gateway_connect_failed"); reason = "reconnect"; }
       if (reason === "stopped" || signal.aborted || stopped) break;
       if (reason === "invalid_session") await wait(2_500 + Math.floor(Math.random() * 2_500), signal);
       else await wait(backoffMs, signal);
       if (reason === "reconnect") backoffMs = Math.min(30_000, backoffMs * 2);
       else backoffMs = 1_000;
-      if (resumeUrl && sessionId) url = resumeUrl;
-      else url = options.gatewayUrl ?? DISCORD_GATEWAY_URL;
     }
   }
 
@@ -249,8 +234,6 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
       await loop;
       controller = undefined;
       loop = undefined;
-      sessionId = undefined;
-      resumeUrl = undefined;
       sequence = null;
       botUserId = undefined;
     },
