@@ -154,6 +154,7 @@ test("HTTP MCP tools validate both fixed endpoint and model-supplied URLs", asyn
   const allowed = new RegistryToolGateway(
     { runtime: runtime(), tools: registry },
     { ...defaultPolicy, allowNetwork: true, allowedHosts: ["mcp.example.com"] },
+    async () => true,
   );
   const modelUrlDenied = await allowed.execute({ tool: "mcp.docs.lookup", input: { query: "hello", url: "https://attacker.example" } }, context);
   assert.equal(modelUrlDenied.ok, false);
@@ -589,7 +590,7 @@ test("browser readiness uses a registered safe probe once for all browser tools"
   ]);
   const gateway = new RegistryToolGateway(
     { runtime: runtime(), tools: registry },
-    { ...defaultPolicy, allowBrowser: true },
+    { ...defaultPolicy, allowBrowser: true, allowNetwork: true, allowedHosts: ["example.com"] },
     async () => true,
   );
   const catalog = await gateway.probeReadiness();
