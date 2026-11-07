@@ -26,6 +26,9 @@ function harness() {
         forward: async () => {},
         reload: async () => {},
         screenshot: async () => Buffer.from("image").toString("base64"),
+        clickAt: async (x, y) => { assert.equal(x, 12); assert.equal(y, 34); },
+        typeFocused: async (text) => { assert.equal(text, "hello"); },
+        viewportSize: async () => ({ width: 1280, height: 720 }),
         close: async () => {},
       };
       return {
@@ -52,7 +55,7 @@ test("cloud browser sessions are private to their owner and expose screenshot/ac
     url: "https://example.com/", title: "Example", content: "<main>Example</main>",
   });
   assert.deepEqual(await h.manager.screenshot("owner-a", created.id), {
-    imageBase64: Buffer.from("image").toString("base64"), mimeType: "image/png",
+    imageBase64: Buffer.from("image").toString("base64"), mimeType: "image/png", width: 1280, height: 720,
   });
   assert.deepEqual(await h.manager.navigate("owner-a", created.id, "https://example.org/"), {
     url: "https://example.com/", title: "Example",
@@ -60,6 +63,8 @@ test("cloud browser sessions are private to their owner and expose screenshot/ac
   assert.deepEqual(await h.manager.act("owner-a", created.id, { kind: "click", selector: "button" }), {
     ok: true, url: "https://example.com/",
   });
+  await h.manager.act("owner-a", created.id, { kind: "clickAt", x: 12, y: 34 });
+  await h.manager.act("owner-a", created.id, { kind: "typeFocused", text: "hello" });
   await assert.rejects(h.manager.act("owner-a", created.id, { kind: "type", selector: "input", text: "x".repeat(5000) }), /Unsupported/);
   await h.manager.close("owner-a", created.id);
   assert.equal(h.closes(), 1);
