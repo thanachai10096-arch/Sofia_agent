@@ -169,7 +169,7 @@ export function createTelegramMessagingRuntime(
   const baseUrl = env.SOFIA_API_BASE_URL?.trim() ||
     (railwayDomain ? "https://" + railwayDomain.replace(/^https?:\/\//i, "").replace(/\/$/, "") : "");
 
-  if (!token || !rawUsers || !rawChats || !apiKey || !baseUrl) {
+  if (!token || !rawUsers || !rawChats || (!apiKey && !rawUserApiKeys) || !baseUrl) {
     onWarning("Telegram integration disabled: token, API connection, and explicit user/chat allowlists are required.");
     return undefined;
   }
