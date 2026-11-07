@@ -80,7 +80,6 @@ function routeCapabilities(values: unknown): string[] {
 /** Keep phase-critical work off cheap routes that cannot reliably satisfy its output contract. */
 function phaseCapabilities(phase: BrainPhase): string[] {
   switch (phase) {
-    case "understand":
     case "plan":
     case "replan":
     case "diagnose":
@@ -88,6 +87,8 @@ function phaseCapabilities(phase: BrainPhase): string[] {
       return ["reasoning"];
     case "implement":
       return ["coding"];
+    case "understand":
+      return ["fast"];
     case "respond":
     case "finalize":
       return ["fast"];
@@ -99,8 +100,8 @@ function phaseCapabilities(phase: BrainPhase): string[] {
 function outputContractFor(phase: BrainPhase): string {
   if (phase === "understand") return [
     "Return this exact JSON object shape:",
-    '{"mode":"conversation|action","objective":"non-empty string","constraints":["string"],"assumptions":["string"],"requiredCapabilities":["string"],"requiredTools":["string"],"risk":"low|medium|high","successCriteria":["string"],"ambiguities":["string"]}',
-    "All fields except mode are required. mode must be conversation only when the user is asking for an answer, explanation, translation, or ordinary discussion and no external action/tool is needed; otherwise use action. Every list field must be a JSON array, even when empty. requiredCapabilities must use only fast, reasoning, coding, vision, long-context, or tool-use; use [] for ordinary conversation/general questions. risk must be exactly low, medium, or high.",
+    '{"mode":"conversation|action","response":"required when mode=conversation","objective":"non-empty string","constraints":["string"],"assumptions":["string"],"requiredCapabilities":["string"],"requiredTools":["string"],"risk":"low|medium|high","successCriteria":["string"],"ambiguities":["string"]}',
+    "All fields except mode and response are required. For mode=conversation, include the complete natural-language answer in response; this allows the Brain to answer in one provider call. For mode=action, omit response and describe the actual work required. mode must be conversation only when no external action/tool is needed; otherwise use action. Every list field must be a JSON array, even when empty. requiredCapabilities must use only fast, reasoning, coding, vision, long-context, or tool-use; use [] for ordinary conversation/general questions. risk must be exactly low, medium, or high.",
   ].join("\n");
   if (phase === "respond") return [
     "Return exactly one JSON object: {\"response\":\"the complete user-facing answer\"}.",
