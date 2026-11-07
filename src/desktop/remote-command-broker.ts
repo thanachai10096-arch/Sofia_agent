@@ -199,7 +199,7 @@ export class DesktopCommandBroker {
   }
 
   private authenticate(token: string): Companion {
-    if (!token || token.length > 256) throw new Error("Invalid desktop companion token.");
+    if (!token || token.length > 256) throw new DesktopCompanionAuthenticationError();
     const supplied = digest(token);
     for (const companion of this.companions.values()) {
       if (safeEqual(supplied, companion.tokenDigest)) return companion;
