@@ -52,6 +52,9 @@ interface SchedulerState {
   schedules: CronSchedule[];
   history: CronExecution[];
   audit: CronAuditEvent[];
+  globalPaused?: boolean;
+  globalPauseReason?: string;
+  globalPausedAt?: string;
 }
 export interface CronStore {
   transact<T>(operation: (state: SchedulerState) => Promise<T> | T): Promise<T>;
@@ -77,9 +80,16 @@ export class FileCronStore implements CronStore {
   private async read(): Promise<SchedulerState> {
     try {
       const parsed = JSON.parse(await fs.readFile(this.file, "utf8")) as Partial<SchedulerState>;
-      return { schedules: parsed.schedules ?? [], history: parsed.history ?? [], audit: parsed.audit ?? [] };
+      return {
+        schedules: parsed.schedules ?? [],
+        history: parsed.history ?? [],
+        audit: parsed.audit ?? [],
+        globalPaused: parsed.globalPaused ?? false,
+        ...(parsed.globalPauseReason ? { globalPauseReason: parsed.globalPauseReason } : {}),
+        ...(parsed.globalPausedAt ? { globalPausedAt: parsed.globalPausedAt } : {}),
+      };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { schedules: [], history: [], audit: [] };
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { schedules: [], history: [], audit: [], globalPaused: false };
       throw error;
     }
   }
@@ -288,6 +298,67 @@ export class CronScheduler {
   async list(actor: string): Promise<CronSchedule[]> {
     return this.store.transact(state => state.schedules.filter(s => s.ownerKeyId === actor).map(s => ({ ...s })));
   }
+  /** Pause future automatic dispatches globally; active executions are left untouched. */
+  async pauseAll(actor: string, reason = "Paused by operator"): Promise<{ paused: true; pausedAt: string; reason: string }> {
+    if (!await this.authorize(actor, "update")) throw new Error("Not authorized to pause cron scheduler");
+    const normalizedReason = reason.trim().slice(0, 500) || "Paused by operator";
+    return this.store.transact(async state => {
+      if (!state.globalPaused) {
+        state.globalPaused = true;
+        state.globalPausedAt = this.now().toISOString();
+        state.globalPauseReason = normalizedReason;
+        await this.recordAudit(state, {
+          at: state.globalPausedAt,
+          actor,
+          action: "scheduler.paused",
+          scheduleId: "*",
+          detail: normalizedReason,
+        });
+      }
+      return {
+        paused: true as const,
+        pausedAt: state.globalPausedAt ?? this.now().toISOString(),
+        reason: state.globalPauseReason ?? normalizedReason,
+      };
+    });
+  }
+
+  /** Resume automatic dispatch; overdue jobs follow each schedule's existing misfire policy. */
+  async resumeAll(actor: string): Promise<{ paused: false; resumedAt: string }> {
+    if (!await this.authorize(actor, "update")) throw new Error("Not authorized to resume cron scheduler");
+    return this.store.transact(async state => {
+      const resumedAt = this.now().toISOString();
+      if (state.globalPaused) {
+        state.globalPaused = false;
+        state.globalPausedAt = undefined;
+        state.globalPauseReason = undefined;
+        await this.recordAudit(state, {
+          at: resumedAt,
+          actor,
+          action: "scheduler.resumed",
+          scheduleId: "*",
+        });
+      }
+      return { paused: false as const, resumedAt };
+    });
+  }
+
+  async schedulerStatus(actor: string): Promise<{
+    paused: boolean;
+    pauseReason?: string;
+    pausedAt?: string;
+    enabledSchedules: number;
+    activeExecutions: number;
+  }> {
+    if (!await this.authorize(actor, "update")) throw new Error("Not authorized to inspect cron scheduler");
+    return this.store.transact(state => ({
+      paused: state.globalPaused === true,
+      ...(state.globalPauseReason ? { pauseReason: state.globalPauseReason } : {}),
+      ...(state.globalPausedAt ? { pausedAt: state.globalPausedAt } : {}),
+      enabledSchedules: state.schedules.filter(schedule => schedule.status === "enabled").length,
+      activeExecutions: state.history.filter(item => item.status === "claimed" || item.status === "running").length,
+    }));
+  }
   async setEnabled(id: string, enabled: boolean, actor: string): Promise<CronSchedule> {
     return this.store.transact(async state => {
       const schedule = state.schedules.find(s => s.id === id);
@@ -329,6 +400,7 @@ export class CronScheduler {
     try {
       while (this.active.size < this.maxConcurrent) {
         const claim = await this.store.transact(async state => {
+          if (state.globalPaused) return undefined;
           const now = this.now();
           const activeExecutions = state.history.filter(item => item.status === "claimed" || item.status === "running").length;
           if (activeExecutions >= this.maxConcurrent) return undefined;
