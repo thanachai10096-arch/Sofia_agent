@@ -17,6 +17,8 @@ import { createToolRegistry } from "../tools/registry.js";
 import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { createBrowserTools } from "../browser/tools.js";
+import { BrowserProfileStore } from "../browser/profile-store.js";
+import { BrowserProfileSessionManager } from "../browser/profile-sessions.js";
 import { PlaywrightBrowserRuntime } from "../browser/runtime.js";
 import { discoverProjectContext } from "../brain/project-context.js";
 import { createSubagentRuntime } from "../brain/subagents.js";
@@ -43,7 +45,7 @@ function intEnv(name:string,fallback:number,minimum=0){const value=Number(proces
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink}):NonNullable<AgentDependencies["brainFactory"]>{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
@@ -75,8 +77,18 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     // never on the process-wide dependency registry, so concurrent users/runs cannot
     // address each other's tabs or reuse each other's authenticated browser context.
     const browserCleanups: Array<() => Promise<void>> = [];
+    const localDisplayAvailable = process.platform === "win32" || process.platform === "darwin" ||
+      Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+    const loginEnabled = Boolean(dependencies.profileSessions) &&
+      process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
+      process.env.SOFIA_BROWSER_HEADLESS === "false" && localDisplayAvailable &&
+      Boolean(principalId);
     const runBrowserTools = dependencies.policy.allowBrowser
-      ? createBrowserTools(new PlaywrightBrowserRuntime(), (cleanup) => browserCleanups.push(cleanup))
+      ? createBrowserTools(
+          new PlaywrightBrowserRuntime(),
+          (cleanup) => browserCleanups.push(cleanup),
+          loginEnabled ? { profileSessions: dependencies.profileSessions, ownerId: principalId!, allowLogin: true } : {},
+        )
       : [];
     const grantedDesktopCapabilities = desktopCapabilities ?? [];
     const runDesktopTools = grantedDesktopCapabilities.length
@@ -113,10 +125,14 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const tools=createToolRegistry(createBuiltinTools());
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
-  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
+  const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
+    process.env.SOFIA_BROWSER_HEADLESS === "false" && process.env.SOFIA_BROWSER_PROFILE_DIR?.trim()
+      ? new BrowserProfileSessionManager(new BrowserProfileStore(process.env.SOFIA_BROWSER_PROFILE_DIR), () => new PlaywrightBrowserRuntime())
+      : undefined;
+  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const userMemoryStore = new FileUserMemoryStore();
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */

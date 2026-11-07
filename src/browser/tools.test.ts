@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { BrowserProfileStore } from "./profile-store.js";
+import { BrowserProfileSessionManager } from "./profile-sessions.js";
 import { createBrowserTools } from "./tools.js";
 import type { BrowserPage, BrowserRuntime, BrowserSession } from "./runtime.js";
 
@@ -181,4 +186,76 @@ test("run-scoped browser cleanup closes the session even when the model never ca
   // Cleanup is idempotent and must not close the same browser twice.
   await cleanup!();
   assert.equal(closes, 1);
+});
+
+test("browser.login keeps the authenticated session available across Brain runs", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-browser-login-"));
+  try {
+    const store = new BrowserProfileStore(root);
+    const launchOptions: Array<{ profileDirectory?: string; headless?: boolean } | undefined> = [];
+    let closeCount = 0;
+    const runtime: BrowserRuntime = {
+      launch: async (options) => {
+        launchOptions.push(options);
+        return {
+          id: "persistent-session",
+          newPage: async () => ({
+            id: "persistent-page",
+            url: async () => "https://example.com/",
+            title: async () => "Example",
+            content: async () => "",
+            goto: async () => {},
+            click: async () => {},
+            type: async () => {},
+            select: async () => {},
+            scroll: async () => {},
+            wait: async () => {},
+            press: async () => {},
+            back: async () => {},
+            forward: async () => {},
+            reload: async () => {},
+            screenshot: async () => "",
+            close: async () => {},
+          }),
+          close: async () => { closeCount++; },
+        };
+      },
+    };
+    const manager = new BrowserProfileSessionManager(store, () => runtime);
+    let cleanup: (() => Promise<void>) | undefined;
+    const firstRun = createBrowserTools(runtime, (dispose) => { cleanup = dispose; }, { profileSessions: manager, ownerId: "principal-a", allowLogin: true });
+    const tool = (tools: typeof firstRun, name: string) => {
+      const found = tools.find((item) => item.name === name);
+      assert.ok(found, "missing browser tool " + name);
+      return found;
+    };
+    const result = await tool(firstRun, "browser.login").execute({ url: "https://example.com/login" }, {} as never) as {
+      profileId: string; loginHandoff: string;
+    };
+    assert.ok(result.profileId);
+    assert.match(result.loginHandoff, /visible browser window/);
+    assert.equal(launchOptions.length, 1);
+    assert.equal(launchOptions[0]?.headless, false);
+    assert.ok(launchOptions[0]?.profileDirectory);
+    const listed = await tool(firstRun, "browser.profile.list").execute({}, {} as never) as { profiles: Array<Record<string, unknown>> };
+    assert.equal(listed.profiles.length, 1);
+    assert.equal("directory" in listed.profiles[0]!, false);
+
+    // Brain run cleanup must not close a user-owned persistent login window.
+    await cleanup!();
+    assert.equal(closeCount, 0);
+
+    // A later Brain run reuses the same authenticated context instead of
+    // launching a second Chromium process against the locked profile directory.
+    const secondRun = createBrowserTools(runtime, undefined, { profileSessions: manager, ownerId: "principal-a", allowLogin: true });
+    await tool(secondRun, "browser.open").execute({ profileId: result.profileId }, {} as never);
+    assert.equal(launchOptions.length, 1);
+    await assert.rejects(tool(createBrowserTools(runtime, undefined, { profileSessions: manager, ownerId: "principal-b", allowLogin: true }), "browser.open").execute({ profileId: result.profileId }, {} as never));
+    await tool(secondRun, "browser.profile.revoke").execute({ profileId: result.profileId }, {} as never);
+    assert.equal(closeCount, 1);
+    await assert.rejects(store.get("principal-a", result.profileId));
+    await manager.closeAll();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
