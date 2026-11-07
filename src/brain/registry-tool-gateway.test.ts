@@ -74,6 +74,57 @@ test("inspection tools are available without write approval", async () => {
 });
 
 
+test("web search remains disabled by default and runs only with network policy plus the fixed host allowlist", async () => {
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "web.search",
+    description: "Fixed-endpoint search test double",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    effects: ["network", "read"] as const,
+    async execute(input) {
+      executions += 1;
+      return { query: input.query, sources: [] };
+    },
+  }]);
+  const context = {
+    runId: "web-search-policy-test",
+    principalId: "test-user",
+    signal: new AbortController().signal,
+    requireApproval: false,
+    notifyApproval() {},
+  };
+  const disabled = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: false, allowedHosts: ["api.search.brave.com"] },
+  );
+  const denied = await disabled.execute({ tool: "web.search", input: { query: "latest news" } }, context);
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error?.category, "permission_error");
+  assert.equal(executions, 0);
+
+  const wrongHost = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowedHosts: ["example.com"] },
+  );
+  const hostDenied = await wrongHost.execute({ tool: "web.search", input: { query: "latest news" } }, context);
+  assert.equal(hostDenied.ok, false);
+  assert.match(hostDenied.error?.message ?? "", /allowlisted/i);
+  assert.equal(executions, 0);
+
+  const enabled = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowedHosts: ["api.search.brave.com"] },
+  );
+  const allowed = await enabled.execute({ tool: "web.search", input: { query: "latest news" } }, context);
+  assert.equal(allowed.ok, true);
+  assert.equal(executions, 1);
+});
+
 test("security kill switch aborts an active tool execution", async () => {
   const rt = runtime();
   const security = new SecurityController();
