@@ -8,6 +8,14 @@ export interface DesktopCompanionCommand {
   createdAt: number;
 }
 
+/** Invalid or revoked companion bearer token; safe to translate to HTTP 401. */
+export class DesktopCompanionAuthenticationError extends Error {
+  constructor() {
+    super("Desktop companion is not paired or its token was revoked.");
+    this.name = "DesktopCompanionAuthenticationError";
+  }
+}
+
 interface Companion {
   ownerKeyId: string;
   tokenDigest: Buffer;
@@ -196,7 +204,7 @@ export class DesktopCommandBroker {
     for (const companion of this.companions.values()) {
       if (safeEqual(supplied, companion.tokenDigest)) return companion;
     }
-    throw new Error("Desktop companion is not paired or its token was revoked.");
+    throw new DesktopCompanionAuthenticationError();
   }
 
   private pruneIdle(): void {
