@@ -4,6 +4,7 @@ import { createSofiaMessagingHandler } from "./sofia-handler.js";
 import type { VerifiedDiscordMessage } from "./discord.js";
 import { buildDiscordSessionContext, waitForDiscordTask } from "./discord-durable-job.js";
 import type { InboundMessage } from "./types.js";
+import { messagingSessionKey } from "./session-key.js";
 
 export interface DiscordChatSender {
   sendMessage(channelId: string, text: string, replyToMessageId?: string, interactionId?: string): Promise<{ messageId: string }>;
@@ -30,12 +31,12 @@ export function createDiscordSharedChatHandler(options: DiscordSharedChatHandler
     const senderId = message.author.id;
     const channelId = message.channelId;
     const principalId = "discord:" + senderId;
-    const sessionKey = "discord:" + senderId + ":" + channelId;
+    const sessionKey = messagingSessionKey({ platform: "discord", userId: senderId, channelId, conversationId: channelId });
 
     const client = {
       async start(input: { task: string; context?: string; sessionId?: string }) {
         options.signal.throwIfAborted();
-        const session = input.sessionId ?? sessionKey;
+        const session = sessionKey;
         const memory = await buildDiscordSessionContext(options.runtime, session);
         const context = [input.context, memory]
           .filter((value) => typeof value === "string" && value.trim())
