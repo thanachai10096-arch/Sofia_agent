@@ -87,7 +87,10 @@ export class DesktopCommandBroker {
   /** Replace any previous companion for this owner and issue a one-time secret. */
   connect(ownerKeyId: string): { token: string; connectedAt: number } {
     assertOwner(ownerKeyId);
-    this.disconnect(ownerKeyId);
+    // Only revoke when this process has an active pairing. A fresh owner has
+    // no durable record to delete, and a no-op connect must not depend on the
+    // persistence layer being writable.
+    if (this.companions.has(ownerKeyId)) this.disconnect(ownerKeyId);
     const token = randomBytes(32).toString("base64url");
     const connectedAt = this.now();
     const companion: Companion = {

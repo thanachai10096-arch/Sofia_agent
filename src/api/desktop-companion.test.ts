@@ -175,7 +175,7 @@ test("Desktop Companion disconnect revokes in-memory access when durable deletio
   const store = {
     loadAll: () => [...records.values()],
     save: (record: { ownerKeyId: string; tokenDigest: string; connectedAt: number; lastSeenAt: number }) => { records.set(record.ownerKeyId, record); },
-    delete: (ownerKeyId: string) => { if (records.has(ownerKeyId)) throw new Error("simulated disk failure"); },
+    delete: (ownerKeyId: string) => { if (failDelete && records.has(ownerKeyId)) throw new Error("simulated disk failure"); },
   };
   const broker = new DesktopCommandBroker({ store });
   const ownerKeyId = createHash("sha256").update("desktop-owner-key").digest("hex").slice(0, 32);
