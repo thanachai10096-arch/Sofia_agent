@@ -1,5 +1,5 @@
 import path from "node:path";
-import { SofiaClient } from "../../sdk/client.js";
+import { SofiaApiError, SofiaClient } from "../../sdk/client.js";
 import { FileChatMessageDeduplicator } from "../file-chat-deduplicator.js";
 import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
@@ -20,6 +20,23 @@ interface TelegramRunResult {
   error?: string;
 }
 
+function classifyRunWaitFailure(error: unknown): string {
+  let current: unknown = error;
+  let timedOut = false;
+  let aborted = false;
+  // SofiaClient wraps the last transient API error as Error.cause on timeout.
+  // Walk a bounded cause chain so the original HTTP status is not lost.
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    if (current instanceof SofiaApiError) return "api_http_" + current.status;
+    if (/timed out waiting/i.test(current.message)) timedOut = true;
+    if (/abort/i.test(current.message)) aborted = true;
+    current = "cause" in current ? current.cause : undefined;
+  }
+  if (timedOut) return "timeout";
+  if (aborted) return "aborted";
+  return "network_or_unknown";
+}
+
 /**
  * Wait for an accepted run to reach a terminal state and send its actual result
  * to the originating Telegram conversation. Kept separate for deterministic tests.
@@ -30,22 +47,28 @@ export async function reportTelegramRunCompletion(input: {
   waitForRun: (id: string, options: { timeoutMs: number; intervalMs: number }) => Promise<TelegramRunResult>;
   send: (message: OutboundMessage) => Promise<boolean>;
   onWarning?: (event: string) => void;
+  onEvent?: (event: string) => void;
 }): Promise<void> {
   let run: TelegramRunResult;
   try {
     run = await input.waitForRun(input.runId, { timeoutMs: 30 * 60 * 1_000, intervalMs: 1_000 });
-  } catch {
+  } catch (error) {
+    const failureKind = classifyRunWaitFailure(error);
+    input.onWarning?.("telegram_run_wait_failed run_id=" + input.runId + " kind=" + failureKind);
     try {
-      await input.send({
+      const delivered = await input.send({
         conversationId: input.conversationId,
         text: "Sofia could not retrieve the final result for run " + input.runId + ". The task may still be running; check the Sofia run status.",
       });
+      if (delivered) input.onEvent?.("telegram_run_status_notice_delivered run_id=" + input.runId);
+      else input.onWarning?.("telegram_completion_delivery_failed run_id=" + input.runId);
     } catch {
-      input.onWarning?.("telegram_completion_delivery_failed");
+      input.onWarning?.("telegram_completion_delivery_failed run_id=" + input.runId);
     }
     return;
   }
 
+  input.onEvent?.("telegram_run_terminal run_id=" + input.runId + " status=" + run.status);
   const output = typeof run.result?.output === "string"
     ? String(redactSecrets(run.result.output)).trim()
     : "";
@@ -66,9 +89,10 @@ export async function reportTelegramRunCompletion(input: {
 
   try {
     const delivered = await input.send({ conversationId: input.conversationId, text });
-    if (!delivered) input.onWarning?.("telegram_completion_delivery_failed");
+    if (delivered) input.onEvent?.("telegram_run_result_delivered run_id=" + input.runId);
+    else input.onWarning?.("telegram_completion_delivery_failed run_id=" + input.runId);
   } catch {
-    input.onWarning?.("telegram_completion_delivery_failed");
+    input.onWarning?.("telegram_completion_delivery_failed run_id=" + input.runId);
   }
 }
 
@@ -147,7 +171,8 @@ export function createTelegramMessagingRuntime(
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
-      onAccepted: ({ runId, message }) => {
+      onAccepted: ({ runId, runStatus, message }) => {
+        onWarning("Telegram messaging event: telegram_run_accepted run_id=" + runId + " status=" + runStatus + ".");
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
           runId,
@@ -157,6 +182,7 @@ export function createTelegramMessagingRuntime(
             ? gateway.send("telegram", outbound)
             : Promise.resolve(false),
           onWarning: (event) => onWarning("Telegram messaging warning: " + event + "."),
+          onEvent: (event) => onWarning("Telegram messaging event: " + event + "."),
         });
       },
     });
