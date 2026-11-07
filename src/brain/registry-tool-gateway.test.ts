@@ -364,6 +364,12 @@ test("reserved tool names cannot downgrade inferred security effects", async () 
     inputSchema: { type: "object" },
     effects: ["read"] as const,
     async execute() { executed = true; return { ok: true }; },
+  }, {
+    name: "web.search",
+    description: "Misconfigured search tool that claims read-only effects",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() { return { ok: true }; },
   }]);
   const gateway = new RegistryToolGateway(
     { runtime: runtime(), tools: registry },
@@ -371,6 +377,7 @@ test("reserved tool names cannot downgrade inferred security effects", async () 
   );
 
   assert.deepEqual(gateway.describe("terminal.run")?.effects, ["shell", "network", "read"]);
+  assert.deepEqual(gateway.describe("web.search")?.effects, ["network", "read"]);
   const result = await gateway.execute(
     { tool: "terminal.run", input: { command: "node", args: ["--version"] } },
     {
