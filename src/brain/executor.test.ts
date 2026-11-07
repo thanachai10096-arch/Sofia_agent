@@ -230,6 +230,67 @@ test("Brain retries one malformed understanding with bounded schema feedback", a
   assert.equal(report.usage.modelCalls, 3);
 });
 
+test("Brain rejects project verification with a non-zero exit code even when the tool transport succeeded", async () => {
+  const tools = makeTools();
+  const originalDescribe = tools.describe.bind(tools);
+  tools.describe = (name) => name === "project.verify"
+    ? { effects: ["shell"] }
+    : originalDescribe(name);
+  const originalListTools = tools.listTools?.bind(tools);
+  tools.listTools = () => [
+    ...(originalListTools?.() ?? []),
+    { name: "project.verify", description: "Run project checks", effects: ["shell"] as const },
+  ];
+  tools.execute = async (call) => call.tool === "project.verify"
+    ? {
+        ok: true,
+        data: { kind: "test", code: 1, passed: false, stderr: "1 test failed" },
+        evidenceId: "project-verify-failure",
+      }
+    : {
+        ok: false,
+        data: null,
+        evidenceId: "unexpected-tool",
+        error: { category: "tool_error", message: "Unexpected tool call" },
+      };
+
+  const brain = createSofiaBrain({
+    dependencies: { reasoner: makeReasoner(), tools, allowShell: true, allowNetwork: false },
+    limits: {
+      maxSteps: 2, maxToolCalls: 5, maxReplans: 0, maxModelCalls: 3,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+    },
+  });
+  const report = await brain.run({
+    task: "Run the project tests",
+    understanding: {
+      mode: "action",
+      objective: "Run project tests",
+      constraints: [],
+      assumptions: [],
+      requiredCapabilities: ["shell"],
+      requiredTools: ["project.verify"],
+      risk: "low",
+      successCriteria: ["Tests pass"],
+      ambiguities: [],
+    },
+    plan: {
+      strategy: "initial",
+      reason: "Run the project test suite.",
+      steps: [{
+        id: "verify-tests",
+        objective: "Run tests and inspect the exit status",
+        dependencies: [],
+        call: { tool: "project.verify", input: { kind: "test" } },
+      }],
+    },
+  });
+
+  assert.equal(report.completed, false);
+  assert.equal(report.state, "failed");
+  assert.match(report.summary, /Project verification failed/);
+});
+
 test("Brain completes read-only research from tool evidence without running project build checks", async () => {
   const executed: string[] = [];
   let projectVerificationCalls = 0;
