@@ -44,7 +44,7 @@ On first pairing, enter the Sofia API key into the hidden terminal prompt. It is
 - Windows: Windows Credential Manager
 - Linux: Secret Service (GNOME Keyring, KWallet, or another Secret Service provider). Linux is configured to require Secret Service and does not silently fall back to the non-persistent kernel keyring.
 
-On later starts, the Companion attempts to reuse the stored token. If Sofia no longer recognizes it (for example, after the API process restarts), the local token is cleared and the operator is prompted to pair again with a Sofia API key. The server stores only the SHA-256 digest of the random Companion token, its owner ID, and activity timestamps in the protected `.sofia/desktop-companions` directory. Pairings can be restored after a Sofia API restart for up to seven days of inactivity. Pending desktop commands are never persisted or replayed after a restart; any in-flight action fails closed and must be submitted again.
+On later starts, the Companion attempts to reuse the stored token. If Sofia no longer recognizes it (for example, after the API process restarts), the local token is cleared and the operator is prompted to pair again with a Sofia API key. The server stores only the SHA-256 digest of the random Companion token, its owner ID, and activity timestamps in the protected `.sofia/desktop-companions` directory. Pairings can be restored after a Sofia API restart for up to seven days of inactivity. This requires `SOFIA_WORKSPACE` (or the process working directory) to be on persistent storage; on Railway, attach a persistent volume and place the workspace on that volume before relying on restart recovery. Pending desktop commands are never persisted or replayed after a restart; any in-flight action fails closed and must be submitted again.
 
 For each application launch, the Companion opens a local browser approval page. The page is served only on `127.0.0.1`, uses a one-time random approval token in the URL fragment, rejects cross-origin decisions, expires automatically, and is bound to the exact requested application ID and arguments. Approve or deny on the computer itself. If the local browser cannot be opened, the action fails closed.
 
@@ -62,7 +62,7 @@ That explicit revoke operation asks for the Sofia API key in a hidden prompt. Th
 - GUI approval uses the system browser; a dedicated native approval window is not included.
 - App launch is the only enabled local capability.
 - Screen capture, mouse, and keyboard operations fail closed.
-- The durable pairing store is local-filesystem based and intended for a single API instance with persistent storage. Do not run multiple API replicas against independent ephemeral disks; shared multi-replica coordination and transactional locking are not implemented.
+- The durable pairing store is local-filesystem based and intended for a single API instance with a persistent volume. Do not run multiple API replicas against independent ephemeral disks; shared multi-replica coordination and transactional locking are not implemented.
 - Linux requires an unlocked Secret Service session. Headless Linux servers without Secret Service cannot use this persistent credential adapter.
 - This does not make a computer unnecessary: users without a PC continue to use the separately hosted Mobile Workspace / Cloud Browser path.
 
