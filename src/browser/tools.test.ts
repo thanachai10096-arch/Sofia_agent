@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { BrowserProfileStore } from "./profile-store.js";
+import { BrowserProfileSessionManager } from "./profile-sessions.js";
 import { createBrowserTools } from "./tools.js";
 import type { BrowserPage, BrowserRuntime, BrowserSession } from "./runtime.js";
 
@@ -187,7 +188,7 @@ test("run-scoped browser cleanup closes the session even when the model never ca
   assert.equal(closes, 1);
 });
 
-test("browser.login creates an owner-bound persistent profile without exposing its directory", async () => {
+test("browser.login keeps the authenticated session available across Brain runs", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-browser-login-"));
   try {
     const store = new BrowserProfileStore(root);
@@ -220,32 +221,40 @@ test("browser.login creates an owner-bound persistent profile without exposing i
         };
       },
     };
-    const tools = createBrowserTools(runtime, undefined, { profileStore: store, ownerId: "principal-a", allowLogin: true });
-    const tool = (name: string) => {
+    const manager = new BrowserProfileSessionManager(store, () => runtime);
+    let cleanup: (() => Promise<void>) | undefined;
+    const firstRun = createBrowserTools(runtime, (dispose) => { cleanup = dispose; }, { profileSessions: manager, ownerId: "principal-a", allowLogin: true });
+    const tool = (tools: typeof firstRun, name: string) => {
       const found = tools.find((item) => item.name === name);
       assert.ok(found, "missing browser tool " + name);
       return found;
     };
-    const result = await tool("browser.login").execute({ url: "https://example.com/login" }, {} as never) as {
+    const result = await tool(firstRun, "browser.login").execute({ url: "https://example.com/login" }, {} as never) as {
       profileId: string; loginHandoff: string;
     };
     assert.ok(result.profileId);
     assert.match(result.loginHandoff, /visible browser window/);
+    assert.equal(launchOptions.length, 1);
     assert.equal(launchOptions[0]?.headless, false);
     assert.ok(launchOptions[0]?.profileDirectory);
-    const listed = await tool("browser.profile.list").execute({}, {} as never) as { profiles: Array<Record<string, unknown>> };
+    const listed = await tool(firstRun, "browser.profile.list").execute({}, {} as never) as { profiles: Array<Record<string, unknown>> };
     assert.equal(listed.profiles.length, 1);
     assert.equal("directory" in listed.profiles[0]!, false);
-    await tool("browser.close").execute({}, {} as never);
+
+    // Brain run cleanup must not close a user-owned persistent login window.
+    await cleanup!();
+    assert.equal(closeCount, 0);
+
+    // A later Brain run reuses the same authenticated context instead of
+    // launching a second Chromium process against the locked profile directory.
+    const secondRun = createBrowserTools(runtime, undefined, { profileSessions: manager, ownerId: "principal-a", allowLogin: true });
+    await tool(secondRun, "browser.open").execute({ profileId: result.profileId }, {} as never);
+    assert.equal(launchOptions.length, 1);
+    await assert.rejects(tool(createBrowserTools(runtime, undefined, { profileSessions: manager, ownerId: "principal-b", allowLogin: true }), "browser.open").execute({ profileId: result.profileId }, {} as never));
+    await tool(secondRun, "browser.profile.revoke").execute({ profileId: result.profileId }, {} as never);
     assert.equal(closeCount, 1);
-    const nextRunTools = createBrowserTools(runtime, undefined, { profileStore: store, ownerId: "principal-a", allowLogin: true });
-    const open = nextRunTools.find((item) => item.name === "browser.open")!;
-    await open.execute({ profileId: result.profileId }, {} as never);
-    assert.equal(launchOptions[1]?.headless, false);
-    assert.equal(launchOptions[1]?.profileDirectory, launchOptions[0]?.profileDirectory);
-    await nextRunTools.find((item) => item.name === "browser.profile.revoke")!.execute({ profileId: result.profileId }, {} as never);
-    assert.equal(closeCount, 2);
     await assert.rejects(store.get("principal-a", result.profileId));
+    await manager.closeAll();
   } finally {
     await rm(root, { recursive: true, force: true });
   }
