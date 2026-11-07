@@ -120,6 +120,29 @@ export class PostgresWorkflowExecutionLedger implements WorkflowExecutionLedger 
     patch: Pick<WorkflowExecutionRecord, "status"> &
       Partial<Pick<WorkflowExecutionRecord, "providerExecutionId" | "output" | "safeErrorCode">>,
   ): Promise<WorkflowExecutionRecord | undefined> {
+    if (expectedStatus === "indeterminate") {
+      throw new Error("workflow_reconciliation_required");
+    }
+    return this.updateRecord(executionId, expectedStatus, patch);
+  }
+
+  async reconcile(
+    executionId: string,
+    patch: Pick<WorkflowExecutionRecord, "status"> &
+      Partial<Pick<WorkflowExecutionRecord, "providerExecutionId" | "output" | "safeErrorCode">>,
+  ): Promise<WorkflowExecutionRecord | undefined> {
+    if (!["succeeded", "failed", "cancelled"].includes(patch.status)) {
+      throw new Error("workflow_reconciliation_invalid_outcome");
+    }
+    return this.updateRecord(executionId, "indeterminate", patch);
+  }
+
+  private async updateRecord(
+    executionId: string,
+    expectedStatus: WorkflowExecutionState,
+    patch: Pick<WorkflowExecutionRecord, "status"> &
+      Partial<Pick<WorkflowExecutionRecord, "providerExecutionId" | "output" | "safeErrorCode">>,
+  ): Promise<WorkflowExecutionRecord | undefined> {
     if (!canTransitionWorkflowExecution(expectedStatus, patch.status)) {
       throw new Error("workflow_execution_invalid_transition");
     }
