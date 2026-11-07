@@ -106,3 +106,40 @@ test("normalized prompt bounds oversized memory without truncating the task", as
   assert.equal(captured.core.task, task);
   assert.ok(JSON.stringify(captured.core.state).length < 20_000);
 });
+
+
+test("ordinary conversation task labels do not reject every model route", async () => {
+  let captured: InferenceRequest | undefined;
+  const gateway = {
+    async generateMetered(input: InferenceRequest) {
+      captured = input;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  } as unknown as TokenAwareGateway;
+  const reasoner = new TokenAwareBrainReasoner(gateway);
+  const controller = new AbortController();
+  const prepared = await reasoner.prepare(JSON.stringify({
+    phase: "understand",
+    payload: { task: "ตอบว่า 2+2 เท่ากับเท่าไร", requiredCapabilities: ["general"] },
+  }), { signal: controller.signal, maxContextTokens: 16_000 });
+  await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
+  assert.deepEqual(captured?.requiredCapabilities, []);
+});
+
+test("task intent labels map to supported provider capabilities", async () => {
+  let captured: InferenceRequest | undefined;
+  const gateway = {
+    async generateMetered(input: InferenceRequest) {
+      captured = input;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  } as unknown as TokenAwareGateway;
+  const reasoner = new TokenAwareBrainReasoner(gateway);
+  const controller = new AbortController();
+  const prepared = await reasoner.prepare(JSON.stringify({
+    phase: "understand",
+    payload: { task: "Analyze a code issue", understanding: { requiredCapabilities: ["analysis", "code", "general"] } },
+  }), { signal: controller.signal, maxContextTokens: 16_000 });
+  await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
+  assert.deepEqual(captured?.requiredCapabilities, ["reasoning", "coding"]);
+});
