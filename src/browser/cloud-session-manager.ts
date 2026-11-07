@@ -124,7 +124,12 @@ export class CloudBrowserSessionManager {
     await this.expireIdle();
     const item = this.owned(ownerId, sessionId);
     const kind = action.kind;
-    if (kind === "click" && typeof action.selector === "string" && action.selector.length <= 1000) {
+    if (kind === "clickAt" && Number.isFinite(action.x) && Number.isFinite(action.y) &&
+      Math.abs(Number(action.x)) <= 10000 && Math.abs(Number(action.y)) <= 10000 && item.page.clickAt) {
+      await item.page.clickAt(Number(action.x), Number(action.y));
+    } else if (kind === "typeFocused" && typeof action.text === "string" && action.text.length <= 4000 && item.page.typeFocused) {
+      await item.page.typeFocused(action.text);
+    } else if (kind === "click" && typeof action.selector === "string" && action.selector.length <= 1000) {
       await item.page.click(action.selector);
     } else if (kind === "type" && typeof action.selector === "string" && action.selector.length <= 1000 &&
       typeof action.text === "string" && action.text.length <= 4000) {
@@ -154,6 +159,7 @@ export class CloudBrowserSessionManager {
   }
 
   async closeAll(): Promise<void> {
+    clearInterval(this.cleanupTimer);
     const current = [...this.sessions.values()];
     this.sessions.clear();
     await Promise.allSettled(current.map((item) => item.session.close()));
