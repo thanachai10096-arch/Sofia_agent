@@ -957,3 +957,46 @@ test("Brain answers explicit conversational turns without entering the coding or
   assert.equal(report.usage.toolCalls, 0);
   assert.equal(report.verification.length, 0);
 });
+
+
+test("explicit Thai file-edit requests stay on the action path even if the model labels them conversation", async () => {
+  const phases: string[] = [];
+  let snapshots = 0;
+  const tools = makeTools();
+  const originalSnapshot = tools.snapshot.bind(tools);
+  tools.snapshot = async (signal) => { snapshots += 1; return originalSnapshot(signal); };
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      phases.push(parsed.phase);
+      const value = parsed.phase === "understand"
+        ? {
+            mode: "conversation",
+            objective: "Edit the requested file",
+            constraints: [],
+            assumptions: [],
+            requiredCapabilities: ["file-write"],
+            requiredTools: ["workspace.write_file"],
+            risk: "low",
+            successCriteria: ["hello.txt exists"],
+            ambiguities: [],
+          }
+        : plan;
+      return {
+        inputTokens: 12,
+        async invoke() {
+          return { value, usage: { inputTokens: 12, outputTokens: 18 } };
+        },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools, allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({ task: "ช่วยแก้ไฟล์ src/index.ts ให้หน่อย" });
+  assert.equal(snapshots, 1);
+  assert.ok(phases.includes("plan"));
+  assert.ok(!phases.includes("respond"));
+  assert.ok(report.usage.toolCalls > 0);
+});
