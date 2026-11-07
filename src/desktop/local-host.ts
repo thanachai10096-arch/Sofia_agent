@@ -1,9 +1,23 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import type { DesktopAction, DesktopHostDriver } from "./types.js";
+import type { DesktopAction, DesktopCapability, DesktopHostDriver } from "./types.js";
 
 export type DesktopApplicationAllowlist = Readonly<Record<string, string>>;
+
+export function resolveLocalDesktopCapabilities(
+  applications: DesktopApplicationAllowlist,
+  options: { enableInput: boolean; enableScreenCapture: boolean },
+): DesktopCapability[] {
+  const capabilities: DesktopCapability[] = [];
+  if (Object.keys(applications).length > 0) capabilities.push("app:launch");
+  if (options.enableInput) capabilities.push("input:control");
+  if (options.enableScreenCapture) capabilities.push("screen:capture");
+  if (capabilities.length === 0) {
+    throw new Error("No local desktop capability is enabled. Allowlist an app or explicitly enable input or screen capture.");
+  }
+  return capabilities;
+}
 
 /** Parse a strict application-id -> absolute executable-path map supplied by the local operator. */
 export function parseDesktopApplicationAllowlist(raw: string | undefined): DesktopApplicationAllowlist {
