@@ -19,7 +19,8 @@ function parseConfig(raw: string): ServerConfig[] {
     if (typeof config.id !== "string" || !/^[a-z][a-z0-9_-]{0,47}$/.test(config.id) || ids.has(config.id)) throw new Error("Invalid or duplicate MCP server id at index " + index);
     ids.add(config.id);
     if (config.readOnlyTools !== undefined && (!Array.isArray(config.readOnlyTools) || config.readOnlyTools.some((name) => typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(name)))) throw new Error("Invalid readOnlyTools list for MCP server " + config.id);
-    if (Array.isArray(config.readOnlyTools) && Array.isArray(config.allowedTools) && config.readOnlyTools.some((name) => !config.allowedTools.includes(name))) throw new Error("readOnlyTools must be a subset of allowedTools for MCP server " + config.id);
+    const allowedTools = config.allowedTools;
+    if (Array.isArray(config.readOnlyTools) && Array.isArray(allowedTools) && config.readOnlyTools.some((name) => !allowedTools.includes(name))) throw new Error("readOnlyTools must be a subset of allowedTools for MCP server " + config.id);
     if (!Array.isArray(config.allowedTools) || config.allowedTools.length === 0 || config.allowedTools.length > 64 ||
         config.allowedTools.some((name) => typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(name))) {
       throw new Error("MCP server " + config.id + " requires an explicit valid allowedTools list");
