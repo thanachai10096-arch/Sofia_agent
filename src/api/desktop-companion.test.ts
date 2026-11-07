@@ -55,6 +55,24 @@ test("Desktop Companion API pairs, polls and completes owner-bound commands", as
     assert.equal(completed.status, 200);
     assert.deepEqual(await pending, { ok: true });
 
+    // A lost HTTP response may cause the Companion to retry the same POST.
+    // The exact same token + command + payload is acknowledged without
+    // resolving or executing the desktop action a second time.
+    const retriedCompletion = await fetch(base + "/v1/desktop/companion/commands/" + command.id + "/complete", {
+      method: "POST",
+      headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ result: { ok: true } }),
+    });
+    assert.equal(retriedCompletion.status, 200);
+    assert.deepEqual(await retriedCompletion.json(), { completed: true });
+
+    const conflictingCompletion = await fetch(base + "/v1/desktop/companion/commands/" + command.id + "/complete", {
+      method: "POST",
+      headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({ result: { ok: false } }),
+    });
+    assert.equal(conflictingCompletion.status, 404, "a retry with a different result must not overwrite the accepted completion");
+
     const disconnected = await request("/v1/desktop/companion/disconnect", "desktop-owner-key", "POST");
     assert.equal(disconnected.status, 200);
     const stalePoll = await fetch(base + "/v1/desktop/companion/commands", {
