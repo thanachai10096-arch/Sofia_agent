@@ -15,7 +15,8 @@
     "cli": "tsx src/cli/index.ts",
     "start": "node dist/api/entrypoint.js",
     "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs",
-    "discord:register-command": "node scripts/register-discord-command.mjs"
+    "discord:register-command": "node scripts/register-discord-command.mjs",
+    "desktop:companion": "tsx src/cli/index.ts desktop companion"
   },
   "engines": {
     "node": ">=20"
