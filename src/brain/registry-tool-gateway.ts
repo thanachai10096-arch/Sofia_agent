@@ -47,6 +47,12 @@ export class RegistryToolGateway implements ToolGateway {
     if(!descriptor)return{ok:false,data:null,evidenceId,error:{category:"tool_error",message:`Unknown tool: ${call.tool}`}};
     const registeredTool=this.dependencies.tools.get(call.tool);
     if(!registeredTool)return{ok:false,data:null,evidenceId,error:{category:"tool_error",message:"Tool disappeared during execution."}};
+    // Snapshot operator-owned destinations once. The registry is an in-process
+    // extension point, so a mutable array must not change what the approval UI
+    // displays after the action hash has already been calculated.
+    const trustedNetworkTargets = registeredTool.trustedNetworkTargets
+      ? Object.freeze([...registeredTool.trustedNetworkTargets])
+      : undefined;
     try {
       validateToolInput(registeredTool.inputSchema, input);
     } catch (error) {
@@ -56,7 +62,7 @@ export class RegistryToolGateway implements ToolGateway {
     if(!this.policy.allowTools)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution is disabled by policy."}};
     const permission=toolPermission(this.policy,call.tool,descriptor.effects);
     if(permission.allow===false)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:`Tool execution is disabled by policy: ${call.tool}`}};
-    const assessment=assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:input,trustedNetworkTargets:registeredTool.trustedNetworkTargets,effects:descriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts);
+    const assessment=assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:input,trustedNetworkTargets,effects:descriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts);
     if(!assessment.allowed){
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:assessment.reason,input:redactSecrets(input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:assessment.reason??"Security policy denied the action."}};
@@ -74,7 +80,7 @@ export class RegistryToolGateway implements ToolGateway {
       if(!this.approval)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is required for this tool."}};
       context.notifyApproval(true);
       try{
-        const approved=await this.approval({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),trustedNetworkTargets:registeredTool.trustedNetworkTargets ? [...registeredTool.trustedNetworkTargets] : undefined,actionHash:assessment.actionHash,risk:assessment.risk});
+        const approved=await this.approval({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),trustedNetworkTargets,actionHash:assessment.actionHash,risk:assessment.risk});
         if(!approved){
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
