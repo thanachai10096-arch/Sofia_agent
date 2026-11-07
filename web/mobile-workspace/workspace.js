@@ -237,6 +237,14 @@
   $("remoteTyping").addEventListener("keydown", event => {
     if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("remoteTypeSend").click(); }
   });
+  document.querySelectorAll("[data-remote-key]").forEach(button => button.addEventListener("click", () => {
+    action({kind:"pressFocused",key:button.dataset.remoteKey});
+    $("remoteTyping").focus();
+  }));
+  els.screenshot.addEventListener("wheel", event => {
+    event.preventDefault();
+    action({kind:"scroll",x:Math.round(event.deltaX),y:Math.round(event.deltaY)});
+  }, {passive:false});
   $("fullScreenButton").addEventListener("click", () => els.stage.requestFullscreen?.().catch(() => undefined));
   $("newTabHint").addEventListener("click", () => { els.url.focus(); els.url.value = ""; toast("Enter a website address above."); });
   $("signInHint").addEventListener("click", () => showModal("Sign in safely", "Open the website in the browser and enter your password or verification code directly in that page. Sofia does not ask for, read, or store your passwords or one-time codes."));
