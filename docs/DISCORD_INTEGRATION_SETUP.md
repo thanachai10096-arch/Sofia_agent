@@ -1,6 +1,6 @@
 # Discord integration: deployment and smoke test
 
-This guide covers the opt-in Discord slash-command integration wired by `src/api/entrypoint.ts`.
+This guide covers the opt-in Discord slash-command integration and optional Gateway intake for ordinary guild messages wired by `src/api/entrypoint.ts`.
 It does not claim that a live Discord app or production server has already been tested.
 
 ## Commands
@@ -32,7 +32,7 @@ Required for the API entrypoint:
 - `DISCORD_PUBLIC_KEY`: the Discord application's 32-byte public key as 64 hexadecimal characters.
 - `DISCORD_BOT_TOKEN`: bot token.
 - `DISCORD_ALLOWED_USER_IDS`: comma-separated Discord user IDs allowed to invoke Sofia.
-- `DISCORD_ALLOWED_CHANNEL_IDS`: comma-separated channel IDs allowed to invoke Sofia.
+- `DISCORD_ALLOWED_CHANNEL_IDS`: comma-separated channel IDs allowed to invoke Sofia.\n- `DISCORD_GATEWAY_ENABLED=true`: optional; enables ordinary guild messages without requiring a slash command. Leave false until the Message Content Intent and private-server checks below are complete.
 
 Example using placeholders only:
 
@@ -78,7 +78,7 @@ The registration script registers commands individually for the specified guild 
 
 The server exposes the interaction handler at `/v1/integrations/discord/interactions` when Discord is configured. Configure the Discord Developer Portal endpoint to the exact public HTTPS URL and ensure the reverse proxy preserves the request body bytes for signature verification.
 
-## 4. Verify in a private test channel
+## 4. Enable and verify ordinary messages (optional Gateway)\n\n1. In Discord Developer Portal → Bot → Privileged Gateway Intents, enable **Message Content Intent** and save. The Gateway requests only `GUILD_MESSAGES` and `MESSAGE_CONTENT`; it does not subscribe to direct messages.\n2. Set `DISCORD_GATEWAY_ENABLED=true` only after the bot token and both allowlists are configured. Keep the HTTP Interactions endpoint for slash commands.\n3. Restart the service and confirm a redacted `READY`/connected diagnostic is available before testing (never log the bot token or message contents).\n4. From an allowlisted user in an allowlisted guild channel, send `สวัสดี` without `/run`; Sofia should route it through the same shared handler and Brain.\n5. Repeat from a non-allowlisted user and channel; neither may create a job or trigger Brain execution.\n\n## 5. Verify slash commands in a private test channel
 
 1. Confirm an allowed user can run `/run task:Reply with exactly SOFIA_DISCORD_SMOKE_OK`.
 2. Confirm the bot acknowledges the request and returns a job ID before the task finishes.
