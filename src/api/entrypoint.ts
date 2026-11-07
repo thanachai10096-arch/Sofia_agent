@@ -10,6 +10,7 @@ import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplica
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { SqliteApprovalQueue, createQueuedApprovalHandler } from "../agent/approval-queue.js";
+import { handleDiscordApprovalCommand } from "../integrations/messaging/discord-approvals.js";
 import { createTelegramMessagingRuntime, parseTelegramUserAllowlist, parseTelegramUserApiKeys } from "../integrations/messaging/telegram-runtime.js";
 
 const processStartedAt = Date.now();
@@ -56,7 +57,7 @@ if (discordConfigured) {
     publicKeyHex: discordPublicKey,
     botToken: discordBotToken,
     commandName: process.env.DISCORD_COMMAND_NAME?.trim() || "run",
-    additionalCommandNames: ["status", "cancel", "resume"],
+    additionalCommandNames: ["status", "cancel", "resume", "approvals", "approve", "reject"],
     allowedUserIds: discordUserIds,
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
@@ -71,6 +72,11 @@ if (discordConfigured) {
       const principalId = "discord:" + message.author.id;
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
       const argument = message.content.trim().slice(command.length).trim();
+      if (command === "/approvals" || command === "/approve" || command === "/reject") {
+        const reply = handleDiscordApprovalCommand(approvalQueue, principalId, command, argument);
+        await discordTransport?.sendMessage(message.channelId, reply, undefined, message.id);
+        return;
+      }
       if (command === "/status" || command === "/cancel" || command === "/resume") {
         if (!/^([0-9a-f]{8}-[0-9a-f-]{27,})$/i.test(argument)) {
           await discordTransport?.sendMessage(
