@@ -20,6 +20,23 @@ interface TelegramRunResult {
   error?: string;
 }
 
+function classifyRunWaitFailure(error: unknown): string {
+  let current: unknown = error;
+  let timedOut = false;
+  let aborted = false;
+  // SofiaClient wraps the last transient API error as Error.cause on timeout.
+  // Walk a bounded cause chain so the original HTTP status is not lost.
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    if (current instanceof SofiaApiError) return "api_http_" + current.status;
+    if (/timed out waiting/i.test(current.message)) timedOut = true;
+    if (/abort/i.test(current.message)) aborted = true;
+    current = "cause" in current ? current.cause : undefined;
+  }
+  if (timedOut) return "timeout";
+  if (aborted) return "aborted";
+  return "network_or_unknown";
+}
+
 /**
  * Wait for an accepted run to reach a terminal state and send its actual result
  * to the originating Telegram conversation. Kept separate for deterministic tests.
@@ -36,13 +53,7 @@ export async function reportTelegramRunCompletion(input: {
   try {
     run = await input.waitForRun(input.runId, { timeoutMs: 30 * 60 * 1_000, intervalMs: 1_000 });
   } catch (error) {
-    const failureKind = error instanceof SofiaApiError
-      ? "api_http_" + error.status
-      : error instanceof Error && /timed out waiting/i.test(error.message)
-        ? "timeout"
-        : error instanceof Error && /abort/i.test(error.message)
-          ? "aborted"
-          : "network_or_unknown";
+    const failureKind = classifyRunWaitFailure(error);
     input.onWarning?.("telegram_run_wait_failed run_id=" + input.runId + " kind=" + failureKind);
     try {
       const delivered = await input.send({
