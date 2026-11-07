@@ -270,6 +270,7 @@ export class SofiaBrain {
   private readonly decisions: Array<{ strategy: Strategy; reason: string }> = [];
   private projectContext?: ProjectContext;
   private repositoryMap?: RepositoryMap;
+  private discoveredTools?: NonNullable<ReturnType<NonNullable<ToolGateway["listTools"]>>>;
   private projectContextLoaded = false;
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
@@ -544,6 +545,7 @@ export class SofiaBrain {
     const discoveredTools = this.dependencies.tools.probeReadiness
       ? await this.wait(() => this.dependencies.tools.probeReadiness!())
       : this.dependencies.tools.listTools?.() ?? [];
+    this.discoveredTools = discoveredTools;
     const payload = {
       task: input.task,
       referenceContext: priorReferenceContext(input.context),
@@ -655,7 +657,7 @@ export class SofiaBrain {
       task: input.task,
       referenceContext: priorReferenceContext(input.context),
       understanding,
-      availableTools: this.dependencies.tools.listTools?.() ?? [],
+      availableTools: this.discoveredTools ?? this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
   }
