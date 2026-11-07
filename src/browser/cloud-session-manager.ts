@@ -25,6 +25,8 @@ export interface CloudBrowserManagerConfig {
  */
 export class CloudBrowserSessionManager {
   private readonly sessions = new Map<string, CloudSession>();
+  private readonly pendingByOwner = new Map<string, number>();
+  private readonly cleanupTimer: ReturnType<typeof setInterval>;
   private readonly now: () => number;
   private readonly idleTimeoutMs: number;
   private readonly maxSessionsPerOwner: number;
@@ -40,6 +42,8 @@ export class CloudBrowserSessionManager {
         !Number.isSafeInteger(this.maxScreenshotBytes) || this.maxScreenshotBytes < 64 * 1024) {
       throw new Error("Invalid cloud browser manager limits.");
     }
+    this.cleanupTimer = setInterval(() => { void this.expireIdle(); }, Math.min(this.idleTimeoutMs, 60_000));
+    this.cleanupTimer.unref?.();
   }
 
   private async expireIdle(): Promise<void> {
@@ -63,17 +67,24 @@ export class CloudBrowserSessionManager {
     if (!ownerId.trim() || ownerId.length > 512) throw new Error("A valid browser session owner is required.");
     await this.expireIdle();
     const count = [...this.sessions.values()].filter((item) => item.ownerId === ownerId).length;
-    if (count >= this.maxSessionsPerOwner) throw new Error("Cloud browser session limit reached.");
-    const session = await this.runtime.launch({ headless: true });
+    const pending = this.pendingByOwner.get(ownerId) ?? 0;
+    if (count + pending >= this.maxSessionsPerOwner) throw new Error("Cloud browser session limit reached.");
+    this.pendingByOwner.set(ownerId, pending + 1);
+    let session: BrowserSession | undefined;
     try {
+      session = await this.runtime.launch({ headless: true });
       const page = await session.newPage();
       const now = this.now();
       const id = randomUUID();
       this.sessions.set(id, { id, ownerId, session, page, createdAt: now, lastUsedAt: now });
       return { id, createdAt: now, expiresInMs: this.idleTimeoutMs, url: await page.url() };
     } catch (error) {
-      await session.close().catch(() => undefined);
+      await session?.close().catch(() => undefined);
       throw error;
+    } finally {
+      const remaining = (this.pendingByOwner.get(ownerId) ?? 1) - 1;
+      if (remaining <= 0) this.pendingByOwner.delete(ownerId);
+      else this.pendingByOwner.set(ownerId, remaining);
     }
   }
 
