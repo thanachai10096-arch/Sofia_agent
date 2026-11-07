@@ -516,7 +516,24 @@ export class SofiaBrain {
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
 
-    return parseUnderstanding(value);
+    try {
+      return parseUnderstanding(value);
+    } catch (firstError) {
+      // Match plan recovery: a malformed model contract is recoverable once.
+      // Never infer missing fields or execute based on an invalid understanding.
+      value = await this.infer("understand", {
+        task: input.task,
+        referenceContext: priorReferenceContext(input.context),
+        availableTools: this.dependencies.tools.listTools?.() ?? [],
+        repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
+        outputContractRepair: {
+          error: errorMessage(firstError),
+          invalidResponse: preview(value, 4_000).text,
+          instruction: "Return a complete corrected understanding JSON object. Every list field must be a JSON array of strings, including ambiguities. Keep risk exactly low, medium, or high. Do not omit required fields or add prose.",
+        },
+      });
+      return parseUnderstanding(value);
+    }
   }
 
   private async delegateSubagent(
