@@ -836,3 +836,25 @@ test("Brain saves reusable workflow memory only after verified completion and ex
   assert.match(learned.content, /Verification evidence:/);
   assert.doesNotMatch(learned.content, /"content":"hello"/);
 });
+
+
+test("Brain rejects unknown delegated tools and falls back to the primary planner", async () => {
+  let writes = 0;
+  const tools = makeTools();
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.write_file") {
+      writes += 1;
+      if (writes === 1) return { ok: false, data: null, evidenceId: "failure-unknown-delegate", error: { category: "tool_error", message: "initial write failed" } };
+    }
+    return originalExecute(call, context);
+  };
+  const subagents: SubagentRuntime = { async run() { return { role: "debugger", summary: "Invalid proposal", output: "unknown tool", proposedAction: { tool: "tools.unknown", input: {}, reason: "must be rejected" } }; } };
+  const events: string[] = [];
+  const brain = createSofiaBrain({ dependencies: { reasoner: makeReasoner(), tools, subagents, allowShell: false, allowNetwork: false, onEvent(event) { events.push(event.type); } }, limits: { maxSteps: 6, maxToolCalls: 20, maxReplans: 2, maxModelCalls: 6, maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 } });
+  const report = await brain.run({ task: "Create hello.txt", acceptanceCriteria: [{ id: "file-exists", description: "hello.txt exists", probe: { tool: "workspace.list_files", input: { path: "." } }, evaluate(data) { return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" }; } }] });
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(report.state, "completed", report.summary);
+  assert.equal(writes, 1);
+  assert.ok(events.includes("brain.replan.started"));
+});
