@@ -2,6 +2,7 @@ import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import type { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
+import type { CloudBrowserSessionManager } from "../browser/cloud-session-manager.js";
 
 export interface AgentRunInput {
   task: string;
@@ -60,6 +61,8 @@ export interface SofiaApiConfig {
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   /** Optional owner-bound relay for a locally paired Desktop Companion. */
   desktopCommandBroker?: DesktopCommandBroker;
+  /** Optional owner-isolated headless browser sessions controlled from mobile clients. */
+  cloudBrowserSessions?: CloudBrowserSessionManager;
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
     path?: string;
