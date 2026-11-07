@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { chmod, lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -17,11 +19,30 @@ interface BrowserProfileMetadata {
   lastUsedAt: string;
 }
 
+const execFileAsync = promisify(execFile);
+
 const PROFILE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function ownerKey(ownerId: string): string {
   if (!ownerId.trim() || ownerId.length > 512) throw new Error("A valid browser profile owner is required.");
   return createHash("sha256").update(ownerId).digest("hex");
+}
+
+async function secureDirectory(pathname: string): Promise<void> {
+  if (process.platform === "win32") {
+    const username = process.env.USERNAME;
+    if (!username) throw new Error("Cannot secure browser profile ACL: current Windows user is unknown.");
+    const account = process.env.USERDOMAIN ? process.env.USERDOMAIN + "\\" + username : username;
+    await execFileAsync("icacls", [
+      pathname, "/inheritance:r", "/grant:r",
+      "*S-1-5-18:(OI)(CI)F",
+      "*S-1-5-32-544:(OI)(CI)F",
+      account + ":(OI)(CI)F",
+      "/T", "/C",
+    ]);
+    return;
+  }
+  await chmod(pathname, 0o700);
 }
 
 async function assertDirectory(pathname: string): Promise<void> {
@@ -41,7 +62,7 @@ export class BrowserProfileStore {
     await mkdir(this.configuredRoot, { recursive: true, mode: 0o700 });
     const resolved = await realpath(this.configuredRoot);
     await assertDirectory(resolved);
-    await chmod(resolved, 0o700);
+    await secureDirectory(resolved);
     this.root = resolved;
     return resolved;
   }
@@ -50,7 +71,7 @@ export class BrowserProfileStore {
     const directory = path.join(await this.rootDirectory(), ownerHash);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await assertDirectory(directory);
-    await chmod(directory, 0o700);
+    await secureDirectory(directory);
     return directory;
   }
 
@@ -73,7 +94,7 @@ export class BrowserProfileStore {
     const id = randomUUID();
     const directory = path.join(ownerDirectory, id);
     await mkdir(directory, { mode: 0o700 });
-    await chmod(directory, 0o700);
+    await secureDirectory(directory);
     const now = new Date().toISOString();
     const metadata: BrowserProfileMetadata = { version: 1, id, ownerHash: hash, createdAt: now, lastUsedAt: now };
     await writeFile(path.join(directory, "sofia-profile.json"), JSON.stringify(metadata), { encoding: "utf8", mode: 0o600, flag: "wx" });
