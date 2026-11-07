@@ -25,10 +25,10 @@ All routes require Authorization: Bearer <SOFIA_API_KEY> and the explicit browse
 
 Example action payloads:
 
-- click: selector button[type=submit]
-- type: selector input[name=email], text user@example.com
-- press: selector input[name=email], key Enter
-- scroll: x 0, y 600
+- {"kind":"click","selector":"button[type=submit]"}
+- {"kind":"type","selector":"input[name=email]","text":"user@example.com"}
+- {"kind":"press","selector":"input[name=email]","key":"Enter"}
+- {"kind":"scroll","x":0,"y":600}
 
 ## Opt-in configuration
 
