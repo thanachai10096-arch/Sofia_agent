@@ -74,7 +74,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const models=config.routes.map(route=>({key:route.providerId??route.id,limit:{maxTokens:intEnv("SOFIA_BRAIN_MODEL_MAX_TOKENS",runLimit.maxTokens,1),maxCostNanoUsd:runLimit.maxCostNanoUsd,maxCalls:runLimit.maxCalls,maxInFlight:runLimit.maxInFlight},price:{inputNanoUsdPerToken:bigintEnv("SOFIA_"+route.id.toUpperCase()+"_INPUT_NANO_USD",0n),outputNanoUsdPerToken:bigintEnv("SOFIA_"+route.id.toUpperCase()+"_OUTPUT_NANO_USD",0n)}})).filter((m,i,a)=>a.findIndex(x=>x.key===m.key)===i);
     const budget=new TokenBudget(runLimit,models);
     const gateway=new TokenAwareGateway(budget,selectedRouteAdapters,intEnv("SOFIA_BRAIN_MODEL_TIMEOUT_MS",45000,1));
-    const reasoner=new TokenAwareBrainReasoner(gateway);
+    const reasoner=new TokenAwareBrainReasoner(gateway, requestedRouteId);
     // Browser tools own mutable page/session handles. Construct them per Brain run,
     // never on the process-wide dependency registry, so concurrent users/runs cannot
     // address each other's tabs or reuse each other's authenticated browser context.
