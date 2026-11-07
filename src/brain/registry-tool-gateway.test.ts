@@ -577,6 +577,48 @@ test("capability discovery reports policy availability instead of exposing every
 });
 
 
+test("browser readiness uses a registered safe probe once for all browser tools", async () => {
+  let probeCalls = 0;
+  const probeReadiness = async () => {
+    probeCalls += 1;
+    return { ok: true, reason: "Isolated browser launch passed." };
+  };
+  const registry = new MapToolRegistry([
+    { name: "browser.open", description: "Open browser", inputSchema: { type: "object" }, effects: ["browser"] as const, probeReadiness, async execute() { return {}; } },
+    { name: "browser.goto", description: "Navigate browser", inputSchema: { type: "object" }, effects: ["browser"] as const, probeReadiness, async execute() { return {}; } },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowBrowser: true },
+    async () => true,
+  );
+  const catalog = await gateway.probeReadiness();
+  assert.equal(probeCalls, 1);
+  assert.equal(catalog[0]?.runtimeReadiness, "ready");
+  assert.equal(catalog[1]?.runtimeReadiness, "ready");
+  assert.match(catalog[0]?.runtimeReason ?? "", /isolated browser launch passed/i);
+});
+
+test("browser readiness probe is skipped when execution policy blocks the browser", async () => {
+  let probeCalls = 0;
+  const registry = new MapToolRegistry([
+    {
+      name: "browser.open",
+      description: "Open browser",
+      inputSchema: { type: "object" },
+      effects: ["browser"] as const,
+      async probeReadiness() { probeCalls += 1; return { ok: true, reason: "unexpected probe" }; },
+      async execute() { return {}; },
+    },
+  ]);
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, defaultPolicy);
+  const capability = (await gateway.probeReadiness())[0];
+  assert.equal(probeCalls, 0);
+  assert.equal(capability?.policy?.status, "blocked");
+  assert.equal(capability?.runtimeReadiness, "not_probed");
+  assert.match(capability?.runtimeReason ?? "", /policy blocks/i);
+});
+
 test("network capability discovery explains missing host allowlist", () => {
   const registry = new MapToolRegistry([
     { name: "web.search", description: "Search web", inputSchema: { type: "object" }, effects: ["network", "read"] as const, async execute() { return {}; } },
