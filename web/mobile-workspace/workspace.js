@@ -4,13 +4,13 @@
   // Sofia API key server-side; this browser code never handles master keys.
   const API_ROOT = (window.SOFIA_WORKSPACE_API_ROOT || "/api/sofia").replace(/\/$/, "");
   const $ = (id) => document.getElementById(id);
-  const state = { sessionId: null, refreshTimer: null, clockTimer: null, runTimer: null, startedAt: 0, expiresAt: 0, sessionTimeoutMs: 900000, screenshotBusy: false, lastUrl: "", busy: false, touchStart: null };
+  const state = { sessionId: null, refreshTimer: null, clockTimer: null, runTimer: null, approvalTimer: null, approvalBusy: false, startedAt: 0, expiresAt: 0, sessionTimeoutMs: 900000, screenshotBusy: false, lastUrl: "", busy: false, touchStart: null };
   const els = {
     statusDot:$("statusDot"),statusText:$("statusText"),url:$("urlInput"),pageTitle:$("pageTitle"),
     welcome:$("welcomeScreen"),screenWrap:$("screenWrap"),screenshot:$("browserScreenshot"),
     stage:$("browserStage"),loading:$("loadingOverlay"),loadingText:$("loadingText"),
     browserState:$("browserState"),sessionTimer:$("sessionTimer"),close:$("closeSessionButton"),
-    messages:$("copilotMessages"),chat:$("chatInput"),send:$("sendButton"),approval:$("approvalBanner"),
+    messages:$("copilotMessages"),chat:$("chatInput"),send:$("sendButton"),approval:$("approvalInbox"),approvalList:$("approvalList"),approvalText:$("approvalText"),
     modal:$("infoModal"),modalTitle:$("modalTitle"),modalBody:$("modalBody"),toast:$("toast")
   };
 
@@ -162,6 +162,75 @@
     row.append(content); els.messages.append(row); els.messages.scrollTop = els.messages.scrollHeight;
     return row;
   }
+  function approvalNode(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+  async function loadApprovals() {
+    if (state.approvalBusy) return;
+    state.approvalBusy = true;
+    try {
+      const result = await api("/v1/approvals");
+      const items = Array.isArray(result.approvals) ? result.approvals : [];
+      els.approval.classList.toggle("hidden", items.length === 0);
+      els.approvalText.textContent = items.length ? items.length + " action" + (items.length === 1 ? "" : "s") + " waiting for your decision." : "No pending actions.";
+      els.approvalList.replaceChildren();
+      if (!items.length) return;
+      for (const item of items) {
+        const card = approvalNode("article", "approval-item");
+        const top = approvalNode("div", "approval-item-top");
+        top.append(approvalNode("strong", "approval-tool", item.toolName || "Sofia action"));
+        top.append(approvalNode("span", "approval-risk", String(item.risk || "unknown") + " risk"));
+        card.append(top);
+        card.append(approvalNode("div", "approval-meta", "Run " + String(item.runId || "").slice(0, 8) + " · Expires " + new Date(item.expiresAt).toLocaleTimeString()));
+        const input = approvalNode("pre", "approval-input");
+        try { input.textContent = JSON.stringify(item.input ?? {}, null, 2); }
+        catch { input.textContent = "[Action details unavailable]"; }
+        card.append(input);
+        const actions = approvalNode("div", "approval-actions");
+        const deny = approvalNode("button", "approval-deny", "Deny");
+        const approve = approvalNode("button", "approval-allow", "Approve action");
+        deny.type = approve.type = "button";
+        deny.addEventListener("click", () => decideApproval(item, "deny", deny, approve));
+        approve.addEventListener("click", () => decideApproval(item, "approve", deny, approve));
+        actions.append(deny, approve);
+        card.append(actions);
+        els.approvalList.append(card);
+      }
+    } catch (error) {
+      if (error.status === 401) {
+        els.approval.classList.add("hidden");
+      } else if (error.status === 403) {
+        els.approval.classList.remove("hidden");
+        els.approvalText.textContent = "This API key needs approval:read and approval:decide scopes.";
+        els.approvalList.replaceChildren(approvalNode("p", "approval-empty", "Ask the workspace administrator to grant the approval scopes."));
+      } else if (error.status !== 404) {
+        els.approval.classList.remove("hidden");
+        els.approvalText.textContent = "Approval inbox temporarily unavailable.";
+      }
+    } finally {
+      state.approvalBusy = false;
+    }
+  }
+  async function decideApproval(item, decision, denyButton, approveButton) {
+    if (!item?.id || !item?.actionHash) return;
+    denyButton.disabled = approveButton.disabled = true;
+    try {
+      await api("/v1/approvals/" + encodeURIComponent(item.id) + "/decision", {
+        method: "POST",
+        body: { decision, actionHash: item.actionHash }
+      });
+      toast(decision === "approve" ? "Action approved. Sofia may continue." : "Action denied. Sofia will not execute it.");
+      await loadApprovals();
+    } catch (error) {
+      toast(error.status === 409 ? "This approval expired or was already decided." : error.message);
+      await loadApprovals();
+    } finally {
+      denyButton.disabled = approveButton.disabled = false;
+    }
+  }
   async function sendMessage(text) {
     const task = text.trim(); if (!task || state.busy) return;
     appendMessage(task, "user"); els.chat.value = ""; resizeChat();
@@ -261,9 +330,11 @@
   $("mobileSofiaButton").addEventListener("click", () => { els.chat.scrollIntoView({behavior:"smooth",block:"center"}); setTimeout(() => els.chat.focus(),250); });
   $("mobileMoreButton").addEventListener("click", () => showModal("Workspace options", "Your mobile workspace is designed to work without a desktop computer. Use the Browser tab to control your cloud browser, or ask Sofia for help."));
   $("activityNav").addEventListener("click", () => showModal("Activity", "Run history and reconnectable task activity are available through the Sofia API. A dedicated activity screen will be added in a later UI slice."));
-  $("approvalReview").addEventListener("click", () => showModal("Approval required", "This workspace build does not yet include the approval inbox UI. High-impact actions must remain blocked until a real approval flow is connected."));
+  $("approvalRefresh").addEventListener("click", loadApprovals);
+  loadApprovals();
+  state.approvalTimer = setInterval(loadApprovals, 2500);
   $("chatInput").addEventListener("focus", () => { if (window.matchMedia("(max-width:600px)").matches) setTimeout(() => els.chat.scrollIntoView({behavior:"smooth",block:"center"}),150); });
-  window.addEventListener("beforeunload", () => { clearInterval(state.refreshTimer); clearInterval(state.clockTimer); });
+  window.addEventListener("beforeunload", () => { clearInterval(state.refreshTimer); clearInterval(state.clockTimer); clearInterval(state.approvalTimer); });
   if ("serviceWorker" in navigator && location.protocol === "https:") {
     navigator.serviceWorker.register("./service-worker.js").catch(() => { /* Offline shell is an enhancement, not a blocker. */ });
   }
