@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { request as httpRequest } from "node:http";
 import { createLocalGuiApproval } from "./gui-approval.js";
 
 test("GUI approval is loopback-bound and requires the exact one-time token", async () => {
@@ -19,6 +20,21 @@ test("GUI approval is loopback-bound and requires the exact one-time token", asy
     const page = await fetch(url.origin + "/");
     assert.equal(page.status, 200);
     assert.match(await page.text(), /editor/);
+    const hostSpoofStatus = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: Number(url.port),
+        path: "/",
+        method: "GET",
+        headers: { host: `attacker.example:${url.port}` },
+      }, (response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      });
+      request.once("error", reject);
+      request.end();
+    });
+    assert.equal(hostSpoofStatus, 403);
     const rejected = await fetch(url.origin + "/decision", {
       method: "POST",
       headers: {
