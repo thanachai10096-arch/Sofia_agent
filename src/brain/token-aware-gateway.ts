@@ -151,6 +151,7 @@ const PHASE_CAPS: Record<BrainPhase, PhaseCap> = {
   review: { input: 10_000, output: 1_100 },
   finalize: { input: 4_000, output: 600 },
   subagent: { input: 12_000, output: 1_200 },
+  respond: { input: 12_000, output: 1_200 },
 };
 
 function validateCount(prepared: PreparedCall): PreparedCall {
