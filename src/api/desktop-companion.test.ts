@@ -98,7 +98,7 @@ test("Desktop Companion API rejects unauthenticated, oversized and malformed com
     const oversized = await fetch(base + "/v1/desktop/companion/commands/00000000-0000-4000-8000-000000000000/complete", {
       method: "POST",
       headers: { authorization: "Bearer " + token, "content-type": "application/json" },
-      body: JSON.stringify({ result: "x".repeat(1000) }),
+      body: JSON.stringify({ result: "x".repeat(5_500_001) }),
     });
     assert.equal(oversized.status, 413);
   } finally {
