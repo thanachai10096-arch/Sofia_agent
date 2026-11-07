@@ -78,7 +78,7 @@ export class WorkspaceOidcAuth {
     this.issuer = requiredString(options.issuer).replace(/\/$/, "");
     const issuerUrl = new URL(this.issuer);
     if (issuerUrl.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(issuerUrl.hostname)) throw new Error("Workspace OIDC issuer must use HTTPS.");
-    if (issuerUrl.username || issuerUrl.password || issuerUrl.hash) throw new Error("Invalid workspace OIDC issuer.");
+    if (issuerUrl.username || issuerUrl.password || issuerUrl.hash || issuerUrl.search) throw new Error("Invalid workspace OIDC issuer.");
     this.clientId = requiredString(options.clientId);
     this.clientSecret = requiredString(options.clientSecret);
     this.redirectUri = requiredString(options.redirectUri);
@@ -115,8 +115,9 @@ export class WorkspaceOidcAuth {
     if (!equalText(issuer.replace(/\/$/, ""), this.issuer)) throw new Error("OIDC issuer mismatch.");
     for (const endpoint of [authorization_endpoint, token_endpoint, jwks_uri]) {
       const url = new URL(endpoint);
-      if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
-        throw new Error("OIDC endpoints must use HTTPS.");
+      if ((url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") ||
+          url.username || url.password || url.hash) {
+        throw new Error("OIDC endpoints must use HTTPS and contain no credentials or fragments.");
       }
     }
     this.discovery = { issuer, authorization_endpoint, token_endpoint, jwks_uri };
@@ -178,11 +179,14 @@ export class WorkspaceOidcAuth {
     if (parts.length !== 3 || token.length > 16_384) throw new Error("Invalid OIDC ID token.");
     const header = decodeJson(parts[0]!);
     const claims = decodeJson(parts[1]!);
-    if (header.alg !== "RS256" || typeof header.kid !== "string") throw new Error("Unsupported OIDC ID token signature.");
+    if (header.alg !== "RS256" || typeof header.kid !== "string" || header.crit !== undefined || header.b64 === false) {
+      throw new Error("Unsupported OIDC ID token signature.");
+    }
     const jwksResponse = await this.fetcher(provider.jwks_uri, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(10_000) });
     if (!jwksResponse.ok) throw new Error("OIDC signing keys unavailable.");
     const jwks = await jwksResponse.json() as { keys?: Array<JsonObject> };
-    const jwk = jwks.keys?.find((key) => key.kid === header.kid && key.kty === "RSA" && key.use !== "enc" && (!key.alg || key.alg === "RS256"));
+    const jwk = jwks.keys?.find((key) => key.kid === header.kid && key.kty === "RSA" &&
+      (key.use === undefined || key.use === "sig") && (key.alg === undefined || key.alg === "RS256"));
     if (!jwk || typeof jwk.n !== "string" || typeof jwk.e !== "string") throw new Error("OIDC signing key not found.");
     const publicKey = createPublicKey({ key: { kty: "RSA", n: jwk.n, e: jwk.e }, format: "jwk" });
     const valid = verifySignature("RSA-SHA256", Buffer.from(parts[0] + "." + parts[1]), publicKey, Buffer.from(parts[2]!, "base64url"));
@@ -196,6 +200,7 @@ export class WorkspaceOidcAuth {
     const nbf = claims.nbf === undefined ? 0 : Number(claims.nbf);
     if (!equalText(issuer, this.issuer) || !audiences.includes(this.clientId) ||
         (audiences.length > 1 && claims.azp !== this.clientId) ||
+        (claims.azp !== undefined && claims.azp !== this.clientId) ||
         !Number.isFinite(exp) || exp <= Math.floor(this.now() / 1000) ||
         !Number.isFinite(iat) || iat > Math.floor(this.now() / 1000) + 60 ||
         !Number.isFinite(nbf) || nbf > Math.floor(this.now() / 1000) ||
