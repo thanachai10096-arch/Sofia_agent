@@ -9,6 +9,8 @@ export interface SofiaTool {
   effects?: readonly ToolEffect[];
   /** Fixed operator-configured endpoint for network-backed tools; never model-controlled. */
   networkUrl?: string;
+  /** Optional bounded, side-effect-free runtime health probe for capability discovery. */
+  probeReadiness?: () => Promise<{ ok: boolean; reason: string }>;
   execute(input: Record<string, unknown>, context: ToolContext): Promise<unknown>;
 }
 export interface ToolRegistry { get(name: string): SofiaTool | undefined; list(): SofiaTool[]; }
