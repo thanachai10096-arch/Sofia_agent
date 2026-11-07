@@ -40,11 +40,14 @@ The BFF is a required integration; do not expose the privileged Sofia API direct
 - `DELETE /v1/browser/cloud/sessions/:id`
 - `POST /v1/agent/runs` with `{ "task": "...", "async": true }`
 - `GET /v1/agent/runs/:id`
+- `GET /v1/approvals` (requires `approval:read` or `approval:decide`)
+- `POST /v1/approvals/:id/decision` with `{ "decision": "approve" | "deny", "actionHash": "<displayed-action-hash>" }` (requires `approval:decide`)
 
 ## Known UI/backend gaps
 
 - No authentication/login product or BFF implementation is included in this repository slice.
-- Approval banner is a placeholder; no approval inbox endpoint/UI is connected yet. High-impact actions must remain blocked pending a real approval workflow.
+- The Approval Inbox is connected to the Brain approval callback and exposes owner-scoped, one-time decisions. The UI displays the redacted action input and risk before approval. It is process-local and pending approvals fail closed on server restart; durable approval recovery and audit retention remain future work.
+- Grant `approval:read` and `approval:decide` only to API keys that should review/approve actions. The BFF must preserve these scope checks and validate its CSRF token on decision requests.
 - Browser streaming currently refreshes PNG screenshots on a short polling interval; it is not WebRTC/video streaming.
 - Session cookies are ephemeral and lost on server restart; multi-replica affinity/durable session routing remains future work.
 - Native browser coordinate actions are only available when the runtime exposes the optional `clickAt` driver; keyboard text requires `typeFocused`.
