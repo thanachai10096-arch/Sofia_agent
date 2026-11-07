@@ -654,8 +654,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 200, desktopBroker.getStatus(auth.keyId), origin, config);
         }
         if (desktopPath === "/v1/desktop/companion/disconnect" && req.method === "POST") {
-          desktopBroker.disconnect(auth.keyId);
-          return json(res, 200, { disconnected: true }, origin, config);
+          try {
+            desktopBroker.disconnect(auth.keyId);
+            return json(res, 200, { disconnected: true }, origin, config);
+          } catch {
+            // The active pairing has already been revoked in memory, but durable
+            // deletion failed. Do not report a successful persistent disconnect.
+            return json(res, 503, { error: "desktop_companion_revocation_persistence_failed" }, origin, config);
+          }
         }
         return json(res, 404, { error: "not_found" }, origin, config);
       }
