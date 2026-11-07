@@ -66,10 +66,10 @@ test("mobile cloud browser API requires scope and isolates sessions by API-key o
 
     const screenshot = await request("/v1/browser/cloud/sessions/" + session.id + "/screenshot", "mobile-owner-key");
     assert.equal(screenshot.status, 200);
-    assert.equal((await screenshot.json() as { mimeType: string }).mimeType, "image/png");
+    const screenshotBody = await screenshot.json() as { mimeType: string; width: number; height: number };\n    assert.equal(screenshotBody.mimeType, "image/png");\n    assert.equal(screenshotBody.width, 1280);\n    assert.equal(screenshotBody.height, 720);
 
     const action = await request("/v1/browser/cloud/sessions/" + session.id + "/action", "mobile-owner-key", "POST", { kind: "click", selector: "button" });
-    assert.equal(action.status, 200);
+    assert.equal(action.status, 200);\n    const touch = await request("/v1/browser/cloud/sessions/" + session.id + "/action", "mobile-owner-key", "POST", { kind: "clickAt", x: 120, y: 80 });\n    assert.equal(touch.status, 200);
     assert.equal((await request("/v1/browser/cloud/sessions/" + session.id, "mobile-owner-key", "DELETE")).status, 200);
     assert.equal((await request("/v1/browser/cloud/sessions/" + session.id, "mobile-owner-key")).status, 404);
   } finally {
