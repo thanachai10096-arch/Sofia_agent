@@ -1,4 +1,5 @@
 import type { BrainReasoner, PreparedInference } from "./types.js";
+import { estimatePromptTokensUpperBound } from "./model-route-adapter.js";
 import {
   TokenAwareGateway,
   type BrainPhase,
@@ -21,13 +22,6 @@ function compactValue(value: unknown, depth = 0): unknown {
     return Object.fromEntries(entries.map(([key, item]) => [key.slice(0, 120), compactValue(item, depth + 1)]));
   }
   return undefined;
-}
-
-function estimatePromptTokens(value: unknown): number {
-  const characters = Array.from(JSON.stringify(value));
-  const nonAscii = characters.filter((character) => character.codePointAt(0)! > 0x7f).length;
-  const ascii = characters.length - nonAscii;
-  return Math.ceil(ascii / 3) + nonAscii;
 }
 
 function phaseFromRequest(request: string): BrainPhase {
@@ -155,7 +149,7 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
     // Match the route-admission estimate so executor preflight does not
     // reject Thai/CJK prompts merely because their UTF-8 representation is 3x.
     // Provider-reported usage remains authoritative after invocation.
-    const inputTokens = estimatePromptTokens(input);
+    const inputTokens = estimatePromptTokensUpperBound(input);
     return {
       inputTokens,
       invoke: async (invokeOptions) => {
