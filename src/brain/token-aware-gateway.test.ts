@@ -376,7 +376,7 @@ test("gateway falls back once to another eligible route after malformed structur
   const primary: InternalRoute = {
     ...route(async () => {
       primaryCalls += 1;
-      throw new Error("Model returned non-JSON Brain output");
+      throw new MeteredProviderError({ inputTokens: 13, outputTokens: 7 }, "provider_invalid_response");
     }),
     id: "primary",
     budgetKey: "primary",
