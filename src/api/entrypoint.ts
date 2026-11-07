@@ -15,6 +15,7 @@ import { CloudBrowserSessionManager } from "../browser/cloud-session-manager.js"
 import { PlaywrightBrowserRuntime } from "../browser/runtime.js";
 import { ApprovalInbox } from "../agent/approval-inbox.js";
 import { FileApprovalAuditStore } from "../agent/approval-audit-store.js";
+import { WorkspaceOidcAuth } from "./workspace-oidc-auth.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -30,6 +31,27 @@ const approvalAuditStore = new FileApprovalAuditStore(path.join(workspace, ".sof
 // Never replay an approval after restart: close orphaned audit entries before accepting traffic.
 approvalAuditStore.recoverInterrupted();
 const approvalInbox = new ApprovalInbox({ ttlMs: 120_000, maxPendingPerOwner: 30, auditStore: approvalAuditStore });
+const workspaceOidcValues = [
+  process.env.SOFIA_WORKSPACE_OIDC_ISSUER,
+  process.env.SOFIA_WORKSPACE_OIDC_CLIENT_ID,
+  process.env.SOFIA_WORKSPACE_OIDC_CLIENT_SECRET,
+  process.env.SOFIA_WORKSPACE_OIDC_REDIRECT_URI,
+  process.env.SOFIA_WORKSPACE_OIDC_ALLOWED_SUBJECT,
+];
+const workspaceOidcRequested = workspaceOidcValues.some((value) => Boolean(value?.trim()));
+const workspaceAuth = workspaceOidcValues.every((value) => Boolean(value?.trim()))
+  ? new WorkspaceOidcAuth({
+      issuer: process.env.SOFIA_WORKSPACE_OIDC_ISSUER!,
+      clientId: process.env.SOFIA_WORKSPACE_OIDC_CLIENT_ID!,
+      clientSecret: process.env.SOFIA_WORKSPACE_OIDC_CLIENT_SECRET!,
+      redirectUri: process.env.SOFIA_WORKSPACE_OIDC_REDIRECT_URI!,
+      allowedSubject: process.env.SOFIA_WORKSPACE_OIDC_ALLOWED_SUBJECT!,
+    })
+  : undefined;
+if (workspaceOidcRequested && !workspaceAuth) {
+  console.error("Mobile Workspace login disabled: all SOFIA_WORKSPACE_OIDC_* settings are required.");
+}
+
 const cloudBrowserSessions = process.env.SOFIA_CLOUD_BROWSER_ENABLED === "true"
   ? new CloudBrowserSessionManager(new PlaywrightBrowserRuntime(), {
       maxSessionsPerOwner: Number(process.env.SOFIA_CLOUD_BROWSER_MAX_SESSIONS_PER_OWNER ?? 2),
@@ -226,6 +248,7 @@ const server = createSofiaApi(deps, {
   runStore: new FileRunRecordStore(runStoreDirectory),
   desktopCommandBroker,
   approvalInbox,
+  ...(workspaceAuth ? { workspaceAuth, workspaceApiKey: apiKey, workspaceStaticDirectory: path.resolve(process.cwd(), "web/mobile-workspace") } : {}),
   approvalAuditStore,
   ...(cloudBrowserSessions ? { cloudBrowserSessions } : {}),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
