@@ -56,11 +56,11 @@ test("macOS uses native screenshot and cliclick arguments without a shell", asyn
   assert.equal(image.width, 1024);
   await driver.click({ x: 12, y: 34, button: "left" });
   await driver.typeText("safe text");
-  await driver.pressKey("Cmd+A");
+  await driver.pressKey("Ctrl+A");
   assert.equal(calls[0]?.command, "/usr/sbin/screencapture");
   assert.deepEqual(calls[1]?.args, ["m:12,34", "c:12,34"]);
   assert.deepEqual(calls[2]?.args, ["t:safe text"]);
-  assert.deepEqual(calls[3]?.args, ["kd:CMD", "kp:A", "ku:CMD"]);
+  assert.deepEqual(calls[3]?.args, ["kd:CTRL", "kp:A", "ku:CTRL"]);
 });
 
 test("Windows input data is passed as environment values, not command text", async () => {
