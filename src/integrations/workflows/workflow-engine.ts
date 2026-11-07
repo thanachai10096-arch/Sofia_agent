@@ -3,7 +3,8 @@ export type WorkflowExecutionState =
   | "running"
   | "succeeded"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "indeterminate";
 
 export interface WorkflowStartRequest {
   readonly workflowId: string;
@@ -31,7 +32,8 @@ export interface WorkflowEngine {
   /**
    * Start an allowlisted workflow. Implementations must deduplicate repeated
    * requests by workflowId + idempotencyKey and must not treat a timeout as proof
-   * that the external side effect did not happen.
+   * that the external side effect did not happen. If cancellation occurs after
+   * dispatch, report an indeterminate outcome unless non-execution is confirmed.
    */
   start(request: WorkflowStartRequest): Promise<WorkflowStartResult>;
 
