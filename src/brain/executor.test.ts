@@ -858,3 +858,72 @@ test("Brain rejects unknown delegated tools and falls back to the primary planne
   assert.equal(writes, 1);
   assert.ok(events.includes("brain.replan.started"));
 });
+
+
+test("Brain answers ordinary chat directly without planning or workspace tool execution", async () => {
+  const phases: string[] = [];
+  let toolCalls = 0;
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      phases.push(parsed.phase);
+      const value = parsed.phase === "understand"
+        ? {
+            objective: "Answer a simple arithmetic question",
+            constraints: [],
+            assumptions: [],
+            requiredCapabilities: ["fast"],
+            requiredTools: [],
+            risk: "low",
+            successCriteria: ["Give the arithmetic result"],
+            ambiguities: [],
+          }
+        : { answer: "2+2 เท่ากับ 4" };
+      return {
+        inputTokens: 10,
+        async invoke() {
+          return { value, usage: { inputTokens: 10, outputTokens: 20 } };
+        },
+      };
+    },
+  };
+  const base = makeTools();
+  const tools: ToolGateway = {
+    ...base,
+    async execute(call, context) {
+      toolCalls += 1;
+      return base.execute(call, context);
+    },
+    async snapshot(signal) {
+      toolCalls += 1;
+      return base.snapshot(signal);
+    },
+    async checkpoint(signal) {
+      toolCalls += 1;
+      return base.checkpoint(signal);
+    },
+  };
+  const events: string[] = [];
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner,
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+      onEvent(event) { events.push(event.type); },
+    },
+    limits: {
+      maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100,
+      timeoutMs: 5000,
+    },
+  });
+  const report = await brain.run({ task: "สวัสดี Sofia ช่วยตอบว่า 2+2 เท่ากับเท่าไร" });
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(report.state, "completed");
+  assert.equal(report.summary, "2+2 เท่ากับ 4");
+  assert.deepEqual(phases, ["understand", "respond"]);
+  assert.equal(toolCalls, 0);
+  assert.ok(events.includes("brain.conversation.completed"));
+  assert.equal(events.includes("brain.coding.loop.started"), false);
+});
