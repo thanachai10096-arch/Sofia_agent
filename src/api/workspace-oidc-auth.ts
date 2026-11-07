@@ -130,6 +130,7 @@ export class WorkspaceOidcAuth {
     while (this.loginStarts.length && this.loginStarts[0]! <= now - 60_000) this.loginStarts.shift();
     if (this.loginStarts.length >= 20 || this.logins.size >= 100) throw new Error("Workspace login rate limit reached.");
     this.loginStarts.push(now);
+    if (this.logins.size >= 100) throw new Error("Too many pending workspace login attempts.");
     const provider = await this.provider();
     const state = b64url(randomBytes(32));
     const nonce = b64url(randomBytes(32));
@@ -184,8 +185,9 @@ export class WorkspaceOidcAuth {
     }
     const jwksResponse = await this.fetcher(provider.jwks_uri, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(10_000) });
     if (!jwksResponse.ok) throw new Error("OIDC signing keys unavailable.");
-    const jwks = await jwksResponse.json() as { keys?: Array<JsonObject> };
-    const jwk = jwks.keys?.find((key) => key.kid === header.kid && key.kty === "RSA" &&
+    const jwks = await jwksResponse.json() as { keys?: unknown };
+    if (!Array.isArray(jwks.keys) || jwks.keys.length > 100) throw new Error("OIDC JWKS is invalid.");
+    const jwk = (jwks.keys as Array<JsonObject>).find((key) => key.kid === header.kid && key.kty === "RSA" &&
       (key.use === undefined || key.use === "sig") && (key.alg === undefined || key.alg === "RS256"));
     if (!jwk || typeof jwk.n !== "string" || typeof jwk.e !== "string") throw new Error("OIDC signing key not found.");
     const publicKey = createPublicKey({ key: { kty: "RSA", n: jwk.n, e: jwk.e }, format: "jwk" });
