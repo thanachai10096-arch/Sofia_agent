@@ -49,7 +49,7 @@ function outputContractFor(phase: BrainPhase): string {
   if (phase === "understand") return [
     "Return this exact JSON object shape:",
     '{"objective":"non-empty string","constraints":["string"],"assumptions":["string"],"requiredCapabilities":["string"],"requiredTools":["string"],"risk":"low|medium|high","successCriteria":["string"],"ambiguities":["string"]}',
-    "All fields are required. risk must be exactly one of low, medium, or high.",
+    "All fields are required. Every list field must be a JSON array, even when it has one item or no items (use [] for empty). risk must be exactly one of low, medium, or high.",
   ].join("\n");
   if (phase === "plan" || phase === "replan") return [
     "Return this exact JSON object shape:",
