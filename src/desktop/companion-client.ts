@@ -103,7 +103,7 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
     switch (action.kind) {
       case "screen.capture": {
         const capture = await config.driver.captureScreen(action.displayId ? { displayId: action.displayId } : undefined);
-        if (capture.data.byteLength > 5 * 1024 * 1024) throw new Error("Screen capture exceeds the 5 MiB limit.");
+        if (capture.data.byteLength > 3.75 * 1024 * 1024) throw new Error("Screen capture exceeds the 5 MiB limit.");
         if (!Number.isInteger(capture.width) || !Number.isInteger(capture.height) || capture.width < 1 || capture.height < 1 || capture.width > 16384 || capture.height > 16384) {
           throw new Error("Desktop driver returned invalid screen dimensions.");
         }
