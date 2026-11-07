@@ -75,3 +75,54 @@ test("approval-required skills fail closed without trusted action-bound approval
   );
   assert.equal(handlerCalled, false);
 });
+
+test("privileged skill accepts only matching one-run action-bound approval evidence", async () => {
+  const base = ADVANCED_SKILLS.find((skill) => skill.status === "verified");
+  assert.ok(base);
+  const definition = {
+    ...base,
+    id: "test.action-bound-approval",
+    risk: "privileged" as const,
+    requiresApproval: true,
+  };
+  let handlerCalls = 0;
+  const expected = {
+    requestId: "approval-once",
+    runId: "run-123",
+    principalId: "principal-test",
+    toolName: `skill.${definition.id}`,
+    actionHash: "sha256:approved-action",
+  };
+  const registry = new AdvancedSkillRegistry((request) =>
+    request.requestId === expected.requestId &&
+    request.runId === expected.runId &&
+    request.principalId === expected.principalId &&
+    request.toolName === expected.toolName &&
+    request.actionHash === expected.actionHash &&
+    request.skillId === definition.id,
+  );
+  registry.register(definition, async () => {
+    handlerCalls += 1;
+    return "executed";
+  });
+  const tool = createAdvancedSkillTools(registry, "principal-test").find(
+    (item) => item.name === expected.toolName,
+  );
+  assert.ok(tool);
+
+  await assert.rejects(
+    () => tool.execute({}, {
+      runtime: {} as never,
+      approval: { ...expected, actionHash: "sha256:changed-action" },
+    }),
+    { code: "APPROVAL_REQUIRED" },
+  );
+  assert.equal(handlerCalls, 0);
+
+  const result = await tool.execute({}, {
+    runtime: {} as never,
+    approval: expected,
+  });
+  assert.equal(result, "executed");
+  assert.equal(handlerCalls, 1);
+});
