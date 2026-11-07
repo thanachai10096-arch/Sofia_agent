@@ -340,7 +340,7 @@ export class SofiaModelGateway implements ModelProvider {
     let body: Record<string, unknown>;
     if (protocol === "anthropic-messages") {
       const converted = anthropicMessages(messages, brainStructuredOutput);
-      endpoint = config.baseUrl.replace(/\/+$/, "") + "/messages";
+      endpoint = providerBaseUrl.replace(/\/+$/, "") + "/messages";
       requestHeaders = {
         ...config.headers,
         "x-api-key": config.apiKey,
@@ -363,7 +363,7 @@ export class SofiaModelGateway implements ModelProvider {
         } : {}),
       };
     } else {
-      endpoint = config.baseUrl.replace(/\/+$/, "") + "/chat/completions";
+      endpoint = providerBaseUrl.replace(/\/+$/, "") + "/chat/completions";
       requestHeaders = {
         ...config.headers,
         authorization: "Bearer " + config.apiKey,
