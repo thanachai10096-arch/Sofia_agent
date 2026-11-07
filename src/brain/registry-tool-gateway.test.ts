@@ -53,6 +53,30 @@ test("snapshot detects content changes even when the path stays modified", async
   assert.deepEqual(changed, ["src/app.ts"]);
 });
 
+test("workspace readiness discovery does not touch the workspace when tool policy blocks access", async () => {
+  let cwdCalls = 0;
+  let listFilesCalls = 0;
+  const rt = {
+    ...runtime(),
+    async cwd() { cwdCalls += 1; return "/workspace"; },
+    async listFiles() { listFilesCalls += 1; return ["src/app.ts"]; },
+  } satisfies WorkspaceRuntime;
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: createToolRegistry(createBuiltinTools()) },
+    { ...defaultPolicy, allowTools: false },
+  );
+
+  const discovered = await gateway.probeReadiness();
+  const workspaceTools = discovered.filter((tool) => tool.name.startsWith("workspace."));
+
+  assert.ok(workspaceTools.length > 0);
+  assert.ok(workspaceTools.every((tool) => tool.policy?.status === "blocked"));
+  assert.ok(workspaceTools.every((tool) => tool.runtimeReadiness === "not_probed"));
+  assert.ok(workspaceTools.every((tool) => /probe skipped/i.test(tool.runtimeReason ?? "")));
+  assert.equal(cwdCalls, 0, "blocked workspace discovery must not inspect the working directory");
+  assert.equal(listFilesCalls, 0, "blocked workspace discovery must not list files");
+});
+
 test("inspection tools are available without write approval", async () => {
   const rt = runtime();
   const gateway = new RegistryToolGateway(
