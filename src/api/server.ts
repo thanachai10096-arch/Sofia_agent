@@ -364,7 +364,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, limited ? 429 : 503, { error: limited ? "cloud_browser_session_limit" : "cloud_browser_start_failed" }, origin, config);
           }
         }
-        const match = requestUrl.pathname.match(/^\\/v1\\/browser\\/cloud\\/sessions\\/([0-9a-f-]{36})(?:\\/(navigate|action|screenshot))?$/i);
+        const match = requestUrl.pathname.match(/^\/v1\/browser\/cloud\/sessions\/([0-9a-f-]{36})(?:\/(navigate|action|screenshot))?$/i);
         if (!match) return json(res, 404, { error: "cloud_browser_session_not_found" }, origin, config);
         const sessionId = match[1]!;
         const operation = match[2];
