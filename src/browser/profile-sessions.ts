@@ -58,9 +58,7 @@ export class BrowserProfileSessionManager {
     const key = this.key(ownerId, profileId);
     const current = this.sessions.get(key);
     this.sessions.delete(key);
-    if (current) {
-      try { await (await current).close(); } catch { /* Still revoke the stored profile. */ }
-    }
+    if (current) await (await current).close();
     await this.store.revoke(ownerId, profileId);
   }
 
