@@ -44,3 +44,30 @@ test("MCP environment config rejects unsupported transport types", () => {
     }]),
   }), /stdio or http/);
 });
+
+
+test("MCP environment config rejects unsafe server IDs and tool names before transport creation", () => {
+  assert.throws(() => loadMcpServerConfigsFromEnv({
+    SOFIA_MCP_SERVERS_JSON: JSON.stringify([{
+      id: "../unsafe",
+      allowedTools: ["lookup"],
+      transport: { type: "http", endpoint: "https://mcp.example.com/rpc" },
+    }]),
+  }), /lowercase slug id/);
+  assert.throws(() => loadMcpServerConfigsFromEnv({
+    SOFIA_MCP_SERVERS_JSON: JSON.stringify([{
+      id: "docs",
+      allowedTools: ["../lookup"],
+      transport: { type: "http", endpoint: "https://mcp.example.com/rpc" },
+    }]),
+  }), /Invalid MCP tool name/);
+});
+
+test("MCP environment config rejects duplicate qualified tool names", () => {
+  assert.throws(() => loadMcpServerConfigsFromEnv({
+    SOFIA_MCP_SERVERS_JSON: JSON.stringify([
+      { id: "docs", allowedTools: ["lookup"], transport: { type: "http", endpoint: "https://mcp.example.com/one" } },
+      { id: "docs", allowedTools: ["lookup"], transport: { type: "http", endpoint: "https://mcp.example.com/two" } },
+    ]),
+  }), /Duplicate MCP tool/);
+});
