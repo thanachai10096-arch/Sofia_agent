@@ -9,7 +9,7 @@ import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.j
 import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { createTelegramMessagingRuntime, parseTelegramUserAllowlist, parseTelegramUserApiKeys } from "../integrations/messaging/telegram-runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -205,8 +205,25 @@ if (discordConfigured) {
   discordRecoveryTimer.unref?.();
 }
 
+// Register per-sender Telegram API credentials with the same scope policy as the
+// primary server key. The Telegram runtime independently validates the mapping
+// against its explicit sender allowlist and refuses shared keys for multi-user bots.
+const apiKeys: Record<string, string[]> = { [apiKey]: scopes };
+const rawTelegramUsers = process.env.TELEGRAM_ALLOWED_USER_IDS?.trim();
+const rawTelegramUserApiKeys = process.env.TELEGRAM_USER_API_KEYS_JSON?.trim();
+if (rawTelegramUsers && rawTelegramUserApiKeys) {
+  try {
+    const telegramUsers = parseTelegramUserAllowlist(rawTelegramUsers);
+    const telegramKeys = parseTelegramUserApiKeys(rawTelegramUserApiKeys, telegramUsers);
+    for (const key of telegramKeys.values()) apiKeys[key] = scopes;
+  } catch {
+    // Telegram remains fail-closed in its runtime; do not log credential values.
+    console.error("Telegram per-user API credentials are invalid; Telegram integration will remain disabled.");
+  }
+}
+
 const server = createSofiaApi(deps, {
-  apiKeys: { [apiKey]: scopes },
+  apiKeys,
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
