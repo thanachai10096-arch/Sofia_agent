@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { SofiaClient } from "../sdk/client.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
+import { runDesktopCompanion } from "./desktop-companion.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
