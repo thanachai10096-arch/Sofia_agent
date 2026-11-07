@@ -74,14 +74,13 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
   const capabilities = new Set(config.allowedCapabilities);
   const allowedApplications = new Set(config.allowedApplications ?? []);
   const pollIntervalMs = Math.min(Math.max(500, config.pollIntervalMs ?? 2_000), 30_000);
-  const localController = new AbortController();
   let activeController: AbortController | undefined;
 
   const request = async (path: string, token: string, init: RequestInit = {}): Promise<Response> => {
     return fetcher(baseUrl + path, {
       ...init,
       redirect: "error",
-      signal: init.signal ?? localController.signal,
+      ...(init.signal ? { signal: init.signal } : {}),
       headers: { ...(init.headers as Record<string, string> | undefined), authorization: "Bearer " + token },
     });
   };
@@ -168,7 +167,6 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
         method: "POST",
         redirect: "error",
         headers: { authorization: "Bearer " + apiKey },
-        signal: localController.signal,
       });
       if (!response.ok) throw new Error("Desktop Companion pairing failed with HTTP " + response.status + ".");
       const payload = await responseJson(response);
@@ -201,7 +199,6 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
     },
     stop() {
       activeController?.abort(new Error("Desktop Companion stopped by local operator."));
-      localController.abort(new Error("Desktop Companion stopped by local operator."));
     },
   };
 }
