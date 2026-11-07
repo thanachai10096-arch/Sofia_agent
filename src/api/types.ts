@@ -4,6 +4,7 @@ import type { DiscordInteractionTransport } from "../integrations/messaging/disc
 import type { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
 import type { CloudBrowserSessionManager } from "../browser/cloud-session-manager.js";
 import type { ApprovalInbox } from "../agent/approval-inbox.js";
+import type { FileApprovalAuditStore } from "../agent/approval-audit-store.js";
 
 export interface AgentRunInput {
   task: string;
@@ -66,6 +67,8 @@ export interface SofiaApiConfig {
   cloudBrowserSessions?: CloudBrowserSessionManager;
   /** Optional owner-bound, one-time approval inbox connected to the Brain approval handler. */
   approvalInbox?: ApprovalInbox;
+  /** Optional durable audit history for owner-bound approval decisions. */
+  approvalAuditStore?: FileApprovalAuditStore;
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
     path?: string;
