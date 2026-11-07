@@ -81,7 +81,9 @@ export class VersionedSkillLifecycle {
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
     const safePackage = validatePackage(skillPackage);
     if (!isRecord(provenance) || typeof provenance.source !== "string" || !provenance.source.trim() ||
-        !Array.isArray(provenance.evidenceIds) || !provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
+        !Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length === 0 ||
+        !provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
+        new Set(provenance.evidenceIds).size !== provenance.evidenceIds.length ||
         !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1) {
       throw new Error("Invalid skill provenance");
     }
