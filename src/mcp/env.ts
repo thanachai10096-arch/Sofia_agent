@@ -26,7 +26,6 @@ function parseConfig(raw: string): ServerConfig[] {
       if (typeof config.endpoint !== "string") throw new Error("MCP HTTP endpoint is required for " + config.id);
       const endpoint = new URL(config.endpoint);
       if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) throw new Error("MCP HTTP endpoints must use HTTPS and must not embed credentials");
-      if (!policyHostAllowed(endpoint.hostname, config.__allowedHosts as string[])) { /* checked by caller below */ }
       const headersEnv = config.headersEnv;
       if (headersEnv !== undefined && (!headersEnv || typeof headersEnv !== "object" || Array.isArray(headersEnv) ||
           Object.entries(headersEnv as Record<string, unknown>).some(([header, envName]) => !/^[A-Za-z0-9-]{1,64}$/.test(header) || typeof envName !== "string" || !/^[A-Z][A-Z0-9_]{0,127}$/.test(envName)))) {
