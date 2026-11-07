@@ -258,6 +258,53 @@ test("tool catalog exposes only registered tools with accurate desktop effects",
 });
 
 
+test("read-only browser tools can run without interactive approval while page actions remain gated", async () => {
+  let observed = false;
+  let clicked = false;
+  const registry = new MapToolRegistry([
+    {
+      name: "browser.goto",
+      description: "Navigate to a public page",
+      inputSchema: { type: "object", properties: { pageId: { type: "string" }, url: { type: "string" } }, required: ["pageId", "url"] },
+      async execute() { return { url: "https://example.com/" }; },
+    },
+    {
+      name: "browser.observe",
+      description: "Read page content",
+      inputSchema: { type: "object", properties: { pageId: { type: "string" } }, required: ["pageId"] },
+      async execute() { observed = true; return { title: "Public page" }; },
+    },
+    {
+      name: "browser.click",
+      description: "Interact with a page",
+      inputSchema: { type: "object", properties: { pageId: { type: "string" }, selector: { type: "string" } }, required: ["pageId", "selector"] },
+      async execute() { clicked = true; return { ok: true }; },
+    },
+  ]);
+  const policy = { ...defaultPolicy, allowNetwork: true, allowBrowser: true, allowedHosts: ["example.com"] };
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy);
+
+  assert.deepEqual(gateway.describe("browser.observe")?.effects, ["read"]);
+  assert.deepEqual(gateway.describe("browser.goto")?.effects, ["network", "read"]);
+  assert.deepEqual(gateway.describe("browser.click")?.effects, ["browser", "network"]);
+
+  const read = await gateway.execute(
+    { tool: "browser.observe", input: { pageId: "page-1" } },
+    { runId: "browser-read-test", principalId: "test-user", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(read.ok, true);
+  assert.equal(observed, true);
+
+  const interaction = await gateway.execute(
+    { tool: "browser.click", input: { pageId: "page-1", selector: "button" } },
+    { runId: "browser-click-test", principalId: "test-user", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(interaction.ok, false);
+  assert.equal(interaction.error?.category, "permission_error");
+  assert.match(interaction.error?.message ?? "", /url/i);
+  assert.equal(clicked, false);
+});
+
 test("reserved tool names cannot downgrade inferred security effects", async () => {
   let executed = false;
   const registry = new MapToolRegistry([{
