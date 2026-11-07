@@ -58,12 +58,12 @@ test("Desktop Companion reports approval denial without performing the local act
   const store = credentials();
   store.value = "d".repeat(43);
   const calls: string[] = [];
-  let completion: Record<string, unknown> | undefined;
+  const completion: { value?: Record<string, unknown> } = {};
   const fetchImpl: typeof fetch = async (_input, init) => {
     if (String(_input).endsWith("/commands")) return new Response(JSON.stringify({
       command: { id: "00000000-0000-4000-8000-000000000002", createdAt: 123, action: { kind: "input.key", key: "Enter" } },
     }), { status: 200 });
-    completion = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    completion.value = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify({ completed: true }), { status: 200 });
   };
   const client = createDesktopCompanionClient({
@@ -76,7 +76,7 @@ test("Desktop Companion reports approval denial without performing the local act
   });
   assert.equal(await client.pollOnce(), true);
   assert.deepEqual(calls, []);
-  assert.equal(typeof completion?.error, "string");
+  assert.equal(typeof completion.value?.error, "string");
   assert.match(completion?.error as string, /denied/);
 });
 
@@ -157,7 +157,7 @@ test("screen capture requires a separate local capability and explicit approval"
   assert.deepEqual(calls, []);
   assert.match(completion?.error as string, /not granted: screen:capture/);
   assert.equal(approvals, 0);
-  completion = undefined;
+  completion.value = undefined;
   const enabled = createDesktopCompanionClient({
     apiBaseUrl: "https://sofia.example.com", credentials: store, driver: captureDriver,
     allowedCapabilities: ["screen:capture"],
@@ -167,7 +167,7 @@ test("screen capture requires a separate local capability and explicit approval"
   assert.equal(await enabled.pollOnce(), true);
   assert.deepEqual(calls, ["capture"]);
   assert.equal(approvals, 1);
-  assert.deepEqual(completion?.result, {
+  assert.deepEqual(completion.value?.result, {
     mimeType: "image/png", dataBase64: "AQID", width: 2, height: 1,
   });
 });
