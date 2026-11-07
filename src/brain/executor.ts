@@ -359,7 +359,7 @@ export class SofiaBrain {
     }
 
     const recent = this.observations.slice(-12);
-    if (!this.projectContextLoaded) {
+    if (phase !== "understand" && phase !== "respond" && !this.projectContextLoaded) {
       this.projectContextLoaded = true;
       if (this.dependencies.projectContextLoader) this.projectContext = await this.wait(this.dependencies.projectContextLoader);
       else this.projectContext = this.dependencies.projectContext;
@@ -376,7 +376,7 @@ export class SofiaBrain {
       }
     }
 
-    if (!this.projectMemoryLoaded && this.dependencies.projectMemory) {
+    if (phase !== "understand" && phase !== "respond" && !this.projectMemoryLoaded && this.dependencies.projectMemory) {
       this.projectMemoryLoaded = true;
       // Search task intent instead of serialized tool catalogs or internal keys.
       // Keep the query bounded so retrieval remains predictable for large tasks.
@@ -971,7 +971,7 @@ export class SofiaBrain {
             (input.acceptanceCriteria ?? []).length === 0 &&
             input.plan === undefined) {
           this.move("responding");
-          const response = await this.respond(input, understanding);
+          const response = understanding.response?.trim() || await this.respond(input, understanding);
           this.emit({ type: "brain.response.completed" });
           this.move("completed");
           return this.report(true, response, [], [], false, []);
