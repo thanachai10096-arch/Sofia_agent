@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, lstatSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -42,6 +42,24 @@ test("rejects malformed records and prevents owner identity from being changed i
     writeFileSync(filename, JSON.stringify(record));
     assert.deepEqual(store.loadAll(), []);
     assert.equal(readdirSync(directory).length, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+
+test("does not restore credentials atomically moved into the revoked tombstone namespace", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-companion-revoked-"));
+  try {
+    const store = new FileDesktopCompanionStore(directory);
+    const ownerKeyId = "e".repeat(32);
+    store.save({ ownerKeyId, tokenDigest: "f".repeat(64), connectedAt: 100, lastSeenAt: 100 });
+    const live = path.join(directory, readdirSync(directory)[0]!);
+    const tombstone = live + ".revoked";
+    // Simulate a process stopping after the atomic revoke rename but before
+    // best-effort tombstone cleanup.
+    renameSync(live, tombstone);
+    assert.deepEqual(store.loadAll(), []);
+    assert.equal(readdirSync(directory).some((name) => name.endsWith(".json")), false);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
