@@ -566,3 +566,58 @@ test("capability discovery never claims runtime readiness and reflects the secur
   assert.equal(after?.policy?.status, "blocked");
   assert.match(after?.policy?.reason ?? "", /kill switch/i);
 });
+
+test("runtime readiness probe confirms workspace only after read-only runtime checks", async () => {
+  const readyGateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: createToolRegistry(createBuiltinTools()) },
+    defaultPolicy,
+  );
+  const ready = await readyGateway.probeReadiness();
+  const workspace = ready.find((tool) => tool.name === "workspace.read_file");
+  assert.equal(workspace?.registered, true);
+  assert.equal(workspace?.runtimeReadiness, "ready");
+  assert.match(workspace?.runtimeReason ?? "", /read-only/i);
+
+  const unavailableRuntime = {
+    ...runtime(),
+    async listFiles() { throw new Error("workspace mount is unavailable"); },
+  } satisfies WorkspaceRuntime;
+  const unavailableGateway = new RegistryToolGateway(
+    { runtime: unavailableRuntime, tools: createToolRegistry(createBuiltinTools()) },
+    defaultPolicy,
+  );
+  const unavailable = await unavailableGateway.probeReadiness();
+  const failedWorkspace = unavailable.find((tool) => tool.name === "workspace.read_file");
+  assert.equal(failedWorkspace?.runtimeReadiness, "unavailable");
+  assert.match(failedWorkspace?.runtimeReason ?? "", /workspace mount is unavailable/i);
+});
+
+test("runtime readiness never claims browser or terminal is ready without a real safe probe", async () => {
+  const registry = new MapToolRegistry([
+    {
+      name: "browser.observe",
+      description: "Observe an existing browser page",
+      inputSchema: { type: "object" },
+      effects: ["read"] as const,
+      async execute() { return { title: "test" }; },
+    },
+    {
+      name: "terminal.run",
+      description: "Run an approved command",
+      inputSchema: { type: "object" },
+      effects: ["shell"] as const,
+      async execute() { return { code: 0 }; },
+    },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowShell: true },
+  );
+  const catalog = await gateway.probeReadiness();
+  const browser = catalog.find((tool) => tool.name === "browser.observe");
+  const terminal = catalog.find((tool) => tool.name === "terminal.run");
+  assert.equal(browser?.runtimeReadiness, "not_probed");
+  assert.equal(terminal?.runtimeReadiness, "not_probed");
+  assert.match(browser?.runtimeReason ?? "", /browser-session probe/i);
+  assert.match(terminal?.runtimeReason ?? "", /not invoked/i);
+});
