@@ -91,11 +91,11 @@ test("unsupported platforms fail closed", async () => {
 });
 
 
-test("native desktop commands are killed when their approval/run signal is aborted", async () => {
+test("native desktop drivers forward cancellation to the process runner", async () => {
   let observedSignal: AbortSignal | undefined;
   const run: NativeCommandRunner = async (_command, _args, options) => {
     observedSignal = options?.signal;
-    return await new Promise((_, reject) => {
+    return await new Promise<{ stdout: Buffer; stderr: Buffer }>((_, reject) => {
       const abort = () => reject(new Error("Native desktop command aborted."));
       if (options?.signal?.aborted) abort();
       else options?.signal?.addEventListener("abort", abort, { once: true });
