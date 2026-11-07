@@ -154,6 +154,76 @@ test("Brain retries one malformed plan with the strict call schema before failin
   assert.equal(report.completed, true, report.summary);
 });
 
+test("Brain retries one malformed understanding with bounded schema feedback", async () => {
+  let understandCalls = 0;
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as {
+        phase: string;
+        payload?: Record<string, unknown>;
+      };
+      let value: unknown;
+      if (parsed.phase === "understand") {
+        understandCalls += 1;
+        const repairing = Boolean(parsed.payload?.outputContractRepair);
+        value = repairing
+          ? {
+              objective: "Write a file",
+              constraints: [],
+              assumptions: [],
+              requiredCapabilities: ["file-write"],
+              requiredTools: ["workspace.write_file"],
+              risk: "low",
+              successCriteria: ["hello.txt exists"],
+              ambiguities: [],
+            }
+          : {
+              objective: "Write a file",
+              constraints: { unexpected: "object" },
+              assumptions: [],
+              requiredCapabilities: ["file-write"],
+              requiredTools: ["workspace.write_file"],
+              risk: "low",
+              successCriteria: ["hello.txt exists"],
+              ambiguities: [],
+            };
+      } else {
+        value = plan;
+      }
+      return {
+        inputTokens: 10,
+        async invoke() {
+          return { value, usage: { inputTokens: 10, outputTokens: 20 } };
+        },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: {
+      maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+    },
+  });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+  assert.equal(understandCalls, 2);
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(report.usage.modelCalls, 3);
+});
+
 test("Brain completes a coding loop only after trusted verification", async () => {
   const brain = createSofiaBrain({
     dependencies: {
