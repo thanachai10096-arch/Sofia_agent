@@ -18,6 +18,20 @@ export function createRemoteDesktopTools(options: {
   const string = (description: string) => ({ type: "string", description });
 
   const tools: SofiaTool[] = [];
+  if (capabilities.has("screen:capture")) {
+    tools.push({
+      name: "desktop.remote.screen.capture",
+      description: "Capture the paired local screen after explicit approval on the computer. Screen contents may contain private information.",
+      inputSchema: { type: "object", properties: { displayId: string("Optional display identifier") }, additionalProperties: false },
+      async execute(input, context: ToolContext) {
+        require("screen:capture");
+        if (input.displayId !== undefined && (typeof input.displayId !== "string" || input.displayId.length > 64 || !/^[a-zA-Z0-9._:-]+$/.test(input.displayId))) {
+          throw new Error("Invalid display identifier.");
+        }
+        return dispatch({ kind: "screen.capture", ...(typeof input.displayId === "string" ? { displayId: input.displayId } : {}) }, context);
+      },
+    });
+  }
   if (capabilities.has("app:launch")) {
     tools.push({
       name: "desktop.remote.app.launch",
