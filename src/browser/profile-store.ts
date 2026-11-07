@@ -30,14 +30,16 @@ function ownerKey(ownerId: string): string {
 
 async function secureDirectory(pathname: string): Promise<void> {
   if (process.platform === "win32") {
-    const username = process.env.USERNAME;
-    if (!username) throw new Error("Cannot secure browser profile ACL: current Windows user is unknown.");
-    const account = process.env.USERDOMAIN ? process.env.USERDOMAIN + "\\" + username : username;
-    await execFileAsync("icacls", [
+    // Resolve the effective process SID rather than relying on USERNAME /
+    // USERDOMAIN, which can differ from the identity used by the runner.
+    const { stdout } = await execFileAsync("whoami.exe", ["/user", "/fo", "csv", "/nh"]);
+    const sid = stdout.match(/S-1-5-(?:21|80|82)(?:-[0-9]+)+/i)?.[0];
+    if (!sid) throw new Error("Cannot secure browser profile ACL: current Windows user SID is unavailable.");
+    await execFileAsync("icacls.exe", [
       pathname, "/inheritance:r", "/grant:r",
       "*S-1-5-18:(OI)(CI)F",
       "*S-1-5-32-544:(OI)(CI)F",
-      account + ":(OI)(CI)F",
+      "*" + sid + ":(OI)(CI)F",
       "/T", "/C",
     ]);
     return;
