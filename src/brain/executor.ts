@@ -236,7 +236,10 @@ function explicitlyRequestsAction(task: string): boolean {
   // Match imperative phrases (ทำมา/ลงมือ), not broad words such as ทำไม (why),
   // so ordinary questions remain conversational.
   const thai = /(แก้(โค้ด|ไฟล์|ระบบ|บั๊ก|โปรเจกต์)|สร้าง(ไฟล์|โปรเจกต์|branch|pr)|รัน(คำสั่ง|เทสต์|ทดสอบ)|ดีพลอย|ติดตั้ง|ลบ(ไฟล์|ข้อมูล)|ส่ง(ข้อความ|อีเมล)|จอง|ค้นหาเว็บ|ค้นข้อมูลล่าสุด|หาข่าว|ค้นข่าว|ข่าวล่าสุด|เปิดเว็บ|เข้าเว็บ|ทดสอบโค้ด|ตรวจสอบ(โค้ด|repository|repo)|ทำมา|ลงมือ|ดำเนินการ|จัดการให้)/i;
-  return english.test(task) || thai.test(task);
+  // Short continuation replies are common in ongoing agent sessions. Treat only
+  // standalone imperative continuations as actions; ordinary questions remain chat.
+  const continuation = /^(?:ต่อ|ต่อครับ|ต่อเลย|ทำต่อ|ทำต่อเลย|ดำเนินการต่อ)[.!?…]*$/i;
+  return english.test(task) || thai.test(task) || continuation.test(task.trim());
 }
 
 function priorReferenceContext(context?: string): { trust: "untrusted_reference_data"; content: string } | undefined {
