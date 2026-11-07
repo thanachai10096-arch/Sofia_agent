@@ -123,7 +123,7 @@ test("ordinary conversation task labels do not reject every model route", async 
     payload: { task: "ตอบว่า 2+2 เท่ากับเท่าไร", requiredCapabilities: ["general"] },
   }), { signal: controller.signal, maxContextTokens: 16_000 });
   await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
-  assert.deepEqual(captured?.requiredCapabilities, ["reasoning"]);
+  assert.deepEqual(captured?.requiredCapabilities, ["fast"]);
 });
 
 test("task intent labels map to supported provider capabilities", async () => {
@@ -141,11 +141,11 @@ test("task intent labels map to supported provider capabilities", async () => {
     payload: { task: "Analyze a code issue", understanding: { requiredCapabilities: ["analysis", "code", "general"] } },
   }), { signal: controller.signal, maxContextTokens: 16_000 });
   await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
-  assert.deepEqual(captured?.requiredCapabilities, ["reasoning", "coding"]);
+  assert.deepEqual(captured?.requiredCapabilities, ["fast", "reasoning", "coding"]);
 });
 
 
-test("understand phase requires reasoning and cannot be routed to fast-only models", async () => {
+test("understand phase uses the fast route for low-latency intent and response generation", async () => {
   let captured: InferenceRequest | undefined;
   const gateway = {
     async generateMetered(input: InferenceRequest) {
@@ -160,7 +160,7 @@ test("understand phase requires reasoning and cannot be routed to fast-only mode
     payload: { task: "เขียนโค้ดสร้างแกนเป็นเดือนแกนพร้อมรับใช้มนุษย์โลก" },
   }), { signal: controller.signal, maxContextTokens: 16_000 });
   await prepared.invoke({ signal: controller.signal, maxOutputTokens: 700 });
-  assert.deepEqual(captured?.requiredCapabilities, ["reasoning"]);
+  assert.deepEqual(captured?.requiredCapabilities, ["fast"]);
 });
 
 test("implementation and response phases request their matching route capabilities", async () => {
