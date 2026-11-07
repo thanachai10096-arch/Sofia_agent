@@ -22,7 +22,7 @@ export interface TelegramApprovalBrokerOptions {
 export class TelegramApprovalBroker {
   private sender?: (conversationId: string, text: string) => Promise<boolean>;
   private readonly routes = new Map<string, TelegramApprovalRoute>();
-  private readonly routeWaiters = new Map<string, Set<(route: TelegramApprovalRoute) => void>>();
+  private readonly routeWaiters = new Map<string, Set<(route: TelegramApprovalRoute | undefined) => void>>();
   private readonly pending = new Map<string, {
     runId: string;
     route: TelegramApprovalRoute;
@@ -94,9 +94,9 @@ export class TelegramApprovalBroker {
         if (waiters?.size === 0) this.routeWaiters.delete(runId);
         resolve(route);
       };
-      const onRoute = (route: TelegramApprovalRoute) => finish(route);
+      const onRoute = (route: TelegramApprovalRoute | undefined) => finish(route);
       const timer = setTimeout(() => finish(undefined), this.routeWaitMs);
-      const waiters = this.routeWaiters.get(runId) ?? new Set<(route: TelegramApprovalRoute) => void>();
+      const waiters = this.routeWaiters.get(runId) ?? new Set<(route: TelegramApprovalRoute | undefined) => void>();
       waiters.add(onRoute);
       this.routeWaiters.set(runId, waiters);
       const raced = this.routes.get(runId);
@@ -176,7 +176,7 @@ export class TelegramApprovalBroker {
     }
     this.routes.clear();
     for (const waiters of this.routeWaiters.values()) {
-      for (const resolve of waiters) resolve({ userId: "", conversationId: "" });
+      for (const resolve of waiters) resolve(undefined);
     }
     this.routeWaiters.clear();
   }
