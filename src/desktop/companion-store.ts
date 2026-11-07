@@ -91,8 +91,7 @@ export class FileDesktopCompanionStore implements DesktopCompanionStore {
       throw new Error("Invalid desktop companion record.");
     }
     const target = this.filename(record.ownerKeyId);
-    const temporary = target + "." + process.pid + "." + createHash("sha256")
-      .update(String(Date.now()) + Math.random()).digest("hex").slice(0, 16) + ".tmp";
+    const temporary = target + "." + process.pid + "." + randomBytes(8).toString("hex") + ".tmp";
     try {
       writeFileSync(temporary, JSON.stringify(record), { encoding: "utf8", mode: 0o600, flag: "wx" });
       try { chmodSync(temporary, 0o600); } catch { /* best effort */ }
