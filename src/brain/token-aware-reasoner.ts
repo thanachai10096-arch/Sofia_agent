@@ -48,9 +48,9 @@ function phaseFromRequest(request: string): BrainPhase {
 
 /**
  * Understanding labels describe task intent, while the gateway expects
- * provider-route capabilities. Keep ordinary conversation unconstrained;
- * translate common task labels to the route vocabulary and leave unknown
- * labels intact so the gateway continues to fail closed for unsupported needs.
+ * provider-route capabilities. Require capabilities needed by each Brain
+ * phase first, then merge task-derived requirements and leave unknown labels
+ * intact so the gateway continues to fail closed for unsupported needs.
  */
 function routeCapabilities(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
