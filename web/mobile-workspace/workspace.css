@@ -3,3 +3,23 @@
 .remote-keyboard{position:fixed;z-index:15;left:50%;bottom:20px;transform:translateX(-50%);width:min(440px,calc(100vw - 24px));padding:13px;border:1px solid rgba(139,240,196,.24);border-radius:16px;background:rgba(16,26,44,.97);box-shadow:0 24px 80px #0009;backdrop-filter:blur(20px)}.keyboard-grip{width:34px;height:3px;border-radius:3px;background:#65738e;margin:0 auto 12px}.keyboard-head{display:flex;align-items:center;justify-content:space-between;font-size:11px;margin-bottom:9px}.keyboard-head button{width:25px;height:25px;border:1px solid var(--line);border-radius:8px;background:transparent;color:#b8c5dc;font-size:18px}.remote-keyboard textarea{width:100%;resize:vertical;min-height:58px;max-height:130px;border:1px solid var(--line);border-radius:9px;padding:10px;background:#0a1221;color:var(--text);outline:none;font-size:13px}.remote-keyboard textarea:focus{border-color:rgba(139,240,196,.5)}.remote-keyboard .primary-button{margin-top:9px;width:100%;justify-content:center}@media(max-width:600px){.remote-keyboard{bottom:calc(75px + env(safe-area-inset-bottom));}.remote-keyboard textarea{font-size:16px}}
 
 .remote-key-row{display:flex;gap:6px;margin-top:8px}.remote-key-row button{flex:1;border:1px solid var(--line);border-radius:7px;background:#1a2940;color:#b9c8df;padding:7px 4px;font-size:10px}.remote-key-row button:active{background:#29425a;color:var(--mint)}
+
+/* Live approval inbox: the displayed action is the exact action whose hash is decided. */
+.approval-inbox{margin:0 12px 10px;padding:11px;border:1px solid rgba(255,190,104,.28);border-radius:12px;background:linear-gradient(145deg,rgba(255,190,104,.09),rgba(18,27,46,.9));max-height:290px;overflow:auto}
+.approval-inbox-head{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.approval-inbox-head>div{flex:1;min-width:0}
+.approval-inbox-head strong,.approval-inbox-head small{display:block}
+.approval-inbox-head strong{font-size:11px;color:#f5d7a8}
+.approval-inbox-head small{font-size:8px;color:#aeb8ca;margin-top:3px}
+.approval-inbox-head>button{border:1px solid rgba(255,190,104,.24);background:transparent;color:#f4cf96;border-radius:7px;padding:6px 8px;font-size:9px}
+.approval-item{border:1px solid rgba(160,180,220,.14);border-radius:9px;padding:9px;margin-top:7px;background:rgba(8,14,26,.48)}
+.approval-item-top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.approval-tool{font-size:10px;font-weight:700;color:#e6edf9;overflow-wrap:anywhere}
+.approval-risk{font-size:8px;text-transform:uppercase;letter-spacing:.6px;color:#f1c27b}
+.approval-meta{font-size:8px;color:#8796b0;margin:5px 0}
+.approval-input{white-space:pre-wrap;overflow-wrap:anywhere;max-height:90px;overflow:auto;margin:0;padding:7px;border-radius:7px;background:#080e19;color:#aebbd0;font:8px/1.5 ui-monospace,monospace}
+.approval-actions{display:flex;gap:7px;margin-top:8px}
+.approval-actions button{flex:1;border:0;border-radius:7px;padding:8px;font-size:9px;font-weight:700}
+.approval-allow{background:#a7f6d4;color:#09241d}
+.approval-deny{background:#3b2634;color:#ffc1cb;border:1px solid rgba(255,140,160,.2)!important}
+.approval-empty{font-size:9px;color:#8998b4;padding:8px 2px}
