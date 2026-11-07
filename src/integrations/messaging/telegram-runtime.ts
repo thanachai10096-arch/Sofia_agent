@@ -117,12 +117,30 @@ function parseTelegramIds(value: string, pattern: RegExp, name: string): Readonl
   return ids;
 }
 
+/**
+ * Parse per-user API credentials without ever logging their values.
+ * Every allowed sender must have a unique key so API-key-scoped memory
+ * and sessions remain private to that Telegram identity.
+ */
+export function parseTelegramUserApiKeys(value: string, allowedUsers: ReadonlySet<string>): ReadonlyMap<string, string> {
+  const invalid = () => new Error("TELEGRAM_USER_API_KEYS_JSON must map every allowed Telegram user ID to a unique non-empty API key.");
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { throw invalid(); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw invalid();
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (allowedUsers.size === 0 || entries.length !== allowedUsers.size ||
+      entries.some(([userId, key]) => !allowedUsers.has(userId) || typeof key !== "string" || !key.trim()) ||
+      new Set(entries.map(([, key]) => (key as string).trim())).size !== entries.length) throw invalid();
+  return new Map(entries.map(([userId, key]) => [userId, (key as string).trim()]));
+}
+
 export interface TelegramMessagingEnvironment {
   SOFIA_MESSAGING_ENABLED?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
   SOFIA_API_KEY?: string;
+  TELEGRAM_USER_API_KEYS_JSON?: string;
   SOFIA_API_BASE_URL?: string;
   RAILWAY_PUBLIC_DOMAIN?: string;
   SOFIA_CHAT_DEDUPE_DIR?: string;
@@ -146,6 +164,7 @@ export function createTelegramMessagingRuntime(
   const rawUsers = env.TELEGRAM_ALLOWED_USER_IDS?.trim();
   const rawChats = env.TELEGRAM_ALLOWED_CHAT_IDS?.trim();
   const apiKey = env.SOFIA_API_KEY?.trim();
+  const rawUserApiKeys = env.TELEGRAM_USER_API_KEYS_JSON?.trim();
   const railwayDomain = env.RAILWAY_PUBLIC_DOMAIN?.trim();
   const baseUrl = env.SOFIA_API_BASE_URL?.trim() ||
     (railwayDomain ? "https://" + railwayDomain.replace(/^https?:\/\//i, "").replace(/\/$/, "") : "");
@@ -158,12 +177,28 @@ export function createTelegramMessagingRuntime(
   try {
     const allowedUsers = parseTelegramUserAllowlist(rawUsers);
     const allowedChats = parseTelegramChatAllowlist(rawChats);
-    const client = new SofiaClient({ apiKey, baseUrl });
+    const userApiKeys = rawUserApiKeys ? parseTelegramUserApiKeys(rawUserApiKeys, allowedUsers) : undefined;
+    if (allowedUsers.size > 1 && !userApiKeys) {
+      throw new Error("Per-user Telegram API keys are required when multiple Telegram users are allowed.");
+    }
+    const clients = new Map<string, SofiaClient>();
+    const clientForUser = (userId: string) => {
+      const key = userApiKeys?.get(userId) ?? apiKey;
+      if (!key) throw new Error("No Sofia API key is configured for this Telegram user.");
+      let client = clients.get(userId);
+      if (!client) {
+        client = new SofiaClient({ apiKey: key, baseUrl });
+        clients.set(userId, client);
+      }
+      return client;
+    };
+    const client = clientForUser([...allowedUsers][0]!);
     const accessPolicy = {
       isAllowed(input: { platform: "telegram" | "discord" | "slack"; senderId: string; conversationId: string }) {
         return input.platform === "telegram" &&
           allowedUsers.has(input.senderId) &&
-          allowedChats.has(input.conversationId);
+          allowedChats.has(input.conversationId) &&
+          (!userApiKeys || userApiKeys.has(input.senderId));
       },
     };
     const dedupeDirectory = path.resolve(env.SOFIA_CHAT_DEDUPE_DIR ?? path.join(workspace, ".sofia", "chat-dedupe"));
@@ -171,13 +206,14 @@ export function createTelegramMessagingRuntime(
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
+      clientForMessage: (message) => clientForUser(message.identity.userId),
       onAccepted: ({ runId, runStatus, message }) => {
         onWarning("Telegram messaging event: telegram_run_accepted run_id=" + runId + " status=" + runStatus + ".");
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
           runId,
           conversationId: message.identity.conversationId,
-          waitForRun: (id, options) => client.waitForRun(id, options),
+          waitForRun: (id, options) => clientForUser(message.identity.userId).waitForRun(id, options),
           send: (outbound) => gateway
             ? gateway.send("telegram", outbound)
             : Promise.resolve(false),
@@ -219,6 +255,8 @@ export function createTelegramMessagingRuntime(
       "TELEGRAM_ALLOWED_CHAT_IDS must be a comma-separated list of valid numeric IDs.",
       "TELEGRAM_ALLOWED_USER_IDS must not contain duplicate IDs.",
       "TELEGRAM_ALLOWED_CHAT_IDS must not contain duplicate IDs.",
+      "Per-user Telegram API keys are required when multiple Telegram users are allowed.",
+      "TELEGRAM_USER_API_KEYS_JSON must map every allowed Telegram user ID to a unique non-empty API key.",
       "Telegram bot token has an invalid format.",
       "Telegram poll timeout must be an integer between 1 and 50 seconds.",
     ].includes(error.message) ? error.message : "Telegram configuration validation failed; check required variable values and API URL format.";
