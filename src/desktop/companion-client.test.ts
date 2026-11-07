@@ -77,7 +77,7 @@ test("Desktop Companion reports approval denial without performing the local act
   assert.equal(await client.pollOnce(), true);
   assert.deepEqual(calls, []);
   assert.equal(typeof completion.value?.error, "string");
-  assert.match(completion?.error as string, /denied/);
+  assert.match(completion.value?.error as string, /denied/);
 });
 
 test("Desktop Companion clears revoked credentials and rejects insecure remote HTTP URLs", async () => {
@@ -167,7 +167,8 @@ test("screen capture requires a separate local capability and explicit approval"
   assert.equal(await enabled.pollOnce(), true);
   assert.deepEqual(calls, ["capture"]);
   assert.equal(approvals, 1);
-  assert.deepEqual(completion.value?.result, {
+  const completedPayload = completion.value as Record<string, unknown> | undefined;
+  assert.deepEqual(completedPayload?.result, {
     mimeType: "image/png", dataBase64: "AQID", width: 2, height: 1,
   });
 });
