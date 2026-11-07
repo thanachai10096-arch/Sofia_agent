@@ -1,6 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { ApprovalRequest } from "../agent/approval.js";
 import { redactSecrets } from "../security/guard.js";
+import type { FileApprovalAuditStore } from "./approval-audit-store.js";
 
 export interface ApprovalInboxItem {
   id: string;
@@ -30,7 +31,7 @@ export class ApprovalInbox {
   private readonly pending = new Map<string, PendingApproval>();
 
   constructor(
-    private readonly options: { ttlMs?: number; maxPendingPerOwner?: number; maxInputBytes?: number } = {},
+    private readonly options: { ttlMs?: number; maxPendingPerOwner?: number; maxInputBytes?: number; auditStore?: FileApprovalAuditStore } = {},
   ) {}
 
   request: (request: ApprovalRequest) => Promise<boolean> = (request) => {
