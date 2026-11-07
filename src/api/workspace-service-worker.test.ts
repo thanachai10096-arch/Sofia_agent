@@ -7,7 +7,8 @@ const source = readFileSync(new URL("../../web/mobile-workspace/service-worker.j
 
 function harness(fetcher: typeof fetch = fetch) {
   const handlers = new Map<string, (event: any) => void>();
-  const cachedAssets: string[][] = [];\n  const deletedCaches: string[] = [];
+  const cachedAssets: string[][] = [];
+  const deletedCaches: string[] = [];
   const cache = { addAll: async (assets: string[]) => { cachedAssets.push(assets); }, put: async () => undefined };
   const cacheApi = {
     open: async () => cache,
