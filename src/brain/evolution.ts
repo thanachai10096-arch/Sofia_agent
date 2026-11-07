@@ -47,6 +47,9 @@ export interface SkillRanking {
   confidence: number;
   successRate: number;
   attempts: number;
+  avgDurationMs: number;
+  avgToolCalls: number;
+  efficiencyPenalty: number;
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -120,8 +123,20 @@ export class EvolutionEngine {
 
   rank(ids: readonly string[], taskType = "general"): SkillRanking[] {
     const key = normalizeTaskType(taskType);
-    return ids.map(id => {
-      const s = this.get(id);
+    const candidates = ids.map(id => ({ id, skill: this.get(id) }));
+    const median = (values: number[]): number => {
+      if (values.length === 0) return 0;
+      const sorted = [...values].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+    };
+    const durationBaseline = median(candidates
+      .filter(item => item.skill.durationSamples > 0 && item.skill.avgDurationMs > 0)
+      .map(item => item.skill.avgDurationMs));
+    const callsBaseline = median(candidates
+      .filter(item => item.skill.toolCallSamples > 0 && item.skill.avgToolCalls > 0)
+      .map(item => item.skill.avgToolCalls));
+    return candidates.map(({ id, skill: s }) => {
       // Use a Beta(1, 1) prior so one lucky outcome does not make a
       // barely-tested skill appear perfectly reliable. As evidence grows,
       // the smoothed estimate converges toward the observed success rate.
@@ -133,8 +148,24 @@ export class EvolutionEngine {
         : globalRate;
       const rate = globalRate * (1 - localEvidence) + localRate * localEvidence;
       const evidence = 1 - Math.exp(-s.attempts / 5);
-      const score = rate * 70 + s.confidence * 20 + evidence * 10 - Math.min(10, s.avgRecoveryRounds * 2);
-      return { id, score, confidence: s.confidence, successRate: rate, attempts: local?.attempts ?? s.attempts };
+      // Compare execution cost only among the current candidates and only when
+      // real samples exist. Missing/legacy metrics never count as zero-cost wins.
+      const durationPenalty = durationBaseline > 0 && s.durationSamples > 0 && s.avgDurationMs > 0
+        ? clamp((s.avgDurationMs / durationBaseline - 1) * 4, 0, 8)
+        : 0;
+      const callsPenalty = callsBaseline > 0 && s.toolCallSamples > 0 && s.avgToolCalls > 0
+        ? clamp((s.avgToolCalls / callsBaseline - 1) * 2, 0, 4)
+        : 0;
+      const efficiencyPenalty = durationPenalty + callsPenalty;
+      const score = rate * 70 + s.confidence * 20 + evidence * 10
+        - Math.min(10, s.avgRecoveryRounds * 2) - efficiencyPenalty;
+      return {
+        id, score, confidence: s.confidence, successRate: rate,
+        attempts: local?.attempts ?? s.attempts,
+        avgDurationMs: s.avgDurationMs,
+        avgToolCalls: s.avgToolCalls,
+        efficiencyPenalty,
+      };
     }).sort((a,b) => b.score-a.score);
   }
 
