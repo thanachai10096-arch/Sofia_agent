@@ -33,6 +33,9 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import { createAdvancedSkillTools } from "../skills/tool-adapter.js";
+import { connectManagedMcpRegistry } from "../mcp/registry.js";
+import { loadManagedMcpServersFromEnv } from "../mcp/env-config.js";
+import type { SofiaTool } from "../tools/types.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -120,11 +123,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   };
 }
 
-export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
+export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"],additionalTools: readonly SofiaTool[] = []):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
-  const tools=createToolRegistry(createBuiltinTools());
+  const tools=createToolRegistry([...createBuiltinTools(), ...additionalTools]);
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
@@ -143,7 +146,24 @@ export async function createSofiaAgentDependenciesWithSessions(
   approval?: AgentDependencies["approval"],
   databasePath?: string,
 ): Promise<AgentDependencies & { closeSessionStore: () => void }> {
-  const dependencies = createSofiaAgentDependencies(workspace, approval);
-  const sessionStore = await SqliteSessionStore.open(databasePath);
-  return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+  let managedMcp: Awaited<ReturnType<typeof connectManagedMcpRegistry>> | undefined;
+  let sessionStore: SqliteSessionStore | undefined;
+  try {
+    const configuredServers = loadManagedMcpServersFromEnv();
+    if (configuredServers.length > 0) {
+      managedMcp = await connectManagedMcpRegistry([], configuredServers);
+    }
+    const dependencies = createSofiaAgentDependencies(workspace, approval, managedMcp?.tools.list() ?? []);
+    sessionStore = await SqliteSessionStore.open(databasePath);
+    return {
+      ...dependencies,
+      sessionStore,
+      closeSessionStore: () => sessionStore!.close(),
+      closeMcpServers: async () => { await managedMcp?.close(); },
+    };
+  } catch (error) {
+    await managedMcp?.close().catch(() => undefined);
+    sessionStore?.close();
+    throw error;
+  }
 }
