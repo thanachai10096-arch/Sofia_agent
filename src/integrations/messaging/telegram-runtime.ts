@@ -160,7 +160,8 @@ export function createTelegramMessagingRuntime(
     let gateway: MessagingGateway | undefined;
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
-      onAccepted: ({ runId, message }) => {
+      onAccepted: ({ runId, runStatus, message }) => {
+        onWarning("Telegram messaging event: telegram_run_accepted run_id=" + runId + " status=" + runStatus + ".");
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
           runId,
