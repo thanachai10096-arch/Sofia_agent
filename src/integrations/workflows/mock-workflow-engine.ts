@@ -66,8 +66,10 @@ export class MockWorkflowEngine implements WorkflowEngine {
       status: "running",
     });
 
+    let handlerStarted = false;
     try {
       request.signal?.throwIfAborted();
+      handlerStarted = true;
       const output = await handler(structuredClone(request.input), request.signal);
       request.signal?.throwIfAborted();
       this.executions.set(executionId, {
@@ -78,12 +80,21 @@ export class MockWorkflowEngine implements WorkflowEngine {
       });
       return { executionId, status: "succeeded" };
     } catch (error) {
-      const cancelled = request.signal?.aborted === true;
+      // Once a handler has been dispatched, abort does not prove that it avoided
+      // side effects. Keep the outcome indeterminate rather than claiming cancel.
+      const aborted = request.signal?.aborted === true;
+      const status = aborted
+        ? (handlerStarted ? "indeterminate" : "cancelled")
+        : "failed";
       this.executions.set(executionId, {
         executionId,
         workflowId: request.workflowId,
-        status: cancelled ? "cancelled" : "failed",
-        safeErrorCode: cancelled ? "cancelled" : "mock_workflow_failed",
+        status,
+        safeErrorCode: status === "indeterminate"
+          ? "outcome_unknown"
+          : status === "cancelled"
+            ? "cancelled"
+            : "mock_workflow_failed",
       });
       throw error;
     }
