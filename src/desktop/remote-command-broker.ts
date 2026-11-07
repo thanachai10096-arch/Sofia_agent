@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { DesktopAction } from "./types.js";
+import type { DesktopCompanionStore, DesktopCompanionRecord } from "./companion-store.js";
 
 export interface DesktopCompanionCommand {
   id: string;
@@ -29,6 +30,7 @@ export interface DesktopCommandBrokerConfig {
   commandTimeoutMs?: number;
   companionIdleTimeoutMs?: number;
   maxPendingPerOwner?: number;
+  store?: DesktopCompanionStore;
 }
 
 /**
@@ -177,8 +179,36 @@ export class DesktopCommandBroker {
   private pruneIdle(): void {
     const cutoff = this.now() - this.idleTimeoutMs;
     for (const [ownerKeyId, companion] of this.companions) {
-      if (companion.lastSeenAt < cutoff) this.disconnect(ownerKeyId);
+      if (companion.lastSeenAt < cutoff) {
+        try { this.disconnect(ownerKeyId); }
+        catch {
+          // Expired credentials are rejected in memory even if disk cleanup fails.
+          this.companions.delete(ownerKeyId);
+          for (const [id, command] of this.pending) {
+            if (command.ownerKeyId !== ownerKeyId) continue;
+            this.removePending(id);
+            command.reject(new Error("Paired desktop companion disconnected."));
+          }
+        }
+      }
     }
+  }
+
+  private persist(companion: Companion): void {
+    const record: DesktopCompanionRecord = {
+      ownerKeyId: companion.ownerKeyId,
+      tokenDigest: companion.tokenDigest.toString("hex"),
+      connectedAt: companion.connectedAt,
+      lastSeenAt: companion.lastSeenAt,
+    };
+    this.store?.save(record);
+  }
+
+  private touch(companion: Companion): void {
+    const lastSeenAt = this.now();
+    if (lastSeenAt <= companion.lastSeenAt) return;
+    this.persist({ ...companion, lastSeenAt });
+    companion.lastSeenAt = lastSeenAt;
   }
 
   private removePending(id: string): void {
