@@ -77,9 +77,9 @@ export async function runDesktopCompanion(): Promise<void> {
     pollIntervalMs: 1500,
   });
 
-  const apiKey = await readSecret("Sofia API key (input hidden; key is not saved): ");
+  let apiKey = await readSecret("Sofia API key (input hidden; key is not saved): ");
   if (!apiKey) throw new Error("A Sofia API key is required to pair this computer.");
-  await client.pair(apiKey);
+  try { await client.pair(apiKey); } finally { apiKey = ""; }
   // Drop the only local reference to the master key immediately after pairing.
   console.log("Desktop Companion paired. Only the short-lived companion token remains in memory.");
   console.log("Allowed applications:", Object.keys(applications).join(", "));
