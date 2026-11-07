@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
-import { PostgresWorkflowExecutionLedger } from "../dist/src/integrations/workflows/postgres-workflow-execution-ledger.js";
+import { PostgresWorkflowExecutionLedger } from "../dist/integrations/workflows/postgres-workflow-execution-ledger.js";
 
 const connectionString = process.env.SOFIA_TEST_DATABASE_URL;
 if (!connectionString) throw new Error("SOFIA_TEST_DATABASE_URL_required");
