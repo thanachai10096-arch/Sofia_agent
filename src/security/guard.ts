@@ -163,7 +163,7 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
 
   // Treat command/URL/query text as untrusted control input. Content being written is
   // deliberately excluded so legitimate source code/comments can contain these phrases.
-  const controlFields = ["command", "url", "query", "args"];
+  const controlFields = ["command", "url", "requestedUrl", "query", "args"];
   const controlText = controlFields.map(k => action.input[k]).filter(v => v !== undefined);
   if (containsPromptInjection(controlText)) {
     return { allowed: false, risk: "critical", requireApproval: true, reason: "Suspicious instruction pattern in tool parameters.", actionHash: hash };
