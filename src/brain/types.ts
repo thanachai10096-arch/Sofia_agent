@@ -2,6 +2,7 @@ export type BrainState =
   | "idle"
   | "understanding"
   | "planning"
+  | "responding"
   | "executing"
   | "observing"
   | "verifying"
@@ -41,6 +42,8 @@ export interface TaskUnderstanding {
   risk: "low" | "medium" | "high";
   successCriteria: string[];
   ambiguities: string[];
+  /** Explicitly separates conversational replies from tasks that require execution. */
+  mode?: "conversation" | "action";
 }
 
 export interface ToolCall {
