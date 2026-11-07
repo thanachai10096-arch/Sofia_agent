@@ -117,14 +117,14 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       verifyApproval: (request) => {
         const evidence = skillApprovalEvidence.get(request.requestId);
         if (!evidence) return false;
-        const valid =
-          evidence.runId === request.runId &&
+        // Consume on first verification attempt, including mismatches, so an
+        // approval token can never be replayed against a modified action.
+        skillApprovalEvidence.delete(request.requestId);
+        return evidence.runId === request.runId &&
           evidence.principalId === request.principalId &&
           evidence.toolName === request.toolName &&
           evidence.toolName === `skill.${request.skillId}` &&
           evidence.actionHash === request.actionHash;
-        if (valid) skillApprovalEvidence.delete(request.requestId);
-        return valid;
       },
     });
     const runSkillTools = createAdvancedSkillTools(advancedSkillRegistry, principalId ?? "anonymous");
