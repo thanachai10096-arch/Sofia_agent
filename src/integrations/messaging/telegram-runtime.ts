@@ -122,15 +122,20 @@ function parseTelegramIds(value: string, pattern: RegExp, name: string): Readonl
  * Every allowed sender must have a unique key so API-key-scoped memory
  * and sessions remain private to that Telegram identity.
  */
-export function parseTelegramUserApiKeys(value: string, allowedUsers: ReadonlySet<string>): ReadonlyMap<string, string> {
-  const invalid = () => new Error("TELEGRAM_USER_API_KEYS_JSON must map every allowed Telegram user ID to a unique non-empty API key.");
+export function parseTelegramUserApiKeys(
+  value: string,
+  allowedUsers: ReadonlySet<string>,
+  reservedKeys: ReadonlySet<string> = new Set(),
+): ReadonlyMap<string, string> {
+  const invalid = () => new Error("TELEGRAM_USER_API_KEYS_JSON must map every allowed Telegram user ID to a unique non-empty API key that is not shared with another Sofia identity.");
   let parsed: unknown;
   try { parsed = JSON.parse(value); } catch { throw invalid(); }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw invalid();
   const entries = Object.entries(parsed as Record<string, unknown>);
   if (allowedUsers.size === 0 || entries.length !== allowedUsers.size ||
       entries.some(([userId, key]) => !allowedUsers.has(userId) || typeof key !== "string" || !key.trim()) ||
-      new Set(entries.map(([, key]) => (key as string).trim())).size !== entries.length) throw invalid();
+      new Set(entries.map(([, key]) => (key as string).trim())).size !== entries.length ||
+      entries.some(([, key]) => reservedKeys.has((key as string).trim()))) throw invalid();
   return new Map<string, string>(entries.map(([userId, key]) => [userId, (key as string).trim()] as const));
 }
 
@@ -177,7 +182,9 @@ export function createTelegramMessagingRuntime(
   try {
     const allowedUsers = parseTelegramUserAllowlist(rawUsers);
     const allowedChats = parseTelegramChatAllowlist(rawChats);
-    const userApiKeys = rawUserApiKeys ? parseTelegramUserApiKeys(rawUserApiKeys, allowedUsers) : undefined;
+    const userApiKeys = rawUserApiKeys
+      ? parseTelegramUserApiKeys(rawUserApiKeys, allowedUsers, apiKey ? new Set([apiKey]) : new Set())
+      : undefined;
     if (allowedUsers.size > 1 && !userApiKeys) {
       throw new Error("Per-user Telegram API keys are required when multiple Telegram users are allowed.");
     }
