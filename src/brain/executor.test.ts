@@ -230,6 +230,83 @@ test("Brain retries one malformed understanding with bounded schema feedback", a
   assert.equal(report.usage.modelCalls, 3);
 });
 
+test("Brain completes read-only research from tool evidence without running project build checks", async () => {
+  const executed: string[] = [];
+  let projectVerificationCalls = 0;
+  let sequence = 0;
+  const tools: ToolGateway = {
+    listTools() {
+      return [
+        { name: "web.search", description: "Search the web", effects: ["network", "read"] as const },
+        { name: "project.verify", description: "Run project checks", effects: ["shell"] as const },
+      ];
+    },
+    describe(name) {
+      if (name === "web.search") return { effects: ["network", "read"] };
+      if (name === "project.verify") return { effects: ["shell"] };
+      return undefined;
+    },
+    async execute(call) {
+      executed.push(call.tool);
+      sequence += 1;
+      if (call.tool === "project.verify") projectVerificationCalls += 1;
+      return {
+        ok: true,
+        data: call.tool === "web.search"
+          ? { results: [{ title: "Grounded result", url: "https://example.com" }] }
+          : { passed: false, code: 1, stderr: "No package.json" },
+        evidenceId: "research-evidence-" + sequence,
+      };
+    },
+    async snapshot() { return { id: "snapshot-" + sequence, revision: "revision-" + sequence, evidenceId: "snapshot-evidence" }; },
+    async changedFiles() { return []; },
+    async checkpoint() { return { id: "checkpoint", revision: "revision-0" }; },
+    async rollback() { return []; },
+  };
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      const value = parsed.phase === "understand"
+        ? {
+            mode: "action",
+            objective: "Research the requested topic",
+            constraints: [],
+            assumptions: [],
+            requiredCapabilities: ["network"],
+            requiredTools: ["web.search"],
+            risk: "low",
+            successCriteria: ["Return source-backed search results"],
+            ambiguities: [],
+          }
+        : {
+            strategy: "research",
+            reason: "Search the public web for source-backed results.",
+            steps: [{
+              id: "search",
+              objective: "Search the requested topic",
+              dependencies: [],
+              call: { tool: "web.search", input: { query: "Sofia Agent architecture" } },
+            }],
+          };
+      return {
+        inputTokens: 10,
+        async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools, allowShell: false, allowNetwork: true },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({ task: "Research Sofia Agent architecture" });
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(report.verification[0]?.criterionId, "tool-execution");
+  assert.equal(report.verification[0]?.passed, true);
+  assert.deepEqual(executed, ["web.search"]);
+  assert.equal(projectVerificationCalls, 0);
+});
+
 test("Brain completes a coding loop only after trusted verification", async () => {
   const brain = createSofiaBrain({
     dependencies: {
