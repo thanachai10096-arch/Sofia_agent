@@ -17,6 +17,8 @@ export interface SkillPerformance {
   avgRecoveryRounds: number;
   avgDurationMs: number;
   avgToolCalls: number;
+  durationSamples: number;
+  toolCallSamples: number;
   lastSuccessAt?: string;
   lastFailureAt?: string;
   lastFailure?: string;
@@ -89,6 +91,8 @@ export class EvolutionEngine {
             id: skill.id ?? id,
             avgDurationMs: Number.isFinite(skill.avgDurationMs) ? skill.avgDurationMs : 0,
             avgToolCalls: Number.isFinite(skill.avgToolCalls) ? skill.avgToolCalls : 0,
+            durationSamples: Number.isSafeInteger(skill.durationSamples) ? skill.durationSamples : 0,
+            toolCallSamples: Number.isSafeInteger(skill.toolCallSamples) ? skill.toolCallSamples : 0,
             taskTypes: skill.taskTypes ?? {},
             successHistory: skill.successHistory ?? [],
             failureHistory: skill.failureHistory ?? [],
@@ -107,7 +111,7 @@ export class EvolutionEngine {
     const created: SkillPerformance = {
       id, attempts: 0, successes: 0, failures: 0,
       confidence: 0.5, avgSteps: 0, avgRecoveryRounds: 0,
-      avgDurationMs: 0, avgToolCalls: 0,
+      avgDurationMs: 0, avgToolCalls: 0, durationSamples: 0, toolCallSamples: 0,
       successHistory: [], failureHistory: [], taskTypes: {},
     };
     setOwnValue(this.snapshot.skills, id, created);
@@ -153,12 +157,22 @@ export class EvolutionEngine {
     s.confidence = clamp(s.confidence * 0.8 + 0.2, 0, 1);
     s.avgSteps = s.attempts === 1 ? steps : ((s.avgSteps * (s.attempts - 1)) + steps) / s.attempts;
     s.avgRecoveryRounds = s.attempts === 1 ? recoveryRounds : ((s.avgRecoveryRounds * (s.attempts - 1)) + recoveryRounds) / s.attempts;
-    const durationMs = Number.isFinite(metrics.durationMs) ? Math.max(0, metrics.durationMs!) : 0;
-    const toolCalls = Number.isFinite(metrics.toolCalls) ? Math.max(0, metrics.toolCalls!) : 0;
-    s.avgDurationMs = s.attempts === 1 ? durationMs : ((s.avgDurationMs * (s.attempts - 1)) + durationMs) / s.attempts;
-    s.avgToolCalls = s.attempts === 1 ? toolCalls : ((s.avgToolCalls * (s.attempts - 1)) + toolCalls) / s.attempts;
+    const durationMs = Number.isFinite(metrics.durationMs) ? Math.max(0, metrics.durationMs!) : undefined;
+    const toolCalls = Number.isFinite(metrics.toolCalls) ? Math.max(0, metrics.toolCalls!) : undefined;
+    if (durationMs !== undefined) {
+      s.durationSamples++;
+      s.avgDurationMs += (durationMs - s.avgDurationMs) / s.durationSamples;
+    }
+    if (toolCalls !== undefined) {
+      s.toolCallSamples++;
+      s.avgToolCalls += (toolCalls - s.avgToolCalls) / s.toolCallSamples;
+    }
     s.lastSuccessAt = new Date().toISOString();
-    s.successHistory.push({ at: s.lastSuccessAt, steps, recoveryRounds, durationMs, toolCalls });
+    s.successHistory.push({
+      at: s.lastSuccessAt, steps, recoveryRounds,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(toolCalls !== undefined ? { toolCalls } : {}),
+    });
     s.successHistory = s.successHistory.slice(-20);
     void this.persist();
   }
@@ -178,11 +192,21 @@ export class EvolutionEngine {
     s.confidence = clamp(s.confidence * 0.75 - 0.05, 0.05, 0.95);
     s.lastFailureAt = new Date().toISOString();
     s.lastFailure = message.slice(0, 500);
-    const durationMs = Number.isFinite(metrics.durationMs) ? Math.max(0, metrics.durationMs!) : 0;
-    const toolCalls = Number.isFinite(metrics.toolCalls) ? Math.max(0, metrics.toolCalls!) : 0;
-    s.avgDurationMs = s.attempts === 1 ? durationMs : ((s.avgDurationMs * (s.attempts - 1)) + durationMs) / s.attempts;
-    s.avgToolCalls = s.attempts === 1 ? toolCalls : ((s.avgToolCalls * (s.attempts - 1)) + toolCalls) / s.attempts;
-    s.failureHistory.push({ at: s.lastFailureAt, message: s.lastFailure, durationMs, toolCalls });
+    const durationMs = Number.isFinite(metrics.durationMs) ? Math.max(0, metrics.durationMs!) : undefined;
+    const toolCalls = Number.isFinite(metrics.toolCalls) ? Math.max(0, metrics.toolCalls!) : undefined;
+    if (durationMs !== undefined) {
+      s.durationSamples++;
+      s.avgDurationMs += (durationMs - s.avgDurationMs) / s.durationSamples;
+    }
+    if (toolCalls !== undefined) {
+      s.toolCallSamples++;
+      s.avgToolCalls += (toolCalls - s.avgToolCalls) / s.toolCallSamples;
+    }
+    s.failureHistory.push({
+      at: s.lastFailureAt, message: s.lastFailure,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(toolCalls !== undefined ? { toolCalls } : {}),
+    });
     s.failureHistory = s.failureHistory.slice(-20);
     void this.persist();
   }
