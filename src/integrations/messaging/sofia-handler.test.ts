@@ -60,8 +60,8 @@ test("verified sender identity selects that sender's API client", async () => {
       };
     },
   });
-  await handle(inbound("hello", { identity: { platform: "telegram", userId: "123", channelId: "c", conversationId: "c" } }));
-  await handle(inbound("hello", { identity: { platform: "telegram", userId: "456", channelId: "c", conversationId: "c" } }));
+  await handle(inbound("hello", { messageId: "message-123", identity: { platform: "telegram", userId: "123", channelId: "c", conversationId: "c" } }));
+  await handle(inbound("hello", { messageId: "message-456", identity: { platform: "telegram", userId: "456", channelId: "c", conversationId: "c" } }));
   assert.deepEqual(selected, ["123", "456"]);
   assert.equal(h.starts.length, 2);
 });
