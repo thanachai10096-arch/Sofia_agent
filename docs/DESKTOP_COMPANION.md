@@ -8,20 +8,20 @@ The local Companion can launch explicitly allowlisted applications and, when sep
 - A reachable Sofia API with the Desktop Companion routes enabled
 - An interactive local terminal for first-time pairing and explicit revocation
 - A supported OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service)
-- One or more existing executable paths that the local operator wants to allow
+- At least one local capability: an allowlisted application, explicitly enabled input control, or explicitly enabled screen capture
 
-## Configure applications
+## Configure local capabilities
 
 Set `SOFIA_API_URL` to the Sofia API base URL. Remote URLs must use HTTPS; loopback HTTP is accepted only for local development.
 
-Set `SOFIA_DESKTOP_ALLOWED_APPS` to a JSON object mapping short application IDs to absolute executable paths. Example for Linux:
+Application launch is optional. To allow it, set `SOFIA_DESKTOP_ALLOWED_APPS` to a JSON object mapping short application IDs to absolute executable paths. Example for Linux:
 
 ```sh
 export SOFIA_API_URL="https://sofia.example.com"
 export SOFIA_DESKTOP_ALLOWED_APPS='{"editor":"/usr/bin/code","browser":"/usr/bin/firefox"}'
 ```
 
-The executable paths are resolved and checked when the companion starts. Do not point an entry at a shell, command interpreter, script runner, or other general-purpose command processor.
+The executable paths are resolved and checked when the companion starts. Do not point an entry at a shell, command interpreter, script runner, or other general-purpose command processor. You may omit this variable entirely for a screen-only or input-only companion.
 
 ## Start and approve actions
 
