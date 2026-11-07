@@ -1,13 +1,18 @@
-import { TextEncoder } from "node:util";
-
 import type { ModelProvider, ModelRequest, ModelRoute, TaskKind } from "../models/types.js";
 import type { InternalRoute, PackedPrompt, PreparedCall, ProviderReply } from "./token-aware-gateway.js";
 
-const encoder = new TextEncoder();
-
-function upperBoundTokens(value: unknown): number {
-  const text = JSON.stringify(value);
-  return encoder.encode(text).byteLength;
+/**
+ * Tokenizer-independent admission estimate (not a mathematical upper bound).
+ * UTF-8 byte length is not a token count: it multiplies Thai/CJK text by
+ * roughly 3. Estimate ASCII at 1 token per 3 characters and non-ASCII at
+ * 1 token per code point. Provider-reported usage remains authoritative;
+ * TokenBudget fails closed if actual input or output exceeds the reservation.
+ */
+export function estimatePromptTokensUpperBound(value: unknown): number {
+  const characters = Array.from(JSON.stringify(value));
+  const nonAscii = characters.filter((character) => character.codePointAt(0)! > 0x7f).length;
+  const ascii = characters.length - nonAscii;
+  return Math.ceil(ascii / 3) + nonAscii;
 }
 
 function taskKindForPhase(phase: string): TaskKind {
@@ -121,7 +126,7 @@ export function createInternalRoute(
       };
 
       return {
-        inputTokensUpperBound: upperBoundTokens(request),
+        inputTokensUpperBound: estimatePromptTokensUpperBound(request),
         invoke: async ({ signal, maxOutputTokens }): Promise<ProviderReply> => {
           const response = await modelProvider.generate(request, route, {
             signal,

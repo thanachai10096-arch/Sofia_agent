@@ -48,3 +48,61 @@ test("subagent prompt contains the explicit untrusted proposal shape", async () 
   assert.match(prompt, /untrusted proposal/);
   assert.match(prompt, /parent Brain must validate permissions/);
 });
+
+
+test("normalized prompt keeps task once and moves memory into bounded state", async () => {
+  let captured: InferenceRequest | undefined;
+  const gateway = {
+    async generateMetered(input: InferenceRequest) {
+      captured = input;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  } as unknown as TokenAwareGateway;
+  const reasoner = new TokenAwareBrainReasoner(gateway);
+  const controller = new AbortController();
+  const request = JSON.stringify({
+    phase: "plan",
+    payload: {
+      task: "Build a safe feature",
+      understanding: { successCriteria: ["criterion one"], requiredCapabilities: ["coding"] },
+      availableTools: [{ name: "read_file" }],
+    },
+    memory: {
+      observations: [{ summary: "prior observation" }],
+      projectMemory: [{ content: "project convention" }],
+    },
+  });
+  const prepared = await reasoner.prepare(request, { signal: controller.signal, maxContextTokens: 16_000 });
+  assert.ok(prepared.inputTokens > 1);
+  await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
+  assert.ok(captured);
+  assert.equal(captured.core.task, "Build a safe feature");
+  assert.equal(JSON.stringify(captured.core.state).includes("Build a safe feature"), false);
+  assert.equal(JSON.stringify(captured.core.state).includes("prior observation"), true);
+  assert.equal(JSON.stringify(captured.core.state).includes("project convention"), true);
+  assert.deepEqual(captured.core.acceptanceCriteria, ["criterion one"]);
+  assert.deepEqual(captured.requiredCapabilities, ["coding"]);
+});
+
+test("normalized prompt bounds oversized memory without truncating the task", async () => {
+  let captured: InferenceRequest | undefined;
+  const gateway = {
+    async generateMetered(input: InferenceRequest) {
+      captured = input;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  } as unknown as TokenAwareGateway;
+  const reasoner = new TokenAwareBrainReasoner(gateway);
+  const controller = new AbortController();
+  const task = "ตอบคำถามนี้ให้สำเร็จ";
+  const hugeMemory = "x".repeat(50_000);
+  const prepared = await reasoner.prepare(JSON.stringify({
+    phase: "understand",
+    payload: { task },
+    memory: { observations: [{ content: hugeMemory }] },
+  }), { signal: controller.signal, maxContextTokens: 16_000 });
+  await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
+  assert.ok(captured);
+  assert.equal(captured.core.task, task);
+  assert.ok(JSON.stringify(captured.core.state).length < 20_000);
+});
