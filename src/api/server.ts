@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { DesktopCapability } from "../desktop/types.js";
@@ -90,6 +92,43 @@ function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapabi
     .filter((capability): capability is DesktopCapability => capability !== undefined))];
 }
 
+function cookieValue(header: string | undefined, name: string): string | undefined {
+  return (header ?? "").split(";").map((part) => part.trim())
+    .find((part) => part.startsWith(name + "="))?.slice(name.length + 1);
+}
+function safeEqualText(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const part = Buffer.from(chunk as Buffer);
+    size += part.length;
+    if (size > maxBytes) throw new Error("Request body too large.");
+    chunks.push(part);
+  }
+  return Buffer.concat(chunks);
+}
+function sameOriginRequest(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  const host = req.headers.host;
+  if (typeof origin !== "string" || typeof host !== "string" || host.includes(",")) return false;
+  try {
+    const parsed = new URL(origin);
+    const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+    return parsed.host.toLowerCase() === host.toLowerCase() &&
+      (parsed.protocol === "https:" || (local && parsed.protocol === "http:"));
+  } catch { return false; }
+}
+function setWorkspaceCookies(res: ServerResponse, sessionCookie: string, csrf: string): void {
+  res.setHeader("set-cookie", [
+    sessionCookie,
+    "__Host-sofia_csrf=" + csrf + "; Path=/; Secure; SameSite=Strict; Max-Age=28800",
+  ]);
+}
 function normalizeContext(context: AgentRunInput["context"]): string | undefined {
   if (context === undefined) return undefined;
   return typeof context === "string" ? context : JSON.stringify(context);
@@ -270,6 +309,128 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const server = createServer(async (req, res) => {
     const origin = req.headers.origin;
     try {
+      const workspaceAuth = config.workspaceAuth;
+      const workspaceRoot = "/workspace";
+      if (workspaceAuth && req.url && (req.url === workspaceRoot || req.url.startsWith(workspaceRoot + "/"))) {
+        const pathname = new URL(req.url, "http://sofia.local").pathname;
+        if (req.method === "GET" && (pathname === workspaceRoot || pathname === workspaceRoot + "/")) {
+          res.writeHead(302, { location: workspaceRoot + "/", "cache-control": "no-store" });
+          return res.end();
+        }
+        if (req.method === "GET" && pathname === workspaceRoot + "/auth/login") {
+          try {
+            const login = await workspaceAuth.beginLogin();
+            res.writeHead(302, { location: login.url, "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          } catch {
+            return json(res, 503, { error: "workspace_identity_provider_unavailable" }, undefined, config);
+          }
+        }
+        if (req.method === "GET" && pathname === workspaceRoot + "/auth/callback") {
+          const callback = new URL(req.url, "http://sofia.local");
+          const code = callback.searchParams.get("code") ?? "";
+          const state = callback.searchParams.get("state") ?? "";
+          if (callback.searchParams.has("error")) {
+            res.writeHead(302, { location: workspaceRoot + "/?auth=failed", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          }
+          try {
+            const identity = await workspaceAuth.completeLogin(code, state);
+            const csrf = randomBytes(32).toString("base64url");
+            setWorkspaceCookies(res, workspaceAuth.sessionCookie(identity.sessionId, Math.floor((identity.expiresAt - Date.now()) / 1000)), csrf);
+            res.writeHead(302, { location: workspaceRoot + "/", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          } catch {
+            res.writeHead(302, { location: workspaceRoot + "/?auth=failed", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          }
+        }
+        if (req.method === "GET" && pathname === workspaceRoot + "/auth/session") {
+          const identity = workspaceAuth.authenticate(req.headers.cookie);
+          return identity
+            ? json(res, 200, { authenticated: true, expiresAt: identity.expiresAt }, origin, config)
+            : json(res, 401, { error: "workspace_sign_in_required" }, origin, config);
+        }
+        if (req.method === "POST" && pathname === workspaceRoot + "/auth/logout") {
+          if (!sameOriginRequest(req)) return json(res, 403, { error: "workspace_origin_rejected" }, origin, config);
+          const csrfCookie = cookieValue(req.headers.cookie, "__Host-sofia_csrf");
+          const csrfHeader = req.headers["x-csrf-token"];
+          if (!csrfCookie || typeof csrfHeader !== "string" || !safeEqualText(csrfCookie, csrfHeader)) {
+            return json(res, 403, { error: "workspace_csrf_rejected" }, origin, config);
+          }
+          const identity = workspaceAuth.authenticate(req.headers.cookie);
+          if (identity) workspaceAuth.revoke(identity.sessionId);
+          res.writeHead(204, { "set-cookie": [workspaceAuth.clearCookie(), "__Host-sofia_csrf=; Path=/; Secure; SameSite=Strict; Max-Age=0"], "cache-control": "no-store" });
+          return res.end();
+        }
+        if (pathname.startsWith("/workspace/") && req.method === "GET") {
+          const asset = pathname.slice((workspaceRoot + "/").length);
+          const allowedAssets = new Set(["index.html", "workspace.css", "workspace.js", "manifest.webmanifest", "sofia-icon.svg", "service-worker.js"]);
+          if (!allowedAssets.has(asset)) return json(res, 404, { error: "not_found" }, origin, config);
+          const directory = path.resolve(config.workspaceStaticDirectory ?? path.resolve(process.cwd(), "web/mobile-workspace"));
+          const file = path.resolve(directory, asset);
+          if (!file.startsWith(directory + path.sep)) return json(res, 404, { error: "not_found" }, origin, config);
+          try {
+            const content = readFileSync(file);
+            const types: Record<string, string> = {
+              ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
+              ".js": "text/javascript; charset=utf-8", ".webmanifest": "application/manifest+json",
+              ".svg": "image/svg+xml",
+            };
+            res.writeHead(200, {
+              "content-type": types[path.extname(file)] ?? "application/octet-stream",
+              "cache-control": asset === "index.html" ? "no-store" : "public, max-age=300",
+              "x-content-type-options": "nosniff",
+              "content-security-policy": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+              ...(asset === "service-worker.js" ? { "service-worker-allowed": "/workspace/" } : {}),
+            });
+            return res.end(content);
+          } catch { return json(res, 404, { error: "workspace_asset_not_found" }, origin, config); }
+        }
+      }
+
+      if (workspaceAuth && req.url?.startsWith("/api/sofia/")) {
+        const identity = workspaceAuth.authenticate(req.headers.cookie);
+        if (!identity) return json(res, 401, { error: "workspace_sign_in_required" }, origin, config);
+        if (!config.workspaceApiKey) return json(res, 503, { error: "workspace_bff_unavailable" }, origin, config);
+        if (!sameOriginRequest(req)) return json(res, 403, { error: "workspace_origin_rejected" }, origin, config);
+        const csrfCookie = cookieValue(req.headers.cookie, "__Host-sofia_csrf");
+        const csrfHeader = req.headers["x-csrf-token"];
+        if (req.method !== "GET" && (!csrfCookie || typeof csrfHeader !== "string" || !safeEqualText(csrfCookie, csrfHeader))) {
+          return json(res, 403, { error: "workspace_csrf_rejected" }, origin, config);
+        }
+        const upstreamPath = req.url.slice("/api/sofia".length);
+        const upstreamUrl = new URL(upstreamPath, "http://sofia.local");
+        const allowedPath = /^\/v1\/(?:browser\/cloud\/sessions(?:\/[0-9a-f-]{36}(?:\/(?:navigate|action))?)?|agent\/runs(?:\/[0-9a-f-]{36})?|approvals(?:\/audit|\/[0-9a-f-]{36}\/decision)?)$/i.test(upstreamUrl.pathname);
+        if (!allowedPath || !["GET", "POST", "DELETE"].includes(req.method ?? "")) {
+          return json(res, 404, { error: "workspace_route_not_allowed" }, origin, config);
+        }
+        const address = server.address();
+        if (!address || typeof address === "string") return json(res, 503, { error: "workspace_upstream_unavailable" }, origin, config);
+        try {
+          const requestBody = req.method === "GET" || req.method === "DELETE" ? undefined : await readRawBody(req, maxBytes);
+          const upstream = await fetch("http://127.0.0.1:" + address.port + upstreamUrl.pathname + upstreamUrl.search, {
+            method: req.method,
+            headers: {
+              authorization: "Bearer " + config.workspaceApiKey,
+              ...(requestBody ? { "content-type": req.headers["content-type"] ?? "application/json" } : {}),
+              accept: "application/json",
+            },
+            ...(requestBody ? { body: requestBody } : {}),
+          });
+          const responseBody = Buffer.from(await upstream.arrayBuffer());
+          res.writeHead(upstream.status, {
+            "content-type": upstream.headers.get("content-type") ?? "application/json; charset=utf-8",
+            "cache-control": "no-store",
+            ...(upstream.headers.get("retry-after") ? { "retry-after": upstream.headers.get("retry-after")! } : {}),
+            "x-content-type-options": "nosniff",
+          });
+          return res.end(responseBody);
+        } catch {
+          return json(res, 502, { error: "workspace_upstream_failed" }, origin, config);
+        }
+      }
+
       if (discordRoute && req.url === discordRoutePath) {
         await handleDiscordInteractionHttpRequest(req, res, discordRoute.transport, discordMaxBodyBytes);
         return;
