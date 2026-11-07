@@ -33,7 +33,21 @@ export class RegistryToolGateway implements ToolGateway {
     private readonly security:SecurityController=new SecurityController(),
     private readonly audit?:SecurityAuditSink,
   ){this.checkpoints=checkpoints??new RuntimeCheckpointManager(dependencies.runtime);}
-  listTools(){return this.dependencies.tools.list().map((tool)=>({name:tool.name,description:tool.description,effects:effectiveToolEffects(tool.name,tool.effects)}));}
+  listTools(){return this.dependencies.tools.list().map((tool)=>{
+    const effects=effectiveToolEffects(tool.name,tool.effects);
+    const permission=toolPermission(this.policy,tool.name,effects);
+    let status:"available"|"requires_approval"|"disabled"="available";
+    let reason:string|undefined;
+    if(!this.policy.allowTools){status="disabled";reason="Tool execution is disabled by policy.";}
+    else if(permission.allow===false){status="disabled";reason="Disabled by execution policy: "+tool.name;}
+    else if(effects.includes("network")&&this.policy.allowedHosts.length===0){status="disabled";reason="Network tool has no configured allowed-host list.";}
+    else if(permission.requireApproval===true||effects.some(effect=>effect==="write"||effect==="shell"||effect==="destructive"||effect==="browser")){
+      status="requires_approval";
+      reason=this.approval?"Approval is required before execution.":"Approval is required but no approval handler is configured.";
+      if(!this.approval)status="disabled";
+    }
+    return{name:tool.name,description:tool.description,effects,availability:{status,reason}};
+  });}
   describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:effectiveToolEffects(name,tool.effects)};}
 
   async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{
