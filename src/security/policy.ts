@@ -49,6 +49,9 @@ export { riskRank };
 
 /** Shared effect classification for both Brain and legacy execution paths. */
 export function classifyToolEffects(name: string): ToolEffect[] {
+  // Browser reads are network access, not browser-control actions. They remain
+  // gated by allowNetwork + allowedHosts, while page interaction stays privileged.
+  if (["browser.open", "browser.goto", "browser.observe", "browser.screenshot", "browser.close"].includes(name)) return ["network", "read"];
   if (name.startsWith("browser.")) return ["browser", "network"];
   if (name === "desktop.system.discover" || name === "desktop.workspace.list_files" ||
       name === "desktop.workspace.read_file" || name === "desktop.screen.capture") return ["read"];
