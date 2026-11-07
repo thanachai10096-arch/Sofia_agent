@@ -8,6 +8,11 @@ test("verified skill handlers are exposed as tools in the shared Sofia registry"
   const tools = createAdvancedSkillTools({
     securityController: new SecurityController(),
     principalId: "test:owner",
+    projectMemoryStore: {
+      async save() {},
+      async list() { return []; },
+      async find() { return []; },
+    },
   });
   const listed = tools.find((tool) => tool.name === "skill.list");
   assert.ok(listed);
