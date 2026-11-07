@@ -1,6 +1,13 @@
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import type { ToolEffect } from "../security/policy.js";
-export interface ToolContext { runtime: WorkspaceRuntime; signal?: AbortSignal; }
+export interface ToolApprovalEvidence {
+  readonly requestId: string;
+  readonly runId: string;
+  readonly principalId: string;
+  readonly toolName: string;
+  readonly actionHash: string;
+}
+export interface ToolContext { runtime: WorkspaceRuntime; signal?: AbortSignal; approval?: ToolApprovalEvidence; }
 export interface SofiaTool {
   name: string;
   description: string;
@@ -28,46 +35,15 @@ function validateValue(schema: Record<string, unknown>, value: unknown, path: st
   if (expected === "string" && typeof value !== "string") throw new Error(`Invalid tool input at ${path}: expected string`);
   if (expected === "boolean" && typeof value !== "boolean") throw new Error(`Invalid tool input at ${path}: expected boolean`);
   if (expected === "number" && (typeof value !== "number" || !Number.isFinite(value))) throw new Error(`Invalid tool input at ${path}: expected finite number`);
-  if (expected === "integer" && (typeof value !== "number" || !Number.isInteger(value))) throw new Error(`Invalid tool input at ${path}: expected integer`);
+  if (expected === "integer" && (typeof value !== "number" || !Number.isSafeInteger(value))) throw new Error(`Invalid tool input at ${path}: expected safe integer`);
   if (expected === "array" && !Array.isArray(value)) throw new Error(`Invalid tool input at ${path}: expected array`);
-  if (Array.isArray(schema.enum) && !schema.enum.some((item) => Object.is(item, value))) {
-    throw new Error(`Invalid tool input at ${path}: value is not an allowed enum member`);
-  }
-  if (Array.isArray(value)) {
-    if (typeof schema.minItems === "number" && value.length < schema.minItems) {
-      throw new Error(`Invalid tool input at ${path}: expected at least ${schema.minItems} items`);
-    }
-    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
-      throw new Error(`Invalid tool input at ${path}: expected at most ${schema.maxItems} items`);
-    }
-    if (typeof schema.items === "object" && schema.items !== null) {
-      const itemSchema = schema.items as Record<string, unknown>;
-      value.forEach((item, index) => validateValue(itemSchema, item, `${path}[${index}]`));
-    }
-  }
+  if (schema.enum && Array.isArray(schema.enum) && !schema.enum.some(item => Object.is(item, value))) throw new Error(`Invalid tool input at ${path}: value is not allowed`);
   if (validObject) {
-    const objectValue = value as Record<string, unknown>;
-    const properties = typeof schema.properties === "object" && schema.properties !== null
-      ? schema.properties as Record<string, unknown>
-      : {};
-    const required = Array.isArray(schema.required) ? schema.required : [];
-    for (const key of required) {
-      if (typeof key === "string" && !Object.prototype.hasOwnProperty.call(objectValue, key)) {
-        throw new Error(`Invalid tool input at ${path}: missing required property "${key}"`);
-      }
-    }
-    if (schema.additionalProperties === false) {
-      for (const key of Object.keys(objectValue)) {
-        if (!Object.prototype.hasOwnProperty.call(properties, key)) {
-          throw new Error(`Invalid tool input at ${path}: unexpected property "${key}"`);
-        }
-      }
-    }
-    for (const [key, childSchema] of Object.entries(properties)) {
-      if (Object.prototype.hasOwnProperty.call(objectValue, key) && typeof childSchema === "object" && childSchema !== null) {
-        validateValue(childSchema as Record<string, unknown>, objectValue[key], `${path}.${key}`);
-      }
-    }
+    const properties = schema.properties && typeof schema.properties === "object" ? schema.properties as Record<string, Record<string, unknown>> : {};
+    const required = Array.isArray(schema.required) ? schema.required.filter((item): item is string => typeof item === "string") : [];
+    for (const key of required) if (!(key in value)) throw new Error(`Invalid tool input at ${path}.${key}: required`);
+    if (schema.additionalProperties === false) for (const key of Object.keys(value)) if (!(key in properties)) throw new Error(`Invalid tool input at ${path}.${key}: additional property`);
+    for (const [key, child] of Object.entries(properties)) if (key in value) validateValue(child, (value as Record<string, unknown>)[key], `${path}.${key}`);
   }
+  if (Array.isArray(value) && schema.items && typeof schema.items === "object") value.forEach((item, index) => validateValue(schema.items as Record<string, unknown>, item, `${path}[${index}]`));
 }
-
