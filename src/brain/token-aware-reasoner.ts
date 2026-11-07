@@ -169,11 +169,11 @@ function asInferenceRequest(request: string): InferenceRequest {
       : 1,
     requiredCapabilities: [...new Set([
       ...phaseCapabilities(phase),
-      ...routeCapabilities(
+      ...(phase === "understand" ? [] : routeCapabilities(
         Array.isArray(payload.requiredCapabilities)
           ? payload.requiredCapabilities
           : understanding.requiredCapabilities,
-      ),
+      )),
     ])],
     core: {
       instructions: [
