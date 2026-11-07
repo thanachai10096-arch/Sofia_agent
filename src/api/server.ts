@@ -5,6 +5,7 @@ import path from "node:path";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import { DesktopCompanionAuthenticationError } from "../desktop/remote-command-broker.js";
 import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } from "./types.js";
 import { UsageLimiter } from "./usage.js";
 import { idempotencyFingerprint } from "./idempotency.js";
@@ -502,8 +503,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           const command = desktopBroker.poll(token);
           return json(res, 200, { command }, origin, config);
-        } catch {
-          return json(res, 401, { error: "desktop_companion_unauthorized" }, origin, config);
+        } catch (error) {
+          return error instanceof DesktopCompanionAuthenticationError
+            ? json(res, 401, { error: "desktop_companion_unauthorized" }, origin, config)
+            : json(res, 503, { error: "desktop_companion_temporarily_unavailable" }, origin, config);
         }
       }
 
@@ -528,8 +531,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return completed
             ? json(res, 200, { completed: true }, origin, config)
             : json(res, 404, { error: "desktop_command_not_found" }, origin, config);
-        } catch {
-          return json(res, 401, { error: "desktop_companion_unauthorized" }, origin, config);
+        } catch (error) {
+          return error instanceof DesktopCompanionAuthenticationError
+            ? json(res, 401, { error: "desktop_companion_unauthorized" }, origin, config)
+            : json(res, 503, { error: "desktop_companion_temporarily_unavailable" }, origin, config);
         }
       }
 
