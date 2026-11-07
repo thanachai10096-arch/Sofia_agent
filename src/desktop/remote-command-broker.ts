@@ -24,6 +24,13 @@ interface Companion {
   persistedAt: number;
 }
 
+interface CompletionReceipt {
+  ownerKeyId: string;
+  tokenDigest: Buffer;
+  payloadDigest: Buffer;
+  completedAt: number;
+}
+
 interface PendingCommand extends DesktopCompanionCommand {
   ownerKeyId: string;
   assigned: boolean;
@@ -59,6 +66,11 @@ export class DesktopCommandBroker {
   private readonly store?: DesktopCompanionStore;
   private readonly companions = new Map<string, Companion>();
   private readonly pending = new Map<string, PendingCommand>();
+  // Short-lived in-memory receipts make completion POST retries idempotent
+  // without ever re-running the local desktop action.
+  private readonly completionReceipts = new Map<string, CompletionReceipt>();
+  private readonly completionReceiptTtlMs = 5 * 60_000;
+  private readonly maxCompletionReceipts = 512;
 
   constructor(config: DesktopCommandBrokerConfig = {}) {
     this.now = config.now ?? Date.now;
@@ -121,12 +133,40 @@ export class DesktopCommandBroker {
   complete(token: string, commandId: string, result: unknown, error?: string): boolean {
     const companion = this.authenticate(token);
     this.touch(companion);
+    const payloadDigest = digest(JSON.stringify({ result: result ?? null, error: error ?? null }));
+    this.pruneCompletionReceipts();
+    const receipt = this.completionReceipts.get(commandId);
+    if (receipt) {
+      // Only the same paired device may replay the exact same completion.
+      // A different payload or companion is not accepted as an idempotent retry.
+      return receipt.ownerKeyId === companion.ownerKeyId &&
+        safeEqual(receipt.tokenDigest, companion.tokenDigest) &&
+        safeEqual(receipt.payloadDigest, payloadDigest);
+    }
     const command = this.pending.get(commandId);
     if (!command || command.ownerKeyId !== companion.ownerKeyId || !command.assigned) return false;
+    this.completionReceipts.set(commandId, {
+      ownerKeyId: companion.ownerKeyId,
+      tokenDigest: Buffer.from(companion.tokenDigest),
+      payloadDigest,
+      completedAt: this.now(),
+    });
+    while (this.completionReceipts.size > this.maxCompletionReceipts) {
+      const oldest = this.completionReceipts.keys().next().value;
+      if (oldest === undefined) break;
+      this.completionReceipts.delete(oldest);
+    }
     this.removePending(commandId);
     if (error) command.reject(new Error("Local desktop action failed: " + safeError(error)));
     else command.resolve(result);
     return true;
+  }
+
+  private pruneCompletionReceipts(): void {
+    const cutoff = this.now() - this.completionReceiptTtlMs;
+    for (const [id, receipt] of this.completionReceipts) {
+      if (receipt.completedAt < cutoff) this.completionReceipts.delete(id);
+    }
   }
 
   /** Dispatch one approved action from a Brain run and await its local result. */
