@@ -3,6 +3,18 @@ import { applyEditPatch, createEditPatch } from "../brain/edit-engine.js";
 
 const str = (description: string) => ({ type: "string", description });
 
+// Search-provider results are untrusted input. Only expose canonical HTTPS links;
+// never pass executable, local-file, credential-bearing, or plaintext URLs downstream.
+function isSafeSourceUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && Boolean(parsed.hostname) && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
 const editOperationSchema = {
   type: "object",
   properties: {
@@ -88,8 +100,8 @@ export function createBuiltinTools(): SofiaTool[] {
         const results = generic.slice(0, maxResults).flatMap((entry) => {
           if (!entry || typeof entry !== "object") return [];
           const item = entry as Record<string, unknown>;
-          const sourceUrl = typeof item.url === "string" ? item.url : "";
-          if (!sourceUrl.startsWith("https://") && !sourceUrl.startsWith("http://")) return [];
+          const sourceUrl = item.url;
+          if (!isSafeSourceUrl(sourceUrl)) return [];
           const snippets = Array.isArray(item.snippets)
             ? item.snippets.filter((value): value is string => typeof value === "string").slice(0, 4)
             : [];
@@ -163,8 +175,8 @@ export function createBuiltinTools(): SofiaTool[] {
         const results = rawResults.slice(0, maxResults).flatMap((entry) => {
           if (!entry || typeof entry !== "object") return [];
           const item = entry as Record<string, unknown>;
-          const sourceUrl = typeof item.url === "string" ? item.url : "";
-          if (!sourceUrl.startsWith("https://") && !sourceUrl.startsWith("http://")) return [];
+          const sourceUrl = item.url;
+          if (!isSafeSourceUrl(sourceUrl)) return [];
           const profile = item.profile && typeof item.profile === "object"
             ? item.profile as Record<string, unknown>
             : {};
