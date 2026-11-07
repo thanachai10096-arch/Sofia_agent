@@ -507,3 +507,45 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
 });
+
+
+test("capability discovery reports policy availability instead of exposing every registered tool as ready", () => {
+  const registry = new MapToolRegistry([
+    { name: "workspace.search", description: "Search workspace", inputSchema: { type: "object" }, effects: ["read"] as const, async execute() { return {}; } },
+    { name: "web.search", description: "Search web", inputSchema: { type: "object" }, effects: ["network", "read"] as const, async execute() { return {}; } },
+    { name: "workspace.write_file", description: "Write file", inputSchema: { type: "object" }, effects: ["write"] as const, async execute() { return {}; } },
+    { name: "terminal.run", description: "Run terminal", inputSchema: { type: "object" }, effects: ["shell"] as const, async execute() { return {}; } },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowShell: true, allowFileWrite: true, allowedHosts: ["api.search.brave.com"] },
+    async () => true,
+  );
+  const capabilities = Object.fromEntries(gateway.listTools().map(tool => [tool.name, tool.availability]));
+  assert.deepEqual(capabilities["workspace.search"], { status: "available", reason: undefined });
+  assert.deepEqual(capabilities["web.search"], { status: "available", reason: undefined });
+  assert.deepEqual(capabilities["workspace.write_file"], { status: "requires_approval", reason: "Approval is required before execution." });
+  assert.deepEqual(capabilities["terminal.run"], { status: "requires_approval", reason: "Approval is required before execution." });
+
+  const noApproval = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowFileWrite: true },
+  );
+  const write = noApproval.listTools().find(tool => tool.name === "workspace.write_file");
+  assert.equal(write?.availability?.status, "disabled");
+  assert.match(write?.availability?.reason ?? "", /no approval handler/i);
+});
+
+
+test("network capability discovery explains missing host allowlist", () => {
+  const registry = new MapToolRegistry([
+    { name: "web.search", description: "Search web", inputSchema: { type: "object" }, effects: ["network", "read"] as const, async execute() { return {}; } },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowedHosts: [] },
+  );
+  const capability = gateway.listTools()[0];
+  assert.equal(capability.availability?.status, "disabled");
+  assert.match(capability.availability?.reason ?? "", /allowed-host/i);
+});
