@@ -1,13 +1,15 @@
-import { TextEncoder } from "node:util";
-
 import type { ModelProvider, ModelRequest, ModelRoute, TaskKind } from "../models/types.js";
 import type { InternalRoute, PackedPrompt, PreparedCall, ProviderReply } from "./token-aware-gateway.js";
 
-const encoder = new TextEncoder();
-
-function upperBoundTokens(value: unknown): number {
-  const text = JSON.stringify(value);
-  return encoder.encode(text).byteLength;
+/**
+ * Tokenizer-independent conservative estimate for route admission.
+ * UTF-8 byte length is not a token count: it multiplies Thai/CJK text by
+ * roughly 3 and caused every route to reject otherwise short conversations.
+ * Count Unicode code points instead; the provider's returned usage is the
+ * authoritative measurement after invocation.
+ */
+export function estimatePromptTokensUpperBound(value: unknown): number {
+  return Array.from(JSON.stringify(value)).length;
 }
 
 function taskKindForPhase(phase: string): TaskKind {
@@ -121,7 +123,7 @@ export function createInternalRoute(
       };
 
       return {
-        inputTokensUpperBound: upperBoundTokens(request),
+        inputTokensUpperBound: estimatePromptTokensUpperBound(request),
         invoke: async ({ signal, maxOutputTokens }): Promise<ProviderReply> => {
           const response = await modelProvider.generate(request, route, {
             signal,
