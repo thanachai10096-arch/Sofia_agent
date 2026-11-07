@@ -30,14 +30,14 @@ test("Postgres ledger preserves safe error code when patch omits the field", asy
     ): Promise<WorkflowLedgerQueryResult<RowType>> {
       calls.push({ sql, values });
       if (sql.includes("SELECT") && sql.includes("FOR UPDATE")) {
-        return { rows: [row as RowType], rowCount: 1 };
+        return { rows: [row as unknown as RowType], rowCount: 1 };
       }
       if (sql.includes("UPDATE sofia_workflow_executions")) {
         assert.match(sql, /safe_error_code = CASE WHEN \$7::boolean THEN \$8 ELSE safe_error_code END/);
         assert.equal(values?.[6], false);
         assert.equal(values?.[7], null);
         return {
-          rows: [{ ...row, status: "succeeded" } as RowType],
+          rows: [{ ...row, status: "succeeded" } as unknown as RowType],
           rowCount: 1,
         };
       }
