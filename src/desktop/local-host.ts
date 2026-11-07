@@ -105,6 +105,7 @@ function safeLaunchEnvironment(): NodeJS.ProcessEnv {
 
 export function describeDesktopAction(action: DesktopAction): string {
   switch (action.kind) {
+    case "screen.capture": return "Capture the local screen" + (action.displayId ? " (display " + action.displayId + ")" : "") + " — image contents may contain private information.";
     case "app.launch":
       return [
         "Launch application",
