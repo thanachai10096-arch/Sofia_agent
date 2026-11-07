@@ -111,12 +111,13 @@ export class CloudBrowserSessionManager {
     return { url: await item.page.url(), title: await item.page.title(), content: (await item.page.content()).slice(0, 50_000) };
   }
 
-  async screenshot(ownerId: string, sessionId: string): Promise<{ imageBase64: string; mimeType: "image/png" }> {
+  async screenshot(ownerId: string, sessionId: string): Promise<{ imageBase64: string; mimeType: "image/png"; width: number; height: number }> {
     await this.expireIdle();
     const item = this.owned(ownerId, sessionId);
     const imageBase64 = await item.page.screenshot();
     if (Buffer.byteLength(imageBase64, "base64") > this.maxScreenshotBytes) throw new Error("Cloud browser screenshot is too large.");
-    return { imageBase64, mimeType: "image/png" };
+    const viewport = await item.page.viewportSize?.() ?? { width: 1280, height: 720 };
+    return { imageBase64, mimeType: "image/png", width: viewport.width, height: viewport.height };
   }
 
   async act(ownerId: string, sessionId: string, action: Record<string, unknown>): Promise<{ ok: true; url: string }> {
