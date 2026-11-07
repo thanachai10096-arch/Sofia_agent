@@ -129,6 +129,9 @@ export class CloudBrowserSessionManager {
       await item.page.clickAt(Number(action.x), Number(action.y));
     } else if (kind === "typeFocused" && typeof action.text === "string" && action.text.length <= 4000 && item.page.typeFocused) {
       await item.page.typeFocused(action.text);
+    } else if (kind === "pressFocused" && typeof action.key === "string" && action.key.length <= 32 &&
+      ["Enter", "Tab", "Backspace", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(action.key) && item.page.pressFocused) {
+      await item.page.pressFocused(action.key);
     } else if (kind === "click" && typeof action.selector === "string" && action.selector.length <= 1000) {
       await item.page.click(action.selector);
     } else if (kind === "type" && typeof action.selector === "string" && action.selector.length <= 1000 &&
