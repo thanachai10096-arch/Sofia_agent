@@ -219,6 +219,7 @@ const server = createSofiaApi(deps, {
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
   desktopCommandBroker,
+  ...(cloudBrowserSessions ? { cloudBrowserSessions } : {}),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
