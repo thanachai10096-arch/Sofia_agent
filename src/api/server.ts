@@ -397,12 +397,19 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               ".js": "text/javascript; charset=utf-8", ".webmanifest": "application/manifest+json",
               ".svg": "image/svg+xml",
             };
+            const isHtml = path.extname(file) === ".html";
+            const isServiceWorker = asset === "service-worker.js";
             res.writeHead(200, {
               "content-type": types[path.extname(file)] ?? "application/octet-stream",
-              "cache-control": asset === "index.html" ? "no-store" : "public, max-age=300",
+              // Never let browsers or intermediary caches retain authenticated HTML or a stale worker.
+              "cache-control": isHtml || isServiceWorker ? "no-store" : "public, max-age=300",
               "x-content-type-options": "nosniff",
-              "content-security-policy": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
-              ...(asset === "service-worker.js" ? { "service-worker-allowed": "/workspace/" } : {}),
+              "x-frame-options": "DENY",
+              "referrer-policy": "no-referrer",
+              "permissions-policy": "camera=(), microphone=(), geolocation=()",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+              ...(isServiceWorker ? { "service-worker-allowed": "/workspace/" } : {}),
             });
             return res.end(content);
           } catch { return json(res, 404, { error: "workspace_asset_not_found" }, origin, config); }
