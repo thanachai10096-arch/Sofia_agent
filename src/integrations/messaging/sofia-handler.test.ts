@@ -97,6 +97,20 @@ test("denied user cannot start a run", async () => {
   assert.equal(h.starts.length, 0);
 });
 
+test("denied sender never triggers sender-specific credential selection", async () => {
+  const h = harness(false);
+  let selected = false;
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    clientForMessage: () => {
+      selected = true;
+      throw new Error("credential lookup must not run for denied senders");
+    },
+  });
+  assert.equal(await handle(inbound("do not authorize me")), "Access denied.");
+  assert.equal(selected, false);
+});
+
 test("empty and overlong tasks are rejected by existing dispatcher", async () => {
   const empty = harness();
   const handleEmpty = createSofiaMessagingHandler({ ...empty });
