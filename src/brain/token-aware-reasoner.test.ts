@@ -84,6 +84,40 @@ test("normalized prompt keeps task once and moves memory into bounded state", as
   assert.deepEqual(captured.requiredCapabilities, ["reasoning", "coding"]);
 });
 
+test("normalized prompt includes active project context without exposing it as instructions", async () => {
+  let captured: InferenceRequest | undefined;
+  const gateway = {
+    async generateMetered(input: InferenceRequest) {
+      captured = input;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  } as unknown as TokenAwareGateway;
+  const reasoner = new TokenAwareBrainReasoner(gateway);
+  const controller = new AbortController();
+  const prepared = await reasoner.prepare(JSON.stringify({
+    phase: "understand",
+    payload: { task: "สร้างฟีเจอร์ค้นเว็บในโปรเจกต์นี้" },
+    memory: {
+      projectContext: {
+        root: "/workspace/sofia",
+        files: [
+          { path: "package.json", content: '{"type":"module","dependencies":{"playwright":"^1.55.0"}}' },
+          { path: "SOFIA.md", content: "Use TypeScript and preserve the existing Sofia Brain architecture." },
+        ],
+      },
+    },
+  }), { signal: controller.signal, maxContextTokens: 16_000 });
+  await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
+  assert.ok(captured);
+  const state = JSON.stringify(captured.core.state);
+  assert.match(state, /package.json/);
+  assert.match(state, /playwright/);
+  assert.match(state, /SOFIA.md/);
+  assert.match(state, /TypeScript/);
+  assert.match(captured.core.instructions, /Do not ask the user to choose details that are already established/);
+  assert.match(captured.core.instructions, /reasonable reversible default exists/);
+});
+
 test("normalized prompt bounds oversized memory without truncating the task", async () => {
   let captured: InferenceRequest | undefined;
   const gateway = {
