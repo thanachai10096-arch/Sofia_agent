@@ -911,6 +911,16 @@ export class SofiaBrain {
       throw new Stop("Replanner returned the same effective plan");
     }
 
+    // Legacy learned repair skills are prompt-guidance, not executable
+    // skill.<id> handlers. Count one only after it was supplied to the
+    // recovery planner and that planner produced a materially changed plan.
+    // Advanced handler skills continue to be attributed only by executeStep.
+    const selectedRecoverySkill = skills[0];
+    if (selectedRecoverySkill) {
+      this.selectedSkillIds.add(selectedRecoverySkill.id);
+      this.activeSkillId = selectedRecoverySkill.id;
+    }
+
     return plan;
   }
 
