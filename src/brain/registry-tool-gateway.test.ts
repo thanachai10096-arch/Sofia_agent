@@ -278,7 +278,8 @@ test("read-only browser tools can run without interactive approval while page ac
   const policy = { ...defaultPolicy, allowNetwork: true, allowBrowser: true, allowedHosts: ["example.com"] };
   const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy);
 
-  assert.deepEqual(gateway.describe("browser.observe")?.effects, ["network", "read"]);
+  assert.deepEqual(gateway.describe("browser.observe")?.effects, ["read"]);
+  assert.deepEqual(gateway.describe("browser.goto")?.effects, ["network", "read"]);
   assert.deepEqual(gateway.describe("browser.click")?.effects, ["browser", "network"]);
 
   const read = await gateway.execute(
@@ -294,7 +295,7 @@ test("read-only browser tools can run without interactive approval while page ac
   );
   assert.equal(interaction.ok, false);
   assert.equal(interaction.error?.category, "permission_error");
-  assert.match(interaction.error?.message ?? "", /approval/i);
+  assert.match(interaction.error?.message ?? "", /url/i);
   assert.equal(clicked, false);
 });
 
