@@ -9,6 +9,8 @@ export interface SecurityAction {
   principalId?: string | undefined;
   toolName: string;
   input: Record<string, unknown>;
+  /** Fixed operator-owned targets; included in the approval hash and host allowlist checks. */
+  trustedNetworkTargets?: readonly string[];
   effects: readonly ToolEffect[];
   risk: RiskLevel;
   actionHash: string;
@@ -33,8 +35,9 @@ export function canonicalJson(value: unknown): string {
   return "{" + Object.keys(record).sort().map(key => JSON.stringify(key) + ":" + canonicalJson(record[key])).join(",") + "}";
 }
 
-export function actionHash(runId: string, toolName: string, input: Record<string, unknown>, principalId?: string): string {
-  return createHash("sha256").update((principalId ?? "") + "\n" + runId + "\n" + toolName + "\n" + canonicalJson(input)).digest("hex");
+export function actionHash(runId: string, toolName: string, input: Record<string, unknown>, principalId?: string, trustedNetworkTargets: readonly string[] = []): string {
+  const trustedTargets = [...trustedNetworkTargets].sort();
+  return createHash("sha256").update((principalId ?? "") + "\n" + runId + "\n" + toolName + "\n" + canonicalJson(input) + "\n" + canonicalJson(trustedTargets)).digest("hex");
 }
 
 export function riskFor(effects: readonly ToolEffect[], input: Record<string, unknown>): RiskLevel {
@@ -121,12 +124,13 @@ function isGitNetworkCommand(input: Record<string, unknown>): boolean {
 }
 
 export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">, blockedPaths: readonly string[] = [], allowedHosts: readonly string[] = []): SecurityDecision {
-  const hash = actionHash(action.runId, action.toolName, action.input, action.principalId);
+  const trustedTargets = action.trustedNetworkTargets ?? [];
+  const hash = actionHash(action.runId, action.toolName, action.input, action.principalId, trustedTargets);
   const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;
   if (action.effects.includes("network") || action.effects.includes("browser")) {
     const explicitUrl = typeof action.input.url === "string" ? action.input.url : undefined;
     const discoveredUrls = collectHttpUrls(action.input).filter((url) => url !== explicitUrl);
-    const urls = [...(explicitUrl ? [explicitUrl] : []), ...discoveredUrls];
+    const urls = [...trustedTargets, ...(explicitUrl ? [explicitUrl] : []), ...discoveredUrls];
     const opaqueGitNetworkOperation = action.toolName === "git.run" && isGitNetworkCommand(action.input);
     if (urls.length === 0 && action.toolName !== "terminal.run" && !(action.toolName === "git.run" && !opaqueGitNetworkOperation)) {
       return { allowed: false, risk: "critical", requireApproval: true, reason: "Network actions must expose an explicit HTTP(S) URL for allowlist enforcement.", actionHash: hash };
