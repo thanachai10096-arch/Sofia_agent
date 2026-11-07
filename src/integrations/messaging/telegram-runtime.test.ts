@@ -29,6 +29,10 @@ test("Telegram API credentials are unique and scoped to every allowed sender", (
   assert.throws(() => parseTelegramUserApiKeys('{"123":"same","456":"same"}', allowed), /unique non-empty API key/);
   assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one"}', allowed), /every allowed Telegram user ID/);
   assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one","999":"key-two"}', allowed), /every allowed Telegram user ID/);
+  assert.throws(
+    () => parseTelegramUserApiKeys('{"123":"master-key","456":"key-two"}', allowed, new Set(["master-key"])),
+    /not shared with another Sofia identity/,
+  );
   assert.throws(() => parseTelegramUserApiKeys('not-json', allowed), /every allowed Telegram user ID/);
 });
 
