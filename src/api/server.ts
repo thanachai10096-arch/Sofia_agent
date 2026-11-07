@@ -11,6 +11,7 @@ import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import type { ApprovalRecord } from "../agent/approval-queue.js";
 
 interface ActiveRun {
   id: string;
@@ -296,6 +297,38 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      const isApprovalRequest = requestUrl.pathname === "/v1/approvals" || requestUrl.pathname.startsWith("/v1/approvals/");
+      if (isApprovalRequest) {
+        const queue = deps.approvalQueue;
+        if (!queue) return json(res, 503, { error: "approval_queue_unavailable" }, origin, config);
+        if (req.method === "GET" && requestUrl.pathname === "/v1/approvals") {
+          if (!auth.scopes.includes("approval:read")) return json(res, 403, { error: "forbidden", requiredScope: "approval:read" }, origin, config);
+          const rawLimit = Number(requestUrl.searchParams.get("limit") ?? "50");
+          const limit = Number.isSafeInteger(rawLimit) ? Math.max(1, Math.min(200, rawLimit)) : 50;
+          const approvals: ApprovalRecord[] = queue.list(auth.keyId, { limit });
+          return json(res, 200, { approvals }, origin, config);
+        }
+        const decisionMatch = requestUrl.pathname.match(/^\\/v1\\/approvals\\/([0-9a-f-]{36})\\/decision$/i);
+        if (req.method === "POST" && decisionMatch) {
+          if (!auth.scopes.includes("approval:decide")) return json(res, 403, { error: "forbidden", requiredScope: "approval:decide" }, origin, config);
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          const input = raw as Record<string, unknown>;
+          if (typeof input.actionHash !== "string" || !/^[a-f0-9]{64}$/i.test(input.actionHash) || typeof input.approved !== "boolean") {
+            return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          }
+          const decision = queue.decide({
+            id: decisionMatch[1]!,
+            ownerId: auth.keyId,
+            decidedBy: auth.keyId,
+            actionHash: input.actionHash,
+            approved: input.approved,
+          });
+          if (!decision) return json(res, 409, { error: "approval_not_pending_or_action_mismatch" }, origin, config);
+          return json(res, 200, { approval: decision }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
+      }
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
         if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
