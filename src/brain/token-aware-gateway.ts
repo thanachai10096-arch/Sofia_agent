@@ -188,7 +188,17 @@ function packContext(
   if (prepared.inputTokensUpperBound > inputLimit) {
     const state = core.state;
     if (state && typeof state === "object" && !Array.isArray(state)) {
+      // These fields carry task semantics or route/phase constraints.
+      // They must never be discarded as a side effect of context compaction.
+      const protectedStateKeys = new Set([
+        "phase",
+        "task",
+        "understanding",
+        "minimumQualityTier",
+        "requiredCapabilities",
+      ]);
       const entries = Object.entries(state as Record<string, unknown>)
+        .filter(([key]) => !protectedStateKeys.has(key))
         .sort((a, b) => {
           const size = (value: unknown) => {
             try { return JSON.stringify(value)?.length ?? 0; } catch { return 0; }
