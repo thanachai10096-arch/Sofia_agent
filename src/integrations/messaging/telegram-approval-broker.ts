@@ -156,13 +156,13 @@ export class TelegramApprovalBroker {
   handleCommand(input: { userId: string; conversationId: string; text: string }): string | undefined {
     const match = input.text.trim().match(/^\/(approve|deny)(?:@[A-Za-z0-9_]+)?\s+([a-f0-9]{32})$/i);
     if (!match) return undefined;
-    const code = match[2].toLowerCase();
+    const code = (match[2] ?? "").toLowerCase();
     const item = this.pending.get(code);
     if (!item) return "คำขออนุมัตินี้หมดอายุหรือถูกใช้ไปแล้ว";
     if (item.route.userId !== input.userId || item.route.conversationId !== input.conversationId) {
       return "คุณไม่มีสิทธิ์ตอบรับคำขออนุมัตินี้";
     }
-    const approved = match[1].toLowerCase() === "approve";
+    const approved = (match[1] ?? "").toLowerCase() === "approve";
     item.resolve(approved);
     return approved ? "✅ อนุมัติแล้ว Sofia จะดำเนินการต่อ" : "⛔ ปฏิเสธแล้ว Sofia จะไม่ดำเนินการ";
   }
