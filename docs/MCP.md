@@ -2,6 +2,8 @@
 
 Sofia exposes an opt-in MCP client that adapts remote MCP tools into Sofia's existing tool format. The adapter does not execute tools directly: register the returned SofiaTool array with the existing Tool Registry so the normal Tool Gateway, policy, approval, and audit path remains authoritative.
 
+The async `createSofiaAgentDependenciesWithSessions(workspace, approval, databasePath, mcpServers)` factory can now accept an explicit list of trusted `ManagedMcpServerConfig` entries. It connects them during startup and injects their allowlisted tools into every Brain run's Tool Registry. The returned dependencies expose `closeMcpServers()`; call it during graceful shutdown. Existing calls that omit `mcpServers` keep the previous behavior.
+
 ## Transports
 
 - stdio launches an explicitly configured command. Only a small environment-variable allowlist is inherited by default; pass additional variables explicitly. Only connect to MCP servers whose commands and packages you trust.
@@ -9,18 +11,26 @@ Sofia exposes an opt-in MCP client that adapts remote MCP tools into Sofia's exi
 
 ## Example
 
-    import { McpClient } from "sofia-agent";
-    import { McpStdioTransport } from "sofia-agent";
+    import {
+      createSofiaAgentDependenciesWithSessions,
+      McpStdioTransport,
+    } from "sofia-agent";
 
-    const transport = new McpStdioTransport({
-      command: "node",
-      args: ["./trusted-mcp-server.js"],
-      env: { MCP_MODE: "read-only" },
-    });
-    const client = new McpClient(transport);
-    await client.initialize();
-    const tools = await client.createSofiaTools();
-    // Register tools with Sofia's existing registry; do not call them outside ToolGateway.
+    const deps = await createSofiaAgentDependenciesWithSessions(
+      process.cwd(),
+      undefined,
+      undefined,
+      [{
+        transport: new McpStdioTransport({
+          command: "node",
+          args: ["./trusted-mcp-server.js"],
+          env: { MCP_MODE: "read-only" },
+        }),
+        options: { id: "docs", allowedTools: ["lookup"] },
+      }],
+    );
+    // The allowlisted MCP tools are now in deps.tools and available to Brain.
+    // On graceful shutdown, call await deps.closeMcpServers().
 
 ## Security and limitations
 
