@@ -4,6 +4,8 @@ import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
+import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.js";
 import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
@@ -34,6 +36,7 @@ if (discordRequested && !discordConfigured) {
   console.error("Discord integration disabled: required configuration is incomplete; API will continue without Discord.");
 }
 let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
+let discordGatewayTransport: ReturnType<typeof createDiscordGatewayTransport> | undefined;
 const discordAbort = new AbortController();
 let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -57,7 +60,7 @@ if (discordConfigured) {
   const discordDeduplicator = new FileChatMessageDeduplicator(
     path.resolve(process.env.SOFIA_CHAT_DEDUPE_DIR ?? path.join(workspace, ".sofia", "chat-dedupe")),
   );
-  await discordTransport.start(discordAbort.signal, async (message) => {
+  const handleDiscordMessage = async (message: VerifiedDiscordMessage): Promise<void> => {
     try {
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
@@ -137,7 +140,7 @@ if (discordConfigured) {
       }
     } catch (error) {
       // Log only the error class, never task text, credentials, interaction tokens, or raw provider messages.
-      console.error("Discord command handler failed:", error instanceof Error ? error.name : "UnknownError");
+      console.error("Discord message handler failed:", error instanceof Error ? error.name : "UnknownError");
       try {
         await discordTransport?.sendMessage(
           message.channelId,
@@ -149,7 +152,17 @@ if (discordConfigured) {
         console.error("Discord command error reply delivery failed.");
       }
     }
-  });
+  };
+  await discordTransport.start(discordAbort.signal, handleDiscordMessage);
+  // Gateway intake is opt-in and reuses the exact same allowlisted shared handler.
+  // MESSAGE_CONTENT must also be enabled for the application in Discord Developer Portal.
+  if (process.env.DISCORD_GATEWAY_ENABLED?.trim().toLowerCase() === "true") {
+    discordGatewayTransport = createDiscordGatewayTransport({
+      botToken: discordBotToken,
+      onError: (event, status) => console.error("Discord Gateway error:", event, status ?? ""),
+    });
+    await discordGatewayTransport.start(discordAbort.signal, handleDiscordMessage);
+  }
 
   // Retry recovery notifications while the process is alive. A crashed worker may
   // still have an unexpired lease at startup; periodic list() calls let the runtime
@@ -206,6 +219,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     discordAbort.abort();
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
     void discordTransport?.stop();
+    void discordGatewayTransport?.stop();
     void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
     server.close();
   });
