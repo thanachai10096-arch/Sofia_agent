@@ -81,7 +81,7 @@ export const SUBAGENT_ALLOWED_TOOLS = new Set([
 /** Coding recovery is not a default path for ordinary conversation. */
 export function isSubagentWorthyTask(task: string, requiredTools: readonly string[] = []): boolean {
   if (requiredTools.some((tool) => SUBAGENT_ALLOWED_TOOLS.has(tool))) return true;
-  return /\\b(code|coding|typescript|javascript|python|program(?:ming)?|implement|repository|repo|compile|build|test|debug|bug|deploy|refactor)\\b|โค้ด|เขียนโปรแกรม|แก้บั๊ก|แก้โค้ด|ทดสอบระบบ|พัฒนา/.test(task.toLowerCase());
+  return /\b(code|coding|typescript|javascript|python|program(?:ming)?|implement|repository|repo|compile|build|test|debug|bug|deploy|refactor)\b|โค้ด|เขียนโปรแกรม|แก้บั๊ก|แก้โค้ด|ทดสอบระบบ|พัฒนา/.test(task.toLowerCase());
 }
 function compact(value: unknown, max = 6_000): string {
   let text = typeof value === "string" ? value : JSON.stringify(value);
