@@ -37,7 +37,7 @@ export function createBuiltinTools(): SofiaTool[] {
         const apiKey = process.env.BRAVE_SEARCH_API_KEY?.trim();
         if (!apiKey) throw new Error("Web search is not configured: set BRAVE_SEARCH_API_KEY.");
         const query = typeof input.query === "string" ? input.query.trim() : "";
-        if (!query || query.length > 600 || query.split(/\\s+/).length > 75) {
+        if (!query || query.length > 600 || query.split(/\s+/).length > 75) {
           throw new Error("Web search query must contain 1–600 characters and at most 75 words.");
         }
         const country = typeof input.country === "string" ? input.country.toUpperCase() : "TH";
@@ -122,7 +122,7 @@ export function createBuiltinTools(): SofiaTool[] {
         const apiKey = process.env.BRAVE_SEARCH_API_KEY?.trim();
         if (!apiKey) throw new Error("News search is not configured: set BRAVE_SEARCH_API_KEY.");
         const query = typeof input.query === "string" ? input.query.trim() : "";
-        if (!query || query.length > 400 || query.split(/\\s+/).length > 50) {
+        if (!query || query.length > 400 || query.split(/\s+/).length > 50) {
           throw new Error("News query must contain 1–400 characters and at most 50 words.");
         }
         const country = typeof input.country === "string" ? input.country.toUpperCase() : "TH";
