@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { BrowserProfileStore } from "./profile-store.js";
 import { createBrowserTools } from "./tools.js";
 import type { BrowserPage, BrowserRuntime, BrowserSession } from "./runtime.js";
 
@@ -181,4 +185,68 @@ test("run-scoped browser cleanup closes the session even when the model never ca
   // Cleanup is idempotent and must not close the same browser twice.
   await cleanup!();
   assert.equal(closes, 1);
+});
+
+test("browser.login creates an owner-bound persistent profile without exposing its directory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-browser-login-"));
+  try {
+    const store = new BrowserProfileStore(root);
+    const launchOptions: Array<{ profileDirectory?: string; headless?: boolean } | undefined> = [];
+    let closeCount = 0;
+    const runtime: BrowserRuntime = {
+      launch: async (options) => {
+        launchOptions.push(options);
+        return {
+          id: "persistent-session",
+          newPage: async () => ({
+            id: "persistent-page",
+            url: async () => "https://example.com/",
+            title: async () => "Example",
+            content: async () => "",
+            goto: async () => {},
+            click: async () => {},
+            type: async () => {},
+            select: async () => {},
+            scroll: async () => {},
+            wait: async () => {},
+            press: async () => {},
+            back: async () => {},
+            forward: async () => {},
+            reload: async () => {},
+            screenshot: async () => "",
+            close: async () => {},
+          }),
+          close: async () => { closeCount++; },
+        };
+      },
+    };
+    const tools = createBrowserTools(runtime, undefined, { profileStore: store, ownerId: "principal-a", allowLogin: true });
+    const tool = (name: string) => {
+      const found = tools.find((item) => item.name === name);
+      assert.ok(found, "missing browser tool " + name);
+      return found;
+    };
+    const result = await tool("browser.login").execute({ url: "https://example.com/login" }, {} as never) as {
+      profileId: string; loginHandoff: string;
+    };
+    assert.ok(result.profileId);
+    assert.match(result.loginHandoff, /visible browser window/);
+    assert.equal(launchOptions[0]?.headless, false);
+    assert.ok(launchOptions[0]?.profileDirectory);
+    const listed = await tool("browser.profile.list").execute({}, {} as never) as { profiles: Array<Record<string, unknown>> };
+    assert.equal(listed.profiles.length, 1);
+    assert.equal("directory" in listed.profiles[0]!, false);
+    await tool("browser.close").execute({}, {} as never);
+    assert.equal(closeCount, 1);
+    const nextRunTools = createBrowserTools(runtime, undefined, { profileStore: store, ownerId: "principal-a", allowLogin: true });
+    const open = nextRunTools.find((item) => item.name === "browser.open")!;
+    await open.execute({ profileId: result.profileId }, {} as never);
+    assert.equal(launchOptions[1]?.headless, false);
+    assert.equal(launchOptions[1]?.profileDirectory, launchOptions[0]?.profileDirectory);
+    await nextRunTools.find((item) => item.name === "browser.profile.revoke")!.execute({ profileId: result.profileId }, {} as never);
+    assert.equal(closeCount, 2);
+    await assert.rejects(store.get("principal-a", result.profileId));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
