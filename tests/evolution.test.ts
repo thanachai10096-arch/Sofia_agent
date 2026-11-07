@@ -40,6 +40,25 @@ test("skill ranking smooths tiny samples instead of treating one success as cert
   assert.ok((ranked[0]?.successRate ?? 0) > (ranked[1]?.successRate ?? 1));
 });
 
+test("skill reliability records actual tool calls and execution duration", () => {
+  const engine = new EvolutionEngine();
+  engine.recordSuccess("measured-skill", 2, 1, "coding", { toolCalls: 2, durationMs: 850 });
+  engine.recordFailure("measured-skill", "handler failed", "coding", { toolCalls: 1, durationMs: 150 });
+
+  const skill = engine.getSkill("measured-skill");
+  assert.ok(skill);
+  assert.equal(skill.avgToolCalls, 1.5);
+  assert.equal(skill.avgDurationMs, 500);
+  assert.deepEqual(skill.successHistory[0] && {
+    toolCalls: skill.successHistory[0].toolCalls,
+    durationMs: skill.successHistory[0].durationMs,
+  }, { toolCalls: 2, durationMs: 850 });
+  assert.deepEqual(skill.failureHistory[0] && {
+    toolCalls: skill.failureHistory[0].toolCalls,
+    durationMs: skill.failureHistory[0].durationMs,
+  }, { toolCalls: 1, durationMs: 150 });
+});
+
 test("run-level task type statistics track success and failure", () => {
   const engine = new EvolutionEngine();
   engine.recordRun("coding", true);
