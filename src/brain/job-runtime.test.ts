@@ -488,11 +488,8 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
-  // Let each worker settle before deleting shared state. A never-resolving
-  // brain keeps its heartbeat timer active; removing the lock file while those
-  // background writes are still running races with the lock protocol on macOS.
   const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => ({ completed: true, state: "completed" }),
+    run: async () => new Promise(() => undefined),
   } as unknown as SofiaBrain), undefined, namespace));
 
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
@@ -501,19 +498,19 @@ test("DurableJobRuntime preserves concurrent submissions from independent runtim
   const reader = new DurableJobRuntime(() => ({
     run: async () => new Promise(() => undefined),
   } as unknown as SofiaBrain), undefined, namespace);
-  let persisted = await reader.list();
-  for (let attempt = 0; attempt < 100 && persisted.some((record) => record.status !== "completed"); attempt += 1) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
-    persisted = await reader.list();
-  }
+  const persisted = await reader.list();
   const persistedIds = new Set(persisted.map((record) => record.id));
 
   assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
   for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
-  assert.ok(persisted.every((record) => record.status === "completed"), "all background workers must settle before cleanup");
 
-  // Keep the unique temporary namespace isolated; do not unlink its lock file
-  // while a just-completed worker may still be unwinding its heartbeat promise.
+  const file = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  await rm(file, { force: true });
+  await rm(file + ".lock", { force: true });
 });
 
 

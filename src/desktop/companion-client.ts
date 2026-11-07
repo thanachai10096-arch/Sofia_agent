@@ -137,7 +137,7 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
         return { mimeType: capture.mimeType, dataBase64: Buffer.from(capture.data).toString("base64"), width: capture.width, height: capture.height };
       }
       case "app.launch":
-        return config.driver.launchApplication(action.applicationId, action.args);
+        return config.driver.launchApplication(action.applicationId, action.args, signal);
       case "input.click":
         await config.driver.click({ x: action.x, y: action.y, button: action.button }, signal);
         return { ok: true };

@@ -197,3 +197,53 @@ test("Desktop Companion bounds response memory while streaming untrusted API bod
   assert.equal(cancelled, true);
   assert.equal(store.value, null);
 });
+
+
+test("Desktop Companion forwards cancellation to an in-flight app launch and does not report completion", async () => {
+  const store = credentials();
+  store.value = "l".repeat(43);
+  let launchSignal: AbortSignal | undefined;
+  let launchStarted!: () => void;
+  const started = new Promise<void>((resolve) => { launchStarted = resolve; });
+  const calls: string[] = [];
+  const launchDriver: DesktopHostDriver = {
+    ...driver(calls),
+    async launchApplication(_applicationId, _args, signal) {
+      launchSignal = signal;
+      launchStarted();
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw new Error("Native desktop command aborted.");
+    },
+  };
+  let completionRequests = 0;
+  const fetchImpl: typeof fetch = async (input) => {
+    if (String(input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: {
+        id: "00000000-0000-4000-8000-000000000004",
+        createdAt: 123,
+        action: { kind: "app.launch", applicationId: "calculator", args: [] },
+      },
+    }), { status: 200 });
+    completionRequests += 1;
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: launchDriver,
+    allowedCapabilities: ["app:launch"],
+    allowedApplications: ["calculator"],
+    requestApproval: async () => true,
+    fetchImpl,
+  });
+  const controller = new AbortController();
+  const polling = client.pollOnce(controller.signal);
+  await started;
+  assert.equal(launchSignal, controller.signal);
+  controller.abort(new Error("cancelled by operator"));
+  assert.equal(await polling, false);
+  assert.equal(completionRequests, 0, "an aborted native action must not be posted as completed");
+});
