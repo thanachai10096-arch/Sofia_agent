@@ -6,7 +6,10 @@ test("route context estimate does not count UTF-8 bytes as tokens for Thai", () 
   const value = { task: "สวัสดี" };
   const estimate = estimatePromptTokensUpperBound(value);
   const serialized = JSON.stringify(value);
-  assert.equal(estimate, Array.from(serialized).length);
+  const characters = Array.from(serialized);
+  const nonAscii = characters.filter((character) => character.codePointAt(0)! > 0x7f).length;
+  const ascii = characters.length - nonAscii;
+  assert.equal(estimate, Math.ceil(ascii / 3) + nonAscii);
   assert.ok(estimate < new TextEncoder().encode(serialized).byteLength);
 });
 
