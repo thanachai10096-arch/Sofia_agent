@@ -66,3 +66,18 @@ The same API runtime now wires an owner-bound `ApprovalInbox` into the existing 
 - The mobile workspace polls the inbox and renders action details with explicit Approve/Deny controls.
 
 This first implementation is process-local. Pending requests are denied on process shutdown/restart and are not recovered from disk. It is a safe first integration, not yet a durable multi-replica approval service. Grant `approval:read` and `approval:decide` only to trusted owner keys. The cookie-authenticated BFF must enforce its CSRF/Origin checks before proxying decision requests.
+
+
+## Mobile Workspace sign-in and BFF
+
+The API now optionally serves the PWA at `/workspace/` and provides a same-origin BFF at `/api/sofia/*`. Enable it only after configuring a confidential OIDC client and a single explicitly permitted identity:
+
+- `SOFIA_WORKSPACE_OIDC_ISSUER`
+- `SOFIA_WORKSPACE_OIDC_CLIENT_ID`
+- `SOFIA_WORKSPACE_OIDC_CLIENT_SECRET`
+- `SOFIA_WORKSPACE_OIDC_REDIRECT_URI` (exact callback: `https://YOUR_HOST/workspace/auth/callback`)
+- `SOFIA_WORKSPACE_OIDC_ALLOWED_SUBJECT` (exact OIDC `sub` value)
+
+The login uses Authorization Code + PKCE S256, one-time state and nonce, RS256/JWKS signature validation, issuer/audience/expiry/issued-at checks, and an exact subject allowlist. The browser receives only an HttpOnly Secure SameSite session cookie and a separate CSRF cookie; the BFF injects the configured server-side Sofia API key and permits only the browser, agent-run and approval routes needed by this UI.
+
+This is a single-operator bridge for the current one-key API runtime, not multi-user account provisioning. Sessions and pending login state are process-local and are invalidated on restart. Configure API scopes carefully (`agent:run`, `browser:cloud`, `approval:read`, `approval:decide` as needed) and enable `SOFIA_CLOUD_BROWSER_ENABLED=true`. Do not enable public registration or share the OIDC client secret/API key with the browser.
