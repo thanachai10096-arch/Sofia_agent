@@ -47,7 +47,8 @@ function equalText(a: string, b: string): boolean {
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 }
-function tokenTooLong(value: string): boolean { return value.length > 4096; }\nfunction requiredString(value: unknown): string {
+function tokenTooLong(value: string): boolean { return value.length > 4096; }
+function requiredString(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) throw new Error("Invalid OIDC configuration or response.");
   return value;
 }
