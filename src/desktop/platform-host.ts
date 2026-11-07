@@ -110,7 +110,7 @@ public static class SofiaNativeInput {
 Add-Type -TypeDefinition $source
 switch ($env:SOFIA_NATIVE_OPERATION) {
   'capture' {
-    $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     if ($bounds.Width -lt 1 -or $bounds.Height -lt 1 -or $bounds.Width -gt 16384 -or $bounds.Height -gt 16384) { throw 'Invalid screen bounds' }
     $bitmap = New-Object System.Drawing.Bitmap($bounds.Width,$bounds.Height)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
