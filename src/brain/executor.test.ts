@@ -1040,7 +1040,20 @@ test("Thai imperative follow-ups such as ทำมา enter the action planner e
     limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
       maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
   });
-  const report = await brain.run({ task: "ทำมา" });
+  const report = await brain.run({
+    task: "ทำมา",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
   assert.ok(phases.includes("plan"), "explicit Thai action follow-up must not be short-circuited as chat");
   assert.equal(report.completed, true, report.summary);
 });
@@ -1067,7 +1080,20 @@ test("Brain planning reuses the runtime readiness results discovered during unde
     limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
       maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
   });
-  const report = await brain.run({ task: "Create hello.txt" });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
   assert.equal(report.completed, true, report.summary);
   assert.equal(planTools[0]?.runtimeReadiness, "ready");
   assert.match(planTools[0]?.runtimeReason ?? "", /probe passed/i);
