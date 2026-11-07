@@ -231,6 +231,43 @@ test("implementation and response phases request their matching route capabiliti
   }
 });
 
+test("automatic route requirements cover every Brain phase without mixing task/tool capabilities", async () => {
+  const cases = [
+    ["understand", ["fast"]],
+    ["respond", ["fast"]],
+    ["plan", ["reasoning"]],
+    ["replan", ["reasoning"]],
+    ["implement", ["coding"]],
+    ["diagnose", ["reasoning"]],
+    ["review", ["reasoning"]],
+    ["finalize", ["fast"]],
+    ["subagent", []],
+  ] as const;
+  for (const [phase, expected] of cases) {
+    let captured: InferenceRequest | undefined;
+    const gateway = {
+      async generateMetered(input: InferenceRequest) {
+        captured = input;
+        return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    } as unknown as TokenAwareGateway;
+    const reasoner = new TokenAwareBrainReasoner(gateway);
+    const controller = new AbortController();
+    const prepared = await reasoner.prepare(JSON.stringify({
+      phase,
+      payload: {
+        task: "Run the phase regression test",
+        requiredCapabilities: ["browser.open", "workspace.write_file"],
+        understanding: { requiredCapabilities: ["file-write", "network"] },
+      },
+    }), { signal: controller.signal, maxContextTokens: 16_000 });
+    await prepared.invoke({ signal: controller.signal, maxOutputTokens: 700 });
+    assert.deepEqual(captured?.requiredCapabilities, expected, phase);
+    assert.equal(captured?.preferredRouteId, undefined, phase);
+    assert.match(JSON.stringify(captured?.core.state), /workspace\.write_file/);
+  }
+});
+
 test("response and finalization prompts require citations for supplied web research", async () => {
   for (const phase of ["respond", "finalize"]) {
     const prompt = await promptFor(phase);
