@@ -55,7 +55,16 @@ export async function connectMcpFromEnv(policy: ExecutionPolicy): Promise<Manage
   if (!policy.allowTools) throw new Error("MCP cannot start while tool execution is disabled");
   const configs = parseConfig(raw);
   const stdioAllowed = new Set((process.env.SOFIA_MCP_STDIO_ALLOWED_COMMANDS ?? "").split(",").map((value) => value.trim()).filter(Boolean));
-  // Preflight every transport before spawning any stdio child process.\n  for (const config of configs) {\n    if (config.transport === "http") {\n      const endpoint = new URL(config.endpoint);\n      if (!policy.allowNetwork || !policyHostAllowed(endpoint.hostname, policy.allowedHosts)) throw new Error("MCP HTTP server " + config.id + " is blocked: enable network and allowlist its exact hostname");\n    } else if (!stdioAllowed.has(config.command)) {\n      throw new Error("MCP stdio command is not in SOFIA_MCP_STDIO_ALLOWED_COMMANDS: " + config.command);\n    }\n  }\n  const servers = configs.map((config) => {
+  // Preflight every transport before spawning any stdio child process.
+  for (const config of configs) {
+    if (config.transport === "http") {
+      const endpoint = new URL(config.endpoint);
+      if (!policy.allowNetwork || !policyHostAllowed(endpoint.hostname, policy.allowedHosts)) throw new Error("MCP HTTP server " + config.id + " is blocked: enable network and allowlist its exact hostname");
+    } else if (!stdioAllowed.has(config.command)) {
+      throw new Error("MCP stdio command is not in SOFIA_MCP_STDIO_ALLOWED_COMMANDS: " + config.command);
+    }
+  }
+  const servers = configs.map((config) => {
     if (config.transport === "http") {
       const endpoint = new URL(config.endpoint);
       if (!policy.allowNetwork || !policyHostAllowed(endpoint.hostname, policy.allowedHosts)) {
@@ -78,5 +87,9 @@ export async function connectMcpFromEnv(policy: ExecutionPolicy): Promise<Manage
     const options: McpStdioTransportOptions = { command: config.command, args: config.args, cwd: config.cwd, env };
     return { transport: new McpStdioTransport(options), options: { id: config.id, allowedTools: config.allowedTools } };
   });
-  try { return await connectManagedMcpRegistry([], servers); }\n  catch (error) {\n    await Promise.allSettled(servers.map(({ transport }) => transport.close()));\n    throw error;\n  }
+  try { return await connectManagedMcpRegistry([], servers); }
+  catch (error) {
+    await Promise.allSettled(servers.map(({ transport }) => transport.close()));
+    throw error;
+  }
 }
