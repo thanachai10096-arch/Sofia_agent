@@ -118,7 +118,9 @@ export class RegistryToolGateway implements ToolGateway {
     if(!this.policy.allowTools)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution is disabled by policy."}};
     const permission=toolPermission(this.policy,call.tool,descriptor.effects);
     if(permission.allow===false)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:`Tool execution is disabled by policy: ${call.tool}`}};
-    const securityInput = registeredTool.networkUrl ? { ...input, url: registeredTool.networkUrl } : input;
+    const securityInput = registeredTool.networkUrl
+      ? { ...input, ...(Object.prototype.hasOwnProperty.call(input, "url") ? { requestedUrl: input.url } : {}), url: registeredTool.networkUrl }
+      : input;
     const assessment=assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:securityInput,effects:descriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts);
     if(!assessment.allowed){
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:assessment.reason,input:redactSecrets(input)});
