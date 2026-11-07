@@ -1,5 +1,5 @@
 import type { ModelProvider, ModelRequest, ModelRoute, TaskKind } from "../models/types.js";
-import type { InternalRoute, PackedPrompt, PreparedCall, ProviderReply } from "./token-aware-gateway.js";
+import { MeteredProviderError, type InternalRoute, type PackedPrompt, type PreparedCall, type ProviderReply } from "./token-aware-gateway.js";
 
 /**
  * Tokenizer-independent admission estimate (not a mathematical upper bound).
@@ -137,8 +137,17 @@ export function createInternalRoute(
             throw new Error("Provider did not return token usage");
           }
 
+          let value: unknown;
+          try {
+            value = parseStructured(response.text);
+          } catch {
+            // The provider already reported usage, so the gateway can safely
+            // account for this malformed response and try an eligible fallback.
+            throw new MeteredProviderError(response.usage, "provider_invalid_response");
+          }
+
           return {
-            value: parseStructured(response.text),
+            value,
             usage: response.usage,
             finishReason: "complete",
           };

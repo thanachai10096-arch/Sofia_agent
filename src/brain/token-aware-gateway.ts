@@ -73,7 +73,10 @@ export interface InferenceRequest {
 }
 
 export class MeteredProviderError extends Error {
-  constructor(readonly usage: TokenUsage) {
+  constructor(
+    readonly usage: TokenUsage,
+    readonly safeReason?: string,
+  ) {
     super("Provider request failed with known usage");
     this.name = "MeteredProviderError";
   }
@@ -375,75 +378,91 @@ export class TokenAwareGateway {
       );
     }
 
-    let chosen: (typeof candidates)[number] | undefined;
-    let reservation: Reservation | undefined;
+    let lastFailure: GatewayError | undefined;
+    let attempted = 0;
+    let budgetRejected = 0;
 
+    // Try at most one request per eligible route. A malformed structured
+    // response may be recoverable on a different provider/model, but never
+    // retry the same route (which could duplicate cost without new evidence).
     for (const candidate of candidates) {
+      signal.throwIfAborted();
+      let lease: Reservation;
       try {
-        signal.throwIfAborted();
-        reservation = this.budget.reserve(candidate.route.budgetKey, {
+        lease = this.budget.reserve(candidate.route.budgetKey, {
           inputTokens: candidate.prepared.inputTokensUpperBound,
           outputTokens: candidate.maxOutputTokens,
         });
-        chosen = candidate;
-        break;
       } catch (error: unknown) {
         if (!(error instanceof BudgetError)) throw error;
         if (error.code === "run_stopped") throw error;
-      }
-    }
-
-    if (!chosen || !reservation) throw new GatewayError("no_available_budget");
-
-    const selection = chosen;
-    const lease = reservation;
-
-    const work = (async (): Promise<{ value: unknown; usage: TokenUsage }> => {
-      if (signal.aborted) {
-        lease.settle({ inputTokens: 0, outputTokens: 0 });
-        throw new GatewayError("cancelled_or_timed_out");
+        budgetRejected += 1;
+        continue;
       }
 
+      attempted += 1;
       try {
-        const reply = await selection.prepared.invoke({
+        const reply = await observeWithAbort(
+          candidate.prepared.invoke({
+            signal,
+            maxOutputTokens: candidate.maxOutputTokens,
+            requestId: randomUUID(),
+            maxAttempts: 1,
+          }),
           signal,
-          maxOutputTokens: selection.maxOutputTokens,
-          requestId: randomUUID(),
-          maxAttempts: 1,
-        });
+          () => {
+            // Unknown provider usage is charged at the full reservation and
+            // the run is stopped to prevent unmetered retries after timeout.
+            lease.settle();
+            this.budget.stop();
+          },
+        );
 
         const settled = lease.settle(reply.usage);
         if (!settled.usageKnown) throw new GatewayError("invalid_usage");
         if (settled.capExceeded) throw new GatewayError("provider_cap_exceeded");
         if (reply.finishReason !== "complete") throw new GatewayError("incomplete_output");
 
-        this.routeFailures.delete(selection.route.id);
-        this.routeOpenUntil.delete(selection.route.id);
+        this.routeFailures.delete(candidate.route.id);
+        this.routeOpenUntil.delete(candidate.route.id);
         return { value: reply.value, usage: reply.usage };
       } catch (error: unknown) {
         lease.settle(error instanceof MeteredProviderError ? error.usage : undefined);
 
-        if (!signal.aborted) {
-          const id = selection.route.id;
-          const failures = (this.routeFailures.get(id) ?? 0) + 1;
-          this.routeFailures.set(id, failures);
-          if (failures >= 2) this.routeOpenUntil.set(id, Date.now() + this.routeRecoveryCooldownMs);
-        }
+        if (signal.aborted) throw new GatewayError("cancelled_or_timed_out");
 
-        const reason = error instanceof GatewayError ? `gateway_${error.code}` : safeProviderFailureReason(error);
-        // Only sanitized metadata is logged; never log credentials, prompts, headers,
-        // provider bodies, or raw exception messages.
-        console.error("[Sofia Brain provider failure]", { reason, phase: input.phase, routeId: selection.route.id });
-        if (error instanceof GatewayError) throw error;
-        throw new GatewayError("model_call_failed", reason);
+        const id = candidate.route.id;
+        const failures = (this.routeFailures.get(id) ?? 0) + 1;
+        this.routeFailures.set(id, failures);
+        if (failures >= 2) this.routeOpenUntil.set(id, Date.now() + this.routeRecoveryCooldownMs);
+
+        const reason = error instanceof GatewayError
+          ? `gateway_${error.code}`
+          : error instanceof MeteredProviderError && error.safeReason
+            ? error.safeReason
+            : safeProviderFailureReason(error);
+        console.error("[Sofia Brain provider failure]", {
+          reason,
+          phase: input.phase,
+          routeId: candidate.route.id,
+        });
+
+        const failure = error instanceof GatewayError
+          ? error
+          : new GatewayError("model_call_failed", reason);
+        lastFailure = failure;
+
+        // Only malformed/empty model output is safe to recover by selecting
+        // another already-approved route. Auth, billing, budget, timeout,
+        // cancellation, and policy failures stop immediately.
+        const recoverable = failure.code === "model_call_failed" &&
+          ["provider_invalid_response", "provider_empty_content", "provider_thinking_only_output"].includes(failure.reason ?? "");
+        if (!recoverable) throw failure;
       }
-    })();
+    }
 
-    return observeWithAbort(work, signal, () => {
-      // Settle the outstanding reservation at its full reserved amount when provider
-      // usage is unknown. This releases in-flight capacity without undercounting cost.
-      lease.settle();
-      this.budget.stop();
-    });
+    if (lastFailure) throw lastFailure;
+    if (budgetRejected > 0 && attempted === 0) throw new GatewayError("no_available_budget");
+    throw new GatewayError("no_available_budget");
   }
 }
