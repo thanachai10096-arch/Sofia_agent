@@ -35,7 +35,7 @@ function quickConversationReply(text: string): string | undefined {
   const normalized = text
     .normalize("NFKC")
     .toLocaleLowerCase()
-    .replace(/[\\s\\u200b]+/g, "")
+    .replace(/[\s\u200b]+/g, "")
     .replace(/[!?！？。，,、.]+/g, "");
 
   if (/^(ผมมีคำถาม|ฉันมีคำถาม|มีคำถาม|ขอถามหน่อย|ถามหน่อย|ขอถาม|ถามได้ไหม|ขอถามได้ไหม)$/.test(normalized)) {
