@@ -36,6 +36,7 @@ function phaseFromRequest(request: string): BrainPhase {
       case "review":
       case "finalize":
       case "subagent":
+      case "respond":
         return phase;
       default:
         return "implement";
@@ -86,6 +87,11 @@ function outputContractFor(phase: BrainPhase): string {
     "Return this exact JSON object shape:",
     '{"strategy":"initial|inspect-evidence|fix-implementation|fix-environment|alternative-tool","reason":"non-empty string","steps":[{"id":"non-empty string","objective":"non-empty string","dependencies":["step id"],"call":{"tool":"registered tool name","input":{}}}]}',
     "All fields are required. steps must contain 1 or more steps within the supplied step budget. Dependencies must reference existing step IDs and must be acyclic.",
+  ].join("\n");
+  if (phase === "respond") return [
+    "Return this exact JSON object shape:",
+    '{"answer":"the complete user-facing answer as a non-empty string"}',
+    "Answer the user's request directly. Do not propose tools, claim tool execution, or include Markdown fences around the JSON object.",
   ].join("\n");
   if (phase === "subagent") return [
     "Return one JSON object describing your proposal:",

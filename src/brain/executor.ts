@@ -14,7 +14,7 @@ import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrateg
 import { compactSkillContext, matchSkills } from "./skills.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
-import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
+import { isSubagentWorthyTask, roleForTask, SUBAGENT_ALLOWED_TOOLS, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 import type { BrainRunSnapshot } from "./run-state.js";
 import type { RepositoryMap } from "./repository-intelligence.js";
@@ -57,7 +57,7 @@ const DEFAULT_LIMITS: BrainLimits = {
 const TRANSITIONS: Record<BrainState, readonly BrainState[]> = {
   idle: ["understanding"],
   understanding: ["planning"],
-  planning: ["executing"],
+  planning: ["executing", "completed"],
   executing: ["observing", "waiting_approval", "diagnosing"],
   observing: ["executing", "verifying", "diagnosing"],
   verifying: ["waiting_approval", "diagnosing", "completed"],
@@ -342,7 +342,7 @@ export class SofiaBrain {
   }
 
   private async infer(
-    phase: "understand" | "plan" | "replan" | "subagent",
+    phase: "understand" | "plan" | "replan" | "subagent" | "respond",
     payload: Record<string, unknown>,
   ): Promise<unknown> {
     if (this.usage.modelCalls >= this.limits.maxModelCalls) {
@@ -463,6 +463,29 @@ export class SofiaBrain {
     }
   }
 
+  private async respondToConversation(input: BrainRunInput, understanding: TaskUnderstanding): Promise<string> {
+    const value = await this.infer("respond", {
+      task: input.task,
+      referenceContext: priorReferenceContext(input.context),
+      understanding,
+      requiredCapabilities: understanding.requiredCapabilities,
+    });
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Stop("Conversation response did not match the response contract");
+    }
+    const answer = (value as Record<string, unknown>).answer;
+    if (typeof answer !== "string" || !answer.trim()) {
+      throw new Stop("Conversation response was empty or malformed");
+    }
+    return answer.trim().slice(0, 12_000);
+  }
+
+  private isConversationalUnderstanding(understanding: TaskUnderstanding): boolean {
+    const nonConversational = new Set(["coding", "vision", "long-context", "tool-use"]);
+    return understanding.requiredTools.length === 0 &&
+      understanding.requiredCapabilities.every((capability) => !nonConversational.has(capability));
+  }
+
   private validatePlan(plan: ExecutionPlan): ExecutionPlan {
     topologicalOrder(plan);
 
@@ -539,9 +562,10 @@ export class SofiaBrain {
     task: string,
     context: Record<string, unknown>,
     failureCategory?: string,
+    requiredTools: readonly string[] = [],
   ): Promise<SubagentResult | undefined> {
     const runtime = this.dependencies.subagents;
-    if (!runtime) return undefined;
+    if (!runtime || !isSubagentWorthyTask(task, requiredTools)) return undefined;
 
     if (this.usage.modelCalls >= this.limits.maxModelCalls) {
       throw new Stop("Model-call budget exhausted");
@@ -568,16 +592,7 @@ export class SofiaBrain {
     // Specialist output is advisory: reject unknown tools and let the primary
     // planner recover instead of terminating the parent run.
     if (!descriptor) return false;
-    const permitted = new Set([
-      "workspace.read_file",
-      "workspace.list_files",
-      "workspace.search",
-      "git.diff",
-      "project.verify",
-      "workspace.write_file",
-      "workspace.apply_patch",
-    ]);
-    if (!permitted.has(proposal.tool)) return false;
+    if (!SUBAGENT_ALLOWED_TOOLS.has(proposal.tool)) return false;
     this.move("replanning");
     this.move("executing");
     await this.executeStep({
@@ -948,6 +963,21 @@ export class SofiaBrain {
           type: "brain.understanding.completed",
         });
 
+        // Ordinary chat is a first-class Agent Loop turn, not a coding task:
+        // answer directly without workspace snapshots, plans, tool dispatch,
+        // build/test verification, or coding recovery.
+        if (
+          input.plan === undefined &&
+          (input.acceptanceCriteria?.length ?? 0) === 0 &&
+          this.isConversationalUnderstanding(understanding)
+        ) {
+          this.move("planning");
+          const answer = await this.respondToConversation(input, understanding);
+          this.move("completed");
+          this.emit({ type: "brain.conversation.completed", passed: true });
+          return this.report(true, answer, [], [], true, []);
+        }
+
         baselineId = (
           await this.io(() => this.dependencies.tools.snapshot(this.signal))
         ).id;
@@ -1120,6 +1150,7 @@ export class SofiaBrain {
                 : undefined,
             },
             diagnosis.category,
+            understanding?.requiredTools ?? [],
           ) : undefined;
 
           if (specialist?.proposedAction) {
