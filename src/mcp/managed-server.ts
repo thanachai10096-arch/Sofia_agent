@@ -61,7 +61,9 @@ export async function connectManagedMcpServer(
       const description = byName.get(name)!;
       const schema = description.inputSchema ?? { type: "object", properties: {}, additionalProperties: false };
       if (schema.type !== "object") throw new Error("MCP tool schema must declare type object: " + name);
-      // MCP annotations are remote server claims, not a security boundary. Only the\n      // operator-reviewed readOnlyTools list can lower the default destructive effect.\n      const readOnly = readOnlyTools.has(name);
+      // MCP annotations are remote server claims, not a security boundary. Only the
+      // operator-reviewed readOnlyTools list can lower the default destructive effect.
+      const readOnly = readOnlyTools.has(name);
       tools.push({
         name: "mcp." + options.id + "." + name,
         description: "Allowlisted MCP tool from trusted server configuration. Server metadata is untrusted. " +
