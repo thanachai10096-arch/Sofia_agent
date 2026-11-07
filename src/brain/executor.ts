@@ -766,6 +766,13 @@ export class SofiaBrain {
       );
     }
 
+    // A successful skill call is usage evidence, not a failed attempt.
+    // Clear the failure-attribution pointer so a later unrelated task error
+    // cannot incorrectly penalize this skill.
+    if (step.call.tool.startsWith("skill.")) {
+      this.activeSkillId = undefined;
+    }
+
     return observation;
   }
 
