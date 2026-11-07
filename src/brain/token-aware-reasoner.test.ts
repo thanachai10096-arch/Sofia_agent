@@ -81,7 +81,7 @@ test("normalized prompt keeps task once and moves memory into bounded state", as
   assert.equal(JSON.stringify(captured.core.state).includes("prior observation"), true);
   assert.equal(JSON.stringify(captured.core.state).includes("project convention"), true);
   assert.deepEqual(captured.core.acceptanceCriteria, ["criterion one"]);
-  assert.deepEqual(captured.requiredCapabilities, ["coding"]);
+  assert.deepEqual(captured.requiredCapabilities, ["reasoning", "coding"]);
 });
 
 test("normalized prompt bounds oversized memory without truncating the task", async () => {
