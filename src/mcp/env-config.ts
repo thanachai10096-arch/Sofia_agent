@@ -2,6 +2,9 @@ import type { ManagedMcpServerConfig } from "./registry.js";
 import { McpHttpTransport, McpStdioTransport } from "./transports.js";
 
 type JsonRecord = Record<string, unknown>;
+type ParsedServer =
+  | { id: string; allowedTools: string[]; transport: { type: "stdio"; command: string; args?: string[]; cwd?: string; inheritEnv?: string[]; env?: Record<string, string> } }
+  | { id: string; allowedTools: string[]; transport: { type: "http"; endpoint: string; headers?: Record<string, string> } };
 
 function record(value: unknown, label: string): JsonRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(label + " must be an object");
@@ -20,13 +23,8 @@ function stringMap(value: unknown, label: string): Record<string, string> | unde
   return Object.fromEntries(entries) as Record<string, string>;
 }
 
-/**
- * Load only explicit operator-supplied MCP servers. The JSON is configuration,
- * never model input. stdio commands are therefore an operator trust decision.
- */
-export function loadMcpServerConfigsFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): ManagedMcpServerConfig[] {
+/** Load only explicit operator-supplied MCP servers. JSON is configuration, never model input. */
+export function loadMcpServerConfigsFromEnv(env: NodeJS.ProcessEnv = process.env): ManagedMcpServerConfig[] {
   const raw = env.SOFIA_MCP_SERVERS_JSON?.trim();
   if (!raw) return [];
   let parsed: unknown;
@@ -34,7 +32,8 @@ export function loadMcpServerConfigsFromEnv(
   catch { throw new Error("SOFIA_MCP_SERVERS_JSON must contain valid JSON"); }
   if (!Array.isArray(parsed)) throw new Error("SOFIA_MCP_SERVERS_JSON must be a JSON array");
 
-  return parsed.map((entry, index) => {
+  // Validate the complete configuration before spawning any stdio child process.
+  const validated: ParsedServer[] = parsed.map((entry, index) => {
     const item = record(entry, "MCP server entry " + index);
     if (typeof item.id !== "string") throw new Error("MCP server entry " + index + " requires an id");
     const allowedTools = strings(item.allowedTools, "MCP allowedTools");
@@ -42,32 +41,32 @@ export function loadMcpServerConfigsFromEnv(
     const transport = record(item.transport, "MCP transport");
     if (transport.type === "stdio") {
       if (typeof transport.command !== "string" || !transport.command.trim()) throw new Error("MCP stdio transport requires a command");
-      const args = strings(transport.args, "MCP stdio args", true);
-      const inheritEnv = strings(transport.inheritEnv, "MCP stdio inheritEnv", true);
-      const stdioEnv = stringMap(transport.env, "MCP stdio env");
       if (transport.cwd !== undefined && typeof transport.cwd !== "string") throw new Error("MCP stdio cwd must be a string");
       return {
-        transport: new McpStdioTransport({
+        id: item.id,
+        allowedTools,
+        transport: {
+          type: "stdio",
           command: transport.command,
-          ...(args ? { args } : {}),
+          ...(strings(transport.args, "MCP stdio args", true) ? { args: strings(transport.args, "MCP stdio args", true)! } : {}),
           ...(typeof transport.cwd === "string" ? { cwd: transport.cwd } : {}),
-          ...(inheritEnv ? { inheritEnv } : {}),
-          ...(stdioEnv ? { env: stdioEnv } : {}),
-        }),
-        options: { id: item.id, allowedTools },
+          ...(strings(transport.inheritEnv, "MCP stdio inheritEnv", true) ? { inheritEnv: strings(transport.inheritEnv, "MCP stdio inheritEnv", true)! } : {}),
+          ...(stringMap(transport.env, "MCP stdio env") ? { env: stringMap(transport.env, "MCP stdio env")! } : {}),
+        },
       };
     }
     if (transport.type === "http") {
       if (typeof transport.endpoint !== "string" || !transport.endpoint.trim()) throw new Error("MCP HTTP transport requires an endpoint");
       const headers = stringMap(transport.headers, "MCP HTTP headers");
-      return {
-        transport: new McpHttpTransport({
-          endpoint: transport.endpoint,
-          ...(headers ? { headers } : {}),
-        }),
-        options: { id: item.id, allowedTools },
-      };
+      return { id: item.id, allowedTools, transport: { type: "http", endpoint: transport.endpoint, ...(headers ? { headers } : {}) } };
     }
     throw new Error("MCP server " + item.id + " transport type must be stdio or http");
   });
+
+  return validated.map((item) => ({
+    transport: item.transport.type === "stdio"
+      ? new McpStdioTransport(item.transport)
+      : new McpHttpTransport(item.transport),
+    options: { id: item.id, allowedTools: item.allowedTools },
+  }));
 }
