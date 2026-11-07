@@ -4,8 +4,8 @@ import type { ManagedMcpToolRegistry } from "./registry.js";
 import type { McpStdioTransportOptions } from "./transports.js";
 import type { ExecutionPolicy } from "../security/policy.js";
 
-type HttpServerConfig = { id: string; transport: "http"; endpoint: string; allowedTools: string[]; headersEnv?: Record<string, string> };
-type StdioServerConfig = { id: string; transport: "stdio"; command: string; args?: string[]; cwd?: string; allowedTools: string[]; envNames?: string[] };
+type HttpServerConfig = { id: string; transport: "http"; endpoint: string; allowedTools: string[]; readOnlyTools?: string[]; headersEnv?: Record<string, string> };
+type StdioServerConfig = { id: string; transport: "stdio"; command: string; args?: string[]; cwd?: string; allowedTools: string[]; readOnlyTools?: string[]; envNames?: string[] };
 type ServerConfig = HttpServerConfig | StdioServerConfig;
 
 function parseConfig(raw: string): ServerConfig[] {
@@ -18,6 +18,8 @@ function parseConfig(raw: string): ServerConfig[] {
     const config = item as Record<string, unknown>;
     if (typeof config.id !== "string" || !/^[a-z][a-z0-9_-]{0,47}$/.test(config.id) || ids.has(config.id)) throw new Error("Invalid or duplicate MCP server id at index " + index);
     ids.add(config.id);
+    if (config.readOnlyTools !== undefined && (!Array.isArray(config.readOnlyTools) || config.readOnlyTools.some((name) => typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(name)))) throw new Error("Invalid readOnlyTools list for MCP server " + config.id);
+    if (Array.isArray(config.readOnlyTools) && Array.isArray(config.allowedTools) && config.readOnlyTools.some((name) => !config.allowedTools.includes(name))) throw new Error("readOnlyTools must be a subset of allowedTools for MCP server " + config.id);
     if (!Array.isArray(config.allowedTools) || config.allowedTools.length === 0 || config.allowedTools.length > 64 ||
         config.allowedTools.some((name) => typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(name))) {
       throw new Error("MCP server " + config.id + " requires an explicit valid allowedTools list");
@@ -76,7 +78,7 @@ export async function connectMcpFromEnv(policy: ExecutionPolicy): Promise<Manage
         if (!value) throw new Error("Missing environment variable " + envName + " for MCP server " + config.id);
         headers[header] = value;
       }
-      return { transport: new McpHttpTransport({ endpoint: config.endpoint, headers }), options: { id: config.id, allowedTools: config.allowedTools, requiresNetwork: true } };
+      return { transport: new McpHttpTransport({ endpoint: config.endpoint, headers }), options: { id: config.id, allowedTools: config.allowedTools, readOnlyTools: config.readOnlyTools, requiresNetwork: true } };
     }
     if (!stdioAllowed.has(config.command)) throw new Error("MCP stdio command is not in SOFIA_MCP_STDIO_ALLOWED_COMMANDS: " + config.command);
     const env: Record<string, string> = {};
@@ -85,7 +87,7 @@ export async function connectMcpFromEnv(policy: ExecutionPolicy): Promise<Manage
       if (value !== undefined) env[name] = value;
     }
     const options: McpStdioTransportOptions = { command: config.command, args: config.args, cwd: config.cwd, env };
-    return { transport: new McpStdioTransport(options), options: { id: config.id, allowedTools: config.allowedTools, requiresNetwork: false } };
+    return { transport: new McpStdioTransport(options), options: { id: config.id, allowedTools: config.allowedTools, readOnlyTools: config.readOnlyTools, requiresNetwork: false } };
   });
   try { return await connectManagedMcpRegistry([], servers); }
   catch (error) {
