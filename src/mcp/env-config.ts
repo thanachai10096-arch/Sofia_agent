@@ -2,18 +2,21 @@ import { McpStdioTransport, type McpStdioTransportOptions } from "./transports.j
 import type { McpTransport } from "./client.js";
 import type { ManagedMcpServerConfig } from "./registry.js";
 
-type StdioServerInput = {
-  id: string;
-  transport: "stdio";
-  command: string;
-  args?: string[];
-  cwd?: string;
-  inheritEnv?: string[];
-  env?: Record<string, string>;
-  allowedTools: string[];
-};
+class LazyStdioTransport implements McpTransport {
+  private instance?: McpStdioTransport;
+  constructor(private readonly options: McpStdioTransportOptions) {}
+  request(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown> {
+    this.instance ??= new McpStdioTransport(this.options);
+    return this.instance.request(method, params, signal);
+  }
+  notify(method: string, params?: unknown): Promise<void> {
+    this.instance ??= new McpStdioTransport(this.options);
+    return this.instance.notify(method, params);
+  }
+  async close(): Promise<void> { await this.instance?.close(); }
+}
 
-class LazyStdioTransport implements McpTransport {\n  private instance?: McpStdioTransport;\n  constructor(private readonly options: McpStdioTransportOptions) {}\n  request(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown> {\n    this.instance ??= new McpStdioTransport(this.options);\n    return this.instance.request(method, params, signal);\n  }\n  notify(method: string, params?: unknown): Promise<void> {\n    this.instance ??= new McpStdioTransport(this.options);\n    return this.instance.notify(method, params);\n  }\n  async close(): Promise<void> { await this.instance?.close(); }\n}\n\nfunction isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
