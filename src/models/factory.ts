@@ -31,6 +31,8 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { allBuiltinSkills } from "../brain/skills.js";
 import { createSkillsTools } from "../skills/tools.js";
+import { CronScheduler } from "../brain/cron-scheduler.js";
+import { createCronManagementTools } from "../brain/cron-tools.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
@@ -48,7 +50,7 @@ function intEnv(name:string,fallback:number,minimum=0){const value=Number(proces
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink}):NonNullable<AgentDependencies["brainFactory"]>{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;cronScheduler?:()=>CronScheduler|undefined}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
@@ -65,7 +67,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
-  return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
+  return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,cronExecution,onRunSnapshot,onEvent})=>{
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
     if (requestedRouteId && !requestedRoute) throw new Error("Unknown model route: " + requestedRouteId);
@@ -82,6 +84,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...createSkillsTools(skillsPlatform),
+      ...(!cronExecution && principalId && dependencies.cronScheduler?.() ? createCronManagementTools(dependencies.cronScheduler()!, principalId) : []),
       ...(grantedDesktopCapabilities.length
         ? createDesktopTools({
             runtime: new DesktopRuntime({
@@ -138,10 +141,12 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   };
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
-  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
+  let cronScheduler: CronScheduler | undefined;
+  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,cronScheduler:()=>cronScheduler});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
+  cronScheduler = new CronScheduler(jobRuntime);
   const userMemoryStore = new FileUserMemoryStore();
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),initializeIntegrations,closeIntegrations};
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,cronScheduler,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),initializeIntegrations,closeIntegrations};
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
