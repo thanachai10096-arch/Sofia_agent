@@ -106,3 +106,58 @@ test("Desktop Companion API rejects unauthenticated, oversized and malformed com
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("Desktop Companion API returns 503 for transient store failures without revoking pairing", async () => {
+  let now = 1_000;
+  let failSave = false;
+  const records = new Map<string, { ownerKeyId: string; tokenDigest: string; connectedAt: number; lastSeenAt: number }>();
+  const store = {
+    loadAll: () => [...records.values()],
+    save: (record: { ownerKeyId: string; tokenDigest: string; connectedAt: number; lastSeenAt: number }) => {
+      if (failSave) throw new Error("simulated disk failure");
+      records.set(record.ownerKeyId, record);
+    },
+    delete: (ownerKeyId: string) => { records.delete(ownerKeyId); },
+  };
+  const broker = new DesktopCommandBroker({ store, now: () => now });
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => ({ id: "test", capabilities: ["fast"], costWeight: 1, latencyWeight: 1, qualityWeight: 1, healthy: true }), markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { "desktop-owner-key": ["desktop:connect"] },
+    desktopCommandBroker: broker,
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  try {
+    const paired = await fetch(base + "/v1/desktop/companion/connect", {
+      method: "POST", headers: { authorization: "Bearer desktop-owner-key" },
+    });
+    assert.equal(paired.status, 201);
+    const { token } = await paired.json() as { token: string };
+    now += 60_000;
+    failSave = true;
+    const transientFailure = await fetch(base + "/v1/desktop/companion/commands", {
+      headers: { authorization: "Bearer " + token },
+    });
+    assert.equal(transientFailure.status, 503);
+    assert.deepEqual(await transientFailure.json(), { error: "desktop_companion_temporarily_unavailable" });
+    failSave = false;
+    const recovered = await fetch(base + "/v1/desktop/companion/commands", {
+      headers: { authorization: "Bearer " + token },
+    });
+    assert.equal(recovered.status, 200);
+    assert.deepEqual(await recovered.json(), { command: null });
+    const invalidToken = await fetch(base + "/v1/desktop/companion/commands", {
+      headers: { authorization: "Bearer " + "x".repeat(43) },
+    });
+    assert.equal(invalidToken.status, 401);
+  } finally {
+    broker.close();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
