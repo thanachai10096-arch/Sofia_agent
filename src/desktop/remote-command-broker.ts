@@ -270,12 +270,7 @@ function safeError(value: string): string {
 
 export function assertDesktopAction(value: DesktopAction): void {
   if (!value || typeof value !== "object") throw new Error("Invalid desktop action.");
-  if (value.kind === "screen.capture") {
-    if (value.displayId !== undefined && (typeof value.displayId !== "string" || value.displayId.length > 64 || !/^[a-zA-Z0-9._:-]+$/.test(value.displayId))) {
-      throw new Error("Invalid desktop screen capture display ID.");
-    }
-    return;
-  }
+  if (value.kind === "screen.capture") return;
   if (value.kind === "app.launch") {
     if (typeof value.applicationId !== "string" || !value.applicationId.trim() || value.applicationId.length > 128 ||
         !Array.isArray(value.args) || value.args.length > 32 ||
