@@ -22,10 +22,10 @@ The UI expects the same-origin path prefix `/api/sofia` by default. To change it
 
 The browser UI intentionally does not accept, store, or embed a Sofia master API key. It expects a same-origin Backend-for-Frontend (BFF) that:
 
-1. Authenticates the user with the product's existing login/session cookie (HttpOnly, Secure, SameSite).
+1. Authenticates the user with the product's existing login/session cookie (HttpOnly, Secure, SameSite) and sets a separate `sofia_csrf` double-submit cookie (Secure, SameSite, readable by this same-origin UI).
 2. Authorizes the signed-in user for browser and agent-run scopes.
 3. Proxies only the allowed `/v1/browser/cloud/*` and `/v1/agent/runs*` requests to Sofia, injecting the API key server-side.
-4. Enforces CSRF protection on mutating requests, validates Origin/Host, applies per-user rate limits, and never logs credentials or request bodies containing user data.
+4. Validates the `x-csrf-token` request header against the `sofia_csrf` cookie on mutating requests, validates Origin/Host, applies per-user rate limits, and never logs credentials or request bodies containing user data.
 5. Does not expose a generic URL-forwarding proxy or allow the client to choose API keys, provider URLs, or arbitrary headers.
 
 The BFF is a required integration; do not expose the privileged Sofia API directly to an untrusted browser or place a master key in JavaScript/localStorage/sessionStorage. The existing API currently authenticates using Bearer API keys, so a cookie-authenticated BFF is needed before this UI can be used as a signed-in production web surface.
