@@ -345,14 +345,16 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
         } satisfies BrowserPage;
       },
       close: async () => {
-        const results = await Promise.allSettled([
-          Promise.resolve().then(() => context.close()),
-          ...(browser ? [Promise.resolve().then(() => browser.close())] : []),
-          Promise.resolve().then(() => proxy.close()),
-        ]);
-        const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+        const failures: unknown[] = [];
+        // Close dependent resources in order: browser.close can invalidate the
+        // context-close CDP command if both operations race.
+        try { await context.close(); } catch (error) { failures.push(error); }
+        if (browser) {
+          try { await browser.close(); } catch (error) { failures.push(error); }
+        }
+        try { await proxy.close(); } catch (error) { failures.push(error); }
         if (failures.length > 0) {
-          throw new AggregateError(failures.map((failure) => failure.reason), "Browser session cleanup was incomplete.");
+          throw new AggregateError(failures, "Browser session cleanup was incomplete.");
         }
       },
     };
