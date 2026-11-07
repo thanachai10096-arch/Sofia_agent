@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type {
   WorkflowEngine,
   WorkflowStartRequest,
@@ -16,6 +17,12 @@ export interface MockWorkflowEngineOptions {
   readonly createExecutionId?: (sequence: number) => string;
 }
 
+interface IdempotencyEntry {
+  readonly input: Readonly<Record<string, unknown>>;
+  readonly correlationId: string;
+  readonly promise: Promise<WorkflowStartResult>;
+}
+
 /**
  * In-memory test/development engine. It performs no network I/O and is not
  * suitable for production durability or cross-process idempotency.
@@ -23,7 +30,7 @@ export interface MockWorkflowEngineOptions {
 export class MockWorkflowEngine implements WorkflowEngine {
   private sequence = 0;
   private readonly executions = new Map<string, WorkflowStatusResult>();
-  private readonly idempotency = new Map<string, Promise<WorkflowStartResult>>();
+  private readonly idempotency = new Map<string, IdempotencyEntry>();
 
   constructor(private readonly options: MockWorkflowEngineOptions) {}
 
@@ -40,12 +47,27 @@ export class MockWorkflowEngine implements WorkflowEngine {
 
     const key = JSON.stringify([request.workflowId, request.idempotencyKey]);
     const existing = this.idempotency.get(key);
-    if (existing) return existing;
+    if (existing) {
+      if (
+        !isDeepStrictEqual(existing.input, request.input) ||
+        existing.correlationId !== request.correlationId
+      ) {
+        throw new Error("workflow_idempotency_conflict");
+      }
+      return existing.promise;
+    }
 
+    const input = structuredClone(request.input);
+    const executionRequest = { ...request, input };
     const executionId = (this.options.createExecutionId ?? ((n) => `mock-execution-${n}`))(++this.sequence);
-    const pending = this.execute(executionId, request, handler);
-    // Store the promise before awaiting so concurrent duplicate starts share it.
-    this.idempotency.set(key, pending);
+    const pending = this.execute(executionId, executionRequest, handler);
+    // Store the promise and immutable request snapshot before returning so
+    // concurrent duplicates share one execution and cannot change its payload.
+    this.idempotency.set(key, {
+      input,
+      correlationId: request.correlationId,
+      promise: pending,
+    });
     return pending;
   }
 
