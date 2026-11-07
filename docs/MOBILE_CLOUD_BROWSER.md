@@ -45,6 +45,13 @@ These endpoints are the backend foundation, not a finished mobile user interface
 
 For account sign-in, the user enters passwords and MFA codes directly into the visible remote browser surface. Sofia must not request credentials in chat, read or store password fields, or bypass MFA/CAPTCHA. High-impact actions such as purchases, payments, account deletion, and publishing should require a separate confirmation in the mobile UI.
 
+
+## Mobile Workspace UI
+
+A polished responsive UI is now included at `web/mobile-workspace/` (HTML/CSS/JS): mobile-first browser surface, URL navigation, back/forward/reload, touch-to-click, touch scrolling, remote keyboard, session status and Sofia task composer.
+
+See [web/mobile-workspace/README.md](../web/mobile-workspace/README.md) for static hosting and the required cookie-authenticated BFF contract. The UI does not accept or store a Sofia master API key. The current API still uses Bearer keys, so the BFF/authenticated application integration must be completed before the UI can be exposed to end users. The approval inbox remains a placeholder and high-impact actions must stay blocked until a real approval workflow is connected.
+
 ## Important limitations
 
 This first backend slice is process-local and ephemeral: no durable session recovery, multi-replica routing, persistent cloud profiles, video streaming, or mobile UI is included yet. It is not production-ready until the mobile UI, deployment affinity/durable routing strategy, and end-to-end security tests are complete.
