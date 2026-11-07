@@ -18,6 +18,7 @@ export interface DiscordSharedChatHandlerOptions {
   allowedChannelIds: ReadonlySet<string>;
   signal: AbortSignal;
   commandPrefix?: string;
+  pollIntervalMs?: number;
   onError?: (kind: "completion_delivery_failed" | "completion_wait_failed") => void;
 }
 
@@ -69,7 +70,7 @@ export function createDiscordSharedChatHandler(options: DiscordSharedChatHandler
       commandPrefix: options.commandPrefix ?? "/run",
       naturalLanguageEnabled: true,
       onAccepted: ({ runId }) => {
-        void waitForDiscordTask({ id: runId, runtime: options.runtime }, { signal: options.signal })
+        void waitForDiscordTask({ id: runId, runtime: options.runtime }, { signal: options.signal, pollIntervalMs: options.pollIntervalMs })
           .then(async (result) => {
             const label = result.status === "completed"
               ? "Sofia completed the task."
