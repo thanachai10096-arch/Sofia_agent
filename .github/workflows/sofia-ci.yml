@@ -136,3 +136,38 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  postgres-workflow-ledger-integration:
+    name: PostgreSQL workflow ledger integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sofia_test
+          POSTGRES_USER: sofia
+          POSTGRES_PASSWORD: sofia_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sofia -d sofia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Apply workflow ledger migration
+        env:
+          PGPASSWORD: sofia_test_password
+        run: psql -h 127.0.0.1 -U sofia -d sofia_test -v ON_ERROR_STOP=1 -f migrations/202611070001_create_sofia_workflow_executions.sql
+
+      - name: Verify real PostgreSQL constraints and reconciliation query
+        env:
+          PGPASSWORD: sofia_test_password
+        run: psql -h 127.0.0.1 -U sofia -d sofia_test -v ON_ERROR_STOP=1 -f tests/integrations/workflows/postgres-ledger-schema.integration.sql
