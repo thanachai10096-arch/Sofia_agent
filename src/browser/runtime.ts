@@ -22,6 +22,7 @@ export interface BrowserPage {
   clickAt?(x: number, y: number): Promise<void>;
   /** Type into the currently focused element without reading its value. */
   typeFocused?(text: string): Promise<void>;
+  pressFocused?(key: string): Promise<void>;
   viewportSize?(): Promise<{ width: number; height: number }>;
   close(): Promise<void>;
 }
@@ -349,6 +350,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
           screenshot: async () => (await page.screenshot({ type: "png" })).toString("base64"),
           clickAt: async (x: number, y: number) => { await page.mouse.click(x, y); },
           typeFocused: async (text: string) => { await page.keyboard.type(text); },
+          pressFocused: async (key: string) => { await page.keyboard.press(key); },
           viewportSize: async () => page.viewportSize() ?? { width: 1280, height: 720 },
           close: async () => { await page.close(); },
         } satisfies BrowserPage;
