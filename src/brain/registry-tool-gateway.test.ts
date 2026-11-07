@@ -263,6 +263,12 @@ test("read-only browser tools can run without interactive approval while page ac
   let clicked = false;
   const registry = new MapToolRegistry([
     {
+      name: "browser.goto",
+      description: "Navigate to a public page",
+      inputSchema: { type: "object", properties: { pageId: { type: "string" }, url: { type: "string" } }, required: ["pageId", "url"] },
+      async execute() { return { url: "https://example.com/" }; },
+    },
+    {
       name: "browser.observe",
       description: "Read page content",
       inputSchema: { type: "object", properties: { pageId: { type: "string" } }, required: ["pageId"] },
