@@ -467,7 +467,7 @@ test("gateway forwards a single-use approval receipt bound to the approved actio
   let approvedRequest: Record<string, unknown> | undefined;
   const gateway = new RegistryToolGateway(
     { runtime: rt, tools: registry },
-    { ...defaultPolicy, allowDestructive: true },
+    { ...defaultPolicy, allowDestructive: true, maxRisk: "critical" },
     async (request) => {
       approvedRequest = request as unknown as Record<string, unknown>;
       return true;
