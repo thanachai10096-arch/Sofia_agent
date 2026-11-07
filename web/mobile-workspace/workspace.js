@@ -4,7 +4,7 @@
   // Sofia API key server-side; this browser code never handles master keys.
   const API_ROOT = (window.SOFIA_WORKSPACE_API_ROOT || "/api/sofia").replace(/\/$/, "");
   const $ = (id) => document.getElementById(id);
-  const state = { sessionId: null, refreshTimer: null, clockTimer: null, runTimer: null, startedAt: 0, expiresAt: 0, screenshotBusy: false, lastUrl: "", busy: false };
+  const state = { sessionId: null, refreshTimer: null, clockTimer: null, runTimer: null, startedAt: 0, expiresAt: 0, sessionTimeoutMs: 900000, screenshotBusy: false, lastUrl: "", busy: false, touchStart: null };
   const els = {
     statusDot:$("statusDot"),statusText:$("statusText"),url:$("urlInput"),pageTitle:$("pageTitle"),
     welcome:$("welcomeScreen"),screenWrap:$("screenWrap"),screenshot:$("browserScreenshot"),
@@ -54,7 +54,7 @@
   function showConnected(session) {
     state.sessionId = session.id;
     state.startedAt = session.createdAt || Date.now();
-    state.expiresAt = state.startedAt + (session.expiresInMs || 900000);
+    state.sessionTimeoutMs = session.expiresInMs || 900000;\n    state.expiresAt = state.startedAt + state.sessionTimeoutMs;
     els.welcome.classList.add("hidden");
     els.screenWrap.classList.remove("hidden");
     els.close.classList.remove("hidden");
@@ -200,7 +200,7 @@
     const y = Math.max(0, Math.min(els.screenshot.naturalHeight, (event.clientY - rect.top) * els.screenshot.naturalHeight / rect.height));
     action({kind:"clickAt",x:Math.round(x),y:Math.round(y)});
   }
-  els.stage.addEventListener("click", event => { if (event.target === els.screenshot) clickScreen(event); });
+  els.stage.addEventListener("click", event => { if (event.target === els.screenshot && event.detail > 0) clickScreen(event); });\n  els.screenshot.addEventListener("touchstart", event => {\n    const touch = event.touches[0]; if (touch) state.touchStart = {x:touch.clientX,y:touch.clientY};\n  }, {passive:true});\n  els.screenshot.addEventListener("touchend", event => {\n    if (!state.touchStart) return;\n    const touch = event.changedTouches[0]; const start = state.touchStart; state.touchStart = null; if (!touch) return;\n    const dx = touch.clientX - start.x, dy = touch.clientY - start.y;\n    if (Math.abs(dx) > 18 || Math.abs(dy) > 18) { event.preventDefault(); action({kind:"scroll",x:Math.round(-dx),y:Math.round(-dy)}); }\n    else { event.preventDefault(); const rect = els.screenshot.getBoundingClientRect(); const x = Math.max(0, Math.min(els.screenshot.naturalWidth, (touch.clientX - rect.left) * els.screenshot.naturalWidth / rect.width)); const y = Math.max(0, Math.min(els.screenshot.naturalHeight, (touch.clientY - rect.top) * els.screenshot.naturalHeight / rect.height)); action({kind:"clickAt",x:Math.round(x),y:Math.round(y)}); }\n  }, {passive:false});
   $("startButton").addEventListener("click", startSession);
   $("goButton").addEventListener("click", navigate);
   els.url.addEventListener("keydown", event => { if (event.key === "Enter") navigate(); });
