@@ -39,7 +39,7 @@ describe("advanced security",()=>{
  it("never blanket-approves actions in production",async()=>{
   const oldNode=process.env.NODE_ENV; const oldSofia=process.env.SOFIA_ENV;
   process.env.SOFIA_ENV="production";
-  assert.equal(await approveAll({runId:"r",principalId:"p",toolName:"terminal.run",input:{command:"x"},actionHash:"hash",risk:"high"}),false);
+  assert.equal(await approveAll({requestId:"approval-test",runId:"r",principalId:"p",toolName:"terminal.run",input:{command:"x"},actionHash:"hash",risk:"high"}),false);
   if(oldNode===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=oldNode;
   if(oldSofia===undefined)delete process.env.SOFIA_ENV;else process.env.SOFIA_ENV=oldSofia;
  });
