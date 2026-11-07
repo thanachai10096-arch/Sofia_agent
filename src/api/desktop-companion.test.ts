@@ -198,6 +198,10 @@ test("Desktop Companion disconnect revokes in-memory access when durable deletio
     assert.equal(paired.status, 201);
     const { token } = await paired.json() as { token: string };
     const pending = broker.dispatch(ownerKeyId, { kind: "input.key", key: "Enter" });
+    // Disconnect intentionally rejects this in-flight command. Attach a handler
+    // immediately so the test can assert the rejection after the HTTP response
+    // without Node treating it as an unhandled rejection in the meantime.
+    void pending.catch(() => undefined);
     failDelete = true;
     const claimed = broker.poll(token);
     assert.ok(claimed);
