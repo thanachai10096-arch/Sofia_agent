@@ -41,6 +41,7 @@ export class RegistryToolGateway implements ToolGateway {
     if(this.security.isKilled()){status="blocked";reason="Sofia security kill switch is active.";}
     else if(!this.policy.allowTools){status="blocked";reason="Tool execution is disabled by policy."; }
     else if(permission.allow===false){status="blocked";reason="Disabled by execution policy: "+tool.name;}
+        else if(effects.includes("network")&&!this.policy.allowNetwork){status="blocked";reason="Network access is disabled by execution policy.";}
     else if(effects.includes("network")&&this.policy.allowedHosts.length===0){status="blocked";reason="Network tool has no configured allowed-host list.";}
     else if(permission.requireApproval===true||effects.some(effect=>effect==="write"||effect==="shell"||effect==="destructive"||effect==="browser")){
       status="approval_required";
