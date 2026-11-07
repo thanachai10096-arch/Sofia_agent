@@ -44,7 +44,7 @@ On first pairing, enter the Sofia API key into the hidden terminal prompt. It is
 - Windows: Windows Credential Manager
 - Linux: Secret Service (GNOME Keyring, KWallet, or another Secret Service provider). Linux is configured to require Secret Service and does not silently fall back to the non-persistent kernel keyring.
 
-On later starts, the Companion attempts to reuse the stored token. If Sofia no longer recognizes it (for example, after the API process restarts), the local token is cleared and the operator is prompted to pair again with a Sofia API key. The server-side companion broker is currently process-local, so the local Keychain entry alone cannot survive a Sofia server restart.
+On later starts, the Companion attempts to reuse the stored token. If Sofia no longer recognizes it (for example, after the API process restarts), the local token is cleared and the operator is prompted to pair again with a Sofia API key. The server-side companion broker retains an idle pairing for up to seven days so a local restart can resume it. Broker state is still process-local, so the local Keychain entry cannot survive a Sofia API server restart; pair again after the API process restarts.
 
 For each application launch, the Companion opens a local browser approval page. The page is served only on `127.0.0.1`, uses a one-time random approval token in the URL fragment, rejects cross-origin decisions, expires automatically, and is bound to the exact requested application ID and arguments. Approve or deny on the computer itself. If the local browser cannot be opened, the action fails closed.
 
