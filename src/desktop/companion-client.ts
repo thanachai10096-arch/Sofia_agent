@@ -89,7 +89,9 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
   const execute = async (action: DesktopAction, signal?: AbortSignal): Promise<unknown> => {
     assertDesktopAction(action);
     if (signal?.aborted) throw signal.reason ?? new Error("Desktop action aborted.");
-    if (action.kind === "app.launch") {
+    if (action.kind === "screen.capture") {
+      if (!capabilities.has("screen:capture")) throw new Error("Local operator has not granted screen:capture.");
+    } else if (action.kind === "app.launch") {
       if (!capabilities.has("app:launch")) throw new Error("Local operator has not granted app:launch.");
       if (!allowedApplications.has(action.applicationId)) throw new Error("Application is not allowlisted by the local operator.");
     } else if (!capabilities.has("input:control")) {
@@ -99,6 +101,14 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
     if (!approved) throw new Error("Desktop action was denied by the local operator.");
     if (signal?.aborted) throw signal.reason ?? new Error("Desktop action aborted.");
     switch (action.kind) {
+      case "screen.capture": {
+        const capture = await config.driver.captureScreen(action.displayId ? { displayId: action.displayId } : undefined);
+        if (capture.data.byteLength > 5 * 1024 * 1024) throw new Error("Screen capture exceeds the 5 MiB limit.");
+        if (!Number.isInteger(capture.width) || !Number.isInteger(capture.height) || capture.width < 1 || capture.height < 1 || capture.width > 16384 || capture.height > 16384) {
+          throw new Error("Desktop driver returned invalid screen dimensions.");
+        }
+        return { mimeType: capture.mimeType, dataBase64: Buffer.from(capture.data).toString("base64"), width: capture.width, height: capture.height };
+      }
       case "app.launch":
         return config.driver.launchApplication(action.applicationId, action.args);
       case "input.click":
