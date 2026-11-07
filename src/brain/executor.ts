@@ -57,7 +57,7 @@ const DEFAULT_LIMITS: BrainLimits = {
 const TRANSITIONS: Record<BrainState, readonly BrainState[]> = {
   idle: ["understanding"],
   understanding: ["planning"],
-  planning: ["executing"],
+  planning: ["executing", "completed"],
   executing: ["observing", "waiting_approval", "diagnosing"],
   observing: ["executing", "verifying", "diagnosing"],
   verifying: ["waiting_approval", "diagnosing", "completed"],
