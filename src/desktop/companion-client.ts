@@ -220,7 +220,8 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
       const controller = new AbortController();
       activeController = controller;
       const relayAbort = () => controller.abort(signal?.reason);
-      signal?.addEventListener("abort", relayAbort, { once: true });
+      if (signal?.aborted) controller.abort(signal.reason);
+      else signal?.addEventListener("abort", relayAbort, { once: true });
       try {
         while (!controller.signal.aborted) {
           try { await pollOnce(controller.signal); }
