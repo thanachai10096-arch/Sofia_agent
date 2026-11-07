@@ -14,7 +14,7 @@ import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrateg
 import { compactSkillContext, matchSkills } from "./skills.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
-import { roleForTask, type SubagentRuntime, type SubagentResult } from "./subagents.js";
+import { isSubagentWorthyTask, roleForTask, SUBAGENT_ALLOWED_TOOLS, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 import type { BrainRunSnapshot } from "./run-state.js";
 import type { RepositoryMap } from "./repository-intelligence.js";
@@ -541,7 +541,7 @@ export class SofiaBrain {
     failureCategory?: string,
   ): Promise<SubagentResult | undefined> {
     const runtime = this.dependencies.subagents;
-    if (!runtime) return undefined;
+    if (!runtime || !isSubagentWorthyTask(task)) return undefined;
 
     if (this.usage.modelCalls >= this.limits.maxModelCalls) {
       throw new Stop("Model-call budget exhausted");
@@ -568,15 +568,7 @@ export class SofiaBrain {
     // Specialist output is advisory: reject unknown tools and let the primary
     // planner recover instead of terminating the parent run.
     if (!descriptor) return false;
-    const permitted = new Set([
-      "workspace.read_file",
-      "workspace.list_files",
-      "workspace.search",
-      "git.diff",
-      "project.verify",
-      "workspace.write_file",
-      "workspace.apply_patch",
-    ]);
+    if (!SUBAGENT_ALLOWED_TOOLS.has(proposal.tool)) return false;
     if (!permitted.has(proposal.tool)) return false;
     this.move("replanning");
     this.move("executing");
