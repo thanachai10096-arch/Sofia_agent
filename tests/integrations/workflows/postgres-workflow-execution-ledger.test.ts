@@ -55,3 +55,51 @@ test("Postgres ledger preserves safe error code when patch omits the field", asy
   assert.equal(updated?.status, "succeeded");
   assert.equal(calls.some((call) => call.sql === "COMMIT"), true);
 });
+
+test("Postgres reconciliation query is bounded and excludes accepted work", async () => {
+  let capturedSql = "";
+  let capturedValues: readonly unknown[] | undefined;
+  const row = {
+    execution_id: "execution-2",
+    workflow_id: "daily-report",
+    idempotency_key: "request-2",
+    payload_hash: "sha256:payload",
+    correlation_id: "correlation-2",
+    status: "indeterminate" as const,
+    created_at: new Date("2026-11-07T00:00:00.000Z"),
+    updated_at: new Date("2026-11-07T00:01:00.000Z"),
+    provider_execution_id: "provider-2",
+    output_json: null,
+    safe_error_code: "outcome_unknown",
+  };
+  const client: WorkflowLedgerSqlClient = {
+    async query<RowType = Record<string, unknown>>(
+      sql: string,
+      values?: readonly unknown[],
+    ): Promise<WorkflowLedgerQueryResult<RowType>> {
+      capturedSql = sql;
+      capturedValues = values;
+      return { rows: [row as unknown as RowType], rowCount: 1 };
+    },
+    release() {},
+  };
+  const ledger = new PostgresWorkflowExecutionLedger({
+    async connect() { return client; },
+  });
+
+  const results = await ledger.listForReconciliation("2026-11-07T00:05:00.000Z", 25);
+  assert.match(capturedSql, /status IN \('running', 'indeterminate'\)/);
+  assert.match(capturedSql, /ORDER BY updated_at ASC/);
+  assert.match(capturedSql, /LIMIT \$2/);
+  assert.deepEqual(capturedValues, ["2026-11-07T00:05:00.000Z", 25]);
+  assert.equal(results[0]?.providerExecutionId, "provider-2");
+  assert.equal(results[0]?.status, "indeterminate");
+  await assert.rejects(
+    ledger.listForReconciliation("not-a-date", 25),
+    /workflow_reconciliation_cutoff_invalid/,
+  );
+  await assert.rejects(
+    ledger.listForReconciliation("2026-11-07T00:05:00.000Z", 501),
+    /workflow_reconciliation_limit_invalid/,
+  );
+});
