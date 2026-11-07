@@ -212,7 +212,7 @@ function safeError(value: string): string {
   return value.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 300);
 }
 
-function assertDesktopAction(value: DesktopAction): void {
+export function assertDesktopAction(value: DesktopAction): void {
   if (!value || typeof value !== "object") throw new Error("Invalid desktop action.");
   if (value.kind === "app.launch") {
     if (typeof value.applicationId !== "string" || !value.applicationId.trim() || value.applicationId.length > 128 ||
