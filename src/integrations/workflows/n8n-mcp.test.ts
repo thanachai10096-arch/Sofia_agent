@@ -23,7 +23,7 @@ test("n8n MCP stays disabled by default", async () => {
   assert.equal(await connectN8nOfficialMcp({}, defaultPolicy, () => { throw new Error("unexpected transport"); }), undefined);
 });
 test("n8n MCP enforces HTTPS and an explicit allowlist", async () => {
-  await assert.rejects(connectN8nOfficialMcp({ ...env, SOFIA_N8N_MCP_URL: "http://automation.example.com/mcp" }, policy), /HTTPS endpoint/);
+  await assert.rejects(connectN8nOfficialMcp({ ...env, SOFIA_N8N_MCP_URL: "http://automation.example.com/mcp" }, policy), /HTTPS n8n \/mcp-server\/http endpoint/);
   await assert.rejects(connectN8nOfficialMcp({ ...env, SOFIA_N8N_MCP_ALLOWED_TOOLS: "" }, policy), /explicitly list/);
 });
 test("n8n MCP requires Sofia network policy and host allowlisting", async () => {
