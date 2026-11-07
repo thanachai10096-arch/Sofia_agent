@@ -6,6 +6,7 @@ import {
   reportTelegramRunCompletion,
   parseTelegramChatAllowlist,
   parseTelegramUserAllowlist,
+  parseTelegramUserApiKeys,
 } from "./telegram-runtime.js";
 
 test("Telegram allowlists accept numeric user IDs and signed chat IDs", () => {
@@ -18,6 +19,17 @@ test("Telegram allowlists reject empty, malformed and duplicate IDs", () => {
   assert.throws(() => parseTelegramUserAllowlist("123,abc"), /valid numeric IDs/);
   assert.throws(() => parseTelegramUserAllowlist("123,123"), /duplicate IDs/);
   assert.throws(() => parseTelegramChatAllowlist("-1, -1"), /duplicate IDs/);
+});
+
+test("Telegram API credentials are unique and scoped to every allowed sender", () => {
+  const allowed = parseTelegramUserAllowlist("123,456");
+  const keys = parseTelegramUserApiKeys('{"123":"key-one","456":"key-two"}', allowed);
+  assert.equal(keys.get("123"), "key-one");
+  assert.equal(keys.get("456"), "key-two");
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"same","456":"same"}', allowed), /unique non-empty API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one"}', allowed), /every allowed Telegram user ID/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one","999":"key-two"}', allowed), /every allowed Telegram user ID/);
+  assert.throws(() => parseTelegramUserApiKeys('not-json', allowed), /every allowed Telegram user ID/);
 });
 
 test("Telegram integration remains disabled unless explicitly enabled", () => {
