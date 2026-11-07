@@ -1,7 +1,10 @@
 import type { SofiaTool } from "../tools/types.js";
 import type { BrowserRuntime } from "./runtime.js";
+import type { BrowserProfileStore } from "./profile-store.js";
 
-export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (cleanup: () => Promise<void>) => void): SofiaTool[] {
+export interface BrowserToolOptions { profileStore?: BrowserProfileStore; ownerId?: string; allowLogin?: boolean; }
+
+export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (cleanup: () => Promise<void>) => void, options: BrowserToolOptions = {}): SofiaTool[] {
   let session: Awaited<ReturnType<BrowserRuntime["launch"]>> | undefined;
   const pages = new Map<string, Awaited<ReturnType<NonNullable<typeof session>["newPage"]>>>();
 
@@ -22,10 +25,18 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
   return [
     {
       name: "browser.open",
-      description: "Launch the browser and create a page.",
-      inputSchema: { type: "object", additionalProperties: false },
-      async execute() {
-        session ??= await runtime.launch();
+      description: "Launch an isolated browser page. Optionally use this user's saved profileId.",
+      inputSchema: { type: "object", properties: { profileId: { type: "string" } }, additionalProperties: false },
+      async execute(input) {
+        if (typeof input.profileId === "string") {
+          if (!options.profileStore || !options.ownerId) throw new Error("Saved browser profiles are unavailable on this host.");
+          if (!session) {
+            const profile = await options.profileStore.get(options.ownerId, input.profileId);
+            session = await runtime.launch({ profileDirectory: profile.directory, headless: false });
+          }
+        } else {
+          session ??= await runtime.launch();
+        }
         const value = await session.newPage();
         pages.set(value.id, value);
         return { pageId: value.id, url: await value.url() };
