@@ -20,17 +20,14 @@ test("cron management tool always uses the authenticated actor, never a model-su
 
   await execute({ action: "list" });
   await execute({ action: "pause", reason: "maintenance" });
-  await execute({ action: "create", name: "daily", task: "summarize updates", cron: "0 8 * * *", timeZone: "Asia/Bangkok", ownerKeyId: "attacker" } as Record<string, unknown>).catch(() => undefined);
   assert.deepEqual(calls.slice(0, 2), [
     { method: "list", args: ["authenticated-principal"] },
     { method: "pause", args: ["authenticated-principal", "maintenance"] },
   ]);
+  const properties = tool.inputSchema.properties as Record<string, unknown>;
+  assert.equal(properties.ownerKeyId, undefined);
+  assert.equal(tool.inputSchema.additionalProperties, false);
   assert.equal(calls.some((call) => call.method === "create"), false);
-  assert.throws(() => {
-    const schema = tool.inputSchema;
-    const properties = schema.properties as Record<string, unknown>;
-    assert.equal(properties.ownerKeyId, undefined);
-  });
 });
 
 test("cron management tool creates owner-scoped schedules with the host principal", async () => {
