@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createBuiltinTools } from "./builtin.js";
 
-const searchTool = createBuiltinTools().find((tool) => tool.name === "web.search")!;
+const tools = createBuiltinTools();
+const searchTool = tools.find((tool) => tool.name === "web.search")!;
+const newsTool = tools.find((tool) => tool.name === "web.search_news")!;
 
 test("web search calls the fixed Brave LLM context endpoint and returns bounded source excerpts", async () => {
   const oldKey = process.env.BRAVE_SEARCH_API_KEY;
@@ -85,6 +87,44 @@ test("web search validates query limits and does not call the provider for inval
       /1 to 10/,
     );
     assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
+    else process.env.BRAVE_SEARCH_API_KEY = oldKey;
+  }
+});
+
+test("news search uses the dedicated Brave news endpoint and normalizes publisher metadata", async () => {
+  const oldKey = process.env.BRAVE_SEARCH_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+  let requestedUrl: URL | undefined;
+  globalThis.fetch = async (input) => {
+    requestedUrl = new URL(String(input));
+    return new Response(JSON.stringify({
+      results: [
+        { title: "News title", url: "https://news.example/story", description: "News summary", age: "2 hours ago", breaking: true, profile: { name: "Example News" }, extra_snippets: ["More context"] },
+        { title: "Invalid", url: "file:///etc/passwd" },
+      ],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await newsTool.execute({
+      query: "ข่าวเทคโนโลยี",
+      country: "TH",
+      searchLanguage: "th",
+      freshness: "pd",
+      maxResults: 3,
+    }, { runtime: {} as never, signal: new AbortController().signal }) as {
+      resultCount: number; results: Array<{ publisher?: string; breaking: boolean; url: string }>;
+    };
+    assert.equal(requestedUrl?.pathname, "/res/v1/news/search");
+    assert.equal(requestedUrl?.searchParams.get("freshness"), "pd");
+    assert.equal(requestedUrl?.searchParams.get("safesearch"), "strict");
+    assert.equal(result.resultCount, 1);
+    assert.equal(result.results[0]?.publisher, "Example News");
+    assert.equal(result.results[0]?.breaking, true);
+    assert.equal(result.results[0]?.url, "https://news.example/story");
   } finally {
     globalThis.fetch = oldFetch;
     if (oldKey === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
