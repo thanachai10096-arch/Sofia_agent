@@ -49,6 +49,52 @@ export class RegistryToolGateway implements ToolGateway {
     }
     return{name:tool.name,description:tool.description,effects,registered:true,policy:{status,reason},runtimeReadiness:"not_probed" as const};
   });}
+  /**
+   * Probe runtime readiness without executing user tools or making network requests.
+   * Workspace checks are read-only. Shell and browser remain not_probed because a
+   * real probe would execute code or create a browser session outside this gateway.
+   */
+  async probeReadiness(){
+    const catalog=this.listTools();
+    let workspaceReady:{ok:boolean;reason:string}|undefined;
+    for(const item of catalog){
+      if(item.name.startsWith("workspace.")||item.name==="project.verify"){
+        if(!workspaceReady){
+          try{
+            const root=await this.dependencies.runtime.cwd();
+            if(typeof root!=="string"||!root.trim())throw new Error("Workspace runtime returned an empty working directory.");
+            await this.dependencies.runtime.listFiles(".");
+            workspaceReady={ok:true,reason:"Read-only workspace root and directory listing checks passed."};
+          }catch(error){
+            workspaceReady={ok:false,reason:error instanceof Error?error.message:"Workspace runtime probe failed."};
+          }
+        }
+        item.runtimeReadiness=workspaceReady.ok?"ready":"unavailable";
+        item.runtimeReason=workspaceReady.reason;
+      }else if(item.effects.includes("browser")){
+        item.runtimeReadiness="not_probed";
+        item.runtimeReason="Browser readiness requires a real browser-session probe; no session was opened during discovery.";
+      }else if(item.effects.includes("shell")){
+        item.runtimeReadiness="not_probed";
+        item.runtimeReason="Terminal execution was not invoked during discovery to avoid running a command outside an approved task.";
+      }else if(item.effects.includes("network")){
+        if(!this.policy.allowNetwork||this.policy.allowedHosts.length===0){
+          item.runtimeReadiness="unavailable";
+          item.runtimeReason="Network access is disabled or no host allowlist is configured.";
+        }else if((item.name==="web.search"||item.name==="web.search_news")&&!process.env.BRAVE_SEARCH_API_KEY?.trim()){
+          item.runtimeReadiness="unavailable";
+          item.runtimeReason="BRAVE_SEARCH_API_KEY is not configured.";
+        }else{
+          item.runtimeReadiness="not_probed";
+          item.runtimeReason="Network credentials and policy are configured, but no external request was sent during discovery.";
+        }
+      }else{
+        item.runtimeReadiness="not_probed";
+        item.runtimeReason="No safe runtime-specific probe is registered for this tool.";
+      }
+    }
+    return catalog;
+  }
   describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:effectiveToolEffects(name,tool.effects)};}
 
   async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{
