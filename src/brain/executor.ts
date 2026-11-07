@@ -232,7 +232,10 @@ function explicitlyRequestsAction(task: string): boolean {
   // A model classification alone must never turn an explicit side-effect,
   // repository, browsing, or external-service request into a no-tool reply.
   const english = /\b(fix|edit|modify|write|create|build|implement|run|execute|deploy|commit|push|install|delete|remove|send|book|purchase|open a pr|pull request|test|lint|typecheck|search the web|search for news|latest news|news search|browse|visit the site)\b/i;
-  const thai = /(แก้(โค้ด|ไฟล์|ระบบ|บั๊ก|โปรเจกต์)|สร้าง(ไฟล์|โปรเจกต์|branch|pr)|รัน(คำสั่ง|เทสต์|ทดสอบ)|ดีพลอย|ติดตั้ง|ลบ(ไฟล์|ข้อมูล)|ส่ง(ข้อความ|อีเมล)|จอง|ค้นหาเว็บ|ค้นข้อมูลล่าสุด|หาข่าว|ค้นข่าว|ข่าวล่าสุด|เปิดเว็บ|เข้าเว็บ|ทดสอบโค้ด|ตรวจสอบ(โค้ด|repository|repo))/i;
+  // Common short Thai follow-ups explicitly authorize continuing the previously scoped action.
+  // Match imperative phrases (ทำมา/ลงมือ), not broad words such as ทำไม (why),
+  // so ordinary questions remain conversational.
+  const thai = /(แก้(โค้ด|ไฟล์|ระบบ|บั๊ก|โปรเจกต์)|สร้าง(ไฟล์|โปรเจกต์|branch|pr)|รัน(คำสั่ง|เทสต์|ทดสอบ)|ดีพลอย|ติดตั้ง|ลบ(ไฟล์|ข้อมูล)|ส่ง(ข้อความ|อีเมล)|จอง|ค้นหาเว็บ|ค้นข้อมูลล่าสุด|หาข่าว|ค้นข่าว|ข่าวล่าสุด|เปิดเว็บ|เข้าเว็บ|ทดสอบโค้ด|ตรวจสอบ(โค้ด|repository|repo)|ทำมา|ลงมือ|ดำเนินการ|จัดการให้)/i;
   return english.test(task) || thai.test(task);
 }
 
