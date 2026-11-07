@@ -52,7 +52,13 @@ function phaseFromRequest(request: string): BrainPhase {
  * phase first, then merge task-derived requirements and leave unknown labels
  * intact so the gateway continues to fail closed for unsupported needs.
  */
-function routeCapabilities(values: unknown): string[] {
+const NON_MODEL_CAPABILITIES = new Set([
+  "browser", "desktop", "terminal", "shell", "filesystem", "file-system",
+  "workspace", "network", "web", "mcp", "git", "memory", "telegram",
+  "discord", "slack", "voice", "audio", "subagent", "tools", "tool",
+]);
+
+function routeCapabilities(values: unknown, phase: BrainPhase): string[] {
   if (!Array.isArray(values)) return [];
   const mapped = values
     .filter((value): value is string => typeof value === "string")
@@ -69,8 +75,17 @@ function routeCapabilities(values: unknown): string[] {
           return "reasoning";
         case "code":
           return "coding";
-        default:
-          return value.trim();
+        default: {
+          const normalized = value.trim().toLowerCase();
+          // Execution capabilities are enforced by the ToolGateway, not by
+          // model-route admission. Mixing them here rejects every model even
+          // when the required browser, shell, filesystem, or MCP tool exists.
+          if (NON_MODEL_CAPABILITIES.has(normalized)) return undefined;
+          // "fast" selects conversational routes; it is not a prerequisite
+          // for later planning, diagnosis, review, or implementation phases.
+          if (normalized === "fast" && phase !== "understand" && phase !== "respond" && phase !== "finalize") return undefined;
+          return normalized;
+        }
       }
     })
     .filter((value): value is string => Boolean(value));
@@ -173,6 +188,7 @@ function asInferenceRequest(request: string): InferenceRequest {
         Array.isArray(payload.requiredCapabilities)
           ? payload.requiredCapabilities
           : understanding.requiredCapabilities,
+        phase,
       )),
     ])],
     core: {
