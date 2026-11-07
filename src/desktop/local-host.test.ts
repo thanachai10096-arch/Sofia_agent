@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, chmodSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -12,7 +12,7 @@ test("local desktop allowlist accepts only existing absolute executable files", 
     writeFileSync(executable, "#!/bin/sh\nexit 0\n");
     chmodSync(executable, 0o700);
     const parsed = parseDesktopApplicationAllowlist(JSON.stringify({ editor: executable }));
-    assert.equal(parsed.editor, executable);
+    assert.equal(parsed.editor, realpathSync(executable));
     assert.throws(() => parseDesktopApplicationAllowlist(JSON.stringify({ editor: "relative/app" })), /absolute executable/);
     assert.throws(() => parseDesktopApplicationAllowlist(JSON.stringify({ editor: path.join(directory, "missing") })));
     if (process.platform !== "win32") {
