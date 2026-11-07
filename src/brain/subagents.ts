@@ -10,10 +10,50 @@ export type SubagentRole =
   | "security"
   | "researcher";
 
+export interface SubagentToolDescriptor {
+  name: string;
+  description: string;
+  effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[];
+}
+
+export const SUBAGENT_TOOL_ALLOWLIST = [
+  "workspace.read_file",
+  "workspace.list_files",
+  "workspace.search",
+  "git.diff",
+  "project.verify",
+  "workspace.write_file",
+  "workspace.apply_patch",
+] as const;
+
+export function isSubagentToolAllowed(name: string, tools: ToolGateway): boolean {
+  return SUBAGENT_TOOL_ALLOWLIST.includes(name as (typeof SUBAGENT_TOOL_ALLOWLIST)[number])
+    && tools.describe(name) !== undefined;
+}
+
+export function subagentToolCatalog(tools: ToolGateway): SubagentToolDescriptor[] {
+  const registered = tools.listTools?.();
+  if (registered) {
+    return registered.filter((tool) =>
+      SUBAGENT_TOOL_ALLOWLIST.includes(tool.name as (typeof SUBAGENT_TOOL_ALLOWLIST)[number])
+      && tools.describe(tool.name) !== undefined,
+    );
+  }
+
+  // Compatibility for ToolGateway implementations that predate listTools().
+  return SUBAGENT_TOOL_ALLOWLIST.flatMap((name) => {
+    const descriptor = tools.describe(name);
+    return descriptor
+      ? [{ name, description: "Registered tool; description unavailable.", effects: descriptor.effects }]
+      : [];
+  });
+}
+
 export interface SubagentRequest {
   role: SubagentRole;
   task: string;
   context?: Record<string, unknown>;
+  availableTools?: SubagentToolDescriptor[];
   signal: AbortSignal;
 }
 
@@ -88,7 +128,8 @@ export class InProcessSubagentRuntime implements SubagentRuntime {
       payload: {
         role: request.role,
         roleInstructions: instructions,
-        actionContract: "If an action is needed, return {tool,input,reason}. This is a proposal only; Brain must validate and execute it.",
+        actionContract: "If an action is needed, return {tool,input,reason}. Choose tool only from availableTools using the exact registered name. This is a proposal only; Brain must validate and execute it.",
+        availableTools: request.availableTools ?? [],
         task: request.task,
         context: request.context,
         workspaceEvidence: evidence
