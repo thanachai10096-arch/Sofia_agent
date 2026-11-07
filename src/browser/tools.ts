@@ -22,7 +22,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
     return value;
   };
 
-  return [
+  const tools: SofiaTool[] = [
     {
       name: "browser.open",
       description: "Launch an isolated browser page. Optionally use this user's saved profileId.",
@@ -109,4 +109,43 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       },
     },
   ];
+  if (options.allowLogin && options.profileStore && options.ownerId) {
+    tools.unshift({
+      name: "browser.login",
+      description: "Open a visible local browser with a new private profile. The user completes sign-in directly in that browser; never request passwords, OTPs, cookies, or tokens in chat.",
+      inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
+      async execute(input) {
+        if (session) await dispose();
+        const profile = await options.profileStore!.create(options.ownerId!);
+        try {
+          session = await runtime.launch({ profileDirectory: profile.directory, headless: false });
+          const value = await session.newPage();
+          pages.set(value.id, value);
+          await value.goto(String(input.url));
+          return { profileId: profile.id, pageId: value.id, url: await value.url(), loginHandoff: "Complete sign-in in the visible browser window. Do not paste credentials into Sofia chat." };
+        } catch (error) {
+          await dispose().catch(() => undefined);
+          await options.profileStore!.revoke(options.ownerId!, profile.id).catch(() => undefined);
+          throw error;
+        }
+      },
+    });
+    tools.unshift({
+      name: "browser.profile.list",
+      description: "List this user's saved browser profile IDs and timestamps; never return cookies or credential data.",
+      inputSchema: { type: "object", additionalProperties: false },
+      async execute() { return { profiles: await options.profileStore!.list(options.ownerId!) }; },
+    });
+    tools.unshift({
+      name: "browser.profile.revoke",
+      description: "Close the current browser session and permanently revoke one of this user's saved browser profiles.",
+      inputSchema: { type: "object", properties: { profileId: { type: "string" } }, required: ["profileId"], additionalProperties: false },
+      async execute(input) {
+        await dispose();
+        await options.profileStore!.revoke(options.ownerId!, String(input.profileId));
+        return { ok: true, revoked: true };
+      },
+    });
+  }
+  return tools;
 }
