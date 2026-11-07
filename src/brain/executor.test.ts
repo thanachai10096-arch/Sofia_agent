@@ -1019,7 +1019,7 @@ test("Thai imperative follow-ups such as ทำมา enter the action planner e
           }
         : parsed.phase === "replan"
           ? {
-              strategy: "follow-up-inspection",
+              strategy: "inspect-evidence",
               reason: "Inspect the result of the requested action.",
               steps: [{
                 id: "inspect",
