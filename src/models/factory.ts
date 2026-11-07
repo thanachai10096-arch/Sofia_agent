@@ -38,6 +38,9 @@ import { CompositeSecurityAudit } from "../security/audit.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import type { SofiaTool, ToolRegistry } from "../tools/types.js";
+import { connectN8nOfficialMcp } from "../integrations/workflows/n8n-mcp.js";
+import type { ManagedMcpServer } from "../mcp/managed-server.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
@@ -100,13 +103,40 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
 export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   const browserTools=policy.allowBrowser?createBrowserTools(new PlaywrightBrowserRuntime()):[];
-  const tools=createToolRegistry([...createBuiltinTools(),...browserTools]);
+  const baseTools=createToolRegistry([...createBuiltinTools(),...browserTools]);
+  const externalTools:SofiaTool[]=[];
+  // Keep the registry identity stable: Brain factories created below see MCP tools
+  // attached later by the async integration bootstrap, without rebuilding Sofia Brain.
+  const tools:ToolRegistry={
+    get(name){return externalTools.find((tool)=>tool.name===name)??baseTools.get(name);},
+    list(){return [...baseTools.list(),...externalTools];},
+  };
+  let n8nServer:ManagedMcpServer|undefined;
+  const initializeIntegrations=async()=>{
+    if(n8nServer)return;
+    const connected=await connectN8nOfficialMcp(process.env,policy);
+    if(connected){
+      const existing=new Set(baseTools.list().map((tool)=>tool.name));
+      for(const tool of connected.tools){
+        if(existing.has(tool.name)||externalTools.some((item)=>item.name===tool.name)){
+          await connected.close();
+          throw new Error("n8n MCP tool name collides with an existing Sofia tool: "+tool.name);
+        }
+      }
+      externalTools.push(...connected.tools);
+      n8nServer=connected;
+    }
+  };
+  const closeIntegrations=async()=>{
+    const server=n8nServer;n8nServer=undefined;externalTools.splice(0,externalTools.length);
+    await server?.close();
+  };
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const userMemoryStore = new FileUserMemoryStore();
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics()};
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),initializeIntegrations,closeIntegrations};
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
@@ -116,6 +146,21 @@ export async function createSofiaAgentDependenciesWithSessions(
   databasePath?: string,
 ): Promise<AgentDependencies & { closeSessionStore: () => void }> {
   const dependencies = createSofiaAgentDependencies(workspace, approval);
-  const sessionStore = await SqliteSessionStore.open(databasePath);
-  return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+  let sessionStore:SqliteSessionStore|undefined;
+  try {
+    await dependencies.initializeIntegrations?.();
+    sessionStore = await SqliteSessionStore.open(databasePath);
+  } catch(error) {
+    await dependencies.closeIntegrations?.().catch(()=>undefined);
+    sessionStore?.close();
+    throw error;
+  }
+  return {
+    ...dependencies,
+    sessionStore,
+    closeSessionStore: () => {
+      sessionStore?.close();
+      void dependencies.closeIntegrations?.().catch(()=>undefined);
+    },
+  };
 }

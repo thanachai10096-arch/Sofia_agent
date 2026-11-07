@@ -155,7 +155,7 @@ test("ledger update is compare-and-set and preserves indeterminate outcomes", as
       "indeterminate",
       { status: "accepted" },
     ),
-    /workflow_execution_invalid_transition/,
+    /workflow_reconciliation_required/,
   );
   await assert.rejects(
     ledger.update(
