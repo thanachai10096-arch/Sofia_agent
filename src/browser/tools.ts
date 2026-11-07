@@ -12,6 +12,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
   const dispose = async (): Promise<void> => {
     const closing = session;
     session = undefined;
+    activeProfileId = undefined;
     pages.clear();
     if (closing) await closing.close();
   };
