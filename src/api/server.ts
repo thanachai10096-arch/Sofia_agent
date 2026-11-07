@@ -356,7 +356,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           }
           return json(res, 200, { approvals: inbox.list(auth.keyId) }, origin, config);
         }
-        const approvalMatch = requestUrl.pathname.match(/^\\/v1\\/approvals\\/([0-9a-f-]{36})\\/decision$/i);
+        const approvalMatch = requestUrl.pathname.match(/^\/v1\/approvals\/([0-9a-f-]{36})\/decision$/i);
         if (req.method === "POST" && approvalMatch) {
           if (!auth.scopes.includes("approval:decide")) {
             return json(res, 403, { error: "forbidden", requiredScope: "approval:decide" }, origin, config);
