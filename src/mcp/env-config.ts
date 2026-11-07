@@ -66,11 +66,13 @@ export function loadManagedMcpServersFromEnv(
       }
       env = item.env as Record<string, string>;
     }
+    const args = stringArray(item.args, "args");
+    const inheritEnv = stringArray(item.inheritEnv, "inheritEnv");
     const options: McpStdioTransportOptions = {
       command: item.command,
-      ...(stringArray(item.args, "args") ? { args: stringArray(item.args, "args") } : {}),
+      ...(args ? { args } : {}),
       ...(typeof item.cwd === "string" ? { cwd: item.cwd } : {}),
-      ...(stringArray(item.inheritEnv, "inheritEnv") ? { inheritEnv: stringArray(item.inheritEnv, "inheritEnv") } : {}),
+      ...(inheritEnv ? { inheritEnv } : {}),
       ...(env ? { env } : {}),
     };
     return {
