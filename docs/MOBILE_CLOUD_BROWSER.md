@@ -39,22 +39,22 @@ Set SOFIA_CLOUD_BROWSER_ENABLED=true and add browser:cloud only to API keys that
 
 The feature is disabled unless explicitly enabled and the key has the scope. This PR does not change Railway settings or deploy anything.
 
-## Mobile UX still required
+## Mobile UX included
 
-These endpoints are the backend foundation, not a finished mobile user interface. The next slice should add a responsive Sofia Web/Mobile Browser panel with screenshot refresh, touch-to-click mapping, address bar, keyboard/input controls, session close, and an explicit sign-in handoff. The client must keep the API key in the platform secure store and must never put it in browser localStorage or URLs.
+A responsive PWA is included in `web/mobile-workspace/` with screenshot refresh, touch-to-click mapping, address navigation, keyboard/input controls, session close, Sofia task composer, and a sign-in handoff. It uses a same-origin cookie-authenticated BFF; the browser never receives or stores the Sofia API key.
 
-For account sign-in, the user enters passwords and MFA codes directly into the visible remote browser surface. Sofia must not request credentials in chat, read or store password fields, or bypass MFA/CAPTCHA. High-impact actions such as purchases, payments, account deletion, and publishing should require a separate confirmation in the mobile UI.
+For website account sign-in, the user enters passwords and MFA codes directly into the visible remote browser surface. Sofia must not request credentials in chat, read or store password fields, or bypass MFA/CAPTCHA. High-impact actions such as purchases, payments, account deletion, and publishing must follow the Brain-connected approval workflow.
 
 
 ## Mobile Workspace UI
 
 A polished responsive UI is now included at `web/mobile-workspace/` (HTML/CSS/JS): mobile-first browser surface, URL navigation, back/forward/reload, touch-to-click, touch scrolling, remote keyboard, session status and Sofia task composer.
 
-See [web/mobile-workspace/README.md](../web/mobile-workspace/README.md) for static hosting and the required cookie-authenticated BFF contract. The UI does not accept or store a Sofia master API key. The current API still uses Bearer keys, so the BFF/authenticated application integration must be completed before the UI can be exposed to end users. The approval inbox remains a placeholder and high-impact actions must stay blocked until a real approval workflow is connected.
+See [web/mobile-workspace/README.md](../web/mobile-workspace/README.md) for the sign-in configuration and BFF contract. The UI does not accept or store a Sofia master API key. The API still uses Bearer keys internally; the BFF authenticates the allowlisted OIDC subject and injects the key server-side. The Brain-connected Approval Inbox is wired to the existing approval callback.
 
 ## Important limitations
 
-This first backend slice is process-local and ephemeral: no durable session recovery, multi-replica routing, persistent cloud profiles, video streaming, or mobile UI is included yet. It is not production-ready until the mobile UI, deployment affinity/durable routing strategy, and end-to-end security tests are complete.
+The cloud browser and actionable pending approvals remain process-local and are discarded on restart. OIDC login sessions are persisted separately under `.sofia/workspace-sessions/`; this does not make browser cookies or browser sessions persistent. Multi-replica routing, persistent cloud profiles, video streaming, and production end-to-end validation remain future work. The PWA and single-operator BFF are implemented, but do not enable them until the OIDC environment variables, API scopes, persistent volume, and callback URL are configured and tested.
 ## Brain-connected Approval Inbox
 
 The same API runtime now wires an owner-bound `ApprovalInbox` into the existing Brain approval callback. The inbox is not a second execution path: the Brain's existing `RegistryToolGateway` still validates policy, risk, immutable action input, and the approval hash immediately before executing the tool.
