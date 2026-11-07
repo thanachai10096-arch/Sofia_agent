@@ -1,6 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { chmod, lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -19,8 +17,6 @@ interface BrowserProfileMetadata {
   lastUsedAt: string;
 }
 
-const execFileAsync = promisify(execFile);
-
 const PROFILE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function ownerKey(ownerId: string): string {
@@ -30,18 +26,17 @@ function ownerKey(ownerId: string): string {
 
 async function secureDirectory(pathname: string): Promise<void> {
   if (process.platform === "win32") {
-    // Resolve the effective process SID rather than relying on USERNAME /
-    // USERDOMAIN, which can differ from the identity used by the runner.
-    const { stdout } = await execFileAsync("whoami.exe", ["/user", "/fo", "csv", "/nh"]);
-    const sid = stdout.match(/S-1-5-(?:21|80|82)(?:-[0-9]+)+/i)?.[0];
-    if (!sid) throw new Error("Cannot secure browser profile ACL: current Windows user SID is unavailable.");
-    await execFileAsync("icacls.exe", [
-      pathname, "/inheritance:r", "/grant:r",
-      "*S-1-5-18:(OI)(CI)F",
-      "*S-1-5-32-544:(OI)(CI)F",
-      "*" + sid + ":(OI)(CI)F",
-      "/T", "/C",
-    ]);
+    // Windows user-profile directories already carry the effective user's
+    // inherited DACL. Keep inheritance intact: replacing it with a guessed
+    // explicit ACL can deny delete-child rights to the test/service identity.
+    const localAppData = process.env.LOCALAPPDATA;
+    if (!localAppData) throw new Error("Browser profiles on Windows must be stored under the current user's LocalAppData directory.");
+    const base = path.resolve(localAppData);
+    const target = path.resolve(pathname);
+    const relative = path.relative(base, target);
+    if (relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
+      throw new Error("Browser profile directories must remain inside the current user's LocalAppData directory on Windows.");
+    }
     return;
   }
   await chmod(pathname, 0o700);
