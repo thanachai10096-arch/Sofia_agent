@@ -105,18 +105,56 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     // The advanced catalog/handlers were previously exported but never mounted
     // into the live Brain tool registry. Build a run-scoped, guarded registry and
     // expose only verified handlers through the same policy-enforced gateway.
+    // Approval evidence is scoped to this Brain run and consumed once by the
+    // privileged skill verifier. It is created only after the existing approval
+    // handler approves the exact immutable gateway action.
+    const skillApprovalEvidence = new Map<string, {
+      runId: string; principalId: string; toolName: string; actionHash: string;
+    }>();
     const advancedSkillRegistry = createAdvancedSkillRegistry({
       projectMemoryStore: projectMemory,
       securityController: dependencies.security,
+      verifyApproval: (request) => {
+        const evidence = skillApprovalEvidence.get(request.requestId);
+        if (!evidence) return false;
+        const valid =
+          evidence.runId === request.runId &&
+          evidence.principalId === request.principalId &&
+          evidence.toolName === request.toolName &&
+          evidence.toolName === `skill.${request.skillId}` &&
+          evidence.actionHash === request.actionHash;
+        if (valid) skillApprovalEvidence.delete(request.requestId);
+        return valid;
+      },
     });
     const runSkillTools = createAdvancedSkillTools(advancedSkillRegistry, principalId ?? "anonymous");
+    const approvalHandler: AgentDependencies["approval"] = dependencies.approval
+      ? async (request) => {
+          const approved = await dependencies.approval!(request);
+          if (approved && request.toolName.startsWith("skill.")) {
+            const skill = advancedSkillRegistry.list().find((item) =>
+              `skill.${item.id}` === request.toolName &&
+              (item.requiresApproval || item.risk === "privileged"),
+            );
+            if (skill) {
+              skillApprovalEvidence.set(request.requestId, {
+                runId: request.runId,
+                principalId: request.principalId ?? "anonymous",
+                toolName: request.toolName,
+                actionHash: request.actionHash,
+              });
+            }
+          }
+          return approved;
+        }
+      : undefined;
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...runBrowserTools,
       ...runDesktopTools,
       ...runSkillTools,
     ]);
-    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
+    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,approvalHandler,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
       maxConcurrency:intEnv("SOFIA_SUBAGENT_MAX_CONCURRENCY",3,1),
