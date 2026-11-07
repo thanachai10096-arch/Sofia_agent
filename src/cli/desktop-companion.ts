@@ -1,19 +1,14 @@
 import { createInterface } from "node:readline";
-import { createDesktopCompanionClient, type DesktopCompanionCredentialStore } from "../desktop/companion-client.js";
-import { createAllowlistedDesktopHostDriver, describeDesktopAction, parseDesktopApplicationAllowlist } from "../desktop/local-host.js";
-
-class MemoryCredentialStore implements DesktopCompanionCredentialStore {
-  private token: string | null = null;
-  async get() { return this.token; }
-  async set(token: string) { this.token = token; }
-  async delete() { this.token = null; }
-}
+import { createDesktopCompanionClient } from "../desktop/companion-client.js";
+import { createLocalGuiApproval } from "../desktop/gui-approval.js";
+import { OsDesktopCredentialStore } from "../desktop/os-credential-store.js";
+import { createAllowlistedDesktopHostDriver, parseDesktopApplicationAllowlist } from "../desktop/local-host.js";
 
 async function readSecret(prompt: string): Promise<string> {
   const input = process.stdin;
   const output = process.stdout;
   if (!input.isTTY || typeof input.setRawMode !== "function") {
-    throw new Error("Desktop pairing requires an interactive local terminal so the API key can be entered without echo.");
+    throw new Error("This operation requires an interactive local terminal so the API key can be entered without echo.");
   }
   output.write(prompt);
   input.setRawMode(true);
@@ -27,25 +22,30 @@ async function readSecret(prompt: string): Promise<string> {
     };
     const onData = (chunk: Buffer) => {
       for (const byte of chunk) {
-        if (byte === 3) {
-          cleanup();
-          reject(new Error("Pairing cancelled."));
-          return;
-        }
-        if (byte === 13 || byte === 10) {
-          cleanup();
-          resolve(value.trim());
-          return;
-        }
-        if (byte === 127 || byte === 8) {
-          value = value.slice(0, -1);
-          continue;
-        }
+        if (byte === 3) { cleanup(); reject(new Error("Operation cancelled.")); return; }
+        if (byte === 13 || byte === 10) { cleanup(); resolve(value.trim()); return; }
+        if (byte === 127 || byte === 8) { value = value.slice(0, -1); continue; }
         if (byte >= 32 && byte <= 126 && value.length < 4096) value += String.fromCharCode(byte);
       }
     };
     input.on("data", onData);
   });
+}
+
+async function revokeDesktopCompanion(): Promise<void> {
+  const apiBaseUrl = process.env.SOFIA_API_URL;
+  if (!apiBaseUrl) throw new Error("Set SOFIA_API_URL to your Sofia server HTTPS URL first.");
+  const credentials = new OsDesktopCredentialStore();
+  const driver = createAllowlistedDesktopHostDriver({});
+  const client = createDesktopCompanionClient({
+    apiBaseUrl, credentials, driver, allowedCapabilities: [],
+    requestApproval: async () => false,
+  });
+  let apiKey = await readSecret("Sofia API key (input hidden; used only to revoke pairing): ");
+  try {
+    await client.disconnect(apiKey);
+    console.log("Desktop Companion pairing revoked on Sofia and local credential removed.");
+  } finally { apiKey = ""; }
 }
 
 export async function runDesktopCompanion(): Promise<void> {
@@ -55,48 +55,54 @@ export async function runDesktopCompanion(): Promise<void> {
   if (Object.keys(applications).length === 0) {
     throw new Error("No local apps are allowlisted. Set SOFIA_DESKTOP_ALLOWED_APPS to a JSON object of app IDs and absolute executable paths.");
   }
-  const credentials = new MemoryCredentialStore();
+  const credentials = new OsDesktopCredentialStore();
   const driver = createAllowlistedDesktopHostDriver(applications);
+  const approval = createLocalGuiApproval();
   const client = createDesktopCompanionClient({
     apiBaseUrl,
     credentials,
     driver,
     allowedCapabilities: ["app:launch"],
     allowedApplications: Object.keys(applications),
-    requestApproval: async (action) => {
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      try {
-        console.log("\nSofia requests a local desktop action:");
-        console.log(describeDesktopAction(action));
-        if (action.kind === "app.launch") console.log("Executable: " + applications[action.applicationId]);
-        const answer = await rl.question("Approve this action on this computer? Type YES to allow: ");
-        return answer.trim() === "YES";
-      } finally {
-        rl.close();
-      }
-    },
+    requestApproval: (action, signal) => approval.requestApproval(action, signal),
     pollIntervalMs: 1500,
   });
-
-  let apiKey = await readSecret("Sofia API key (input hidden; key is not saved): ");
-  if (!apiKey) throw new Error("A Sofia API key is required to pair this computer.");
-  try { await client.pair(apiKey); } finally { apiKey = ""; }
-  // Drop the only local reference to the master key immediately after pairing.
-  console.log("Desktop Companion paired. Only the short-lived companion token remains in memory.");
-  console.log("Allowed applications:", Object.keys(applications).join(", "));
-  console.log("This initial host supports app launch only; screen/mouse/keyboard controls remain disabled.");
-  console.log("Press Ctrl+C to disconnect.");
 
   const controller = new AbortController();
   const stop = () => { controller.abort(); client.stop(); };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   try {
-    await client.start(controller.signal);
+    if (!await credentials.get()) {
+      let apiKey = await readSecret("Sofia API key (input hidden; used only for initial pairing): ");
+      try { await client.pair(apiKey); } finally { apiKey = ""; }
+      console.log("Desktop Companion paired. Only the restricted companion token is saved in the OS credential store.");
+    } else {
+      console.log("Found a saved Sofia Companion token in the OS credential store; attempting to resume pairing.");
+    }
+    console.log("Allowed applications:", Object.keys(applications).join(", "));
+    console.log("GUI approval opens locally in your browser. Screen/mouse/keyboard remain disabled.");
+    console.log("Stop: Ctrl+C (keeps the pairing). Revoke: sofia desktop companion disconnect");
+    while (!controller.signal.aborted) {
+      try {
+        await client.start(controller.signal);
+        break;
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("pairing was revoked") || controller.signal.aborted) throw error;
+        console.log("The server no longer recognizes this saved pairing (for example after a server restart). Pair again to continue.");
+        let apiKey = await readSecret("Sofia API key (input hidden; used only to re-pair): ");
+        try { await client.pair(apiKey); } finally { apiKey = ""; }
+      }
+    }
   } finally {
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
-    await credentials.delete();
-    console.log("Desktop Companion disconnected; in-memory pairing token cleared.");
+    client.stop();
+    await approval.close();
+    console.log("Desktop Companion stopped. The OS credential remains saved; use the disconnect command to revoke and remove it.");
   }
+}
+
+export async function disconnectDesktopCompanion(): Promise<void> {
+  await revokeDesktopCompanion();
 }
