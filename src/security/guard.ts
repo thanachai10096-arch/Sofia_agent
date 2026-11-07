@@ -37,7 +37,8 @@ export function canonicalJson(value: unknown): string {
 
 export function actionHash(runId: string, toolName: string, input: Record<string, unknown>, principalId?: string, trustedNetworkTargets: readonly string[] = []): string {
   const trustedTargets = [...trustedNetworkTargets].sort();
-  return createHash("sha256").update((principalId ?? "") + "\n" + runId + "\n" + toolName + "\n" + canonicalJson(input) + "\n" + canonicalJson(trustedTargets)).digest("hex");
+  const targetBinding = trustedTargets.length > 0 ? "\n" + canonicalJson(trustedTargets) : "";
+  return createHash("sha256").update((principalId ?? "") + "\n" + runId + "\n" + toolName + "\n" + canonicalJson(input) + targetBinding).digest("hex");
 }
 
 export function riskFor(effects: readonly ToolEffect[], input: Record<string, unknown>): RiskLevel {
