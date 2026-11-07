@@ -154,6 +154,64 @@ test("Brain retries one malformed plan with the strict call schema before failin
   assert.equal(report.completed, true, report.summary);
 });
 
+test("Brain repairs one malformed understanding response before planning", async () => {
+  let understandCalls = 0;
+  let repairWasRequested = false;
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string; payload?: Record<string, unknown> };
+      const repair = Boolean(parsed.payload?.outputContractRepair);
+      const value = parsed.phase === "understand"
+        ? (() => {
+            understandCalls += 1;
+            repairWasRequested ||= repair;
+            return repair
+              ? {
+                  objective: "Answer the arithmetic question",
+                  constraints: [],
+                  assumptions: [],
+                  requiredCapabilities: [],
+                  requiredTools: [],
+                  risk: "low",
+                  successCriteria: ["Return the correct sum"],
+                  ambiguities: ["None"],
+                }
+              : {
+                  objective: "Answer the arithmetic question",
+                  constraints: [],
+                  assumptions: [],
+                  requiredCapabilities: [],
+                  requiredTools: [],
+                  risk: "low",
+                  successCriteria: ["Return the correct sum"],
+                  ambiguities: "None",
+                };
+          })()
+        : plan;
+      return {
+        inputTokens: 10,
+        async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 5,
+      maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
+  });
+  const report = await brain.run({
+    task: "What is 2+2?",
+    acceptanceCriteria: [{
+      id: "file-exists", description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) { return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" }; },
+    }],
+  });
+  assert.equal(understandCalls, 2);
+  assert.equal(repairWasRequested, true);
+  assert.equal(report.completed, true, report.summary);
+});
+
 test("Brain completes a coding loop only after trusted verification", async () => {
   const brain = createSofiaBrain({
     dependencies: {
