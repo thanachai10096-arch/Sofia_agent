@@ -153,8 +153,11 @@ test("screen capture requires a separate local capability and explicit approval"
     apiBaseUrl: "https://sofia.example.com", credentials: store, driver: captureDriver,
     allowedCapabilities: [], requestApproval: async () => { approvals += 1; return true; }, fetchImpl,
   });
-  await assert.rejects(withoutGrant.pollOnce(), /not granted: screen:capture/);
+  assert.equal(await withoutGrant.pollOnce(), true);
   assert.deepEqual(calls, []);
+  assert.match(completion?.error as string, /not granted: screen:capture/);
+  assert.equal(approvals, 0);
+  completion = undefined;
   const enabled = createDesktopCompanionClient({
     apiBaseUrl: "https://sofia.example.com", credentials: store, driver: captureDriver,
     allowedCapabilities: ["screen:capture"],
@@ -163,7 +166,7 @@ test("screen capture requires a separate local capability and explicit approval"
   });
   assert.equal(await enabled.pollOnce(), true);
   assert.deepEqual(calls, ["capture"]);
-  assert.equal(approvals, 2);
+  assert.equal(approvals, 1);
   assert.deepEqual(completion?.result, {
     mimeType: "image/png", dataBase64: "AQID", width: 2, height: 1,
   });
