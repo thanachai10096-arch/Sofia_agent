@@ -68,6 +68,7 @@ export async function runDesktopCompanion(): Promise<void> {
       try {
         console.log("\nSofia requests a local desktop action:");
         console.log(describeDesktopAction(action));
+        if (action.kind === "app.launch") console.log("Executable: " + applications[action.applicationId]);
         const answer = await rl.question("Approve this action on this computer? Type YES to allow: ");
         return answer.trim() === "YES";
       } finally {
