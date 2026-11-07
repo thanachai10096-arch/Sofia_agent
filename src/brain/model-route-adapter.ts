@@ -2,14 +2,17 @@ import type { ModelProvider, ModelRequest, ModelRoute, TaskKind } from "../model
 import type { InternalRoute, PackedPrompt, PreparedCall, ProviderReply } from "./token-aware-gateway.js";
 
 /**
- * Tokenizer-independent conservative estimate for route admission.
- * UTF-8 byte length is not a token count: it multiplies Thai/CJK text by
- * roughly 3 and caused every route to reject otherwise short conversations.
- * Count Unicode code points instead; the provider's returned usage is the
- * authoritative measurement after invocation.
+ * Tokenizer-independent admission estimate. UTF-8 byte length is not a token
+ * count: it multiplies Thai/CJK text by roughly 3. Estimate ASCII at 1 token
+ * per 3 characters and non-ASCII at 1 token per code point. Provider-reported
+ * usage remains authoritative after invocation; the reservation still fails
+ * closed if actual usage exceeds the reserved cap.
  */
 export function estimatePromptTokensUpperBound(value: unknown): number {
-  return Array.from(JSON.stringify(value)).length;
+  const characters = Array.from(JSON.stringify(value));
+  const nonAscii = characters.filter((character) => character.codePointAt(0)! > 0x7f).length;
+  const ascii = characters.length - nonAscii;
+  return Math.ceil(ascii / 3) + nonAscii;
 }
 
 function taskKindForPhase(phase: string): TaskKind {
