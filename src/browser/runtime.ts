@@ -18,6 +18,11 @@ export interface BrowserPage {
   forward(): Promise<void>;
   reload(): Promise<void>;
   screenshot(): Promise<string>;
+  /** Optional coordinate input for remote visual clients. */
+  clickAt?(x: number, y: number): Promise<void>;
+  /** Type into the currently focused element without reading its value. */
+  typeFocused?(text: string): Promise<void>;
+  viewportSize?(): Promise<{ width: number; height: number }>;
   close(): Promise<void>;
 }
 
@@ -342,6 +347,9 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
           forward: async () => { await page.goForward({ waitUntil: "domcontentloaded", timeout: 30_000 }); },
           reload: async () => { await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 }); },
           screenshot: async () => (await page.screenshot({ type: "png" })).toString("base64"),
+          clickAt: async (x: number, y: number) => { await page.mouse.click(x, y); },
+          typeFocused: async (text: string) => { await page.keyboard.type(text); },
+          viewportSize: async () => page.viewportSize() ?? { width: 1280, height: 720 },
           close: async () => { await page.close(); },
         } satisfies BrowserPage;
       },
