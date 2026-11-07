@@ -1,6 +1,6 @@
 # Sofia Desktop Companion Relay
 
-This document describes the first server-side transport slice for connecting a locally running Desktop Companion to a Sofia API instance. It does not make local desktop control available by itself; a companion client and Brain tool adapter are separate required components.
+This document describes the first relay transport and reusable local Companion client library for connecting a desktop process to a Sofia API instance. A packaged desktop app, OS credential-store adapter, and Brain tool adapter are still separate required components.
 
 ## Security model
 
@@ -43,4 +43,4 @@ This slice provides authenticated pairing, status, command polling and completio
 - delivery of existing desktop approvals to the user's local UI;
 - reconnect/backoff UX, multi-device selection, or durable multi-replica broker state.
 
-Until those pieces are complete, the relay is not a usable remote desktop-control feature and should not be enabled in Production. Railway deployment and environment changes are intentionally out of scope.
+The reusable client is created with `createDesktopCompanionClient()` and requires an injected credential store, native driver, explicit capability list, application allowlist, and real approval callback. It accepts only HTTPS remote API URLs (loopback HTTP is permitted for local development), does not persist the Sofia API key, and clears its companion token when the API reports revocation.\n\nUntil the packaged host, OS credential-store adapter, and Brain dispatch/approval wiring are complete, the relay is not a usable remote desktop-control feature and should not be enabled in Production. Railway deployment and environment changes are intentionally out of scope.
