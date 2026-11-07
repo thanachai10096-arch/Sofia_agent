@@ -52,6 +52,16 @@ function requiredString(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) throw new Error("Invalid OIDC configuration or response.");
   return value;
 }
+async function boundedJson(response: Response, maxBytes: number, label: string): Promise<JsonObject> {
+  if (!response.ok) throw new Error(label + " unavailable.");
+  const declared = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declared) && declared > maxBytes) throw new Error(label + " response is too large.");
+  const raw = await response.text();
+  if (Buffer.byteLength(raw, "utf8") > maxBytes) throw new Error(label + " response is too large.");
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(label + " response is invalid.");
+  return parsed as JsonObject;
+}
 
 /**
  * Minimal single-operator OIDC Authorization Code + PKCE integration.
@@ -106,8 +116,7 @@ export class WorkspaceOidcAuth {
     const response = await this.fetcher(this.issuer + "/.well-known/openid-configuration", {
       headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(10_000),
     });
-    if (!response.ok) throw new Error("OIDC discovery failed.");
-    const data = await response.json() as JsonObject;
+    const data = await boundedJson(response, 64 * 1024, "OIDC discovery");
     const issuer = requiredString(data.issuer);
     const authorization_endpoint = requiredString(data.authorization_endpoint);
     const token_endpoint = requiredString(data.token_endpoint);
@@ -167,7 +176,7 @@ export class WorkspaceOidcAuth {
       }),
     });
     if (!tokenResponse.ok) throw new Error("OIDC token exchange failed.");
-    const tokenData = await tokenResponse.json() as JsonObject;
+    const tokenData = await boundedJson(tokenResponse, 64 * 1024, "OIDC token exchange");
     const idToken = requiredString(tokenData.id_token);
     const subject = await this.verifyIdToken(idToken, provider, pending.nonce);
     if (!equalText(subject, this.allowedSubject)) throw new Error("This identity is not allowed to access Sofia Workspace.");
@@ -184,28 +193,31 @@ export class WorkspaceOidcAuth {
       throw new Error("Unsupported OIDC ID token signature.");
     }
     const jwksResponse = await this.fetcher(provider.jwks_uri, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(10_000) });
-    if (!jwksResponse.ok) throw new Error("OIDC signing keys unavailable.");
-    const jwks = await jwksResponse.json() as { keys?: unknown };
+    const jwks = await boundedJson(jwksResponse, 256 * 1024, "OIDC signing keys");
     if (!Array.isArray(jwks.keys) || jwks.keys.length > 100) throw new Error("OIDC JWKS is invalid.");
     const jwk = (jwks.keys as Array<JsonObject>).find((key) => key.kid === header.kid && key.kty === "RSA" &&
-      (key.use === undefined || key.use === "sig") && (key.alg === undefined || key.alg === "RS256"));
+      (key.use === undefined || key.use === "sig") && (key.alg === undefined || key.alg === "RS256") &&
+      (key.key_ops === undefined || (Array.isArray(key.key_ops) && key.key_ops.includes("verify"))));
     if (!jwk || typeof jwk.n !== "string" || typeof jwk.e !== "string") throw new Error("OIDC signing key not found.");
     const publicKey = createPublicKey({ key: { kty: "RSA", n: jwk.n, e: jwk.e }, format: "jwk" });
+    if ((publicKey.asymmetricKeyDetails?.modulusLength ?? 0) < 2048) throw new Error("OIDC signing key is too weak.");
     const valid = verifySignature("RSA-SHA256", Buffer.from(parts[0] + "." + parts[1]), publicKey, Buffer.from(parts[2]!, "base64url"));
     if (!valid) throw new Error("OIDC ID token signature invalid.");
     const issuer = requiredString(claims.iss).replace(/\/$/, "");
     const subject = requiredString(claims.sub);
     const audience = claims.aud;
     const audiences = Array.isArray(audience) ? audience : [audience];
-    const exp = Number(claims.exp);
-    const iat = Number(claims.iat);
-    const nbf = claims.nbf === undefined ? 0 : Number(claims.nbf);
-    if (!equalText(issuer, this.issuer) || !audiences.includes(this.clientId) ||
+    const nowSeconds = Math.floor(this.now() / 1000);
+    const exp = claims.exp;
+    const iat = claims.iat;
+    const nbf = claims.nbf === undefined ? 0 : claims.nbf;
+    const validAudiences = audiences.every((value) => typeof value === "string");
+    if (!equalText(issuer, this.issuer) || !validAudiences || !audiences.includes(this.clientId) ||
         (audiences.length > 1 && claims.azp !== this.clientId) ||
         (claims.azp !== undefined && claims.azp !== this.clientId) ||
-        !Number.isFinite(exp) || exp <= Math.floor(this.now() / 1000) ||
-        !Number.isFinite(iat) || iat > Math.floor(this.now() / 1000) + 60 ||
-        !Number.isFinite(nbf) || nbf > Math.floor(this.now() / 1000) ||
+        typeof exp !== "number" || !Number.isSafeInteger(exp) || exp <= nowSeconds ||
+        typeof iat !== "number" || !Number.isSafeInteger(iat) || iat > nowSeconds + 60 ||
+        typeof nbf !== "number" || !Number.isSafeInteger(nbf) || nbf > nowSeconds ||
         typeof claims.nonce !== "string" || !equalText(claims.nonce, nonce)) {
       throw new Error("OIDC ID token claims invalid.");
     }
