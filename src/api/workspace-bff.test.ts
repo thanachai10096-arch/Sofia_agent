@@ -22,6 +22,8 @@ test("Mobile Workspace serves protected PWA and proxies only same-origin scoped 
   mkdirSync(assets, { recursive: true });
   writeFileSync(path.join(assets, "index.html"), "<main>private workspace</main>");
   writeFileSync(path.join(assets, "login.html"), "<main>sign in</main>");
+  writeFileSync(path.join(assets, "service-worker.js"), "self.addEventListener('install', () => undefined);");
+  writeFileSync(path.join(assets, "workspace.css"), "body { color: black; }");
   const auditStore = new FileApprovalAuditStore(path.join(root, ".sofia"));
   const inbox = new ApprovalInbox();
   const fakeAuth = {
@@ -68,6 +70,24 @@ test("Mobile Workspace serves protected PWA and proxies only same-origin scoped 
     const page = await fetch(base + "/workspace/index.html", { headers: { cookie: sessionCookie } });
     assert.equal(page.status, 200);
     assert.match(await page.text(), /private workspace/);
+    assert.equal(page.headers.get("cache-control"), "no-store");
+    assert.equal(page.headers.get("x-frame-options"), "DENY");
+    assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+    assert.match(page.headers.get("content-security-policy") ?? "", /form-action 'self'/);
+    assert.match(page.headers.get("permissions-policy") ?? "", /camera=\(\)/);
+
+    const loginPage = await fetch(base + "/workspace/login.html");
+    assert.equal(loginPage.status, 200);
+    assert.equal(loginPage.headers.get("cache-control"), "no-store");
+
+    const worker = await fetch(base + "/workspace/service-worker.js");
+    assert.equal(worker.status, 200);
+    assert.equal(worker.headers.get("cache-control"), "no-store");
+    assert.equal(worker.headers.get("service-worker-allowed"), "/workspace/");
+
+    const stylesheet = await fetch(base + "/workspace/workspace.css");
+    assert.equal(stylesheet.status, 200);
+    assert.equal(stylesheet.headers.get("cache-control"), "public, max-age=300");
 
     const logoutRejected = await fetch(base + "/workspace/auth/logout", {
       method: "POST", headers: { cookie, origin },
