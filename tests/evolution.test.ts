@@ -61,6 +61,31 @@ test("skill reliability records actual tool calls and execution duration", () =>
   }, { toolCalls: 1, durationMs: 150 });
 });
 
+test("skill ranking prefers lower measured cost when reliability evidence is equal", () => {
+  const engine = new EvolutionEngine();
+  for (let i = 0; i < 5; i++) {
+    engine.recordSuccess("fast-skill", 2, 0, "coding", { toolCalls: 1, durationMs: 100 });
+    engine.recordSuccess("slow-skill", 2, 0, "coding", { toolCalls: 3, durationMs: 1_000 });
+  }
+
+  const ranked = engine.rank(["slow-skill", "fast-skill"], "coding");
+  assert.equal(ranked[0]?.id, "fast-skill");
+  assert.ok((ranked.find(item => item.id === "slow-skill")?.efficiencyPenalty ?? 0) > 0);
+  assert.equal(ranked.find(item => item.id === "fast-skill")?.efficiencyPenalty, 0);
+});
+
+test("missing legacy execution metrics do not receive a zero-cost ranking advantage", () => {
+  const engine = new EvolutionEngine();
+  for (let i = 0; i < 5; i++) {
+    engine.recordSuccess("measured", 2, 0, "coding", { toolCalls: 1, durationMs: 500 });
+    engine.recordSuccess("unmeasured", 2, 0, "coding");
+  }
+
+  const ranked = engine.rank(["measured", "unmeasured"], "coding");
+  assert.equal(ranked.find(item => item.id === "unmeasured")?.efficiencyPenalty, 0);
+  assert.equal(ranked.find(item => item.id === "measured")?.avgDurationMs, 500);
+});
+
 test("run-level task type statistics track success and failure", () => {
   const engine = new EvolutionEngine();
   engine.recordRun("coding", true);
