@@ -11,7 +11,7 @@ test("advanced skill tools expose only registered verified handlers", async () =
   registry.register(definition, async (input) => ({ accepted: true, input }));
   const tools = createAdvancedSkillTools(registry, "principal-test");
 
-  assert.deepEqual(tools.map((tool) => tool.name), ["skills.list", "skill.runtime.01"]);
+  assert.deepEqual(tools.map((tool) => tool.name), ["skills.list", "skills.search", "skill.runtime.01"]);
   const listing = await tools[0]!.execute({}, { runtime: {} as never });
   assert.deepEqual(listing, {
     registered: [definition],
@@ -21,7 +21,16 @@ test("advanced skill tools expose only registered verified handlers", async () =
       .sort(),
   });
 
-  const result = await tools[1]!.execute(
+  const search = await tools[1]!.execute(
+    { query: "intent clarification", limit: 3 },
+    { runtime: {} as never },
+  ) as { matches: Array<{ id: string; toolName: string }>; executionPerformed: boolean; overallTaskVerified: boolean };
+  assert.equal(search.matches[0]?.id, "runtime.01");
+  assert.equal(search.matches[0]?.toolName, "skill.runtime.01");
+  assert.equal(search.executionPerformed, false);
+  assert.equal(search.overallTaskVerified, false);
+
+  const result = await tools[2]!.execute(
     { goal: "inspect" },
     { runtime: {} as never, signal: new AbortController().signal },
   );
