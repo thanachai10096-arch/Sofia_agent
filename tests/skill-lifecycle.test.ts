@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VersionedSkillLifecycle, getSkillCandidateDigest } from "../src/brain/skill-lifecycle.js";
@@ -227,5 +227,40 @@ test("skill lifecycle rejects missing or mismatched isolated runtime evidence", 
     assert.equal(evaluated.evaluation?.passed, false);
     assert.throws(() => lifecycle.promote(candidate.id), /isolated runtime verification/);
     assert.equal(platform.get("repair-skill"), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("skill lifecycle deactivates legacy active records without isolated evidence during restore", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "legacy-lifecycle.json");
+    const originalPlatform = new InMemorySkillsPlatform();
+    const original = new VersionedSkillLifecycle(originalPlatform, passing, { file });
+    const candidate = original.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["legacy-record"], confidence: 1,
+    });
+    await original.evaluate(candidate.id);
+    original.promote(candidate.id);
+
+    const persisted = JSON.parse(readFileSync(file, "utf8")) as {
+      records: Array<{ evaluation?: { runtimeVerification?: unknown } }>;
+    };
+    delete persisted.records[0].evaluation?.runtimeVerification;
+    writeFileSync(file, JSON.stringify(persisted), "utf8");
+
+    const restoredPlatform = new InMemorySkillsPlatform();
+    const restored = new VersionedSkillLifecycle(restoredPlatform, passing, { file });
+    assert.equal(restored.active("repair-skill"), undefined);
+    assert.equal(restoredPlatform.get("repair-skill"), undefined);
+    assert.equal(restored.list("repair-skill")[0]?.status, "rejected");
+
+    const migrated = JSON.parse(readFileSync(file, "utf8")) as {
+      activeBySkill: Record<string, string>;
+      records: Array<{ status: string; evaluation?: { passed: boolean } }>;
+    };
+    assert.equal(migrated.activeBySkill["repair-skill"], undefined);
+    assert.equal(migrated.records[0]?.status, "rejected");
+    assert.equal(migrated.records[0]?.evaluation?.passed, false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
