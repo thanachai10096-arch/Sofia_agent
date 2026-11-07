@@ -32,6 +32,27 @@ The async `createSofiaAgentDependenciesWithSessions(workspace, approval, databas
     // The allowlisted MCP tools are now in deps.tools and available to Brain.
     // On graceful shutdown, call await deps.closeMcpServers().
 
+
+## API runtime configuration
+
+The API entrypoint can load trusted MCP server definitions from the operator environment variable `SOFIA_MCP_SERVERS_JSON`. It must be a JSON array. Each entry requires a stable `id`, a non-empty `allowedTools` array, and an explicit `transport`:
+
+    [
+      {
+        "id": "docs",
+        "allowedTools": ["lookup"],
+        "transport": {
+          "type": "http",
+          "endpoint": "https://mcp.example.com/rpc",
+          "headers": { "authorization": "Bearer <server-specific-token>" }
+        }
+      }
+    ]
+
+For stdio, set `transport.type` to `stdio` and provide `command`, with optional `args`, `cwd`, `inheritEnv`, and `env`. Stdio commands execute with the API process identity; configure only commands and packages controlled by the operator. Never place the master Sofia API key in MCP server environment variables. Keep this configuration in the hosting platform's secret/environment settings, not source control.
+
+The API connects servers during startup, injects only the allowlisted tools into the Brain's process-wide base registry, and closes transports during graceful shutdown. MCP tool calls still pass through the same Tool Gateway, execution policy, approvals, and audit path as built-in tools. An MCP server is not enabled unless explicitly configured.
+
 ## Security and limitations
 
 - Server-provided names, descriptions, schemas, annotations, tool results, and resource contents are untrusted.
