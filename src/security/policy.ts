@@ -4,7 +4,7 @@ export type ToolEffect = "read" | "write" | "shell" | "network" | "destructive" 
 export interface ToolPermission { allow?: boolean; requireApproval?: boolean; maxRisk?: RiskLevel; }
 export interface ExecutionPolicy {
   allowTools:boolean; allowNetwork:boolean; allowShell:boolean; allowFileWrite:boolean; allowBrowser:boolean;
-  allowDestructive:boolean; allowRemoteDesktop:boolean; maxRisk:RiskLevel; maxSteps:number; maxToolCallsPerStep:number;
+  allowDestructive:boolean; allowRemoteDesktop?:boolean; maxRisk:RiskLevel; maxSteps:number; maxToolCallsPerStep:number;
   blockedPaths:string[]; allowedHosts:string[]; capabilitySecret?:string; permissions:Record<string,ToolPermission>;
 }
 export const defaultPolicy:ExecutionPolicy={
