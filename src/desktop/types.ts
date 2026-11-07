@@ -61,7 +61,7 @@ export interface DesktopHostDriver {
 }
 
 export type DesktopAction =
-  | { kind: "screen.capture"; displayId?: string }
+  | { kind: "screen.capture" }
   | { kind: "app.launch"; applicationId: string; args: string[] }
   | { kind: "input.click"; x: number; y: number; button: "left" | "right" | "middle" }
   | { kind: "input.type"; text: string }
