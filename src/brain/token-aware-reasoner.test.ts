@@ -214,7 +214,7 @@ test("implementation and response phases request their matching route capabiliti
 test("response and finalization prompts require citations for supplied web research", async () => {
   for (const phase of ["respond", "finalize"]) {
     const prompt = await promptFor(phase);
-    assert.match(prompt, /web\\.search_news/);
+    assert.match(prompt, /web\.search_news/);
     assert.match(prompt, /source titles and URLs/);
     assert.match(prompt, /never invent citations/);
   }
