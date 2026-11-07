@@ -2,6 +2,7 @@ import type { ManagedMcpServer } from "../../mcp/managed-server.js";
 import { connectManagedMcpServer } from "../../mcp/managed-server.js";
 import { McpHttpTransport } from "../../mcp/transports.js";
 import type { ExecutionPolicy } from "../../security/policy.js";
+import type { McpTransport } from "../../mcp/client.js";
 
 export interface N8nMcpEnvironment {
   SOFIA_N8N_MCP_ENABLED?: string;
@@ -27,6 +28,10 @@ function parseAllowedTools(value: string | undefined): string[] {
 export async function connectN8nOfficialMcp(
   env: N8nMcpEnvironment,
   policy: ExecutionPolicy,
+  transportFactory: (endpoint: string, token: string) => McpTransport = (endpoint, token) => new McpHttpTransport({
+    endpoint,
+    headers: { Authorization: "Bearer " + token },
+  }),
 ): Promise<ManagedMcpServer | undefined> {
   if (env.SOFIA_N8N_MCP_ENABLED !== "true") return undefined;
   const endpoint = env.SOFIA_N8N_MCP_URL?.trim();
@@ -43,10 +48,7 @@ export async function connectN8nOfficialMcp(
     throw new Error("n8n MCP host must be included in SOFIA_ALLOWED_HOSTS");
   }
   const allowedTools = parseAllowedTools(env.SOFIA_N8N_MCP_ALLOWED_TOOLS);
-  return connectManagedMcpServer(new McpHttpTransport({
-    endpoint: parsed.toString(),
-    headers: { Authorization: "Bearer " + token },
-  }), {
+  return connectManagedMcpServer(transportFactory(parsed.toString(), token), {
     id: "n8n",
     allowedTools,
     trustedNetworkTargets: [parsed.toString()],
