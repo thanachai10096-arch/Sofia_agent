@@ -92,7 +92,7 @@ function outputContractFor(phase: BrainPhase): string {
     "Return this exact JSON object shape:",
     '{"answer":"the complete user-facing answer as a non-empty string"}',
     "Answer the user's request directly. Do not propose tools, claim tool execution, or include Markdown fences around the JSON object.",
-  ].join("\\n");
+  ].join("\n");
   if (phase === "subagent") return [
     "Return one JSON object describing your proposal:",
     '{"tool":"registered tool name","input":{},"reason":"non-empty string"}',
