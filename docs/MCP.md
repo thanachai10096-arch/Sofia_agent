@@ -29,3 +29,42 @@ Sofia exposes an opt-in MCP client that adapts remote MCP tools into Sofia's exi
 - Keep credentials out of source control and logs. Do not pass the master Sofia API key to an MCP server.
 - The HTTP transport handles request/response JSON and SSE responses, not long-lived server-initiated notifications or subscription streaming.
 - This is a client foundation; it does not implement an MCP server endpoint, marketplace, or automatic installation of servers.
+
+
+## Runtime bootstrap
+
+The API host can connect operator-configured stdio servers during its async startup. Set
+`SOFIA_MCP_SERVERS_JSON` to a JSON array; leave it unset to keep MCP disabled.
+
+```json
+[
+  {
+    "id": "filesystem",
+    "transport": "stdio",
+    "command": "node",
+    "args": ["./trusted-mcp-server.js"],
+    "allowedTools": ["list_files", "read_file"]
+  }
+]
+```
+
+Each server needs a unique lowercase ID and a non-empty explicit `allowedTools` list.
+Optional fields are `cwd`, `args`, `inheritEnv`, and `env`. The process is started
+lazily during MCP initialization, receives only the configured environment allowlist,
+and is closed when the API host shuts down. Startup fails if an explicitly configured
+server cannot initialize or an allowlisted tool is missing; Sofia does not silently
+pretend that integration is available.
+
+The first integrated bootstrap supports stdio only. HTTP MCP remains available through
+the lower-level transport API, but is not enabled by environment bootstrap until
+deployment-level SSRF and egress enforcement is provided.
+
+## Verified skill tools
+
+The Brain runtime now registers verified advanced-skill handlers as `skill.<id>`
+tools and exposes `skill.list`. Planned and merely implemented catalog entries are
+not exposed. Every skill call still passes through Sofia's normal Tool Gateway:
+read-only handlers are read-scoped, may-write handlers require write approval, and
+privileged handlers require destructive approval. A skill handler does not grant
+additional workspace or network permissions; side effects must still use the normal
+Sofia tool boundary.
