@@ -119,3 +119,19 @@ test("workspace OIDC rejects insecure issuer and redirect configuration", () => 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+
+test("workspace OIDC rejects oversized discovery metadata before parsing", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-oidc-large-discovery-"));
+  try {
+    const auth = new WorkspaceOidcAuth({
+      issuer: "https://identity.example.test", clientId: "client", clientSecret: "secret",
+      redirectUri: "https://sofia.example.test/workspace/auth/callback",
+      allowedSubject: "operator", sessionDirectory: directory,
+      fetcher: async () => new Response(" ".repeat(64 * 1024 + 1), { status: 200 }),
+    });
+    await assert.rejects(() => auth.beginLogin(), /too large/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
