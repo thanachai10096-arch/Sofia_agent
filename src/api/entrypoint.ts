@@ -10,6 +10,7 @@ import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplica
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -204,16 +205,19 @@ if (discordConfigured) {
   discordRecoveryTimer.unref?.();
 }
 
+const desktopCommandBroker = new DesktopCommandBroker();
 const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
+  desktopCommandBroker,
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
+  desktopCommandBroker.close();
   deps.closeSessionStore();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
