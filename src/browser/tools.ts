@@ -1,9 +1,17 @@
 import type { SofiaTool } from "../tools/types.js";
 import type { BrowserRuntime } from "./runtime.js";
 
-export function createBrowserTools(runtime: BrowserRuntime): SofiaTool[] {
+export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (cleanup: () => Promise<void>) => void): SofiaTool[] {
   let session: Awaited<ReturnType<BrowserRuntime["launch"]>> | undefined;
   const pages = new Map<string, Awaited<ReturnType<NonNullable<typeof session>["newPage"]>>>();
+
+  const dispose = async (): Promise<void> => {
+    const closing = session;
+    session = undefined;
+    pages.clear();
+    if (closing) await closing.close();
+  };
+  registerCleanup?.(dispose);
 
   const page = (id: string) => {
     const value = pages.get(id);
@@ -85,14 +93,7 @@ export function createBrowserTools(runtime: BrowserRuntime): SofiaTool[] {
           }
           return { ok: true, closed: "page", pageId: id };
         }
-        if (session) {
-          const closing = session;
-          // Reset the local handle even if the runtime reports a close error,
-          // so subsequent browser.open calls do not reuse a broken session.
-          session = undefined;
-          pages.clear();
-          await closing.close();
-        }
+        await dispose();
         return { ok: true, closed: "session" };
       },
     },
