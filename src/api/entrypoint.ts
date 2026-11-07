@@ -9,18 +9,22 @@ import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.j
 import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
+import { SqliteApprovalQueue, createQueuedApprovalHandler } from "../agent/approval-queue.js";
 import { createTelegramMessagingRuntime, parseTelegramUserAllowlist, parseTelegramUserApiKeys } from "../integrations/messaging/telegram-runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
-const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read,approval:read,approval:decide").split(",").map((s) => s.trim()).filter(Boolean);
 const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+const approvalQueue = await SqliteApprovalQueue.open(path.join(workspace, ".sofia", "approvals.sqlite"));
+const approvalHandler = createQueuedApprovalHandler(approvalQueue);
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalHandler);
+deps.approvalQueue = approvalQueue;
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -233,6 +237,7 @@ const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
   deps.closeSessionStore();
+  approvalQueue.close();
   void deps.closeMcpRegistry().catch(() => console.error("MCP server shutdown failed."));
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
