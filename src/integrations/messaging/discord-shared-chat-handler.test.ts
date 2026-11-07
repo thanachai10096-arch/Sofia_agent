@@ -67,7 +67,7 @@ test("Discord run requests use the shared chat dispatcher and preserve session-s
   assert.equal(h.submissions[0]?.task, "summarize the project");
   assert.equal(h.submissions[0]?.ownerKeyId, "discord:user-1");
   assert.equal(h.submissions[0]?.notificationChannelId, "channel-1");
-  assert.equal(h.submissions[0]?.sessionKey, "7:discord6:user-19:channel-1");
+  assert.equal(h.submissions[0]?.sessionKey, "7:discord|6:user-1|9:channel-1");
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.ok(h.sent.some((item) => item.text.includes("verified result")));
   assert.deepEqual(h.delivered, ["job-1"]);
@@ -84,8 +84,8 @@ test("concurrent Discord users cannot cross principals, channels, or session mem
   assert.deepEqual(
     h.submissions.map((item) => [item.ownerKeyId, item.notificationChannelId, item.sessionKey]).sort(),
     [
-      ["discord:user-1", "channel-1", "7:discord6:user-19:channel-1"],
-      ["discord:user-2", "channel-2", "7:discord6:user-29:channel-2"],
+      ["discord:user-1", "channel-1", "7:discord|6:user-1|9:channel-1"],
+      ["discord:user-2", "channel-2", "7:discord|6:user-2|9:channel-2"],
     ].sort(),
   );
 });
