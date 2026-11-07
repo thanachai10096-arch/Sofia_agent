@@ -73,7 +73,10 @@ export interface InferenceRequest {
 }
 
 export class MeteredProviderError extends Error {
-  constructor(readonly usage: TokenUsage) {
+  constructor(
+    readonly usage: TokenUsage,
+    readonly safeReason?: string,
+  ) {
     super("Provider request failed with known usage");
     this.name = "MeteredProviderError";
   }
@@ -435,7 +438,9 @@ export class TokenAwareGateway {
 
         const reason = error instanceof GatewayError
           ? `gateway_${error.code}`
-          : safeProviderFailureReason(error);
+          : error instanceof MeteredProviderError && error.safeReason
+            ? error.safeReason
+            : safeProviderFailureReason(error);
         console.error("[Sofia Brain provider failure]", {
           reason,
           phase: input.phase,
