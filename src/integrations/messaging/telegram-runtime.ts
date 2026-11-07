@@ -16,7 +16,7 @@ export interface TelegramMessagingRuntime {
 interface TelegramRunResult {
   id: string;
   status: string;
-  result?: { output?: string };
+  result?: { output?: string; kind?: string };
   error?: string;
 }
 
@@ -74,7 +74,9 @@ export async function reportTelegramRunCompletion(input: {
     : "";
   let text: string;
   if (run.status === "completed") {
-    text = "✅ Sofia completed the task.\nRun ID: " + input.runId +
+    const isConversation = run.result?.kind === "conversation";
+    text = (isConversation ? "💬 Sofia replied." : "✅ Sofia completed the task.") +
+      "\nRun ID: " + input.runId +
       (output ? "\n\n" + output : "\n\nThe run completed but returned no text output.");
   } else {
     const status = ["failed", "cancelled", "queued", "running"].includes(run.status) ? run.status : "unknown";
