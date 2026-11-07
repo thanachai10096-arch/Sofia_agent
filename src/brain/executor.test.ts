@@ -291,6 +291,61 @@ test("Brain rejects project verification with a non-zero exit code even when the
   assert.match(report.summary, /Project verification failed/);
 });
 
+test("Brain does not treat non-zero terminal or git command exits as successful actions", async () => {
+  for (const toolName of ["terminal.run", "git.run"]) {
+    const tools = makeTools();
+    tools.listTools = () => [{
+      name: toolName,
+      description: "Run a command",
+      effects: ["shell"] as const,
+    }];
+    tools.describe = (name) => name === toolName ? { effects: ["shell"] } : undefined;
+    tools.execute = async () => ({
+      ok: true,
+      data: { stdout: "", stderr: "command failed", code: 2 },
+      evidenceId: toolName + "-nonzero",
+    });
+
+    const brain = createSofiaBrain({
+      dependencies: { reasoner: makeReasoner(), tools, allowShell: true, allowNetwork: false },
+      limits: {
+        maxSteps: 2, maxToolCalls: 5, maxReplans: 0, maxModelCalls: 3,
+        maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+      },
+    });
+    const report = await brain.run({
+      task: "Run a command",
+      understanding: {
+        mode: "action",
+        objective: "Run the requested command",
+        constraints: [],
+        assumptions: [],
+        requiredCapabilities: ["shell"],
+        requiredTools: [toolName],
+        risk: "low",
+        successCriteria: ["The command succeeds"],
+        ambiguities: [],
+      },
+      plan: {
+        strategy: "initial",
+        reason: "Execute the requested command.",
+        steps: [{
+          id: "run-command",
+          objective: "Run the command and inspect its exit code",
+          dependencies: [],
+          call: { tool: toolName, input: toolName === "terminal.run"
+            ? { command: "false", args: [] }
+            : { args: ["status"] } },
+        }],
+      },
+    });
+
+    assert.equal(report.completed, false, toolName);
+    assert.equal(report.state, "failed", toolName);
+    assert.match(report.summary, /exit code 2/, toolName);
+  }
+});
+
 test("Brain completes read-only research from tool evidence without running project build checks", async () => {
   const executed: string[] = [];
   let projectVerificationCalls = 0;
