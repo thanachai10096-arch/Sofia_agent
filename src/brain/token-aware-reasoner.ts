@@ -29,6 +29,7 @@ function phaseFromRequest(request: string): BrainPhase {
     const phase = (JSON.parse(request) as { phase?: unknown }).phase;
     switch (phase) {
       case "understand":
+      case "respond":
       case "plan":
       case "replan":
       case "implement":
@@ -79,8 +80,12 @@ function routeCapabilities(values: unknown): string[] {
 function outputContractFor(phase: BrainPhase): string {
   if (phase === "understand") return [
     "Return this exact JSON object shape:",
-    '{"objective":"non-empty string","constraints":["string"],"assumptions":["string"],"requiredCapabilities":["string"],"requiredTools":["string"],"risk":"low|medium|high","successCriteria":["string"],"ambiguities":["string"]}',
-    "All fields are required. Every list field must be a JSON array, even when it has one item or no items (use [] for empty). requiredCapabilities must use only fast, reasoning, coding, vision, long-context, or tool-use; use [] for ordinary conversation/general questions. risk must be exactly one of low, medium, or high.",
+    '{"mode":"conversation|action","objective":"non-empty string","constraints":["string"],"assumptions":["string"],"requiredCapabilities":["string"],"requiredTools":["string"],"risk":"low|medium|high","successCriteria":["string"],"ambiguities":["string"]}',
+    "All fields except mode are required. mode must be conversation only when the user is asking for an answer, explanation, translation, or ordinary discussion and no external action/tool is needed; otherwise use action. Every list field must be a JSON array, even when empty. requiredCapabilities must use only fast, reasoning, coding, vision, long-context, or tool-use; use [] for ordinary conversation/general questions. risk must be exactly low, medium, or high.",
+  ].join("\n");
+  if (phase === "respond") return [
+    "Return exactly one JSON object: {\"response\":\"the complete user-facing answer\"}.",
+    "Answer the user's conversational request directly using only supplied context. Do not propose or claim tool execution, file changes, browsing, or external actions. If the request actually requires an external action or unavailable evidence, say what is missing rather than pretending it was done.",
   ].join("\n");
   if (phase === "plan" || phase === "replan") return [
     "Return this exact JSON object shape:",

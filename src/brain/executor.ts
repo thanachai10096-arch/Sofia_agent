@@ -56,8 +56,9 @@ const DEFAULT_LIMITS: BrainLimits = {
 
 const TRANSITIONS: Record<BrainState, readonly BrainState[]> = {
   idle: ["understanding"],
-  understanding: ["planning"],
+  understanding: ["planning", "responding"],
   planning: ["executing"],
+  responding: ["completed"],
   executing: ["observing", "waiting_approval", "diagnosing"],
   observing: ["executing", "verifying", "diagnosing"],
   verifying: ["waiting_approval", "diagnosing", "completed"],
@@ -225,6 +226,14 @@ function ensureString(value: unknown, label: string): string {
   return value;
 }
 
+function explicitlyRequestsAction(task: string): boolean {
+  // A model classification alone must never turn an explicit side-effect,
+  // repository, browsing, or external-service request into a no-tool reply.
+  const english = /\b(fix|edit|modify|write|create|build|implement|run|execute|deploy|commit|push|install|delete|remove|send|book|purchase|open a pr|pull request|test|lint|typecheck|search the web|browse|visit the site)\b/i;
+  const thai = /(แก้(โค้ด|ไฟล์|ระบบ|บั๊ก|โปรเจกต์)|สร้าง(ไฟล์|โปรเจกต์|branch|pr)|รัน(คำสั่ง|เทสต์|ทดสอบ)|ดีพลอย|ติดตั้ง|ลบ(ไฟล์|ข้อมูล)|ส่ง(ข้อความ|อีเมล)|จอง|ค้นหาเว็บ|ค้นข้อมูลล่าสุด|เปิดเว็บ|เข้าเว็บ|ทดสอบโค้ด|ตรวจสอบ(โค้ด|repository|repo))/i;
+  return english.test(task) || thai.test(task);
+}
+
 function priorReferenceContext(context?: string): { trust: "untrusted_reference_data"; content: string } | undefined {
   if (typeof context !== "string" || !context.trim()) return undefined;
   return {
@@ -342,7 +351,7 @@ export class SofiaBrain {
   }
 
   private async infer(
-    phase: "understand" | "plan" | "replan" | "subagent",
+    phase: "understand" | "respond" | "plan" | "replan" | "subagent",
     payload: Record<string, unknown>,
   ): Promise<unknown> {
     if (this.usage.modelCalls >= this.limits.maxModelCalls) {
@@ -502,6 +511,22 @@ export class SofiaBrain {
     }
 
     return plan;
+  }
+
+  private async respond(input: BrainRunInput, understanding: TaskUnderstanding): Promise<string> {
+    const value = await this.infer("respond", {
+      task: input.task,
+      referenceContext: priorReferenceContext(input.context),
+      understanding,
+    });
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Stop("Conversational response must be a JSON object");
+    }
+    const response = (value as Record<string, unknown>).response;
+    if (typeof response !== "string" || !response.trim()) {
+      throw new Stop("Conversational response was empty or malformed");
+    }
+    return response.trim().slice(0, 12_000);
   }
 
   private async understand(input: BrainRunInput): Promise<TaskUnderstanding> {
@@ -938,6 +963,19 @@ export class SofiaBrain {
         this.emit({
           type: "brain.understanding.completed",
         });
+
+        // Conversational turns bypass workspace snapshots, plans, tools,
+        // coding verification, git diff, and code review entirely.
+        if (understanding.mode === "conversation" &&
+            !explicitlyRequestsAction(input.task) &&
+            (input.acceptanceCriteria ?? []).length === 0 &&
+            input.plan === undefined) {
+          this.move("responding");
+          const response = await this.respond(input, understanding);
+          this.emit({ type: "brain.response.completed" });
+          this.move("completed");
+          return this.report(true, response, [], [], false, []);
+        }
 
         baselineId = (
           await this.io(() => this.dependencies.tools.snapshot(this.signal))

@@ -9,6 +9,7 @@ import {
 
 export type BrainPhase =
   | "understand"
+  | "respond"
   | "plan"
   | "replan"
   | "implement"
@@ -143,6 +144,7 @@ const PHASE_CAPS: Record<BrainPhase, PhaseCap> = {
   // Keep these bounded below the default 16k Brain context budget while leaving
   // room for Thai text and the compact tool catalog.
   understand: { input: 12_000, output: 700 },
+  respond: { input: 12_000, output: 1_400 },
   plan: { input: 14_000, output: 1_400 },
   replan: { input: 14_000, output: 1_800 },
   implement: { input: 14_000, output: 4_000 },
