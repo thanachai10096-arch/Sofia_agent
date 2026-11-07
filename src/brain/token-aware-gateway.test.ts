@@ -38,7 +38,7 @@ function route(invoke: () => Promise<ProviderReply>): InternalRoute {
     hardOutputCap: true,
     prepare() {
       return {
-        inputTokensUpperBound: 10,
+        inputTokensUpperBound: 13,
         invoke,
       };
     },
