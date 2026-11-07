@@ -6,6 +6,7 @@ export interface BrowserToolOptions { profileStore?: BrowserProfileStore; ownerI
 
 export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (cleanup: () => Promise<void>) => void, options: BrowserToolOptions = {}): SofiaTool[] {
   let session: Awaited<ReturnType<BrowserRuntime["launch"]>> | undefined;
+  let activeProfileId: string | undefined;
   const pages = new Map<string, Awaited<ReturnType<NonNullable<typeof session>["newPage"]>>>();
 
   const dispose = async (): Promise<void> => {
@@ -30,11 +31,14 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       async execute(input) {
         if (typeof input.profileId === "string") {
           if (!options.profileStore || !options.ownerId) throw new Error("Saved browser profiles are unavailable on this host.");
+          if (session && activeProfileId !== input.profileId) await dispose();
           if (!session) {
             const profile = await options.profileStore.get(options.ownerId, input.profileId);
             session = await runtime.launch({ profileDirectory: profile.directory, headless: false });
+            activeProfileId = input.profileId;
           }
         } else {
+          if (session && activeProfileId) await dispose();
           session ??= await runtime.launch();
         }
         const value = await session.newPage();
@@ -119,6 +123,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
         const profile = await options.profileStore!.create(options.ownerId!);
         try {
           session = await runtime.launch({ profileDirectory: profile.directory, headless: false });
+          activeProfileId = profile.id;
           const value = await session.newPage();
           pages.set(value.id, value);
           await value.goto(String(input.url));
@@ -134,7 +139,10 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       name: "browser.profile.list",
       description: "List this user's saved browser profile IDs and timestamps; never return cookies or credential data.",
       inputSchema: { type: "object", additionalProperties: false },
-      async execute() { return { profiles: await options.profileStore!.list(options.ownerId!) }; },
+      async execute() {
+        const profiles = await options.profileStore!.list(options.ownerId!);
+        return { profiles: profiles.map(({ id, createdAt, lastUsedAt }) => ({ id, createdAt, lastUsedAt })) };
+      },
     });
     tools.unshift({
       name: "browser.profile.revoke",
