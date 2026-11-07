@@ -43,24 +43,27 @@ export function loadMcpServerConfigsFromEnv(
     if (transport.type === "stdio") {
       if (typeof transport.command !== "string" || !transport.command.trim()) throw new Error("MCP stdio transport requires a command");
       const args = strings(transport.args, "MCP stdio args", true);
+      const inheritEnv = strings(transport.inheritEnv, "MCP stdio inheritEnv", true);
+      const stdioEnv = stringMap(transport.env, "MCP stdio env");
       if (transport.cwd !== undefined && typeof transport.cwd !== "string") throw new Error("MCP stdio cwd must be a string");
       return {
         transport: new McpStdioTransport({
           command: transport.command,
           ...(args ? { args } : {}),
           ...(typeof transport.cwd === "string" ? { cwd: transport.cwd } : {}),
-          ...(strings(transport.inheritEnv, "MCP stdio inheritEnv", true) ? { inheritEnv: strings(transport.inheritEnv, "MCP stdio inheritEnv", true) } : {}),
-          ...(stringMap(transport.env, "MCP stdio env") ? { env: stringMap(transport.env, "MCP stdio env") } : {}),
+          ...(inheritEnv ? { inheritEnv } : {}),
+          ...(stdioEnv ? { env: stdioEnv } : {}),
         }),
         options: { id: item.id, allowedTools },
       };
     }
     if (transport.type === "http") {
       if (typeof transport.endpoint !== "string" || !transport.endpoint.trim()) throw new Error("MCP HTTP transport requires an endpoint");
+      const headers = stringMap(transport.headers, "MCP HTTP headers");
       return {
         transport: new McpHttpTransport({
           endpoint: transport.endpoint,
-          ...(stringMap(transport.headers, "MCP HTTP headers") ? { headers: stringMap(transport.headers, "MCP HTTP headers") } : {}),
+          ...(headers ? { headers } : {}),
         }),
         options: { id: item.id, allowedTools },
       };
