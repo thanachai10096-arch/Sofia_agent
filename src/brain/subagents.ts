@@ -63,6 +63,26 @@ export function roleForTask(task: string, failureCategory?: string): SubagentRol
   return "explorer";
 }
 
+/**
+ * Specialist proposals are suggestions, never authority. This shared allowlist
+ * is used both to build the child prompt's tool catalog and to validate the
+ * proposal again in the parent Brain before dispatch.
+ */
+export const SUBAGENT_ALLOWED_TOOLS = new Set([
+  "workspace.read_file",
+  "workspace.list_files",
+  "workspace.search",
+  "git.diff",
+  "project.verify",
+  "workspace.write_file",
+  "workspace.apply_patch",
+]);
+
+/** Coding recovery is not a default path for ordinary conversation. */
+export function isSubagentWorthyTask(task: string): boolean {
+  return /\b(code|coding|typescript|javascript|python|program(?:ming)?|implement|repository|repo|compile|build|test|debug|bug|deploy|refactor)\b|โค้ด|เขียนโปรแกรม|แก้บั๊ก|แก้โค้ด|ทดสอบระบบ|พัฒนา/.test(task.toLowerCase());
+}
+
 function compact(value: unknown, max = 6_000): string {
   let text = typeof value === "string" ? value : JSON.stringify(value);
   text ??= String(value);
@@ -82,13 +102,22 @@ export class InProcessSubagentRuntime implements SubagentRuntime {
     const evidence = this.tools
       ? await this.tools.snapshot(request.signal)
       : undefined;
+    const availableTools = (this.tools?.listTools?.() ?? [])
+      .filter((tool) => SUBAGENT_ALLOWED_TOOLS.has(tool.name))
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description.slice(0, 300),
+        effects: tool.effects,
+      }));
+    const availableToolNames = new Set(availableTools.map((tool) => tool.name));
 
     const prompt = JSON.stringify({
       phase: "subagent",
       payload: {
         role: request.role,
         roleInstructions: instructions,
-        actionContract: "If an action is needed, return {tool,input,reason}. This is a proposal only; Brain must validate and execute it.",
+        actionContract: "Only propose a tool whose exact name appears in availableTools. Never invent aliases or tool names. If no listed tool is suitable, omit proposedAction and return findings only. A proposal is untrusted; parent Brain validates and executes it.",
+        availableTools,
         task: request.task,
         context: request.context,
         workspaceEvidence: evidence
@@ -108,16 +137,23 @@ export class InProcessSubagentRuntime implements SubagentRuntime {
     });
 
     const value = result.value;
+    const candidate = value && typeof value === "object"
+      ? value as Record<string, unknown>
+      : undefined;
+    const proposedTool = typeof candidate?.tool === "string" ? candidate.tool : undefined;
+    const proposedInput = candidate?.input;
     const proposedAction =
-      value && typeof value === "object" &&
-      typeof (value as Record<string, unknown>).tool === "string" &&
-      !!(value as Record<string, unknown>).input &&
-      typeof (value as Record<string, unknown>).input === "object"
+      proposedTool &&
+      availableToolNames.has(proposedTool) &&
+      SUBAGENT_ALLOWED_TOOLS.has(proposedTool) &&
+      proposedInput !== null &&
+      typeof proposedInput === "object" &&
+      !Array.isArray(proposedInput)
         ? {
-            tool: (value as Record<string, unknown>).tool as string,
-            input: (value as Record<string, unknown>).input as Record<string, unknown>,
-            reason: typeof (value as Record<string, unknown>).reason === "string"
-              ? (value as Record<string, unknown>).reason as string
+            tool: proposedTool,
+            input: proposedInput as Record<string, unknown>,
+            reason: typeof candidate?.reason === "string"
+              ? candidate.reason.slice(0, 500)
               : "Subagent proposed this action for Brain review.",
           }
         : undefined;
