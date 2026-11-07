@@ -7,6 +7,8 @@ export interface ManagedMcpServerOptions {
   /** Explicit allowlist of tool names advertised by the trusted server. */
   allowedTools: readonly string[];
   client?: McpClientOptions;
+  /** Fixed operator-owned destination used by Sofia's network guard; never supplied by model input. */
+  trustedNetworkTargets?: readonly string[];
 }
 
 export interface ManagedMcpServer {
@@ -37,6 +39,17 @@ export async function connectManagedMcpServer(
     allowed.add(name);
   }
 
+  const trustedNetworkTargets = options.trustedNetworkTargets === undefined
+    ? undefined
+    : Object.freeze([...options.trustedNetworkTargets]);
+  for (const target of trustedNetworkTargets ?? []) {
+    let parsed: URL;
+    try { parsed = new URL(target); } catch { throw new Error("Trusted MCP network targets must be valid HTTPS URLs"); }
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+      throw new Error("Trusted MCP network targets must be HTTPS URLs without embedded credentials");
+    }
+  }
+
   const client = new McpClient(transport, options.client);
   try {
     await client.initialize();
@@ -58,6 +71,7 @@ export async function connectManagedMcpServer(
           (description.description ?? name).slice(0, 1000),
         inputSchema: schema,
         effects: readOnly ? ["network", "read"] : ["network", "destructive"],
+        ...(trustedNetworkTargets ? { trustedNetworkTargets } : {}),
         execute: async (input, context) => {
           context.signal?.throwIfAborted();
           return client.callTool(name, input, context.signal);
