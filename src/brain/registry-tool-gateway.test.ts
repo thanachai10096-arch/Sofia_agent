@@ -131,7 +131,7 @@ test("HTTP MCP tools are checked against their operator-configured endpoint, not
   const registry = new MapToolRegistry([{
     name: "mcp.docs.lookup",
     description: "Fixed endpoint MCP lookup",
-    inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false },
+    inputSchema: { type: "object", properties: { query: { type: "string" }, url: { type: "string" } }, required: ["query"], additionalProperties: false },
     effects: ["network", "read"] as const,
     networkUrl: "https://mcp.example.com/mcp",
     async execute() { executions += 1; return { ok: true }; },
@@ -146,7 +146,7 @@ test("HTTP MCP tools are checked against their operator-configured endpoint, not
     { runtime: runtime(), tools: registry },
     { ...defaultPolicy, allowNetwork: true, allowedHosts: ["attacker.example"] },
   );
-  const denied = await blocked.execute({ tool: "mcp.docs.lookup", input: { query: "hello" } }, context);
+  const denied = await blocked.execute({ tool: "mcp.docs.lookup", input: { query: "hello", url: "https://attacker.example" } }, context);
   assert.equal(denied.ok, false);
   assert.match(denied.error?.message ?? "", /allowlisted/i);
   assert.equal(executions, 0);
@@ -155,7 +155,7 @@ test("HTTP MCP tools are checked against their operator-configured endpoint, not
     { runtime: runtime(), tools: registry },
     { ...defaultPolicy, allowNetwork: true, allowedHosts: ["mcp.example.com"] },
   );
-  const result = await allowed.execute({ tool: "mcp.docs.lookup", input: { query: "hello" } }, context);
+  const result = await allowed.execute({ tool: "mcp.docs.lookup", input: { query: "hello", url: "https://attacker.example" } }, context);
   assert.equal(result.ok, true);
   assert.equal(executions, 1);
 });
