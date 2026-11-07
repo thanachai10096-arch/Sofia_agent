@@ -1066,10 +1066,15 @@ export class SofiaBrain {
             : [];
           if (criteria.length > 0) {
             verification = await this.verify(criteria, input.principalId);
-          } else if (changedFiles.length > 0) {
-            // Run project-level checks only when this task actually changed
-            // workspace files. Research, browser, and other read-only actions
-            // must not fail because their workspace has no package/test setup.
+          } else if (
+            changedFiles.length > 0 ||
+            understanding.requiredCapabilities.some((capability) => /^(coding|file-write|code-write)$/i.test(capability)) ||
+            understanding.requiredTools.some((tool) => /^workspace\.(write_file|apply_patch)$/.test(tool)) ||
+            currentPlan.steps.some((step) => /^workspace\.(write_file|apply_patch)$/.test(step.call.tool))
+          ) {
+            // Run project-level checks for code/workspace changes, including a
+            // requested write that produced no diff. Read-only research and
+            // browser actions must not require a package/test setup.
             this.move("verifying");
             this.emit({ type: "brain.verification.started" });
             verification = await runVerification(
@@ -1093,10 +1098,13 @@ export class SofiaBrain {
             this.move("verifying");
             this.emit({ type: "brain.verification.started" });
             const snapshot = await this.io(() => this.dependencies.tools.snapshot(this.signal));
-            const evidenceIds = this.observations.filter((item) => item.ok).map((item) => item.evidenceId);
-            const passed = this.observations.length > 0 &&
-              this.observations.every((item) => item.ok) &&
-              evidenceIds.length === this.observations.length &&
+            const finalStepIds = new Set(currentPlan.steps.map((step) => step.id));
+            const finalStepObservations = this.observations.filter((item) => finalStepIds.has(item.stepId));
+            const successfulSteps = new Set(finalStepObservations.filter((item) => item.ok).map((item) => item.stepId));
+            const evidenceIds = finalStepObservations.filter((item) => item.ok).map((item) => item.evidenceId);
+            const passed = currentPlan.steps.length > 0 &&
+              currentPlan.steps.every((step) => successfulSteps.has(step.id)) &&
+              evidenceIds.length >= currentPlan.steps.length &&
               evidenceIds.every((id) => Boolean(id));
             verification = [{
               criterionId: "tool-execution",
