@@ -124,8 +124,8 @@ if (discordConfigured) {
         runtime: deps.jobRuntime,
         sender: discordTransport!,
         deduplicator: discordDeduplicator,
-        allowedUserIds: discordUserIds,
-        allowedChannelIds: discordChannelIds,
+        allowedUserIds: new Set(discordUserIds),
+        allowedChannelIds: new Set(discordChannelIds),
         signal: discordAbort.signal,
         onError: (kind) => console.error("Discord messaging event:", kind),
       });
