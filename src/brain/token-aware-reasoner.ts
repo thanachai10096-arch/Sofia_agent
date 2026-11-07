@@ -109,7 +109,7 @@ function outputContractFor(phase: BrainPhase): string {
  * large task context and left the executor's preflight estimate disconnected
  * from the prompt actually sent to providers.
  */
-function asInferenceRequest(request: string): InferenceRequest {
+function asInferenceRequest(request: string, preferredRouteId?: string): InferenceRequest {
   const parsed = JSON.parse(request) as {
     phase?: unknown;
     payload?: Record<string, unknown>;
@@ -151,7 +151,8 @@ function asInferenceRequest(request: string): InferenceRequest {
     minimumQualityTier: typeof payload.minimumQualityTier === "number"
       ? payload.minimumQualityTier
       : 1,
-    requiredCapabilities: phaseCapabilities(phase),
+    requiredCapabilities: preferredRouteId ? [] : phaseCapabilities(phase),
+    ...(preferredRouteId ? { preferredRouteId } : {}),
     core: {
       instructions: [
         "Return only valid JSON. Do not use Markdown fences or surrounding prose.",
@@ -171,7 +172,10 @@ function asInferenceRequest(request: string): InferenceRequest {
 }
 
 export class TokenAwareBrainReasoner implements BrainReasoner {
-  constructor(private readonly gateway: TokenAwareGateway) {}
+  constructor(
+    private readonly gateway: TokenAwareGateway,
+    private readonly preferredRouteId?: string,
+  ) {}
 
   async prepare(
     request: string,
@@ -181,7 +185,7 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
     },
   ): Promise<PreparedInference> {
     options.signal.throwIfAborted();
-    const input = asInferenceRequest(request);
+    const input = asInferenceRequest(request, this.preferredRouteId);
     // Match the route-admission estimate so executor preflight does not
     // reject Thai/CJK prompts merely because their UTF-8 representation is 3x.
     // This is an estimate, not a tokenizer guarantee; TokenBudget fails closed
