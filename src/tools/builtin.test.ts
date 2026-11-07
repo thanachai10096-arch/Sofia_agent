@@ -20,6 +20,8 @@ test("web search calls the fixed Brave LLM context endpoint and returns bounded 
         generic: [
           { title: "Source title", url: "https://example.com/article", snippets: ["First excerpt", "Second excerpt"] },
           { title: "Invalid source", url: "javascript:alert(1)", snippets: ["must be dropped"] },
+          { title: "Plaintext source", url: "http://insecure.example/article", snippets: ["must be dropped"] },
+          { title: "Credential URL", url: "https://user:pass@example.com/article", snippets: ["must be dropped"] },
         ],
       },
     }), { status: 200, headers: { "content-type": "application/json" } });
