@@ -28,6 +28,14 @@ test("local desktop allowlist accepts only existing absolute executable files", 
   }
 });
 
+test("allowlisted local host launches an exact executable without a shell", async () => {
+  if (process.platform === "win32") return;
+  const executable = "/usr/bin/true";
+  const applications = parseDesktopApplicationAllowlist(JSON.stringify({ harmless: executable }));
+  const driver = createAllowlistedDesktopHostDriver(applications);
+  assert.deepEqual(await driver.launchApplication("harmless", []), { launched: true, applicationId: "harmless" });
+});
+
 test("initial local host fails closed for screen and input controls", async () => {
   const driver = createAllowlistedDesktopHostDriver({});
   await assert.rejects(driver.captureScreen(), /not enabled/);
