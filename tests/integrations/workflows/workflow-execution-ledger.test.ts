@@ -5,7 +5,10 @@ import type {
   WorkflowExecutionLedger,
   WorkflowExecutionRecord,
 } from "../../../src/integrations/workflows/workflow-execution-ledger.js";
-import { canTransitionWorkflowExecution } from "../../../src/integrations/workflows/workflow-execution-ledger.js";
+import {
+  canTransitionWorkflowExecution,
+  claimWorkflowExecutionForDispatch,
+} from "../../../src/integrations/workflows/workflow-execution-ledger.js";
 import type { WorkflowExecutionState } from "../../../src/integrations/workflows/workflow-engine.js";
 
 /** Contract fixture only; production persistence must be supplied separately. */
@@ -123,4 +126,16 @@ test("ledger update is compare-and-set and preserves indeterminate outcomes", as
     /workflow_execution_invalid_transition/,
   );
   assert.equal((await ledger.get(reservation.record.executionId))?.status, "indeterminate");
+});
+
+test("only one concurrent worker can claim an accepted execution for dispatch", async () => {
+  const ledger = new MemoryLedger();
+  const reservation = await ledger.reserve(request);
+  const results = await Promise.all([
+    claimWorkflowExecutionForDispatch(ledger, reservation.record.executionId),
+    claimWorkflowExecutionForDispatch(ledger, reservation.record.executionId),
+  ]);
+
+  assert.equal(results.filter(Boolean).length, 1);
+  assert.equal((await ledger.get(reservation.record.executionId))?.status, "running");
 });
