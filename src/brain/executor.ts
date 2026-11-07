@@ -226,6 +226,14 @@ function ensureString(value: unknown, label: string): string {
   return value;
 }
 
+function explicitlyRequestsAction(task: string): boolean {
+  // A model classification alone must never turn an explicit side-effect,
+  // repository, browsing, or external-service request into a no-tool reply.
+  const english = /\\b(fix|edit|modify|write|create|build|implement|run|execute|deploy|commit|push|install|delete|remove|send|book|purchase|open a pr|pull request|test|lint|typecheck|search the web|browse|visit the site)\\b/i;
+  const thai = /(แก้(โค้ด|ไฟล์|ระบบ|บั๊ก|โปรเจกต์)|สร้าง(ไฟล์|โปรเจกต์|branch|pr)|รัน(คำสั่ง|เทสต์|ทดสอบ)|ดีพลอย|ติดตั้ง|ลบ(ไฟล์|ข้อมูล)|ส่ง(ข้อความ|อีเมล)|จอง|ค้นหาเว็บ|ค้นข้อมูลล่าสุด|เปิดเว็บ|เข้าเว็บ|ทดสอบโค้ด|ตรวจสอบ(โค้ด|repository|repo))/i;
+  return english.test(task) || thai.test(task);
+}
+
 function priorReferenceContext(context?: string): { trust: "untrusted_reference_data"; content: string } | undefined {
   if (typeof context !== "string" || !context.trim()) return undefined;
   return {
@@ -959,6 +967,7 @@ export class SofiaBrain {
         // Conversational turns bypass workspace snapshots, plans, tools,
         // coding verification, git diff, and code review entirely.
         if (understanding.mode === "conversation" &&
+            !explicitlyRequestsAction(input.task) &&
             (input.acceptanceCriteria ?? []).length === 0 &&
             input.plan === undefined) {
           this.move("responding");
