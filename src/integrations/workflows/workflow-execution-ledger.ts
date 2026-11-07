@@ -58,6 +58,22 @@ export interface WorkflowExecutionLedger {
   ): Promise<WorkflowExecutionRecord | undefined>;
 }
 
+/**
+ * Atomically claim a reserved execution before making any external network call.
+ *
+ * The caller MUST dispatch only when this returns true. A false result means
+ * another worker already claimed it or its state changed; do not send the
+ * external request. A crash after this claim is intentionally treated as
+ * ambiguous and must be reconciled rather than blindly dispatched again.
+ */
+export async function claimWorkflowExecutionForDispatch(
+  ledger: WorkflowExecutionLedger,
+  executionId: string,
+): Promise<boolean> {
+  const claimed = await ledger.update(executionId, "accepted", { status: "running" });
+  return claimed !== undefined;
+}
+
 /** Terminal outcomes cannot be replayed as a fresh dispatch. An indeterminate
  * outcome may only be resolved by reconciliation, never reset to accepted. */
 export function canTransitionWorkflowExecution(
