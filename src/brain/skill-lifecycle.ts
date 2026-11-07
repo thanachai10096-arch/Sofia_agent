@@ -257,6 +257,7 @@ export class VersionedSkillLifecycle {
     if (!isRecord(parsed) || parsed.schemaVersion !== 1 || !Array.isArray(parsed.records) || !isRecord(parsed.activeBySkill)) {
       throw new Error("Unsupported or corrupt skill lifecycle store");
     }
+    const legacyUnverifiedIds = new Set<string>();
     const records: SkillLifecycleRecord[] = parsed.records.map((item) => {
       if (!isRecord(item) || typeof item.id !== "string" || !item.id.trim() || item.id.length > 200 ||
           typeof item.skillId !== "string" || !item.skillId.trim() ||
@@ -277,21 +278,36 @@ export class VersionedSkillLifecycle {
           throw new Error("Invalid skill lifecycle evaluation");
         }
       }
+      const restored = { ...(clone(item) as unknown as SkillLifecycleRecord), package: safePackage };
       if (item.status === "active" &&
           (!isRecord(item.evaluation) || item.evaluation.passed !== true ||
            !Array.isArray(item.evaluation.checks) || item.evaluation.checks.length === 0 ||
            !item.evaluation.checks.every((check) => isRecord(check) && check.passed === true) ||
            !hasValidRuntimeEvidence(safePackage, item.evaluation.runtimeVerification as SkillRuntimeVerificationEvidence | undefined) ||
            item.provenance.confidence < this.minimumConfidence)) {
-        throw new Error("Active skill lifecycle record lacks valid evaluation or confidence");
+        // Schema-v1 records created before package-bound runtime evidence existed
+        // must not keep executing, but must not make the whole agent fail to boot.
+        restored.status = "rejected";
+        restored.evaluation = {
+          passed: false,
+          checks: [
+            ...(restored.evaluation?.checks ?? []),
+            { name: "legacy-runtime-evidence", passed: false, detail: "Deactivated during migration: no package-bound isolated runtime evidence." },
+          ],
+          evaluatedAt: new Date().toISOString(),
+        };
+        restored.updatedAt = new Date().toISOString();
+        legacyUnverifiedIds.add(restored.id);
       }
-      return { ...(clone(item) as unknown as SkillLifecycleRecord), package: safePackage };
+      return restored;
     });
     const activeBySkill: Record<string, string> = {};
     for (const [skillId, recordId] of Object.entries(parsed.activeBySkill)) {
       if (typeof recordId !== "string" || !recordId.trim()) throw new Error("Invalid skill lifecycle active pointer");
-      const record = records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
+      const record = records.find((item) => item.id === recordId && item.skillId === skillId);
       if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
+      if (legacyUnverifiedIds.has(recordId)) continue;
+      if (record.status !== "active") throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
       if (Object.prototype.hasOwnProperty.call(activeBySkill, skillId)) throw new Error("Duplicate skill lifecycle active pointer");
       activeBySkill[skillId] = recordId;
     }
@@ -301,6 +317,7 @@ export class VersionedSkillLifecycle {
       }
     }
     this.snapshot = { schemaVersion: 1, records, activeBySkill };
+    if (legacyUnverifiedIds.size > 0) this.persist();
   }
   private persist(): void {
     const directory = path.dirname(this.file);
