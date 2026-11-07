@@ -310,7 +310,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      const completeMatch = desktopPath.match(/^\\/v1\\/desktop\\/companion\\/commands\\/([0-9a-f-]{36})\\/complete$/i);
+      const completeMatch = desktopPath.match(/^\/v1\/desktop\/companion\/commands\/([0-9a-f-]{36})\/complete$/i);
       if (desktopBroker && completeMatch && req.method === "POST") {
         const header = req.headers.authorization ?? "";
         const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
