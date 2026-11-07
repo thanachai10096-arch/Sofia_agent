@@ -28,7 +28,7 @@ From a source checkout:
 
 ```sh
 npm install
-npm run cli -- desktop companion
+npm run desktop:companion
 ```
 
 Or, after installing/linking the package's `sofia` CLI:
