@@ -32,8 +32,12 @@ export function parseDesktopApplicationAllowlist(raw: string | undefined): Deskt
       throw new Error("General-purpose command interpreters cannot be allowlisted as desktop applications.");
     }
     const info = statSync(canonical);
-    if (!info.isFile()) throw new Error("Allowlisted desktop executable is not a regular file: " + id);
-    if (process.platform !== "win32") accessSync(canonical, constants.X_OK);
+    const macApplicationBundle = process.platform === "darwin" && canonical.toLowerCase().endsWith(".app") &&
+      info.isDirectory() && statSync(path.join(canonical, "Contents", "Info.plist")).isFile();
+    if (!info.isFile() && !macApplicationBundle) {
+      throw new Error("Allowlisted desktop application must be an executable file or a valid macOS .app bundle: " + id);
+    }
+    if (process.platform !== "win32" && !macApplicationBundle) accessSync(canonical, constants.X_OK);
     result[id] = canonical;
   }
   return Object.freeze(result);
@@ -67,7 +71,10 @@ export function createAllowlistedDesktopHostDriver(
           args.some((arg) => typeof arg !== "string" || arg.length > 1000 || arg.includes("\0"))) {
         throw new Error("Invalid application launch arguments.");
       }
-      const child = spawn(executable, args, {
+      const macApplicationBundle = process.platform === "darwin" && executable.toLowerCase().endsWith(".app");
+      const launchCommand = macApplicationBundle ? "/usr/bin/open" : executable;
+      const launchArgs = macApplicationBundle ? ["-a", executable, "--args", ...args] : args;
+      const child = spawn(launchCommand, launchArgs, {
         detached: true,
         shell: false,
         stdio: "ignore",
