@@ -17,6 +17,7 @@ import { createToolRegistry } from "../tools/registry.js";
 import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { createBrowserTools } from "../browser/tools.js";
+import { BrowserProfileStore } from "../browser/profile-store.js";
 import { PlaywrightBrowserRuntime } from "../browser/runtime.js";
 import { discoverProjectContext } from "../brain/project-context.js";
 import { createSubagentRuntime } from "../brain/subagents.js";
@@ -75,8 +76,20 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     // never on the process-wide dependency registry, so concurrent users/runs cannot
     // address each other's tabs or reuse each other's authenticated browser context.
     const browserCleanups: Array<() => Promise<void>> = [];
+    const localDisplayAvailable = process.platform === "win32" || process.platform === "darwin" ||
+      Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+    const loginEnabled = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
+      process.env.SOFIA_BROWSER_HEADLESS === "false" && localDisplayAvailable &&
+      Boolean(process.env.SOFIA_BROWSER_PROFILE_DIR?.trim()) && Boolean(principalId);
+    const profileStore = loginEnabled
+      ? new BrowserProfileStore(process.env.SOFIA_BROWSER_PROFILE_DIR!)
+      : undefined;
     const runBrowserTools = dependencies.policy.allowBrowser
-      ? createBrowserTools(new PlaywrightBrowserRuntime(), (cleanup) => browserCleanups.push(cleanup))
+      ? createBrowserTools(
+          new PlaywrightBrowserRuntime(),
+          (cleanup) => browserCleanups.push(cleanup),
+          profileStore ? { profileStore, ownerId: principalId!, allowLogin: true } : {},
+        )
       : [];
     const grantedDesktopCapabilities = desktopCapabilities ?? [];
     const runDesktopTools = grantedDesktopCapabilities.length
