@@ -125,7 +125,7 @@
     clearInterval(state.refreshTimer); clearInterval(state.clockTimer);
     state.sessionId = null; state.expiresAt = 0; state.startedAt = 0;
     els.screenshot.removeAttribute("src");
-    els.screenWrap.classList.add("hidden"); els.welcome.classList.remove("hidden");
+    els.screenWrap.classList.add("hidden"); els.welcome.classList.remove("hidden"); $("remoteKeyboard").classList.add("hidden");
     els.close.classList.add("hidden"); els.url.value = ""; els.pageTitle.textContent = "Your browser is ready";
     els.sessionTimer.textContent = "SESSION · —"; setStatus(false, "Not connected");
     if (notify) toast("Browser session closed.");
@@ -208,7 +208,7 @@
   $("backButton").addEventListener("click", () => action({kind:"back"}));
   $("forwardButton").addEventListener("click", () => action({kind:"forward"}));
   els.close.addEventListener("click", closeSession);
-  $("keyboardButton").addEventListener("click", openKeyboard);
+  $("keyboardButton").addEventListener("click", () => {\n    if (!state.sessionId) { toast("Start your cloud browser first."); return; }\n    $("remoteKeyboard").classList.remove("hidden");\n    $("remoteTyping").focus();\n  });\n  $("keyboardClose").addEventListener("click", () => $("remoteKeyboard").classList.add("hidden"));\n  $("remoteTypeSend").addEventListener("click", async () => {\n    const text = $("remoteTyping").value; if (!text) return;\n    await action({kind:"typeFocused",text}); $("remoteTyping").value = ""; $("remoteKeyboard").classList.add("hidden");\n  });\n  $("remoteTyping").addEventListener("keydown", event => {\n    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("remoteTypeSend").click(); }\n  });
   $("fullScreenButton").addEventListener("click", () => els.stage.requestFullscreen?.().catch(() => undefined));
   $("newTabHint").addEventListener("click", () => { els.url.focus(); els.url.value = ""; toast("Enter a website address above."); });
   $("signInHint").addEventListener("click", () => showModal("Sign in safely", "Open the website in the browser and enter your password or verification code directly in that page. Sofia does not ask for, read, or store your passwords or one-time codes."));
