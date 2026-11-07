@@ -1,8 +1,8 @@
 import type { SofiaTool } from "../tools/types.js";
 import type { BrowserRuntime } from "./runtime.js";
-import type { BrowserProfileStore } from "./profile-store.js";
+import type { BrowserProfileSessionManager } from "./profile-sessions.js";
 
-export interface BrowserToolOptions { profileStore?: BrowserProfileStore; ownerId?: string; allowLogin?: boolean; }
+export interface BrowserToolOptions { profileSessions?: BrowserProfileSessionManager; ownerId?: string; allowLogin?: boolean; }
 
 export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (cleanup: () => Promise<void>) => void, options: BrowserToolOptions = {}): SofiaTool[] {
   let session: Awaited<ReturnType<BrowserRuntime["launch"]>> | undefined;
@@ -14,7 +14,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
     session = undefined;
     activeProfileId = undefined;
     pages.clear();
-    if (closing) await closing.close();
+    if (closing && !activeProfileId) await closing.close();
   };
   registerCleanup?.(dispose);
 
@@ -31,11 +31,10 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       inputSchema: { type: "object", properties: { profileId: { type: "string" } }, additionalProperties: false },
       async execute(input) {
         if (typeof input.profileId === "string") {
-          if (!options.profileStore || !options.ownerId) throw new Error("Saved browser profiles are unavailable on this host.");
+          if (!options.profileSessions || !options.ownerId) throw new Error("Saved browser profiles are unavailable on this host.");
           if (session && activeProfileId !== input.profileId) await dispose();
           if (!session) {
-            const profile = await options.profileStore.get(options.ownerId, input.profileId);
-            session = await runtime.launch({ profileDirectory: profile.directory, headless: false });
+            session = await options.profileSessions.acquire(options.ownerId, input.profileId);
             activeProfileId = input.profileId;
           }
         } else {
@@ -114,16 +113,16 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       },
     },
   ];
-  if (options.allowLogin && options.profileStore && options.ownerId) {
+  if (options.allowLogin && options.profileSessions && options.ownerId) {
     tools.unshift({
       name: "browser.login",
       description: "Open a visible local browser with a new private profile. The user completes sign-in directly in that browser; never request passwords, OTPs, cookies, or tokens in chat.",
       inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
       async execute(input) {
         if (session) await dispose();
-        const profile = await options.profileStore!.create(options.ownerId!);
+        const { profile, session: persistentSession } = await options.profileSessions!.create(options.ownerId!);
         try {
-          session = await runtime.launch({ profileDirectory: profile.directory, headless: false });
+          session = persistentSession;
           activeProfileId = profile.id;
           const value = await session.newPage();
           pages.set(value.id, value);
@@ -131,7 +130,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
           return { profileId: profile.id, pageId: value.id, url: await value.url(), loginHandoff: "Complete sign-in in the visible browser window. Do not paste credentials into Sofia chat." };
         } catch (error) {
           await dispose().catch(() => undefined);
-          await options.profileStore!.revoke(options.ownerId!, profile.id).catch(() => undefined);
+          await options.profileSessions!.revoke(options.ownerId!, profile.id).catch(() => undefined);
           throw error;
         }
       },
@@ -141,7 +140,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       description: "List this user's saved browser profile IDs and timestamps; never return cookies or credential data.",
       inputSchema: { type: "object", additionalProperties: false },
       async execute() {
-        const profiles = await options.profileStore!.list(options.ownerId!);
+        const profiles = await options.profileSessions!.list(options.ownerId!);
         return { profiles: profiles.map(({ id, createdAt, lastUsedAt }) => ({ id, createdAt, lastUsedAt })) };
       },
     });
@@ -150,8 +149,8 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       description: "Close the current browser session and permanently revoke one of this user's saved browser profiles.",
       inputSchema: { type: "object", properties: { profileId: { type: "string" } }, required: ["profileId"], additionalProperties: false },
       async execute(input) {
-        await dispose();
-        await options.profileStore!.revoke(options.ownerId!, String(input.profileId));
+        if (activeProfileId === String(input.profileId)) await dispose();
+        await options.profileSessions!.revoke(options.ownerId!, String(input.profileId));
         return { ok: true, revoked: true };
       },
     });
