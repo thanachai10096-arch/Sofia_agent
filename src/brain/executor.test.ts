@@ -1046,6 +1046,33 @@ test("Thai imperative follow-ups such as ทำมา enter the action planner e
 });
 
 
+test("Brain planning reuses the runtime readiness results discovered during understanding", async () => {
+  let planTools: Array<{ name: string; runtimeReadiness?: string; runtimeReason?: string }> = [];
+  const tools = makeTools();
+  tools.probeReadiness = async () => [{
+    name: "workspace.write_file",
+    description: "Write a file",
+    effects: ["write"],
+    registered: true,
+    policy: { status: "allowed" },
+    runtimeReadiness: "ready",
+    runtimeReason: "Read-only workspace probe passed.",
+  }];
+  const reasoner = makeReasoner((request) => {
+    const parsed = JSON.parse(request) as { phase: string; payload?: { availableTools?: Array<{ name: string; runtimeReadiness?: string; runtimeReason?: string }> } };
+    if (parsed.phase === "plan") planTools = parsed.payload?.availableTools ?? [];
+  });
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools, allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({ task: "Create hello.txt" });
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(planTools[0]?.runtimeReadiness, "ready");
+  assert.match(planTools[0]?.runtimeReason ?? "", /probe passed/i);
+});
+
 test("Thai why-questions remain conversational and are not forced into tool execution", async () => {
   const phases: string[] = [];
   const reasoner: BrainReasoner = {
