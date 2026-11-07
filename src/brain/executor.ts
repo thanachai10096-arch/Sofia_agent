@@ -695,6 +695,16 @@ export class SofiaBrain {
       );
     }
 
+    // Evolution evidence must follow an actual registered skill invocation.
+    // A skill merely matched during recovery planning is not usage evidence.
+    if (step.call.tool.startsWith("skill.")) {
+      const skillId = step.call.tool.slice("skill.".length);
+      if (skillId.trim()) {
+        this.selectedSkillIds.add(skillId);
+        this.activeSkillId = skillId;
+      }
+    }
+
     this.emit({
       type: "brain.tool.started",
       stepId: step.id,
@@ -861,10 +871,8 @@ export class SofiaBrain {
       const ranking = new Map(this.dependencies.evolution.rank(skills.map(skill => skill.id), taskType).map(item => [item.id, item.score]));
       skills = [...skills].sort((a, b) => (ranking.get(b.id) ?? 0) - (ranking.get(a.id) ?? 0));
     }
-    if (skills[0]) {
-      this.selectedSkillIds.add(skills[0].id);
-      this.activeSkillId = skills[0].id;
-    }
+    // Candidate matching informs the replan prompt only. Do not record
+    // a skill as used until executeStep observes its actual tool invocation.
     const plan = await this.inferValidatedPlan("replan", {
       task,
       understanding,
