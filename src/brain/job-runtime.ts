@@ -17,6 +17,8 @@ export interface JobRecord {
   task: string;
   modelRouteId?: string;
   ownerKeyId?: string;
+  /** True when this job was dispatched by CronScheduler; persisted across resume/recovery. */
+  cronExecution?: boolean;
   /** Destination used only for post-restart Discord job recovery notices. */
   notificationChannelId?: string;
   /** Opaque per-user/per-channel key; never shared across Discord principals. */
@@ -440,6 +442,7 @@ export class DurableJobRuntime implements JobRuntime {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
       ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
+      ...(input.cronExecution ? { cronExecution: true } : {}),
       ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
       ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
       ...(input.sessionTask ? { sessionTask: input.sessionTask } : {}),
@@ -528,7 +531,7 @@ export class DurableJobRuntime implements JobRuntime {
       record.notificationDelivered = false;
       const saved = await this.state.save(record);
       if (!saved) throw new Error("Job state changed before resume could be scheduled");
-      await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
+      await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), ...(record.cronExecution ? { cronExecution: true } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
       return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);
@@ -620,7 +623,7 @@ export class DurableJobRuntime implements JobRuntime {
         return;
       }
 
-      const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot, ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}) });
+      const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot, ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}), ...(record.cronExecution || input.cronExecution ? { cronExecution: true } : {}), ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}) });
       const result = await brain.run({
         ...input,
         ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
