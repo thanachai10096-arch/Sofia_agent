@@ -40,7 +40,7 @@ test("workspace navigation never falls back to a cached authenticated page", asy
   const { handlers } = harness(async () => { throw new Error("offline"); });
   let responsePromise: Promise<Response> | undefined;
   handlers.get("fetch")!({
-    request: new Request("https://sofia.example.test/workspace/index.html", { mode: "navigate" }),
+    request: { url: "https://sofia.example.test/workspace/index.html", method: "GET", mode: "navigate" },
     respondWith: (promise: Promise<Response>) => { responsePromise = promise; },
   });
   const response = await responsePromise!;
