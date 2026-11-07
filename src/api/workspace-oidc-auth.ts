@@ -186,10 +186,12 @@ export class WorkspaceOidcAuth {
     const audience = claims.aud;
     const audiences = Array.isArray(audience) ? audience : [audience];
     const exp = Number(claims.exp);
+    const iat = Number(claims.iat);
     const nbf = claims.nbf === undefined ? 0 : Number(claims.nbf);
     if (!equalText(issuer, this.issuer) || !audiences.includes(this.clientId) ||
         (audiences.length > 1 && claims.azp !== this.clientId) ||
         !Number.isFinite(exp) || exp <= Math.floor(this.now() / 1000) ||
+        !Number.isFinite(iat) || iat > Math.floor(this.now() / 1000) + 60 ||
         !Number.isFinite(nbf) || nbf > Math.floor(this.now() / 1000) ||
         typeof claims.nonce !== "string" || !equalText(claims.nonce, nonce)) {
       throw new Error("OIDC ID token claims invalid.");
