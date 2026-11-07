@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { SofiaClient } from "../sdk/client.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
-import { runDesktopCompanion } from "./desktop-companion.js";
+import { disconnectDesktopCompanion, runDesktopCompanion } from "./desktop-companion.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -25,7 +25,7 @@ Environment:
 
 async function main() {
   if (!command || command === "help" || command === "--help") return help();
-  if (command === "desktop" && args[1] === "companion") return runDesktopCompanion();
+  if (command === "desktop" && args[1] === "companion" && args[2] === "disconnect") return disconnectDesktopCompanion();\n  if (command === "desktop" && args[1] === "companion") return runDesktopCompanion();
 
   const runtime = createNodeWorkspaceRuntime();
   if (command === "init") {
