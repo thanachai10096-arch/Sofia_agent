@@ -45,7 +45,7 @@ function equalText(a: string, b: string): boolean {
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 }
-function requiredString(value: unknown): string {
+function tokenTooLong(value: string): boolean { return value.length > 4096; }\nfunction requiredString(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) throw new Error("Invalid OIDC configuration or response.");
   return value;
 }
@@ -69,6 +69,7 @@ export class WorkspaceOidcAuth {
   private discovery?: OidcDiscovery;
   private readonly logins = new Map<string, PendingLogin>();
   private readonly sessions = new Map<string, { subject: string; expiresAt: number }>();
+  private readonly loginStarts: number[] = [];
 
   constructor(options: WorkspaceAuthOptions) {
     this.issuer = requiredString(options.issuer).replace(/\/$/, "");
@@ -95,7 +96,7 @@ export class WorkspaceOidcAuth {
   private async provider(): Promise<OidcDiscovery> {
     if (this.discovery) return this.discovery;
     const response = await this.fetcher(this.issuer + "/.well-known/openid-configuration", {
-      headers: { accept: "application/json" }, redirect: "error",
+      headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error("OIDC discovery failed.");
     const data = await response.json() as JsonObject;
@@ -116,6 +117,10 @@ export class WorkspaceOidcAuth {
 
   async beginLogin(): Promise<{ url: string; state: string }> {
     this.prune();
+    const now = this.now();
+    while (this.loginStarts.length && this.loginStarts[0]! <= now - 60_000) this.loginStarts.shift();
+    if (this.loginStarts.length >= 20 || this.logins.size >= 100) throw new Error("Workspace login rate limit reached.");
+    this.loginStarts.push(now);
     const provider = await this.provider();
     const state = b64url(randomBytes(32));
     const nonce = b64url(randomBytes(32));
@@ -136,7 +141,7 @@ export class WorkspaceOidcAuth {
 
   async completeLogin(code: string, state: string): Promise<WorkspaceIdentity> {
     this.prune();
-    if (!code || code.length > 4096 || !/^[A-Za-z0-9_-]{32,}$/.test(state)) throw new Error("Invalid OIDC callback.");
+    if (!code || code.length > 4096 || tokenTooLong(code) || !/^[A-Za-z0-9_-]{32,}$/.test(state)) throw new Error("Invalid OIDC callback.");
     const pending = this.logins.get(state);
     this.logins.delete(state); // one-time state, including failed exchanges
     if (!pending || pending.expiresAt <= this.now() || !equalText(pending.state, state)) throw new Error("OIDC login expired or invalid.");
@@ -145,6 +150,7 @@ export class WorkspaceOidcAuth {
       method: "POST",
       redirect: "error",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
       body: new URLSearchParams({
         grant_type: "authorization_code", code, redirect_uri: this.redirectUri,
         client_id: this.clientId, client_secret: this.clientSecret, code_verifier: pending.verifier,
@@ -163,11 +169,11 @@ export class WorkspaceOidcAuth {
 
   private async verifyIdToken(token: string, provider: OidcDiscovery, nonce: string): Promise<string> {
     const parts = token.split(".");
-    if (parts.length !== 3) throw new Error("Invalid OIDC ID token.");
+    if (parts.length !== 3 || token.length > 16_384) throw new Error("Invalid OIDC ID token.");
     const header = decodeJson(parts[0]!);
     const claims = decodeJson(parts[1]!);
     if (header.alg !== "RS256" || typeof header.kid !== "string") throw new Error("Unsupported OIDC ID token signature.");
-    const jwksResponse = await this.fetcher(provider.jwks_uri, { headers: { accept: "application/json" }, redirect: "error" });
+    const jwksResponse = await this.fetcher(provider.jwks_uri, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(10_000) });
     if (!jwksResponse.ok) throw new Error("OIDC signing keys unavailable.");
     const jwks = await jwksResponse.json() as { keys?: Array<JsonObject> };
     const jwk = jwks.keys?.find((key) => key.kid === header.kid && key.kty === "RSA" && key.use !== "enc" && (!key.alg || key.alg === "RS256"));
