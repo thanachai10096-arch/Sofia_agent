@@ -27,8 +27,13 @@ export interface BrowserSession {
   close(): Promise<void>;
 }
 
+export interface BrowserLaunchOptions {
+  profileDirectory?: string;
+  headless?: boolean;
+}
+
 export interface BrowserRuntime {
-  launch(): Promise<BrowserSession>;
+  launch(options?: BrowserLaunchOptions): Promise<BrowserSession>;
 }
 
 function isPrivateIpv4(host: string): boolean {
@@ -273,15 +278,26 @@ export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
 export class PlaywrightBrowserRuntime implements BrowserRuntime {
   constructor(private readonly headless = true) {}
 
-  async launch(): Promise<BrowserSession> {
+  async launch(options: BrowserLaunchOptions = {}): Promise<BrowserSession> {
     const load = new Function("return import('playwright')") as () => Promise<any>;
     const playwright = await load();
     const proxy = await createBrowserEgressProxy();
     let browser: any;
     let context: any;
     try {
-      browser = await playwright.chromium.launch({ headless: this.headless, proxy: { server: proxy.url }, args: ["--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] });
-      context = await browser.newContext();
+      const launchOptions = {
+        headless: options.headless ?? this.headless,
+        proxy: { server: proxy.url },
+        args: ["--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"],
+      };
+      if (options.profileDirectory) {
+        if (launchOptions.headless) throw new Error("Persistent browser login profiles require a visible local browser.");
+        context = await playwright.chromium.launchPersistentContext(options.profileDirectory, launchOptions);
+        browser = context.browser();
+      } else {
+        browser = await playwright.chromium.launch(launchOptions);
+        context = await browser.newContext();
+      }
       // Apply the same URL policy to every request, including redirects and subresources.
       await context.route("**/*", async (route: any) => {
       try {
@@ -331,7 +347,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
       close: async () => {
         const results = await Promise.allSettled([
           Promise.resolve().then(() => context.close()),
-          Promise.resolve().then(() => browser.close()),
+          ...(browser ? [Promise.resolve().then(() => browser.close())] : []),
           Promise.resolve().then(() => proxy.close()),
         ]);
         const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
