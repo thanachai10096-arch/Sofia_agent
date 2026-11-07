@@ -16,7 +16,6 @@ import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
-import { createBrowserTools } from "../browser/tools.js";
 import { BrowserProfileStore } from "../browser/profile-store.js";
 import { BrowserProfileSessionManager } from "../browser/profile-sessions.js";
 import { PlaywrightBrowserRuntime } from "../browser/runtime.js";
@@ -37,9 +36,8 @@ import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
 import { EncryptedFileAudit } from "../security/persistent-audit.js";
 import { CompositeSecurityAudit } from "../security/audit.js";
-import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
-import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import { createRunScopedToolRegistry } from "./run-scoped-tools.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
@@ -76,35 +74,23 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     // Browser tools own mutable page/session handles. Construct them per Brain run,
     // never on the process-wide dependency registry, so concurrent users/runs cannot
     // address each other's tabs or reuse each other's authenticated browser context.
-    const browserCleanups: Array<() => Promise<void>> = [];
     const localDisplayAvailable = process.platform === "win32" || process.platform === "darwin" ||
       Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
     const loginEnabled = Boolean(dependencies.profileSessions) &&
       process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
       process.env.SOFIA_BROWSER_HEADLESS === "false" && localDisplayAvailable &&
       Boolean(principalId);
-    const runBrowserTools = dependencies.policy.allowBrowser
-      ? createBrowserTools(
-          new PlaywrightBrowserRuntime(),
-          (cleanup) => browserCleanups.push(cleanup),
-          loginEnabled ? { profileSessions: dependencies.profileSessions, ownerId: principalId!, allowLogin: true } : {},
-        )
-      : [];
-    const grantedDesktopCapabilities = desktopCapabilities ?? [];
-    const runDesktopTools = grantedDesktopCapabilities.length
-      ? createDesktopTools({
-          runtime: new DesktopRuntime({
-            workspaceRoot: workspace,
-            allowedExecutables: (process.env.SOFIA_DESKTOP_ALLOWED_EXECUTABLES ?? "").split(",").map((value) => value.trim()).filter(Boolean),
-          }),
-          principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
-        })
-      : [];
-    const runTools = createToolRegistry([
-      ...dependencies.tools.list(),
-      ...runBrowserTools,
-      ...runDesktopTools,
-    ]);
+    const runScopedTools = createRunScopedToolRegistry({
+      baseTools: dependencies.tools.list(),
+      allowBrowser: dependencies.policy.allowBrowser,
+      browserRuntime: new PlaywrightBrowserRuntime(),
+      ...(loginEnabled ? { browserOptions: { profileSessions: dependencies.profileSessions, ownerId: principalId!, allowLogin: true } } : {}),
+      desktopCapabilities,
+      principalId,
+      workspaceRoot: workspace,
+      allowedExecutables: (process.env.SOFIA_DESKTOP_ALLOWED_EXECUTABLES ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+    });
+    const runTools = runScopedTools.registry;
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
@@ -114,7 +100,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       maxContextBytes:intEnv("SOFIA_SUBAGENT_MAX_CONTEXT_BYTES",32768,256),
     });
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
-    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
+    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{await runScopedTools.cleanup();}},limits});
   };
 }
 
