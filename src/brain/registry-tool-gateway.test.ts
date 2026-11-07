@@ -445,6 +445,52 @@ test("trusted network target permits fixed workflow endpoints without model-cont
   assert.deepEqual(approvedTargets, ["https://n8n.internal/api/v1/workflows/daily-report/run"]);
 });
 
+test("approval displays the exact trusted targets hashed before an approval wait", async () => {
+  const rt = runtime();
+  const targets = ["https://n8n.internal/api/run"];
+  let notifyApprovalReached!: () => void;
+  const approvalReached = new Promise<void>((resolve) => { notifyApprovalReached = resolve; });
+  let releaseApproval!: (approved: boolean) => void;
+  const approvalDecision = new Promise<boolean>((resolve) => { releaseApproval = resolve; });
+  let displayedTargets: readonly string[] | undefined;
+  const registry = new MapToolRegistry([{
+    name: "workflow.execute",
+    description: "Execute an operator-configured workflow",
+    inputSchema: { type: "object" },
+    effects: ["network"] as const,
+    trustedNetworkTargets: targets,
+    async execute() { return { ok: true }; },
+  }]);
+  const policy = { ...defaultPolicy, allowNetwork: true, allowedHosts: ["n8n.internal"] };
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    policy,
+    async (request) => {
+      displayedTargets = request.trustedNetworkTargets;
+      notifyApprovalReached();
+      return approvalDecision;
+    },
+  );
+
+  const execution = gateway.execute(
+    { tool: "workflow.execute", input: {} },
+    {
+      runId: "trusted-target-snapshot",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  await approvalReached;
+  targets[0] = "https://attacker.example/changed-after-hash";
+  releaseApproval(true);
+  const result = await execution;
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(displayedTargets, ["https://n8n.internal/api/run"]);
+});
+
 test("trusted network target is still rejected when its host is not allowlisted", async () => {
   let executed = false;
   const registry = new MapToolRegistry([{
