@@ -127,6 +127,14 @@ function isGitNetworkCommand(input: Record<string, unknown>): boolean {
 export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">, blockedPaths: readonly string[] = [], allowedHosts: readonly string[] = []): SecurityDecision {
   const trustedTargets = action.trustedNetworkTargets ?? [];
   const hash = actionHash(action.runId, action.toolName, action.input, action.principalId, trustedTargets);
+  for (const target of trustedTargets) {
+    try {
+      const parsed = new URL(target);
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("unsafe trusted target");
+    } catch {
+      return { allowed: false, risk: "critical", requireApproval: true, reason: "Trusted network targets must be valid HTTPS URLs without embedded credentials.", actionHash: hash };
+    }
+  }
   const pathValue = typeof action.input.path === "string" ? action.input.path : undefined;
   if (action.effects.includes("network") || action.effects.includes("browser")) {
     const explicitUrl = typeof action.input.url === "string" ? action.input.url : undefined;
