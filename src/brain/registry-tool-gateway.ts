@@ -58,6 +58,7 @@ export class RegistryToolGateway implements ToolGateway {
   async probeReadiness(){
     const catalog=this.listTools();
     let workspaceReady:{ok:boolean;reason:string}|undefined;
+    const browserProbeResults=new Map<() => Promise<{ok:boolean;reason:string}>,Promise<{ok:boolean;reason:string}>>();
     for(const item of catalog){
       if(item.name.startsWith("workspace.")||item.name==="project.verify"){
         if(!workspaceReady){
@@ -73,8 +74,26 @@ export class RegistryToolGateway implements ToolGateway {
         item.runtimeReadiness=workspaceReady.ok?"ready":"unavailable";
         item.runtimeReason=workspaceReady.reason;
       }else if(item.effects.includes("browser")||item.name.startsWith("browser.")){
-        item.runtimeReadiness="not_probed";
-        item.runtimeReason="Browser readiness requires a real browser-session probe; no session was opened during discovery.";
+        if(item.policy?.status==="blocked"){
+          item.runtimeReadiness="not_probed";
+          item.runtimeReason="Browser runtime probe skipped because execution policy blocks this tool.";
+        }else{
+          const registered=this.dependencies.tools.get(item.name);
+          const probe=registered?.probeReadiness;
+          if(!probe){
+            item.runtimeReadiness="not_probed";
+            item.runtimeReason="No safe browser runtime probe is registered for this tool.";
+          }else{
+            let pending=browserProbeResults.get(probe);
+            if(!pending){
+              pending=probe().catch(error=>({ok:false,reason:error instanceof Error?error.message:"Browser runtime probe failed."}));
+              browserProbeResults.set(probe,pending);
+            }
+            const result=await pending;
+            item.runtimeReadiness=result.ok?"ready":"unavailable";
+            item.runtimeReason=result.reason;
+          }
+        }
       }else if(item.effects.includes("shell")){
         item.runtimeReadiness="not_probed";
         item.runtimeReason="Terminal execution was not invoked during discovery to avoid running a command outside an approved task.";
