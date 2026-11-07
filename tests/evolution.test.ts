@@ -49,6 +49,8 @@ test("skill reliability records actual tool calls and execution duration", () =>
   assert.ok(skill);
   assert.equal(skill.avgToolCalls, 1.5);
   assert.equal(skill.avgDurationMs, 500);
+  assert.equal(skill.durationSamples, 2);
+  assert.equal(skill.toolCallSamples, 2);
   assert.deepEqual(skill.successHistory[0] && {
     toolCalls: skill.successHistory[0].toolCalls,
     durationMs: skill.successHistory[0].durationMs,
@@ -133,6 +135,8 @@ test("legacy evolution snapshots load with safe defaults", async () => {
     }), "utf8");
     const engine = new EvolutionEngine(file);
     assert.deepEqual(engine.getSkill("legacy")?.taskTypes, {});
+    assert.equal(engine.getSkill("legacy")?.avgDurationMs, 0);
+    assert.equal(engine.getSkill("legacy")?.durationSamples, 0);
     engine.recordSuccess("legacy", 1, 0, "coding");
     assert.equal(engine.getSkill("legacy")?.taskTypes.coding?.successes, 1);
     await engine.flush();
