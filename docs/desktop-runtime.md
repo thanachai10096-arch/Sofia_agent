@@ -139,3 +139,39 @@ This host is a local bridge for a trusted frontend/companion; it does not itself
 - The current process runner is a policy boundary, **not an OS-level sandbox**. For untrusted workloads, use a real OS/container sandbox and run the local service as a non-admin user.
 - A production native driver, authenticated loopback pairing service and signed installer are still separate deliverables; this PR adds the capability/approval contract, not those packaged components.
 - Do not grant screen/input capabilities to an API key that only needs ordinary server-side agent execution.
+
+
+## Signed Cloud Relay protocol foundation (not a connected relay yet)
+
+The desktop package also exports a request-authentication primitive for a future outbound Desktop Companion connection:
+
+- `signDesktopRelayRequest` signs the device ID, HTTP method, exact request path (including query), timestamp, nonce, and SHA-256 hash of the exact body using HMAC-SHA256.
+- `verifyDesktopRelayRequest` checks the signature with a constant-time comparison, enforces a bounded clock-skew window, and consumes the nonce to reject replay.
+- Device credentials must be random, device-specific secrets of at least 32 bytes. They are not Sofia API keys and must never be exposed to the model or browser UI.
+- `DesktopRelayReplayGuard` is a bounded in-memory implementation intended for a single process and tests. It fails closed when full. A horizontally scaled Cloud Relay must replace it with a shared atomic nonce store (for example Redis with expiry and SET-NX semantics) before accepting production traffic.
+
+Example:
+
+```ts
+import {
+  createDesktopRelayNonce,
+  signDesktopRelayRequest,
+  verifyDesktopRelayRequest,
+  DesktopRelayReplayGuard,
+} from "../src/desktop/index.js";
+
+const request = {
+  deviceId: "desktop-device-0001",
+  method: "POST",
+  path: "/v1/desktop-relay/commands/claim",
+  timestamp: Date.now(),
+  nonce: createDesktopRelayNonce(),
+  body: JSON.stringify({ waitSeconds: 20 }),
+};
+const headers = signDesktopRelayRequest(request, deviceSecret);
+const accepted = verifyDesktopRelayRequest(
+  request, headers, deviceSecret, new DesktopRelayReplayGuard(),
+);
+```
+
+This is only the cryptographic request boundary. It does **not** implement device enrollment, cloud-side device ownership/storage, command queues, WebSocket/long-poll delivery, result streaming, offline/reconnect handling, or API-to-companion routing. The existing loopback host remains loopback-only. Do not describe phone-to-PC control as available until those pieces are implemented and tested end to end.
