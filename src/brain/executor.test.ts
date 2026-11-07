@@ -1017,7 +1017,18 @@ test("Thai imperative follow-ups such as ทำมา enter the action planner e
             risk: "low", successCriteria: ["the planned action runs"], ambiguities: [],
             mode: "conversation", response: "I will do it.",
           }
-        : plan;
+        : parsed.phase === "replan"
+          ? {
+              strategy: "follow-up-inspection",
+              reason: "Inspect the result of the requested action.",
+              steps: [{
+                id: "inspect",
+                objective: "Confirm the requested file exists",
+                dependencies: [],
+                call: { tool: "workspace.list_files", input: { path: "." } },
+              }],
+            }
+          : plan;
       return {
         inputTokens: 10,
         async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; },
