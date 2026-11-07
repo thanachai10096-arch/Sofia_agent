@@ -71,7 +71,7 @@ test("Telegram run completion sends the real completed output to the originating
       assert.equal(id, "run-123");
       assert.equal(options.timeoutMs, 30 * 60 * 1_000);
       assert.equal(options.intervalMs, 1_000);
-      return { id, status: "completed", result: { output: "สวัสดีจาก Sofia" } };
+      return { id, status: "completed", result: { kind: "conversation", output: "สวัสดีจาก Sofia" } };
     },
     send: async (message) => {
       sent.push({ conversationId: message.conversationId, text: message.text });
@@ -82,7 +82,7 @@ test("Telegram run completion sends the real completed output to the originating
   });
   assert.equal(sent.length, 1);
   assert.equal(sent[0]?.conversationId, "chat-456");
-  assert.match(sent[0]?.text ?? "", /Sofia completed the task/);
+  assert.match(sent[0]?.text ?? "", /Sofia replied/);
   assert.match(sent[0]?.text ?? "", /สวัสดีจาก Sofia/);
   assert.deepEqual(warnings, []);
   assert.deepEqual(events, [
