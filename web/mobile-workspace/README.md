@@ -1,6 +1,6 @@
 # Sofia Mobile Workspace UI
 
-A responsive mobile-first browser workspace for people who use Sofia from a phone and do not own a computer.
+A responsive, installable PWA workspace for people who use Sofia from a phone and do not own a computer. Add it to the iPhone/Android home screen from the browser's Share/Install menu after it is hosted over HTTPS.
 
 ## UI included
 
@@ -8,7 +8,7 @@ A responsive mobile-first browser workspace for people who use Sofia from a phon
 - Private cloud browser start/close, address navigation, back/forward/reload.
 - Screenshot refresh with tap-to-click coordinate mapping and touch-drag scrolling.
 - Remote keyboard panel that types into the currently focused remote browser element.
-- Sofia task composer using the async Agent Runs API and reconnectable status polling.
+- Sofia task composer using the async Agent Runs API and reconnectable status polling.\n- PWA manifest, custom app icon, and offline caching for the static app shell (API responses are never cached).
 - Session countdown, connection states, error feedback, privacy/sign-in guidance and responsive mobile navigation.
 
 ## Run as static assets
