@@ -175,10 +175,35 @@ function packContext(
   if (inputLimit < 1) throw new ContextTooLarge();
 
   const selected: EvidenceChunk[] = [];
-  const prepare = (evidence: readonly EvidenceChunk[]) =>
-    validateCount(route.prepare({ core: request.core, evidence: [...evidence] }));
+  const prepare = (core: PromptCore, evidence: readonly EvidenceChunk[]) =>
+    validateCount(route.prepare({ core, evidence: [...evidence] }));
 
-  let prepared = prepare(selected);
+  // The task and phase instructions are the actionable contract. The state
+  // snapshot is supplemental context and may contain duplicated history,
+  // memory, or serialized runtime data. Drop its largest top-level fields
+  // deterministically before rejecting every route for an oversized prompt.
+  // Never truncate the user's task or the parser/security instructions.
+  let core = request.core;
+  let prepared = prepare(core, selected);
+  if (prepared.inputTokensUpperBound > inputLimit) {
+    const state = core.state;
+    if (state && typeof state === "object" && !Array.isArray(state)) {
+      const entries = Object.entries(state as Record<string, unknown>)
+        .sort((a, b) => {
+          const size = (value: unknown) => {
+            try { return JSON.stringify(value)?.length ?? 0; } catch { return 0; }
+          };
+          return size(b[1]) - size(a[1]) || a[0].localeCompare(b[0]);
+        });
+      const compactState: Record<string, unknown> = { ...(state as Record<string, unknown>) };
+      for (const [key] of entries) {
+        delete compactState[key];
+        core = { ...request.core, state: compactState };
+        prepared = prepare(core, selected);
+        if (prepared.inputTokensUpperBound <= inputLimit) break;
+      }
+    }
+  }
   if (prepared.inputTokensUpperBound > inputLimit) throw new ContextTooLarge();
 
   const seen = new Set<string>();
@@ -197,7 +222,7 @@ function packContext(
   for (const chunk of candidates) {
     if (seen.has(chunk.id)) continue;
     seen.add(chunk.id);
-    const candidate = prepare([...selected, chunk]);
+    const candidate = prepare(core, [...selected, chunk]);
     if (candidate.inputTokensUpperBound <= inputLimit) {
       selected.push(chunk);
       prepared = candidate;
