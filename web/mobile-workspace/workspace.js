@@ -35,11 +35,16 @@
     els.modalBody.textContent = message;
     els.modal.showModal();
   }
+  function csrfToken() {
+    const cookie = document.cookie.split("; ").find(item => item.startsWith("sofia_csrf="));
+    return cookie ? decodeURIComponent(cookie.slice("sofia_csrf=".length)) : "";
+  }
   async function api(path, options = {}) {
+    const csrf = csrfToken();
     const response = await fetch(API_ROOT + path, {
       method: options.method || "GET",
       credentials: "same-origin",
-      headers: { "accept": "application/json", ...(options.body ? { "content-type": "application/json" } : {}) },
+      headers: { "accept": "application/json", ...(csrf ? { "x-csrf-token": csrf } : {}), ...(options.body ? { "content-type": "application/json" } : {}) },
       ...(options.body ? { body: JSON.stringify(options.body) } : {})
     });
     let payload = {};
