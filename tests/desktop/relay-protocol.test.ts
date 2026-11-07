@@ -54,4 +54,10 @@ test("replay guard expires old nonces and fails closed at capacity", () => {
   assert.equal(guard.consume(deviceId, "nonce-abcdefghijkl", 10_500), false);
   now = 10_501;
   assert.equal(guard.consume(deviceId, "nonce-abcdefghijkl", 11_000), true);
+
+  const full = new DesktopRelayReplayGuard({ now: () => now, maxEntries: 100 });
+  for (let index = 0; index < 100; index += 1) {
+    assert.equal(full.consume(deviceId, `nonce-${String(index).padStart(16, "0")}`, 20_000), true);
+  }
+  assert.equal(full.consume(deviceId, "nonce-one-more-entry", 20_000), false);
 });
