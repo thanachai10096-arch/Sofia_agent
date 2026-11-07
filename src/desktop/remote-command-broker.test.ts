@@ -98,3 +98,63 @@ test("a saved local pairing survives ordinary desktop restarts within the idle r
   assert.throws(() => broker.poll(token), /not paired/);
   broker.close();
 });
+
+test("durable pairing survives an API restart but pending commands are never replayed", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { FileDesktopCompanionStore } = await import("./companion-store.js");
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-broker-restart-"));
+  try {
+    const store = new FileDesktopCompanionStore(directory);
+    const firstBroker = new DesktopCommandBroker({ store });
+    const { token } = firstBroker.connect("owner-a");
+    const interrupted = firstBroker.dispatch("owner-a", action);
+    assert.ok(firstBroker.poll(token));
+    firstBroker.close();
+    await assert.rejects(interrupted, /shut down/);
+
+    const restartedBroker = new DesktopCommandBroker({ store });
+    assert.equal(restartedBroker.getStatus("owner-a").connected, true);
+    assert.equal(restartedBroker.poll(token), null);
+    const next = restartedBroker.dispatch("owner-a", action);
+    const command = restartedBroker.poll(token);
+    assert.ok(command);
+    assert.equal(restartedBroker.complete(token, command.id, { afterRestart: true }), true);
+    assert.deepEqual(await next, { afterRestart: true });
+    restartedBroker.disconnect("owner-a");
+
+    const afterRevoke = new DesktopCommandBroker({ store });
+    assert.equal(afterRevoke.getStatus("owner-a").connected, false);
+    assert.throws(() => afterRevoke.poll(token), /not paired/);
+    afterRevoke.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("durable pairings remain isolated by owner across API restarts", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { FileDesktopCompanionStore } = await import("./companion-store.js");
+  const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-broker-owner-"));
+  try {
+    const store = new FileDesktopCompanionStore(directory);
+    const first = new DesktopCommandBroker({ store });
+    const ownerA = first.connect("owner-a");
+    const ownerB = first.connect("owner-b");
+    first.close();
+    const restarted = new DesktopCommandBroker({ store });
+    const taskA = restarted.dispatch("owner-a", action);
+    assert.equal(restarted.poll(ownerB.token), null);
+    const claimedA = restarted.poll(ownerA.token);
+    assert.ok(claimedA);
+    assert.equal(restarted.complete(ownerB.token, claimedA.id, { wrongOwner: true }), false);
+    assert.equal(restarted.complete(ownerA.token, claimedA.id, { ok: true }), true);
+    await taskA;
+    restarted.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
