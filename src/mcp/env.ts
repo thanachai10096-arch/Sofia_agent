@@ -76,7 +76,7 @@ export async function connectMcpFromEnv(policy: ExecutionPolicy): Promise<Manage
         if (!value) throw new Error("Missing environment variable " + envName + " for MCP server " + config.id);
         headers[header] = value;
       }
-      return { transport: new McpHttpTransport({ endpoint: config.endpoint, headers }), options: { id: config.id, allowedTools: config.allowedTools } };
+      return { transport: new McpHttpTransport({ endpoint: config.endpoint, headers }), options: { id: config.id, allowedTools: config.allowedTools, requiresNetwork: true } };
     }
     if (!stdioAllowed.has(config.command)) throw new Error("MCP stdio command is not in SOFIA_MCP_STDIO_ALLOWED_COMMANDS: " + config.command);
     const env: Record<string, string> = {};
@@ -85,7 +85,7 @@ export async function connectMcpFromEnv(policy: ExecutionPolicy): Promise<Manage
       if (value !== undefined) env[name] = value;
     }
     const options: McpStdioTransportOptions = { command: config.command, args: config.args, cwd: config.cwd, env };
-    return { transport: new McpStdioTransport(options), options: { id: config.id, allowedTools: config.allowedTools } };
+    return { transport: new McpStdioTransport(options), options: { id: config.id, allowedTools: config.allowedTools, requiresNetwork: false } };
   });
   try { return await connectManagedMcpRegistry([], servers); }
   catch (error) {
