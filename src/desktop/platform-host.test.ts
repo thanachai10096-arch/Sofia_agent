@@ -27,7 +27,7 @@ test("Linux X11 driver uses direct xdotool arguments and captures a bounded PNG"
   assert.equal(calls[0]?.command, "scrot");
   assert.deepEqual(calls[1]?.args, ["mousemove", "--sync", "25", "40", "click", "3"]);
   assert.deepEqual(calls[2]?.args, ["type", "--clearmodifiers", "--delay", "1", "--", "hello; do-not-run"]);
-  assert.deepEqual(calls[3]?.args, ["key", "--clearmodifiers", "ctrl+a"]);
+  assert.deepEqual(calls[3]?.args, ["key", "--clearmodifiers", "ctrl+A"]);
 });
 
 test("Linux Wayland refuses X11-only input and capture backends", async () => {
