@@ -136,6 +136,14 @@ test("ledger update is compare-and-set and preserves indeterminate outcomes", as
     ),
     /workflow_execution_invalid_transition/,
   );
+  await assert.rejects(
+    ledger.update(
+      reservation.record.executionId,
+      "indeterminate",
+      { status: "running" },
+    ),
+    /workflow_execution_invalid_transition/,
+  );
   assert.equal((await ledger.get(reservation.record.executionId))?.status, "indeterminate");
 });
 
