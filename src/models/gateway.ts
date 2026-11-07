@@ -317,7 +317,7 @@ export class SofiaModelGateway implements ModelProvider {
         const parsedBaseUrl = new URL(config.baseUrl);
         if (
           parsedBaseUrl.hostname === "api.deepseek.com" &&
-          parsedBaseUrl.pathname.replace(/\\/+$/, "") === "/anthropic"
+          parsedBaseUrl.pathname.replace(/\/+$/, "") === "/anthropic"
         ) {
           protocol = "openai-compatible";
           providerBaseUrl = parsedBaseUrl.origin;
