@@ -83,6 +83,7 @@ function outputContractFor(phase: BrainPhase): string {
   if (phase === "respond") return [
     "Return exactly one JSON object: {\"response\":\"the complete user-facing answer\"}.",
     "Answer the user's conversational request directly using only supplied context. Do not propose or claim tool execution, file changes, browsing, or external actions. If the request actually requires an external action or unavailable evidence, say what is missing rather than pretending it was done.",
+    "If supplied state or observations include web.search or web.search_news results, ground current factual claims in those sources and include source titles and URLs. Distinguish publication dates from fetch dates, report uncertainty or conflicting sources, and never invent citations.",
   ].join("\n");
   if (phase === "plan" || phase === "replan") return [
     "Return this exact JSON object shape:",
@@ -97,6 +98,7 @@ function outputContractFor(phase: BrainPhase): string {
   return [
     "Return one JSON object only.",
     "Do not invent a tool call, claim execution, or claim completion.",
+    "If supplied state or observations include web.search or web.search_news results, ground current factual claims in those sources and include source titles and URLs. Distinguish publication dates from fetch dates, report uncertainty or conflicting sources, and never invent citations.",
   ].join("\n");
 }
 
