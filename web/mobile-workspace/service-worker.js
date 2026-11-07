@@ -17,7 +17,7 @@ self.addEventListener("fetch", event => {
     }).catch(() => caches.match("./index.html")));
     return;
   }
-  if (ASSETS.some(asset => url.pathname.endsWith(asset.replace("./", "")))) {
+  if (ASSETS.some(asset => asset !== "./" && url.pathname.endsWith(asset.replace("./", "")))) {
     event.respondWith(caches.match(request).then(cached => cached || fetch(request)));
   }
 });
