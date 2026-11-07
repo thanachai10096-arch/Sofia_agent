@@ -125,6 +125,7 @@ if (discordConfigured) {
       }
       const handleDiscordChat = createDiscordSharedChatHandler({
         runtime: deps.jobRuntime,
+        userMemoryStore: deps.userMemoryStore,
         sender: discordTransport!,
         deduplicator: discordDeduplicator,
         allowedUserIds: new Set(discordUserIds),
