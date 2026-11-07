@@ -9,7 +9,7 @@ export interface ExecutionPolicy {
 }
 export const defaultPolicy:ExecutionPolicy={
   allowTools:true,allowNetwork:false,allowShell:false,allowFileWrite:true,allowBrowser:false,
-  allowDestructive:false,maxRisk:"high",maxSteps:12,maxToolCallsPerStep:4,
+  allowDestructive:false,allowRemoteDesktop:false,maxRisk:"high",maxSteps:12,maxToolCallsPerStep:4,
   blockedPaths:[".env",".git","node_modules",".sofia/secrets"],allowedHosts:[],capabilitySecret:undefined,permissions:{},
 };
 const riskRank:Record<RiskLevel,number>={low:0,medium:1,high:2,critical:3};
