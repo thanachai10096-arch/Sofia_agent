@@ -93,7 +93,9 @@ export interface WorkspaceSnapshot {
 }
 
 export interface ToolGateway {
-  listTools?(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[] }>;
+  listTools?(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[]; registered?: boolean; policy?: { status: "allowed" | "approval_required" | "blocked"; reason?: string }; runtimeReadiness?: "ready" | "not_probed" | "unavailable"; runtimeReason?: string }>;
+  /** Performs bounded, read-only checks for capabilities whose runtime can be safely probed. */
+  probeReadiness?(): Promise<Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[]; registered?: boolean; policy?: { status: "allowed" | "approval_required" | "blocked"; reason?: string }; runtimeReadiness?: "ready" | "not_probed" | "unavailable"; runtimeReason?: string }>>;
   describe(name: string): {
     effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[];
   } | undefined;

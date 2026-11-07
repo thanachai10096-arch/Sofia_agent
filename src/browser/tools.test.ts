@@ -53,6 +53,40 @@ function setup() {
   };
 }
 
+test("browser readiness probe verifies an isolated launch and always closes it", async () => {
+  const harness = setup();
+  const probe = harness.tool("browser.open").probeReadiness;
+  assert.ok(probe);
+  const result = await probe();
+  assert.deepEqual(result, {
+    ok: true,
+    reason: "Isolated headless browser launch and clean shutdown passed.",
+  });
+  assert.deepEqual(harness.counts(), { launchCount: 1, sessionCloseCount: 1, pageCloseCount: 0 });
+});
+
+test("browser readiness probe does not retry a failed session close", async () => {
+  let closeCount = 0;
+  const runtime = {
+    async launch() {
+      return {
+        id: "session-close-failure",
+        async newPage() { throw new Error("probe must not open a page"); },
+        async close() {
+          closeCount += 1;
+          throw new Error("browser shutdown failed");
+        },
+      } satisfies BrowserSession;
+    },
+  } satisfies BrowserRuntime;
+  const tools = createBrowserTools(runtime);
+  const probe = tools.find((item) => item.name === "browser.open")?.probeReadiness;
+  assert.ok(probe);
+  const result = await probe();
+  assert.deepEqual(result, { ok: false, reason: "browser shutdown failed" });
+  assert.equal(closeCount, 1, "a failed close must not be invoked a second time");
+});
+
 test("browser.close closes only the requested page when pageId is provided", async () => {
   const harness = setup();
   const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };

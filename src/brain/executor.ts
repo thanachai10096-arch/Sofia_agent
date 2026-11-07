@@ -231,9 +231,15 @@ function ensureString(value: unknown, label: string): string {
 function explicitlyRequestsAction(task: string): boolean {
   // A model classification alone must never turn an explicit side-effect,
   // repository, browsing, or external-service request into a no-tool reply.
-  const english = /\b(fix|edit|modify|write|create|build|implement|run|execute|deploy|commit|push|install|delete|remove|send|book|purchase|open a pr|pull request|test|lint|typecheck|search the web|browse|visit the site)\b/i;
-  const thai = /(แก้(โค้ด|ไฟล์|ระบบ|บั๊ก|โปรเจกต์)|สร้าง(ไฟล์|โปรเจกต์|branch|pr)|รัน(คำสั่ง|เทสต์|ทดสอบ)|ดีพลอย|ติดตั้ง|ลบ(ไฟล์|ข้อมูล)|ส่ง(ข้อความ|อีเมล)|จอง|ค้นหาเว็บ|ค้นข้อมูลล่าสุด|เปิดเว็บ|เข้าเว็บ|ทดสอบโค้ด|ตรวจสอบ(โค้ด|repository|repo))/i;
-  return english.test(task) || thai.test(task);
+  const english = /\b(fix|edit|modify|write|create|build|implement|run|execute|deploy|commit|push|install|delete|remove|send|book|purchase|open a pr|pull request|test|lint|typecheck|search the web|search for news|latest news|news search|browse|visit the site)\b/i;
+  // Common short Thai follow-ups explicitly authorize continuing the previously scoped action.
+  // Match imperative phrases (ทำมา/ลงมือ), not broad words such as ทำไม (why),
+  // so ordinary questions remain conversational.
+  const thai = /(แก้(โค้ด|ไฟล์|ระบบ|บั๊ก|โปรเจกต์)|สร้าง(ไฟล์|โปรเจกต์|branch|pr)|รัน(คำสั่ง|เทสต์|ทดสอบ)|ดีพลอย|ติดตั้ง|ลบ(ไฟล์|ข้อมูล)|ส่ง(ข้อความ|อีเมล)|จอง|ค้นหาเว็บ|ค้นข้อมูลล่าสุด|หาข่าว|ค้นข่าว|ข่าวล่าสุด|เปิดเว็บ|เข้าเว็บ|ทดสอบโค้ด|ตรวจสอบ(โค้ด|repository|repo)|ทำมา|ลงมือ|ดำเนินการ|จัดการให้)/i;
+  // Short continuation replies are common in ongoing agent sessions. Treat only
+  // standalone imperative continuations as actions; ordinary questions remain chat.
+  const continuation = /^(?:ต่อ|ต่อครับ|ต่อเลย|ทำต่อ|ทำต่อเลย|ดำเนินการต่อ)[.!?…]*$/i;
+  return english.test(task) || thai.test(task) || continuation.test(task.trim());
 }
 
 function priorReferenceContext(context?: string): { trust: "untrusted_reference_data"; content: string } | undefined {
@@ -267,6 +273,7 @@ export class SofiaBrain {
   private readonly decisions: Array<{ strategy: Strategy; reason: string }> = [];
   private projectContext?: ProjectContext;
   private repositoryMap?: RepositoryMap;
+  private discoveredTools?: NonNullable<ReturnType<NonNullable<ToolGateway["listTools"]>>>;
   private projectContextLoaded = false;
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
@@ -536,10 +543,20 @@ export class SofiaBrain {
       return parseUnderstanding(input.understanding);
     }
 
+    // Probe only safe, read-only runtime capabilities before presenting them to the planner.
+    // Tool registration and policy permission alone never imply runtime readiness.
+    const discoveredTools = this.dependencies.tools.probeReadiness
+      ? await this.wait(() => this.dependencies.tools.probeReadiness!())
+      : this.dependencies.tools.listTools?.() ?? [];
+    this.discoveredTools = discoveredTools;
     const payload = {
       task: input.task,
       referenceContext: priorReferenceContext(input.context),
-      availableTools: this.dependencies.tools.listTools?.() ?? [],
+      availableTools: discoveredTools,
+      capabilityDiscovery: {
+        source: "current_brain_run_registry_policy_and_safe_runtime_probes",
+        tools: discoveredTools,
+      },
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     };
     let value = await this.infer("understand", payload);
@@ -643,7 +660,7 @@ export class SofiaBrain {
       task: input.task,
       referenceContext: priorReferenceContext(input.context),
       understanding,
-      availableTools: this.dependencies.tools.listTools?.() ?? [],
+      availableTools: this.discoveredTools ?? this.dependencies.tools.listTools?.() ?? [],
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
   }
@@ -704,10 +721,33 @@ export class SofiaBrain {
       throw new RecoverableFailure(failureCategory(error), errorMessage(error));
     }
 
+    // Some tools report transport/execution success while their domain operation
+    // failed. project.verify is one such contract: the command runner itself
+    // completed, but a non-zero exit code means the requested check failed.
+    // Keep this interpretation tool-specific; arbitrary tool payloads may
+    // legitimately contain fields such as "passed" or "code".
+    let semanticFailure: string | undefined;
+    const commandTools = new Set(["project.verify", "terminal.run", "git.run", "git.diff"]);
+    if (commandTools.has(step.call.tool) && result.ok &&
+      result.data !== null && typeof result.data === "object" && !Array.isArray(result.data)) {
+      const commandResult = result.data as Record<string, unknown>;
+      const failedVerification = step.call.tool === "project.verify" && commandResult.passed === false;
+      const failedExitCode = typeof commandResult.code === "number" && commandResult.code !== 0;
+      if (failedVerification || failedExitCode) {
+        const detail = [
+          typeof commandResult.stderr === "string" ? commandResult.stderr.trim() : "",
+          typeof commandResult.stdout === "string" ? commandResult.stdout.trim() : "",
+        ].filter(Boolean).join("\\n").slice(0, 2_000);
+        const label = step.call.tool === "project.verify" ? "Project verification" : `Command ${step.call.tool}`;
+        semanticFailure = `${label} failed (exit code ${typeof commandResult.code === "number" ? commandResult.code : "unknown"})${detail ? ": " + detail : "."}`;
+      }
+    }
+
+    const toolOk = result.ok && !semanticFailure;
     const p = preview(result.data);
     const fenced = fenceUntrustedOutput(step.call.tool, p.text);
     const observation: Observation = {
-      stepId: step.id, tool: step.call.tool, ok: result.ok, evidenceId: result.evidenceId,
+      stepId: step.id, tool: step.call.tool, ok: toolOk, evidenceId: result.evidenceId,
       preview: fenced.text, truncated: p.truncated,
       ...(fenced.suspicious ? { suspicious: true } : {}),
     };
@@ -716,7 +756,7 @@ export class SofiaBrain {
     this.evidenceIndex.push(result.evidenceId);
 
     this.emit({
-      type: result.ok ? "brain.tool.completed" : "brain.tool.failed",
+      type: toolOk ? "brain.tool.completed" : "brain.tool.failed",
       stepId: step.id,
     });
 
@@ -725,10 +765,10 @@ export class SofiaBrain {
       stepId: step.id,
     });
 
-    if (!result.ok) {
+    if (!toolOk) {
       throw new RecoverableFailure(
         result.error?.category ?? "tool_error",
-        result.error?.message ?? "Tool execution failed",
+        semanticFailure ?? result.error?.message ?? "Tool execution failed",
       );
     }
 
@@ -814,7 +854,7 @@ export class SofiaBrain {
     diagnosis: Diagnosis,
   ): Promise<ExecutionPlan> {
     if (this.usage.replans >= this.limits.maxReplans) {
-      throw new Stop("Replan budget exhausted");
+      throw new Stop(diagnosis.message || "Replan budget exhausted");
     }
 
     this.usage.replans += 1;
@@ -1042,11 +1082,24 @@ export class SofiaBrain {
           this.move("observing");
 
           const criteria = input.acceptanceCriteria ?? [];
-          if (criteria.length === 0) {
+          const changedFiles = baselineId
+            ? await this.io(() =>
+                this.dependencies.tools.changedFiles(baselineId!, this.signal),
+              )
+            : [];
+          if (criteria.length > 0) {
+            verification = await this.verify(criteria, input.principalId);
+          } else if (
+            changedFiles.length > 0 ||
+            understanding.requiredCapabilities.some((capability) => /^(coding|file-write|code-write)$/i.test(capability)) ||
+            understanding.requiredTools.some((tool) => /^workspace\.(write_file|apply_patch)$/.test(tool)) ||
+            currentPlan.steps.some((step) => /^workspace\.(write_file|apply_patch)$/.test(step.call.tool))
+          ) {
+            // Run project-level checks for code/workspace changes, including a
+            // requested write that produced no diff. Read-only research and
+            // browser actions must not require a package/test setup.
             this.move("verifying");
             this.emit({ type: "brain.verification.started" });
-            // A coding task gets a bounded trusted verification pipeline by default.
-            // Custom acceptance criteria still take precedence for domain-specific work.
             verification = await runVerification(
               this.dependencies.tools,
               ["typecheck", "test", "build"],
@@ -1063,49 +1116,70 @@ export class SofiaBrain {
               passed: verification.every((item) => item.passed),
             });
           } else {
-            verification = await this.verify(criteria, input.principalId);
+            // A non-mutating action is verified by successful tool execution
+            // evidence, not by unrelated project build/test commands.
+            this.move("verifying");
+            this.emit({ type: "brain.verification.started" });
+            const snapshot = await this.io(() => this.dependencies.tools.snapshot(this.signal));
+            const finalStepIds = new Set(currentPlan.steps.map((step) => step.id));
+            const finalStepObservations = this.observations.filter((item) => finalStepIds.has(item.stepId));
+            const successfulSteps = new Set(finalStepObservations.filter((item) => item.ok).map((item) => item.stepId));
+            const evidenceIds = finalStepObservations.filter((item) => item.ok).map((item) => item.evidenceId);
+            const passed = currentPlan.steps.length > 0 &&
+              currentPlan.steps.every((step) => successfulSteps.has(step.id)) &&
+              evidenceIds.length >= currentPlan.steps.length &&
+              evidenceIds.every((id) => Boolean(id));
+            verification = [{
+              criterionId: "tool-execution",
+              passed,
+              detail: passed
+                ? "All planned tool calls completed successfully; execution evidence was recorded."
+                : "The action has no complete successful tool-execution evidence.",
+              evidenceIds,
+              workspaceRevision: snapshot.revision,
+            }];
+            this.emit({ type: "brain.verification.completed", passed });
           }
 
           if (verification.every((item) => item.passed)) {
-            const changedFiles = baselineId
-              ? await this.io(() =>
-                  this.dependencies.tools.changedFiles(baselineId!, this.signal),
-                )
-              : [];
-            const diffResult = await this.io(() =>
-              this.dependencies.tools.execute(
-                { tool: "git.diff", input: {} },
-                {
-                  runId: this.runId,
-                  signal: this.signal,
-                  requireApproval: false,
-                  notifyApproval: () => {},
-                },
-              ),
-            );
-            const diff =
-              diffResult.ok && diffResult.data
-                ? JSON.stringify(diffResult.data)
-                : undefined;
-            const review = reviewCodeChange({
-              task: input.task,
-              changedFiles,
-              verification,
-              diff,
-              acceptanceCriteria: (input.acceptanceCriteria ?? []).map(
-                (criterion) => criterion.description,
-              ),
-            });
-            this.emit({
-              type: "brain.review.completed",
-              passed: review.approved,
-              count: codingIteration,
-            });
-            if (!review.approved) {
-              throw new RecoverableFailure(
-                review.repairCategory ?? "incomplete_solution",
-                review.reason,
+            if (changedFiles.length > 0) {
+              const diffResult = await this.io(() =>
+                this.dependencies.tools.execute(
+                  { tool: "git.diff", input: {} },
+                  {
+                    runId: this.runId,
+                    signal: this.signal,
+                    requireApproval: false,
+                    notifyApproval: () => {},
+                  },
+                ),
               );
+              const diff =
+                diffResult.ok && diffResult.data
+                  ? JSON.stringify(diffResult.data)
+                  : undefined;
+              const review = reviewCodeChange({
+                task: input.task,
+                changedFiles,
+                verification,
+                diff,
+                acceptanceCriteria: (input.acceptanceCriteria ?? []).map(
+                  (criterion) => criterion.description,
+                ),
+              });
+              this.emit({
+                type: "brain.review.completed",
+                passed: review.approved,
+                count: codingIteration,
+              });
+              if (!review.approved) {
+                throw new RecoverableFailure(
+                  review.repairCategory ?? "incomplete_solution",
+                  review.reason,
+                );
+              }
+            } else {
+              this.emit({ type: "brain.review.completed", passed: true, count: codingIteration });
             }
 
             this.move("completed");

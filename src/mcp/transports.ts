@@ -97,6 +97,7 @@ export class McpHttpTransport implements McpTransport {
   private readonly endpoint: URL;
   private readonly fetchImpl: typeof fetch;
   private sessionId: string | undefined;
+  private protocolVersion: string | undefined;
   private closed = false;
   constructor(private readonly options: McpHttpTransportOptions) {
     this.endpoint = new URL(options.endpoint);
@@ -135,6 +136,10 @@ export class McpHttpTransport implements McpTransport {
     if (!response.ok && response.status !== 202) throw new Error("MCP HTTP notification failed with status " + response.status);
     if (response.status !== 202) await response.body?.cancel();
   }
+  setProtocolVersion(version: string): void {
+    if (!version.trim() || /[\\r\\n]/.test(version)) throw new Error("Invalid negotiated MCP protocol version");
+    this.protocolVersion = version;
+  }
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
@@ -144,7 +149,13 @@ export class McpHttpTransport implements McpTransport {
     finally { this.sessionId = undefined; }
   }
   private headers(): Record<string, string> {
-    return { accept: "application/json, text/event-stream", "content-type": "application/json", ...this.options.headers, ...(this.sessionId ? { "mcp-session-id": this.sessionId } : {}) };
+    return {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+      ...this.options.headers,
+      ...(this.sessionId ? { "mcp-session-id": this.sessionId } : {}),
+      ...(this.protocolVersion ? { "mcp-protocol-version": this.protocolVersion } : {}),
+    };
   }
   private captureSession(response: Response): void { const value = response.headers.get("mcp-session-id"); if (value) this.sessionId = value; }
   private assertOpen(): void { if (this.closed) throw new Error("MCP HTTP transport is closed"); }

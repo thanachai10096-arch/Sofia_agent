@@ -3,6 +3,8 @@ import type { SofiaTool } from "../tools/types.js";
 export interface McpTransport {
   request(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown>;
   notify(method: string, params?: unknown): Promise<void>;
+  /** Optional negotiated HTTP protocol version; stdio transports do not need it. */
+  setProtocolVersion?(version: string): void;
   close(): Promise<void>;
 }
 export interface McpToolDescription {
@@ -46,6 +48,8 @@ export class McpClient {
       clientInfo: { name: this.clientInfo.name, version: this.clientInfo.version },
     }, signal), "initialize result");
     if (typeof response.protocolVersion !== "string" || !response.serverInfo) throw new Error("Invalid MCP initialize response: missing protocolVersion or serverInfo");
+    if (response.protocolVersion !== this.clientInfo.protocolVersion) throw new Error("MCP server selected an unsupported protocol version");
+    this.transport.setProtocolVersion?.(response.protocolVersion);
     await this.transport.notify("notifications/initialized");
     this.initialized = true;
     return response;

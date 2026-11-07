@@ -45,6 +45,27 @@ test("ordinary natural-language messages start Sofia without /run by default", a
   assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
 });
 
+test("verified sender identity selects that sender's API client", async () => {
+  const h = harness();
+  const selected: string[] = [];
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    clientForMessage: (message) => {
+      selected.push(message.identity.userId);
+      return {
+        async start(input, _signal, options) {
+          h.starts.push({ task: input.task, options });
+          return { id: "run-" + message.identity.userId, status: "queued" };
+        },
+      };
+    },
+  });
+  await handle(inbound("hello", { messageId: "message-123", identity: { platform: "telegram", userId: "123", channelId: "c", conversationId: "c" } }));
+  await handle(inbound("hello", { messageId: "message-456", identity: { platform: "telegram", userId: "456", channelId: "c", conversationId: "c" } }));
+  assert.deepEqual(selected, ["123", "456"]);
+  assert.equal(h.starts.length, 2);
+});
+
 test("command-only mode can be enabled for deployments that require it", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, naturalLanguageEnabled: false });
@@ -74,6 +95,20 @@ test("denied user cannot start a run", async () => {
   const handle = createSofiaMessagingHandler({ ...h });
   assert.equal(await handle(inbound("please do work")), "Access denied.");
   assert.equal(h.starts.length, 0);
+});
+
+test("denied sender never triggers sender-specific credential selection", async () => {
+  const h = harness(false);
+  let selected = false;
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    clientForMessage: () => {
+      selected = true;
+      throw new Error("credential lookup must not run for denied senders");
+    },
+  });
+  assert.equal(await handle(inbound("do not authorize me")), "Access denied.");
+  assert.equal(selected, false);
 });
 
 test("empty and overlong tasks are rejected by existing dispatcher", async () => {

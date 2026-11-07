@@ -230,6 +230,199 @@ test("Brain retries one malformed understanding with bounded schema feedback", a
   assert.equal(report.usage.modelCalls, 3);
 });
 
+test("Brain rejects project verification with a non-zero exit code even when the tool transport succeeded", async () => {
+  const tools = makeTools();
+  const originalDescribe = tools.describe.bind(tools);
+  tools.describe = (name) => name === "project.verify"
+    ? { effects: ["shell"] }
+    : originalDescribe(name);
+  const originalListTools = tools.listTools?.bind(tools);
+  tools.listTools = () => [
+    ...(originalListTools?.() ?? []),
+    { name: "project.verify", description: "Run project checks", effects: ["shell"] as const },
+  ];
+  tools.execute = async (call) => call.tool === "project.verify"
+    ? {
+        ok: true,
+        data: { kind: "test", code: 1, passed: false, stderr: "1 test failed" },
+        evidenceId: "project-verify-failure",
+      }
+    : {
+        ok: false,
+        data: null,
+        evidenceId: "unexpected-tool",
+        error: { category: "tool_error", message: "Unexpected tool call" },
+      };
+
+  const brain = createSofiaBrain({
+    dependencies: { reasoner: makeReasoner(), tools, allowShell: true, allowNetwork: false },
+    limits: {
+      maxSteps: 2, maxToolCalls: 5, maxReplans: 0, maxModelCalls: 3,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+    },
+  });
+  const report = await brain.run({
+    task: "Run the project tests",
+    understanding: {
+      mode: "action",
+      objective: "Run project tests",
+      constraints: [],
+      assumptions: [],
+      requiredCapabilities: ["shell"],
+      requiredTools: ["project.verify"],
+      risk: "low",
+      successCriteria: ["Tests pass"],
+      ambiguities: [],
+    },
+    plan: {
+      strategy: "initial",
+      reason: "Run the project test suite.",
+      steps: [{
+        id: "verify-tests",
+        objective: "Run tests and inspect the exit status",
+        dependencies: [],
+        call: { tool: "project.verify", input: { kind: "test" } },
+      }],
+    },
+  });
+
+  assert.equal(report.completed, false);
+  assert.equal(report.state, "failed");
+  assert.match(report.summary, /Project verification failed/);
+});
+
+test("Brain does not treat non-zero terminal or git command exits as successful actions", async () => {
+  for (const toolName of ["terminal.run", "git.run"]) {
+    const tools = makeTools();
+    tools.listTools = () => [{
+      name: toolName,
+      description: "Run a command",
+      effects: ["shell"] as const,
+    }];
+    tools.describe = (name) => name === toolName ? { effects: ["shell"] } : undefined;
+    tools.execute = async () => ({
+      ok: true,
+      data: { stdout: "", stderr: "command failed", code: 2 },
+      evidenceId: toolName + "-nonzero",
+    });
+
+    const brain = createSofiaBrain({
+      dependencies: { reasoner: makeReasoner(), tools, allowShell: true, allowNetwork: false },
+      limits: {
+        maxSteps: 2, maxToolCalls: 5, maxReplans: 0, maxModelCalls: 3,
+        maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+      },
+    });
+    const report = await brain.run({
+      task: "Run a command",
+      understanding: {
+        mode: "action",
+        objective: "Run the requested command",
+        constraints: [],
+        assumptions: [],
+        requiredCapabilities: ["shell"],
+        requiredTools: [toolName],
+        risk: "low",
+        successCriteria: ["The command succeeds"],
+        ambiguities: [],
+      },
+      plan: {
+        strategy: "initial",
+        reason: "Execute the requested command.",
+        steps: [{
+          id: "run-command",
+          objective: "Run the command and inspect its exit code",
+          dependencies: [],
+          call: { tool: toolName, input: toolName === "terminal.run"
+            ? { command: "false", args: [] }
+            : { args: ["status"] } },
+        }],
+      },
+    });
+
+    assert.equal(report.completed, false, toolName);
+    assert.equal(report.state, "failed", toolName);
+    assert.match(report.summary, /exit code 2/, toolName);
+  }
+});
+
+test("Brain completes read-only research from tool evidence without running project build checks", async () => {
+  const executed: string[] = [];
+  let projectVerificationCalls = 0;
+  let sequence = 0;
+  const tools: ToolGateway = {
+    listTools() {
+      return [
+        { name: "web.search", description: "Search the web", effects: ["network", "read"] as const },
+        { name: "project.verify", description: "Run project checks", effects: ["shell"] as const },
+      ];
+    },
+    describe(name) {
+      if (name === "web.search") return { effects: ["network", "read"] };
+      if (name === "project.verify") return { effects: ["shell"] };
+      return undefined;
+    },
+    async execute(call) {
+      executed.push(call.tool);
+      sequence += 1;
+      if (call.tool === "project.verify") projectVerificationCalls += 1;
+      return {
+        ok: true,
+        data: call.tool === "web.search"
+          ? { results: [{ title: "Grounded result", url: "https://example.com" }] }
+          : { passed: false, code: 1, stderr: "No package.json" },
+        evidenceId: "research-evidence-" + sequence,
+      };
+    },
+    async snapshot() { return { id: "snapshot-" + sequence, revision: "revision-" + sequence, evidenceId: "snapshot-evidence" }; },
+    async changedFiles() { return []; },
+    async checkpoint() { return { id: "checkpoint", revision: "revision-0" }; },
+    async rollback() { return []; },
+  };
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      const value = parsed.phase === "understand"
+        ? {
+            mode: "action",
+            objective: "Research the requested topic",
+            constraints: [],
+            assumptions: [],
+            requiredCapabilities: ["network"],
+            requiredTools: ["web.search"],
+            risk: "low",
+            successCriteria: ["Return source-backed search results"],
+            ambiguities: [],
+          }
+        : {
+            strategy: "initial",
+            reason: "Search the public web for source-backed results.",
+            steps: [{
+              id: "search",
+              objective: "Search the requested topic",
+              dependencies: [],
+              call: { tool: "web.search", input: { query: "Sofia Agent architecture" } },
+            }],
+          };
+      return {
+        inputTokens: 10,
+        async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools, allowShell: false, allowNetwork: true },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({ task: "Research Sofia Agent architecture" });
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(report.verification[0]?.criterionId, "tool-execution");
+  assert.equal(report.verification[0]?.passed, true);
+  assert.deepEqual(executed, ["web.search"]);
+  assert.equal(projectVerificationCalls, 0);
+});
+
 test("Brain completes a coding loop only after trusted verification", async () => {
   const brain = createSofiaBrain({
     dependencies: {
@@ -1001,4 +1194,180 @@ test("explicit Thai file-edit requests stay on the action path even if the model
   assert.ok(phases.includes("plan"));
   assert.ok(!phases.includes("respond"));
   assert.ok(report.usage.toolCalls > 0);
+});
+
+
+test("Thai imperative follow-ups such as ทำมา enter the action planner even if understanding labels them conversational", async () => {
+  const phases: string[] = [];
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      phases.push(parsed.phase);
+      const value = parsed.phase === "understand"
+        ? {
+            objective: "Continue the requested implementation",
+            constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [],
+            risk: "low", successCriteria: ["the planned action runs"], ambiguities: [],
+            mode: "conversation", response: "I will do it.",
+          }
+        : parsed.phase === "replan"
+          ? {
+              strategy: "inspect-evidence",
+              reason: "Inspect the result of the requested action.",
+              steps: [{
+                id: "inspect",
+                objective: "Confirm the requested file exists",
+                dependencies: [],
+                call: { tool: "workspace.list_files", input: { path: "." } },
+              }],
+            }
+          : plan;
+      return {
+        inputTokens: 10,
+        async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({
+    task: "ทำมา",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+  assert.ok(phases.includes("plan"), "explicit Thai action follow-up must not be short-circuited as chat");
+  assert.equal(report.completed, true, report.summary);
+});
+
+
+
+test("Standalone ต่อ follow-up enters the action planner even if understanding labels it conversational", async () => {
+  const phases: string[] = [];
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      phases.push(parsed.phase);
+      const value = parsed.phase === "understand"
+        ? {
+            objective: "Continue the requested implementation",
+            constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [],
+            risk: "low", successCriteria: ["the planned action runs"], ambiguities: [],
+            mode: "conversation", response: "I will do it.",
+          }
+        : parsed.phase === "replan"
+          ? {
+              strategy: "inspect-evidence",
+              reason: "Inspect the result of the requested action.",
+              steps: [{
+                id: "inspect",
+                objective: "Confirm the requested file exists",
+                dependencies: [],
+                call: { tool: "workspace.list_files", input: { path: "." } },
+              }],
+            }
+          : plan;
+      return {
+        inputTokens: 10,
+        async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({
+    task: "ต่อ",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+  assert.ok(phases.includes("plan"), "explicit Thai action follow-up must not be short-circuited as chat");
+  assert.equal(report.completed, true, report.summary);
+});
+
+
+test("Brain planning reuses the runtime readiness results discovered during understanding", async () => {
+  let planTools: Array<{ name: string; runtimeReadiness?: string; runtimeReason?: string }> = [];
+  const tools = makeTools();
+  tools.probeReadiness = async () => [{
+    name: "workspace.write_file",
+    description: "Write a file",
+    effects: ["write"],
+    registered: true,
+    policy: { status: "allowed" },
+    runtimeReadiness: "ready",
+    runtimeReason: "Read-only workspace probe passed.",
+  }];
+  const reasoner = makeReasoner((request) => {
+    const parsed = JSON.parse(request) as { phase: string; payload?: { availableTools?: Array<{ name: string; runtimeReadiness?: string; runtimeReason?: string }> } };
+    if (parsed.phase === "plan") planTools = parsed.payload?.availableTools ?? [];
+  });
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools, allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(planTools[0]?.runtimeReadiness, "ready");
+  assert.match(planTools[0]?.runtimeReason ?? "", /probe passed/i);
+});
+
+test("Thai why-questions remain conversational and are not forced into tool execution", async () => {
+  const phases: string[] = [];
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      phases.push(parsed.phase);
+      const value = {
+        objective: "Explain the reason", constraints: [], assumptions: [], requiredCapabilities: [],
+        requiredTools: [], risk: "low", successCriteria: [], ambiguities: [],
+        mode: "conversation", response: "เพราะต้องตรวจสอบก่อน",
+      };
+      return { inputTokens: 10, async invoke() { return { value, usage: { inputTokens: 10, outputTokens: 20 } }; } };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({ task: "ทำไมยังไม่เสร็จ" });
+  assert.equal(report.completed, true, report.summary);
+  assert.deepEqual(phases, ["understand"]);
 });

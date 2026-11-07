@@ -6,6 +6,7 @@ import {issueCapability,verifyCapability} from "../src/security/capability.js";
 import {ReplayProtector,signAgentMessage,verifyAgentMessage} from "../src/security/agent-message.js";
 import {assertSecurityConfiguration,loadExecutionPolicyFromEnv} from "../src/security/policy.js";
 import {SecurityController} from "../src/security/controller.js";
+import {assessAction} from "../src/security/guard.js";
 
 describe("advanced security",()=>{
  it("aborts active operations when the kill switch activates",()=>{
@@ -42,6 +43,22 @@ describe("advanced security",()=>{
   assert.equal(await approveAll({runId:"r",principalId:"p",toolName:"terminal.run",input:{command:"x"},actionHash:"hash",risk:"high"}),false);
   if(oldNode===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=oldNode;
   if(oldSofia===undefined)delete process.env.SOFIA_ENV;else process.env.SOFIA_ENV=oldSofia;
+ });
+ it("allows only the fixed Brave search endpoint through the configured network host allowlist",()=>{
+  const action={runId:"web-search-policy",toolName:"web.search",input:{query:"latest AI news"},effects:["network","read"] as const};
+  const allowed=assessAction(action,[],["api.search.brave.com"]);
+  assert.equal(allowed.allowed,true);
+  assert.equal(allowed.risk,"low");
+  assert.equal(allowed.requireApproval,false);
+  const denied=assessAction(action,[],["example.com"]);
+  assert.equal(denied.allowed,false);
+  assert.match(denied.reason??"",/allowlisted/i);
+  const missing=assessAction(action,[],[]);
+  assert.equal(missing.allowed,false);
+  const newsAction={...action,toolName:"web.search_news"};
+  const newsAllowed=assessAction(newsAction,[],["api.search.brave.com"]);
+  assert.equal(newsAllowed.allowed,true);
+  assert.equal(newsAllowed.risk,"low");
  });
  it("fails closed for production security configuration",()=>{
   const old={...process.env};
