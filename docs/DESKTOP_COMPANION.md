@@ -1,12 +1,13 @@
-# Sofia Desktop Companion (initial local host)
+# Sofia Desktop Companion
 
-The initial companion is intentionally narrow: it can launch only applications explicitly allowlisted on the computer running the CLI. It does not provide remote shell access, arbitrary process execution, screen capture, mouse control, or keyboard control.
+The local Companion currently launches only explicitly allowlisted applications. It does not provide remote shell access, arbitrary process execution, screen capture, mouse control, or keyboard control.
 
 ## Requirements
 
 - Node.js 20+
 - A reachable Sofia API with the Desktop Companion routes enabled
-- An interactive terminal on the local computer
+- An interactive local terminal for first-time pairing and explicit revocation
+- A supported OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service)
 - One or more existing executable paths that the local operator wants to allow
 
 ## Configure applications
@@ -20,9 +21,9 @@ export SOFIA_API_URL="https://sofia.example.com"
 export SOFIA_DESKTOP_ALLOWED_APPS='{"editor":"/usr/bin/code","browser":"/usr/bin/firefox"}'
 ```
 
-The executable paths are resolved and checked when the companion starts. Do not point an entry at a shell, command interpreter, script runner, or other general-purpose command processor. Each launch request shows the application ID and exact argument list for local approval.
+The executable paths are resolved and checked when the companion starts. Do not point an entry at a shell, command interpreter, script runner, or other general-purpose command processor.
 
-## Start
+## Start and approve actions
 
 From a source checkout:
 
@@ -37,16 +38,32 @@ Or, after installing/linking the package's `sofia` CLI:
 sofia desktop companion
 ```
 
-Enter the Sofia API key into the hidden terminal prompt. The API key is used once to pair and is not written to disk or stored in the companion. The returned companion token is held in memory only and cleared when the process exits; pairing must be repeated after a restart. The companion never stores the master Sofia API key.
+On first pairing, enter the Sofia API key into the hidden terminal prompt. It is used once and is never saved. The returned restricted Companion token is stored using `@napi-rs/keyring` in the operating system credential store:
 
-Every application launch requires the operator to type `YES` in the local terminal. Cloud-side model output cannot approve an action. Denying or closing the prompt prevents the application from launching.
+- macOS: Keychain
+- Windows: Windows Credential Manager
+- Linux: Secret Service (GNOME Keyring, KWallet, or another Secret Service provider). Linux is configured to require Secret Service and does not silently fall back to the non-persistent kernel keyring.
+
+On later starts, the Companion attempts to reuse the stored token. If Sofia no longer recognizes it (for example, after the API process restarts), the local token is cleared and the operator is prompted to pair again with a Sofia API key. The server-side companion broker is currently process-local, so the local Keychain entry alone cannot survive a Sofia server restart.
+
+For each application launch, the Companion opens a local browser approval page. The page is served only on `127.0.0.1`, uses a one-time random approval token in the URL fragment, rejects cross-origin decisions, expires automatically, and is bound to the exact requested application ID and arguments. Approve or deny on the computer itself. If the local browser cannot be opened, the action fails closed.
+
+Stop the local process with Ctrl+C; this retains the OS credential. To revoke the server-side pairing and remove the local credential, run:
+
+```sh
+sofia desktop companion disconnect
+```
+
+That explicit revoke operation asks for the Sofia API key in a hidden prompt. The key is used only for the revoke request and is not saved.
 
 ## Current limits
 
-- This is a CLI host, not a signed native installer or background service.
-- Pairing is memory-only; OS Keychain / Credential Manager / Secret Service persistence is not wired yet.
+- This is still a Node.js local host, not a signed native installer or background service.
+- GUI approval uses the system browser; a dedicated native approval window is not included.
 - App launch is the only enabled local capability.
 - Screen capture, mouse, and keyboard operations fail closed.
-- A packaged desktop UI, native secure credential adapters, and platform-specific automation drivers require separate implementation and security review.
+- Pairing state on the Sofia server is in-memory and is lost when the API process restarts. Re-pair after a server restart.
+- Linux requires an unlocked Secret Service session. Headless Linux servers without Secret Service cannot use this persistent credential adapter.
+- This does not make a computer unnecessary: users without a PC continue to use the separately hosted Mobile Workspace / Cloud Browser path.
 
 These limits are deliberate. Do not enable `input:control`, `screen:capture`, or arbitrary `process:execute` for this host.
