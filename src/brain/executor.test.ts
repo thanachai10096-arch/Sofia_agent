@@ -868,3 +868,42 @@ test("Brain rejects unknown delegated tools and falls back to the primary planne
   assert.equal(writes, 1);
   assert.ok(events.includes("brain.replan.started"));
 });
+
+test("subagent tool catalog fails closed when registry enumeration is unavailable", async () => {
+  const { subagentToolCatalog, isSubagentToolAllowed } = await import("./subagents.js");
+  const gateway = {
+    describe(name: string) {
+      return name === "workspace.write_file" ? { effects: ["write"] as const } : undefined;
+    },
+  } as unknown as ToolGateway;
+
+  assert.deepEqual(subagentToolCatalog(gateway), []);
+  assert.equal(isSubagentToolAllowed("workspace.write_file", gateway), false);
+});
+
+test("subagent tool catalog rejects registry-policy effect mismatches and non-allowlisted tools", async () => {
+  const { subagentToolCatalog, isSubagentToolAllowed } = await import("./subagents.js");
+  const gateway = {
+    listTools() {
+      return [
+        { name: "workspace.write_file", description: "Write a file", effects: ["read"] as const },
+        { name: "workspace.list_files", description: "List files", effects: ["read"] as const },
+        { name: "shell.exec", description: "Run a command", effects: ["shell"] as const },
+      ];
+    },
+    describe(name: string) {
+      return name === "workspace.write_file"
+        ? { effects: ["write"] as const }
+        : name === "workspace.list_files"
+          ? { effects: ["read"] as const }
+          : name === "shell.exec"
+            ? { effects: ["shell"] as const }
+            : undefined;
+    },
+  } as unknown as ToolGateway;
+
+  assert.deepEqual(subagentToolCatalog(gateway).map((tool) => tool.name), ["workspace.list_files"]);
+  assert.equal(isSubagentToolAllowed("workspace.write_file", gateway), false);
+  assert.equal(isSubagentToolAllowed("shell.exec", gateway), false);
+  assert.equal(isSubagentToolAllowed("workspace.list_files", gateway), true);
+});
