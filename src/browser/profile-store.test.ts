@@ -15,7 +15,7 @@ test("browser profiles are private to their owner and can be revoked", async () 
     assert.equal((await store.list("principal-a")).length, 1);
     assert.equal((await store.list("principal-b")).length, 0);
     const directoryStat = await stat(profile.directory);
-    assert.equal(directoryStat.mode & 0o777, 0o700);
+    if (process.platform !== "win32") assert.equal(directoryStat.mode & 0o777, 0o700);
     await store.revoke("principal-a", profile.id);
     await assert.rejects(store.get("principal-a", profile.id));
   } finally {
