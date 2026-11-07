@@ -1,12 +1,39 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { SkillPackage, SkillsPlatform } from "../skills/platform.js";
 import { redactSecrets } from "../security/guard.js";
 
 export type SkillLifecycleStatus = "candidate" | "verified" | "rejected" | "active" | "superseded" | "rolled_back";
 export interface SkillEvaluationCheck { name: string; passed: boolean; detail?: string; }
-export interface SkillEvaluationResult { passed: boolean; checks: SkillEvaluationCheck[]; evaluatedAt?: string; }
+export interface SkillRuntimeVerificationEvidence {
+  candidateDigest: string;
+  runnerId: string;
+  isolatedWorkspaceId: string;
+  isolated: true;
+  executedChecks: Array<{ name: string; passed: boolean }>;
+  completedAt: string;
+}
+export interface SkillEvaluationResult {
+  passed: boolean;
+  checks: SkillEvaluationCheck[];
+  runtimeVerification?: SkillRuntimeVerificationEvidence;
+  evaluatedAt?: string;
+}
+export function getSkillCandidateDigest(candidate: SkillPackage): string {
+  return createHash("sha256").update(JSON.stringify(candidate)).digest("hex");
+}
+function hasValidRuntimeEvidence(candidate: SkillPackage, evidence: SkillRuntimeVerificationEvidence | undefined): evidence is SkillRuntimeVerificationEvidence {
+  if (!evidence || evidence.isolated !== true || evidence.candidateDigest !== getSkillCandidateDigest(candidate) ||
+      typeof evidence.runnerId !== "string" || !evidence.runnerId.trim() ||
+      typeof evidence.isolatedWorkspaceId !== "string" || !evidence.isolatedWorkspaceId.trim() ||
+      typeof evidence.completedAt !== "string" || !Number.isFinite(Date.parse(evidence.completedAt)) ||
+      !Array.isArray(evidence.executedChecks)) return false;
+  const names = evidence.executedChecks.map((item) => item?.name);
+  return new Set(names).size === names.length &&
+    candidate.skill.verification.every((required) =>
+      evidence.executedChecks.some((item) => item.name === required && item.passed === true));
+}
 export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; }
 export interface SkillLifecycleRecord {
   id: string;
@@ -119,7 +146,12 @@ export class VersionedSkillLifecycle {
     const before = clone(this.snapshot);
     const record = this.requireRecord(candidateId);
     record.evaluation = {
-      passed: result.passed === true && result.checks.every((check) => check.passed === true),
+      passed: result.passed === true &&
+        result.checks.every((check) => check.passed === true) &&
+        hasValidRuntimeEvidence(candidate.package, result.runtimeVerification),
+      ...(hasValidRuntimeEvidence(candidate.package, result.runtimeVerification)
+        ? { runtimeVerification: clone(result.runtimeVerification) }
+        : {}),
       checks: result.checks.map((check) => ({
         name: check.name.slice(0, 200),
         passed: check.passed,
@@ -136,7 +168,10 @@ export class VersionedSkillLifecycle {
 
   promote(candidateId: string): SkillLifecycleRecord {
     const candidate = this.requireRecord(candidateId);
-    if (candidate.status !== "verified" || candidate.evaluation?.passed !== true) throw new Error("Only successfully evaluated candidates can be promoted");
+    if (candidate.status !== "verified" || candidate.evaluation?.passed !== true ||
+        !hasValidRuntimeEvidence(candidate.package, candidate.evaluation.runtimeVerification)) {
+      throw new Error("Only candidates with valid isolated runtime verification can be promoted");
+    }
     if (candidate.provenance.confidence < this.minimumConfidence) throw new Error("Skill candidate confidence is below the promotion threshold");
     const before = clone(this.snapshot);
     const previousPackage = this.platform.get(candidate.skillId);
@@ -246,6 +281,7 @@ export class VersionedSkillLifecycle {
           (!isRecord(item.evaluation) || item.evaluation.passed !== true ||
            !Array.isArray(item.evaluation.checks) || item.evaluation.checks.length === 0 ||
            !item.evaluation.checks.every((check) => isRecord(check) && check.passed === true) ||
+           !hasValidRuntimeEvidence(safePackage, item.evaluation.runtimeVerification as SkillRuntimeVerificationEvidence | undefined) ||
            item.provenance.confidence < this.minimumConfidence)) {
         throw new Error("Active skill lifecycle record lacks valid evaluation or confidence");
       }
