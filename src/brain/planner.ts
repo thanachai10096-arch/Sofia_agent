@@ -64,6 +64,7 @@ export function parseUnderstanding(value: unknown): TaskUnderstanding {
 
   return {
     ...(input.mode === "conversation" || input.mode === "action" ? { mode: input.mode } : {}),
+    ...(typeof input.response === "string" && input.response.trim() ? { response: input.response.trim().slice(0, 12_000) } : {}),
     objective: text(input.objective, "objective"),
     constraints: texts(input.constraints, "constraints"),
     assumptions: texts(input.assumptions, "assumptions"),
