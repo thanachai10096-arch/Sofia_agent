@@ -45,6 +45,27 @@ test("ordinary natural-language messages start Sofia without /run by default", a
   assert.ok(h.starts[0]?.options?.idempotencyKey?.startsWith("chat_"));
 });
 
+test("verified sender identity selects that sender's API client", async () => {
+  const h = harness();
+  const selected: string[] = [];
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    clientForMessage: (message) => {
+      selected.push(message.identity.userId);
+      return {
+        async start(input, _signal, options) {
+          h.starts.push({ task: input.task, options });
+          return { id: "run-" + message.identity.userId, status: "queued" };
+        },
+      };
+    },
+  });
+  await handle(inbound("hello", { identity: { platform: "telegram", userId: "123", channelId: "c", conversationId: "c" } }));
+  await handle(inbound("hello", { identity: { platform: "telegram", userId: "456", channelId: "c", conversationId: "c" } }));
+  assert.deepEqual(selected, ["123", "456"]);
+  assert.equal(h.starts.length, 2);
+});
+
 test("command-only mode can be enabled for deployments that require it", async () => {
   const h = harness();
   const handle = createSofiaMessagingHandler({ ...h, naturalLanguageEnabled: false });
