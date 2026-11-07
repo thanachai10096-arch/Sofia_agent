@@ -82,7 +82,7 @@
             <div class="suggestion-label">TRY ASKING</div>
             <div class="suggestions"><button data-prompt="Find the official website for " class="suggestion">Find a website <span>↗</span></button><button data-prompt="Research the latest information about " class="suggestion">Research a topic <span>⌕</span></button><button data-prompt="Compare prices for " class="suggestion">Compare options <span>⇄</span></button></div>
           </div>
-          <div class="approval-banner hidden" id="approvalBanner"><span class="approval-icon">!</span><div><strong>Approval needed</strong><small id="approvalText">Sofia needs your permission.</small></div><button id="approvalReview">Review</button></div>
+          <section class="approval-inbox hidden" id="approvalInbox" aria-live="polite"><div class="approval-inbox-head"><span class="approval-icon">!</span><div><strong>Approval inbox</strong><small id="approvalText">Review actions waiting for you.</small></div><button id="approvalRefresh" type="button">Refresh</button></div><div class="approval-list" id="approvalList"></div></section>
           <form class="composer" id="chatForm"><textarea id="chatInput" rows="1" placeholder="Ask Sofia to do something…" aria-label="Message Sofia"></textarea><button type="submit" id="sendButton" aria-label="Send message">↑</button><div class="composer-meta"><span>↵ to send · Shift + ↵ for new line</span><span>SOFIA AI <i>✦</i></span></div></form>
         </aside>
       </section>
