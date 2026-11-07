@@ -51,14 +51,16 @@ test("mock engine deduplicates concurrent starts before invoking the handler twi
   });
 });
 
-test("mock engine records cancellation and does not report success", async () => {
+test("mock engine marks a dispatched aborted workflow indeterminate, not cancelled", async () => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const controller = new AbortController();
   const engine = new MockWorkflowEngine({
     workflows: new Map([["slow-task", async () => {
       await gate;
-      return { shouldNotSucceed: true };
+      // Simulate a handler that may have completed an external side effect
+      // but cannot confirm the outcome to the caller after cancellation.
+      return { sideEffectMayHaveHappened: true };
     }]]),
   });
 
@@ -75,8 +77,8 @@ test("mock engine records cancellation and does not report success", async () =>
 
   await assert.rejects(pending, /cancel requested/);
   const status = await engine.getStatus("mock-execution-1");
-  assert.equal(status?.status, "cancelled");
-  assert.equal(status?.safeErrorCode, "cancelled");
+  assert.equal(status?.status, "indeterminate");
+  assert.equal(status?.safeErrorCode, "outcome_unknown");
   assert.equal(status && "output" in status, false);
 });
 
