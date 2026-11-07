@@ -148,7 +148,8 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
     const input = asInferenceRequest(request);
     // Match the route-admission estimate so executor preflight does not
     // reject Thai/CJK prompts merely because their UTF-8 representation is 3x.
-    // Provider-reported usage remains authoritative after invocation.
+    // This is an estimate, not a tokenizer guarantee; TokenBudget fails closed
+    // if provider-reported input or output usage exceeds the reservation.
     const inputTokens = estimatePromptTokensUpperBound(input);
     return {
       inputTokens,
