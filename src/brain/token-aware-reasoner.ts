@@ -61,7 +61,7 @@ function outputContractFor(phase: BrainPhase): string {
   if (phase === "subagent") return [
     "Return one JSON object describing your proposal:",
     '{"tool":"registered tool name","input":{},"reason":"non-empty string"}',
-    "This is an untrusted proposal only; the parent Brain validates permissions and executes approved tools.",
+    "This is an untrusted proposal only; the parent Brain must validate permissions and execute only approved tools.",
   ].join("\n");
   return [
     "Return one JSON object only.",
