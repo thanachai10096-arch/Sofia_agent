@@ -40,6 +40,8 @@ import { CompositeSecurityAudit } from "../security/audit.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import type { SofiaTool } from "../tools/types.js";
+import { connectMcpFromEnv } from "../mcp/env.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
@@ -118,11 +120,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   };
 }
 
-export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
+export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"],additionalTools:readonly SofiaTool[]=[]):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
-  const tools=createToolRegistry(createBuiltinTools());
+  const tools=createToolRegistry([...createBuiltinTools(),...additionalTools]);
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
@@ -140,8 +142,23 @@ export async function createSofiaAgentDependenciesWithSessions(
   workspace = process.cwd(),
   approval?: AgentDependencies["approval"],
   databasePath?: string,
-): Promise<AgentDependencies & { closeSessionStore: () => void }> {
-  const dependencies = createSofiaAgentDependencies(workspace, approval);
-  const sessionStore = await SqliteSessionStore.open(databasePath);
-  return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+): Promise<AgentDependencies & { closeSessionStore: () => void; closeMcpRegistry: () => Promise<void> }> {
+  const policy = loadExecutionPolicyFromEnv();
+  const mcpRegistry = await connectMcpFromEnv(policy);
+  let dependencies: AgentDependencies | undefined;
+  let sessionStore: SqliteSessionStore | undefined;
+  try {
+    dependencies = createSofiaAgentDependencies(workspace, approval, mcpRegistry?.tools.list() ?? []);
+    sessionStore = await SqliteSessionStore.open(databasePath);
+    return {
+      ...dependencies,
+      sessionStore,
+      closeSessionStore: () => sessionStore!.close(),
+      closeMcpRegistry: () => mcpRegistry?.close() ?? Promise.resolve(),
+    };
+  } catch (error) {
+    try { sessionStore?.close(); } catch { /* preserve startup error */ }
+    try { await mcpRegistry?.close(); } catch { /* preserve startup error */ }
+    throw error;
+  }
 }
