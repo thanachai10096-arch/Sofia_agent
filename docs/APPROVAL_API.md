@@ -60,3 +60,18 @@ request returns HTTP 409.
 - Register these additional slash commands in the Discord application with
   the `job_id` string option for `approve` and `reject`. The existing
   `run`, `status`, `cancel`, and `resume` command registrations are unchanged.
+
+## Mobile web inbox
+
+Open `/approvals` on the same Sofia API host to use the responsive mobile inbox.
+Paste an API key that has both `approval:read` and `approval:decide`.
+The page keeps the key only in page memory, sends it as a same-origin Bearer
+token, and does not write it to localStorage or sessionStorage. Clearing the
+key or closing the page discards it. The page uses a restrictive Content
+Security Policy, disables caching, and renders approval input as text rather
+than HTML.
+
+Before approving, inspect the redacted action input and risk label. The page
+shows a browser confirmation naming the tool and risk, then submits the
+stored action hash. Approval is one-time and cannot be undone. Rejection is
+also final for that approval request.
