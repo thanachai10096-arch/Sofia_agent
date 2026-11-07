@@ -84,7 +84,7 @@ export async function runDesktopCompanion(): Promise<void> {
       console.log("Found a saved Sofia Companion token in the OS credential store; attempting to resume pairing.");
     }
     console.log("Allowed applications:", Object.keys(applications).join(", "));
-    console.log("GUI approval opens locally in your browser. App launch is enabled.");
+    console.log("GUI approval opens locally in your browser. App launch:", Object.keys(applications).length > 0 ? "enabled for allowlisted apps" : "disabled (no apps allowlisted)");
     console.log("Native input:", enableInput ? "enabled by local operator" : "disabled (set SOFIA_DESKTOP_ENABLE_INPUT=true to enable)");
     console.log("Screen capture:", enableScreenCapture ? "enabled by local operator" : "disabled (set SOFIA_DESKTOP_ENABLE_SCREEN_CAPTURE=true to enable)");
     console.log("Platform driver limitations (e.g. Wayland or missing xdotool/scrot/cliclick) fail closed.");
