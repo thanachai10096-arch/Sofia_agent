@@ -16,3 +16,7 @@ export type { LocalDesktopActionHost, LocalDesktopActionHostConfig } from "./loc
 
 export { DesktopCommandBroker } from "./remote-command-broker.js";
 export type { DesktopCommandBrokerConfig, DesktopCompanionCommand } from "./remote-command-broker.js";
+
+export { createDesktopCompanionClient } from "./companion-client.js";
+export type { DesktopCompanionClient, DesktopCompanionClientConfig, DesktopCompanionCredentialStore } from "./companion-client.js";
+export { assertDesktopAction } from "./remote-command-broker.js";
