@@ -111,7 +111,7 @@ function validateRequest(request: DesktopRelayRequest, secret: Uint8Array): void
   if (!/^[A-Z]{3,10}$/.test(request.method)) throw new Error("Invalid desktop relay method.");
   if (!request.path.startsWith("/") || request.path.startsWith("//") ||
       request.path.includes("#") || request.path.includes("\\") ||
-      /[\\x00-\\x20\\x7f]/.test(request.path) || request.path.length > 2048) {
+      /[\u0000-\u0020\u007f]/.test(request.path) || request.path.length > 2048) {
     throw new Error("Invalid desktop relay path.");
   }
   if (!Number.isSafeInteger(request.timestamp) || request.timestamp < 0) {
