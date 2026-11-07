@@ -347,6 +347,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       // Approval Inbox is deliberately separate from run permissions. Reading and
       // deciding approvals require explicit scopes and are always owner-bound.
+      if (requestUrl.pathname === "/v1/approvals/audit" && req.method === "GET") {
+        if (!auth.scopes.includes("approval:read") && !auth.scopes.includes("approval:decide")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "approval:read" }, origin, config);
+        }
+        if (!config.approvalAuditStore) return json(res, 503, { error: "approval_audit_unavailable" }, origin, config);
+        const rawLimit = Number(requestUrl.searchParams.get("limit") ?? "50");
+        const limit = Number.isSafeInteger(rawLimit) ? Math.max(1, Math.min(100, rawLimit)) : 50;
+        return json(res, 200, { events: config.approvalAuditStore.list(auth.keyId, limit) }, origin, config);
+      }
+
       if (requestUrl.pathname === "/v1/approvals" || requestUrl.pathname.startsWith("/v1/approvals/")) {
         const inbox = config.approvalInbox;
         if (!inbox) return json(res, 503, { error: "approval_inbox_unavailable" }, origin, config);
