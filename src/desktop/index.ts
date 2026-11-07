@@ -13,3 +13,6 @@ export type { LocalPairingHost, LocalPairingHostConfig } from "./local-pairing-h
 
 export { startLocalDesktopActionHost } from "./local-action-host.js";
 export type { LocalDesktopActionHost, LocalDesktopActionHostConfig } from "./local-action-host.js";
+
+export { DesktopCommandBroker } from "./remote-command-broker.js";
+export type { DesktopCommandBrokerConfig, DesktopCompanionCommand } from "./remote-command-broker.js";
