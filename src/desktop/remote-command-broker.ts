@@ -13,6 +13,7 @@ interface Companion {
   tokenDigest: Buffer;
   connectedAt: number;
   lastSeenAt: number;
+  persistedAt: number;
 }
 
 interface PendingCommand extends DesktopCompanionCommand {
@@ -47,6 +48,7 @@ export class DesktopCommandBroker {
   private readonly commandTimeoutMs: number;
   private readonly idleTimeoutMs: number;
   private readonly maxPending: number;
+  private readonly store?: DesktopCompanionStore;
   private readonly companions = new Map<string, Companion>();
   private readonly pending = new Map<string, PendingCommand>();
 
@@ -55,6 +57,23 @@ export class DesktopCommandBroker {
     this.commandTimeoutMs = clamp(config.commandTimeoutMs ?? 30_000, 1_000, 120_000);
     this.idleTimeoutMs = clamp(config.companionIdleTimeoutMs ?? 7 * 24 * 60 * 60 * 1_000, 5_000, 30 * 24 * 60 * 60 * 1_000);
     this.maxPending = clamp(config.maxPendingPerOwner ?? 8, 1, 64);
+    this.store = config.store;
+    if (this.store) {
+      for (const record of this.store.loadAll()) {
+        const companion: Companion = {
+          ownerKeyId: record.ownerKeyId,
+          tokenDigest: Buffer.from(record.tokenDigest, "hex"),
+          connectedAt: record.connectedAt,
+          lastSeenAt: record.lastSeenAt,
+          persistedAt: record.lastSeenAt,
+        };
+        if (companion.lastSeenAt < this.now() - this.idleTimeoutMs) {
+          this.store.delete(companion.ownerKeyId);
+          continue;
+        }
+        this.companions.set(companion.ownerKeyId, companion);
+      }
+    }
   }
 
   /** Replace any previous companion for this owner and issue a one-time secret. */
@@ -63,19 +82,22 @@ export class DesktopCommandBroker {
     this.disconnect(ownerKeyId);
     const token = randomBytes(32).toString("base64url");
     const connectedAt = this.now();
-    this.companions.set(ownerKeyId, {
+    const companion: Companion = {
       ownerKeyId,
       tokenDigest: digest(token),
       connectedAt,
       lastSeenAt: connectedAt,
-    });
+      persistedAt: connectedAt,
+    };
+    this.persist(companion);
+    this.companions.set(ownerKeyId, companion);
     return { token, connectedAt };
   }
 
   /** Returns the next command once. Re-polling never re-delivers an assigned command. */
   poll(token: string): DesktopCompanionCommand | null {
     const companion = this.authenticate(token);
-    companion.lastSeenAt = this.now();
+    this.touch(companion);
     const command = [...this.pending.values()].find(
       (item) => item.ownerKeyId === companion.ownerKeyId && !item.assigned,
     );
@@ -87,7 +109,7 @@ export class DesktopCommandBroker {
   /** Complete only a command claimed by this exact companion token. */
   complete(token: string, commandId: string, result: unknown, error?: string): boolean {
     const companion = this.authenticate(token);
-    companion.lastSeenAt = this.now();
+    this.touch(companion);
     const command = this.pending.get(commandId);
     if (!command || command.ownerKeyId !== companion.ownerKeyId || !command.assigned) return false;
     this.removePending(commandId);
@@ -141,6 +163,7 @@ export class DesktopCommandBroker {
   }
 
   disconnect(ownerKeyId: string): void {
+    this.store?.delete(ownerKeyId);
     this.companions.delete(ownerKeyId);
     for (const [id, command] of this.pending) {
       if (command.ownerKeyId !== ownerKeyId) continue;
@@ -207,8 +230,11 @@ export class DesktopCommandBroker {
   private touch(companion: Companion): void {
     const lastSeenAt = this.now();
     if (lastSeenAt <= companion.lastSeenAt) return;
-    this.persist({ ...companion, lastSeenAt });
     companion.lastSeenAt = lastSeenAt;
+    if (lastSeenAt - companion.persistedAt >= 60_000) {
+      this.persist(companion);
+      companion.persistedAt = lastSeenAt;
+    }
   }
 
   private removePending(id: string): void {
