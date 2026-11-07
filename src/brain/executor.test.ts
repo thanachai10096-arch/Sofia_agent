@@ -340,7 +340,7 @@ test("Brain completes read-only research from tool evidence without running proj
             ambiguities: [],
           }
         : {
-            strategy: "research",
+            strategy: "initial",
             reason: "Search the public web for source-backed results.",
             steps: [{
               id: "search",
