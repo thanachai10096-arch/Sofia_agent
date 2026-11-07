@@ -14,6 +14,7 @@ import { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
 import { CloudBrowserSessionManager } from "../browser/cloud-session-manager.js";
 import { PlaywrightBrowserRuntime } from "../browser/runtime.js";
 import { ApprovalInbox } from "../agent/approval-inbox.js";
+import { FileApprovalAuditStore } from "../agent/approval-audit-store.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -25,7 +26,10 @@ const runStoreDirectory = path.resolve(
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 const desktopCommandBroker = new DesktopCommandBroker();
-const approvalInbox = new ApprovalInbox({ ttlMs: 120_000, maxPendingPerOwner: 30 });
+const approvalAuditStore = new FileApprovalAuditStore(path.join(workspace, ".sofia"));
+// Never replay an approval after restart: close orphaned audit entries before accepting traffic.
+approvalAuditStore.recoverInterrupted();
+const approvalInbox = new ApprovalInbox({ ttlMs: 120_000, maxPendingPerOwner: 30, auditStore: approvalAuditStore });
 const cloudBrowserSessions = process.env.SOFIA_CLOUD_BROWSER_ENABLED === "true"
   ? new CloudBrowserSessionManager(new PlaywrightBrowserRuntime(), {
       maxSessionsPerOwner: Number(process.env.SOFIA_CLOUD_BROWSER_MAX_SESSIONS_PER_OWNER ?? 2),
