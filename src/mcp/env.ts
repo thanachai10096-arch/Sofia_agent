@@ -78,7 +78,7 @@ export async function connectMcpFromEnv(policy: ExecutionPolicy): Promise<Manage
         if (!value) throw new Error("Missing environment variable " + envName + " for MCP server " + config.id);
         headers[header] = value;
       }
-      return { transport: new McpHttpTransport({ endpoint: config.endpoint, headers }), options: { id: config.id, allowedTools: config.allowedTools, readOnlyTools: config.readOnlyTools, requiresNetwork: true } };
+      return { transport: new McpHttpTransport({ endpoint: config.endpoint, headers }), options: { id: config.id, allowedTools: config.allowedTools, readOnlyTools: config.readOnlyTools, requiresNetwork: true, networkUrl: config.endpoint } };
     }
     if (!stdioAllowed.has(config.command)) throw new Error("MCP stdio command is not in SOFIA_MCP_STDIO_ALLOWED_COMMANDS: " + config.command);
     const env: Record<string, string> = {};
