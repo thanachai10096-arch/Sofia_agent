@@ -139,3 +139,46 @@ test("browser.close clears a broken session handle even when session close fails
   await open.execute({}, {} as never);
   assert.equal(launches, 2);
 });
+
+
+test("run-scoped browser cleanup closes the session even when the model never calls browser.close", async () => {
+  let cleanup: (() => Promise<void>) | undefined;
+  let launches = 0;
+  let closes = 0;
+  const runtime = {
+    launch: async () => {
+      launches++;
+      return {
+        id: "cleanup-session",
+        newPage: async () => ({
+          id: "cleanup-page",
+          url: async () => "about:blank",
+          title: async () => "",
+          content: async () => "",
+          goto: async () => {},
+          click: async () => {},
+          type: async () => {},
+          select: async () => {},
+          scroll: async () => {},
+          wait: async () => {},
+          press: async () => {},
+          back: async () => {},
+          forward: async () => {},
+          reload: async () => {},
+          screenshot: async () => "",
+          close: async () => {},
+        } satisfies BrowserPage),
+        close: async () => { closes++; },
+      } satisfies BrowserSession;
+    },
+  } satisfies BrowserRuntime;
+  const tools = createBrowserTools(runtime, (dispose) => { cleanup = dispose; });
+  await tools.find((item) => item.name === "browser.open")!.execute({}, {} as never);
+  assert.equal(launches, 1);
+  assert.ok(cleanup);
+  await cleanup!();
+  assert.equal(closes, 1);
+  // Cleanup is idempotent and must not close the same browser twice.
+  await cleanup!();
+  assert.equal(closes, 1);
+});
