@@ -36,8 +36,8 @@
     els.modal.showModal();
   }
   function csrfToken() {
-    const cookie = document.cookie.split("; ").find(item => item.startsWith("sofia_csrf="));
-    return cookie ? decodeURIComponent(cookie.slice("sofia_csrf=".length)) : "";
+    const cookie = document.cookie.split("; ").find(item => item.startsWith("__Host-sofia_csrf="));
+    return cookie ? decodeURIComponent(cookie.slice("__Host-sofia_csrf=".length)) : "";
   }
   async function api(path, options = {}) {
     const csrf = csrfToken();
