@@ -121,7 +121,7 @@ test("Telegram run completion classifies API polling failures without logging er
   await reportTelegramRunCompletion({
     runId: "run-api-failure",
     conversationId: "chat-456",
-    waitForRun: async () => { throw new SofiaApiError("sensitive response body must not be logged", 503); },
+    waitForRun: async () => { throw new Error("Timed out waiting for Sofia job after repeated transient API errors.", { cause: new SofiaApiError("sensitive response body must not be logged", 503) }); },
     send: async (message) => {
       sent.push({ conversationId: message.conversationId, text: message.text });
       return true;
