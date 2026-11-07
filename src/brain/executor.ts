@@ -612,13 +612,37 @@ export class SofiaBrain {
     phase: "plan" | "replan",
     payload: Record<string, unknown>,
   ): Promise<ExecutionPlan> {
-    let value = await this.infer(phase, payload);
+    const availableTools = Array.isArray(payload.availableTools)
+      ? payload.availableTools.filter((item): item is { name: string; description?: string } =>
+          typeof item === "object" && item !== null &&
+          typeof (item as Record<string, unknown>).name === "string")
+      : [];
+    const registeredSkillTools = availableTools.filter((tool) => tool.name.startsWith("skill."));
+    const hasSkillDiscovery = availableTools.some((tool) => tool.name === "skills.search");
+    const enrichedPayload = registeredSkillTools.length > 0
+      ? {
+          ...payload,
+          skillRuntimePolicy: {
+            registeredSkillTools,
+            discoveryTool: hasSkillDiscovery ? "skills.search" : null,
+            instructions: [
+              "Treat registered skill handlers as executable tools, not as claims about capabilities.",
+              "Choose a skill.<id> tool only when its description directly matches a required task; otherwise use the ordinary registered tools.",
+              "When a relevant skill is selected, include an explicit plan step that calls that exact skill.<id> tool with the required input.",
+              "Do not claim a skill ran unless its tool call appears in execution observations.",
+              "After a skill call, plan or perform independent verification of the requested postconditions; a skill return value alone does not prove the overall task succeeded.",
+              "Never invent skill IDs or bypass the normal tool gateway, risk policy, or approval flow.",
+            ],
+          },
+        }
+      : payload;
+    let value = await this.infer(phase, enrichedPayload);
     try {
       return this.validatePlan(parsePlan(value, this.limits.maxSteps));
     } catch (firstError) {
       // Never guess a tool call: request one bounded schema repair, then fail closed.
       value = await this.infer(phase, {
-        ...payload,
+        ...enrichedPayload,
         outputContractRepair: {
           error: errorMessage(firstError),
           invalidResponse: preview(value, 8_000).text,
