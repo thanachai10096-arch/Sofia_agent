@@ -45,3 +45,13 @@ test("MCP stdio commands require an operator allowlist", async () => {
     await assert.rejects(connectMcpFromEnv(defaultPolicy), /not in SOFIA_MCP_STDIO_ALLOWED_COMMANDS/);
   });
 });
+
+test("MCP bootstrap rejects readOnlyTools outside the explicit allowedTools list", async () => {
+  const config = JSON.stringify([{
+    id: "docs", transport: "http", endpoint: "https://mcp.example.com/mcp",
+    allowedTools: ["search"], readOnlyTools: ["delete"],
+  }]);
+  await withEnv({ SOFIA_MCP_SERVERS: config }, async () => {
+    await assert.rejects(connectMcpFromEnv(defaultPolicy), /readOnlyTools must be a subset/);
+  });
+});
