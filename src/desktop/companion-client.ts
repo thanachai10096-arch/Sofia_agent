@@ -41,10 +41,37 @@ function normalizeBaseUrl(value: string): string {
 }
 
 async function responseJson(response: Response): Promise<Record<string, unknown>> {
+  const maxBytes = 1024 * 1024;
   const declared = Number(response.headers.get("content-length") ?? "0");
-  if (declared > 1024 * 1024) throw new Error("Desktop Companion response is too large.");
-  const text = await response.text();
-  if (Buffer.byteLength(text, "utf8") > 1024 * 1024) throw new Error("Desktop Companion response is too large.");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error("Desktop Companion response is too large.");
+  }
+
+  const reader = response.body?.getReader();
+  let text = "";
+  if (reader) {
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+          await reader.cancel().catch(() => undefined);
+          throw new Error("Desktop Companion response is too large.");
+        }
+        chunks.push(value);
+      }
+      text = new TextDecoder("utf-8", { fatal: true }).decode(
+        Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))),
+      );
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
   const parsed: unknown = JSON.parse(text || "{}");
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid Desktop Companion response.");
   return parsed as Record<string, unknown>;

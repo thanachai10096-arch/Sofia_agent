@@ -172,3 +172,28 @@ test("screen capture requires a separate local capability and explicit approval"
     mimeType: "image/png", dataBase64: "AQID", width: 2, height: 1,
   });
 });
+
+
+test("Desktop Companion bounds response memory while streaming untrusted API bodies", async () => {
+  const store = credentials();
+  let cancelled = false;
+  const oversizedBody = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(1024 * 1024 + 1));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver([]),
+    allowedCapabilities: [],
+    requestApproval: async () => false,
+    fetchImpl: async () => new Response(oversizedBody, { status: 201 }),
+  });
+  await assert.rejects(client.pair("owner-api-secret"), /response is too large/);
+  assert.equal(cancelled, true);
+  assert.equal(store.value, null);
+});
