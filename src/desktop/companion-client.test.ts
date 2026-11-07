@@ -127,3 +127,44 @@ test("stopping keeps the OS credential; explicit disconnect revokes server pairi
   assert.equal(calls[0]?.url, "https://sofia.example.com/v1/desktop/companion/disconnect");
   assert.equal(calls[0]?.authorization, "Bearer owner-api-secret");
 });
+
+test("screen capture requires a separate local capability and explicit approval", async () => {
+  const store = credentials();
+  store.value = "s".repeat(43);
+  const calls: string[] = [];
+  let completion: Record<string, unknown> | undefined;
+  let approvals = 0;
+  const baseDriver = driver(calls);
+  const captureDriver: DesktopHostDriver = {
+    ...baseDriver,
+    async captureScreen() {
+      calls.push("capture");
+      return { mimeType: "image/png", data: new Uint8Array([1, 2, 3]), width: 2, height: 1 };
+    },
+  };
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    if (String(_input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id: "00000000-0000-4000-8000-000000000003", createdAt: 123, action: { kind: "screen.capture" } },
+    }), { status: 200 });
+    completion = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const withoutGrant = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com", credentials: store, driver: captureDriver,
+    allowedCapabilities: [], requestApproval: async () => { approvals += 1; return true; }, fetchImpl,
+  });
+  await assert.rejects(withoutGrant.pollOnce(), /not granted: screen:capture/);
+  assert.deepEqual(calls, []);
+  const enabled = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com", credentials: store, driver: captureDriver,
+    allowedCapabilities: ["screen:capture"],
+    requestApproval: async (action) => { approvals += 1; return action.kind === "screen.capture"; },
+    fetchImpl,
+  });
+  assert.equal(await enabled.pollOnce(), true);
+  assert.deepEqual(calls, ["capture"]);
+  assert.equal(approvals, 2);
+  assert.deepEqual(completion?.result, {
+    mimeType: "image/png", dataBase64: "AQID", width: 2, height: 1,
+  });
+});
