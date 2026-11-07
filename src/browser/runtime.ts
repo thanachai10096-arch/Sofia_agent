@@ -284,6 +284,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
     const proxy = await createBrowserEgressProxy();
     let browser: any;
     let context: any;
+    const persistentContext = Boolean(options.profileDirectory);
     try {
       const launchOptions = {
         headless: options.headless ?? this.headless,
@@ -310,7 +311,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
       });
     } catch (error) {
       await context?.close().catch(() => undefined);
-      await browser?.close().catch(() => undefined);
+      if (browser && !persistentContext) await browser.close().catch(() => undefined);
       await proxy.close().catch(() => undefined);
       throw error;
     }
@@ -349,7 +350,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntime {
         // Close dependent resources in order: browser.close can invalidate the
         // context-close CDP command if both operations race.
         try { await context.close(); } catch (error) { failures.push(error); }
-        if (browser) {
+        if (browser && !persistentContext) {
           try { await browser.close(); } catch (error) { failures.push(error); }
         }
         try { await proxy.close(); } catch (error) { failures.push(error); }
