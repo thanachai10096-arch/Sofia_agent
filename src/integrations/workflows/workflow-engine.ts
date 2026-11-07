@@ -30,10 +30,16 @@ export interface WorkflowStatusResult {
 
 export interface WorkflowEngine {
   /**
-   * Start an allowlisted workflow. Implementations must deduplicate repeated
-   * requests by workflowId + idempotencyKey and must not treat a timeout as proof
-   * that the external side effect did not happen. If cancellation occurs after
-   * dispatch, report an indeterminate outcome unless non-execution is confirmed.
+   * Start an allowlisted workflow. Implementations must reserve a durable
+   * idempotency record, then atomically claim accepted -> running BEFORE the
+   * external network call. Only the worker that wins that compare-and-set may
+   * dispatch. Existing running/indeterminate records must be reconciled, never
+   * blindly dispatched again. A crash after the claim is ambiguous even if the
+   * request may not yet have left the process.
+   *
+   * Implementations must not treat a timeout as proof that the external side
+   * effect did not happen. If cancellation occurs after the claim, report an
+   * indeterminate outcome unless non-execution is confirmed.
    */
   start(request: WorkflowStartRequest): Promise<WorkflowStartResult>;
 

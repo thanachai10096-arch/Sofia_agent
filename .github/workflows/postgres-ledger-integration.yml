@@ -1,0 +1,56 @@
+name: PostgreSQL workflow ledger integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: postgres-ledger-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-ledger:
+    name: Real PostgreSQL ledger integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sofia
+          POSTGRES_PASSWORD: sofia_test_only
+          POSTGRES_DB: sofia_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sofia -d sofia_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install isolated PostgreSQL test driver
+        run: npm install --no-save --package-lock=false --no-audit --no-fund pg@8.16.3
+
+      - name: Build
+        run: npm run build
+
+      - name: Exercise ledger against real PostgreSQL
+        env:
+          SOFIA_TEST_DATABASE_URL: postgres://sofia:sofia_test_only@127.0.0.1:5432/sofia_test
+        run: node scripts/postgres-workflow-ledger-integration.mjs
