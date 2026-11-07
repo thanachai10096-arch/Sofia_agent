@@ -11,7 +11,6 @@ import { createDiscordSharedChatHandler } from "../integrations/messaging/discor
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 import { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
-import { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
