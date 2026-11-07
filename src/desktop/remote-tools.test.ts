@@ -39,3 +39,26 @@ test("remote desktop actions have a dedicated fail-closed policy gate", () => {
     assertToolAllowed({ ...defaultPolicy, allowRemoteDesktop: true }, "desktop.remote.input.click", ["desktop"]),
   );
 });
+
+test("remote screen capture is exposed only with its dedicated capability and dispatched for local approval", async () => {
+  const broker = new DesktopCommandBroker();
+  const { token } = broker.connect("screen-owner");
+  const tools = createRemoteDesktopTools({ broker, ownerKeyId: "screen-owner", capabilities: ["screen:capture"] });
+  assert.deepEqual(tools.map((tool) => tool.name), ["desktop.remote.screen.capture"]);
+  const pending = tools[0]!.execute({}, { runtime: {} as never });
+  const command = broker.poll(token);
+  assert.ok(command);
+  assert.deepEqual(command.action, { kind: "screen.capture" });
+  const image = { mimeType: "image/png", dataBase64: "cG5n", width: 2, height: 1 };
+  assert.equal(broker.complete(token, command.id, image), true);
+  assert.deepEqual(await pending, image);
+  broker.close();
+});
+
+test("screen capture is not exposed by the remote desktop tools without explicit scope", () => {
+  const broker = new DesktopCommandBroker();
+  assert.deepEqual(createRemoteDesktopTools({
+    broker, ownerKeyId: "screen-owner", capabilities: ["app:launch"],
+  }).map((tool) => tool.name), ["desktop.remote.app.launch"]);
+  broker.close();
+});
