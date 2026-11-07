@@ -550,6 +550,19 @@ test("network capability discovery explains missing host allowlist", () => {
   assert.match(capability?.policy?.reason ?? "", /allowed-host/i);
 });
 
+test("network capability discovery blocks tools when network access is disabled", () => {
+  const registry = new MapToolRegistry([
+    { name: "web.search", description: "Search web", inputSchema: { type: "object" }, effects: ["network", "read"] as const, async execute() { return {}; } },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: false, allowedHosts: ["api.search.brave.com"] },
+  );
+  const capability = gateway.listTools()[0];
+  assert.equal(capability?.policy?.status, "blocked");
+  assert.match(capability?.policy?.reason ?? "", /network access is disabled/i);
+});
+
 
 test("capability discovery never claims runtime readiness and reflects the security kill switch", () => {
   const registry = new MapToolRegistry([
