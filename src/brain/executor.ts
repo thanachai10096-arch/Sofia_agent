@@ -1136,9 +1136,8 @@ export class SofiaBrain {
             if (applied) {
               recoveryRounds += 1;
               recoveryFingerprints.add(diagnosis.fingerprint);
-              this.move("replanning");
-              this.move("executing");
-              this.move("observing");
+              // applySubagentProposal owns the state transitions for a
+              // validated action and returns with the Brain in observing.
               this.emit({ type: "brain.coding.loop.repaired", count: recoveryRounds });
               completedStepIds = new Set(currentPlan.steps.map((step) => step.id));
               await checkpointState(currentPlan);
