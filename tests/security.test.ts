@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { assessAction, assertSafePath, containsPromptInjection, redactSecrets, riskFor } from "../src/security/guard.js";
+import { actionHash, assessAction, assertSafePath, containsPromptInjection, redactSecrets, riskFor } from "../src/security/guard.js";
 import { MemorySecurityAudit } from "../src/security/audit.js";
 import { classifyToolEffects } from "../src/security/policy.js";
 import { SecurityController } from "../src/security/controller.js";
@@ -86,6 +86,18 @@ describe("Sofia security controls",()=>{
     );
     assert.equal(decision.allowed, false);
     assert.match(decision.reason ?? "", /must expose an explicit HTTP\(S\) URL/);
+  });
+
+
+  it("binds trusted network destinations into approvals while preserving legacy hashes", () => {
+    const input = { workflowId: "daily-report" };
+    const legacy = actionHash("run", "workflow.execute", input, "principal");
+    const legacyAgain = actionHash("run", "workflow.execute", input, "principal", []);
+    const trusted = actionHash("run", "workflow.execute", input, "principal", ["https://n8n.internal/api/run"]);
+    const changedTarget = actionHash("run", "workflow.execute", input, "principal", ["https://other.internal/api/run"]);
+    assert.equal(legacy, legacyAgain);
+    assert.notEqual(legacy, trusted);
+    assert.notEqual(trusted, changedTarget);
   });
 
   it("requires approval for writes and binds a stable action hash",()=>{
