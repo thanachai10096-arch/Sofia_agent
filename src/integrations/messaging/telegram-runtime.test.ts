@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { SofiaApiError } from "../../sdk/client.js";
 import {
   createTelegramMessagingRuntime,
   reportTelegramRunCompletion,
@@ -62,6 +63,7 @@ test("complete Telegram configuration constructs a runtime without starting netw
 test("Telegram run completion sends the real completed output to the originating chat", async () => {
   const sent: Array<{ conversationId: string; text: string }> = [];
   const warnings: string[] = [];
+  const events: string[] = [];
   await reportTelegramRunCompletion({
     runId: "run-123",
     conversationId: "chat-456",
@@ -76,16 +78,22 @@ test("Telegram run completion sends the real completed output to the originating
       return true;
     },
     onWarning: (event) => warnings.push(event),
+    onEvent: (event) => events.push(event),
   });
   assert.equal(sent.length, 1);
   assert.equal(sent[0]?.conversationId, "chat-456");
   assert.match(sent[0]?.text ?? "", /Sofia completed the task/);
   assert.match(sent[0]?.text ?? "", /สวัสดีจาก Sofia/);
   assert.deepEqual(warnings, []);
+  assert.deepEqual(events, [
+    "telegram_run_terminal run_id=run-123 status=completed",
+    "telegram_run_result_delivered run_id=run-123",
+  ]);
 });
 
 test("Telegram run completion reports failed runs without exposing internal error details", async () => {
   const sent: Array<{ conversationId: string; text: string }> = [];
+  const events: string[] = [];
   await reportTelegramRunCompletion({
     runId: "run-789",
     conversationId: "chat-456",
@@ -94,8 +102,51 @@ test("Telegram run completion reports failed runs without exposing internal erro
       sent.push({ conversationId: message.conversationId, text: message.text });
       return true;
     },
+    onEvent: (event) => events.push(event),
   });
+  assert.deepEqual(events, [
+    "telegram_run_terminal run_id=run-789 status=failed",
+    "telegram_run_result_delivered run_id=run-789",
+  ]);
   assert.match(sent[0]?.text ?? "", /task failed/i);
   assert.match(sent[0]?.text ?? "", /Reason: provider_http_402_insufficient_credits/);
   assert.doesNotMatch(sent[0]?.text ?? "", /Bearer secret-token/);
+});
+
+
+test("Telegram run completion classifies API polling failures without logging error messages", async () => {
+  const sent: Array<{ conversationId: string; text: string }> = [];
+  const warnings: string[] = [];
+  const events: string[] = [];
+  await reportTelegramRunCompletion({
+    runId: "run-api-failure",
+    conversationId: "chat-456",
+    waitForRun: async () => { throw new SofiaApiError("sensitive response body must not be logged", 503); },
+    send: async (message) => {
+      sent.push({ conversationId: message.conversationId, text: message.text });
+      return true;
+    },
+    onWarning: (event) => warnings.push(event),
+    onEvent: (event) => events.push(event),
+  });
+  assert.deepEqual(warnings, ["telegram_run_wait_failed run_id=run-api-failure kind=api_http_503"]);
+  assert.deepEqual(events, ["telegram_run_status_notice_delivered run_id=run-api-failure"]);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0]?.text ?? "", /could not retrieve the final result/);
+  assert.doesNotMatch(warnings.join(" "), /sensitive response body/);
+});
+
+test("Telegram run completion records timeout and failed delivery separately", async () => {
+  const warnings: string[] = [];
+  await reportTelegramRunCompletion({
+    runId: "run-timeout",
+    conversationId: "chat-456",
+    waitForRun: async () => { throw new Error("Timed out waiting for Sofia job."); },
+    send: async () => false,
+    onWarning: (event) => warnings.push(event),
+  });
+  assert.deepEqual(warnings, [
+    "telegram_run_wait_failed run_id=run-timeout kind=timeout",
+    "telegram_completion_delivery_failed run_id=run-timeout",
+  ]);
 });
