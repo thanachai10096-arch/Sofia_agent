@@ -26,7 +26,6 @@ export class TelegramApprovalBroker {
   private readonly pending = new Map<string, {
     runId: string;
     route: TelegramApprovalRoute;
-    actionHash: string;
     resolve: (approved: boolean) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
@@ -36,7 +35,7 @@ export class TelegramApprovalBroker {
 
   constructor(options: TelegramApprovalBrokerOptions = {}) {
     this.sender = options.send;
-    this.routeWaitMs = options.routeWaitMs ?? 15_000;
+    this.routeWaitMs = options.routeWaitMs ?? 5_000;
     this.approvalTimeoutMs = options.approvalTimeoutMs ?? 120_000;
     this.maxPending = options.maxPending ?? 64;
     if (!Number.isSafeInteger(this.routeWaitMs) || this.routeWaitMs < 100 || this.routeWaitMs > 60_000) {
@@ -110,7 +109,8 @@ export class TelegramApprovalBroker {
     if (!route || !this.sender || this.pending.size >= this.maxPending) return false;
 
     const code = randomUUID().replace(/-/g, "");
-    const action = String(redactSecrets(request.input) === undefined ? "{}" : JSON.stringify(redactSecrets(request.input)) ?? "{}").slice(0, 1_000);
+    const redactedInput = redactSecrets(request.input);
+    const action = (typeof redactedInput === "string" ? redactedInput : JSON.stringify(redactedInput) ?? "{}").slice(0, 1_000);
     const prompt = [
       "🔐 Sofia ขออนุมัติก่อนดำเนินการ",
       "เครื่องมือ: " + request.toolName,
@@ -130,7 +130,6 @@ export class TelegramApprovalBroker {
       this.pending.set(code, {
         runId: request.runId,
         route,
-        actionHash: request.actionHash,
         resolve: (approved) => {
           clearTimeout(timer);
           this.pending.delete(code);
