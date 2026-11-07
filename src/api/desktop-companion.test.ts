@@ -167,3 +167,49 @@ test("Desktop Companion API returns 503 for transient store failures without rev
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("Desktop Companion disconnect revokes in-memory access when durable deletion fails", async () => {
+  const records = new Map<string, { ownerKeyId: string; tokenDigest: string; connectedAt: number; lastSeenAt: number }>();
+  const store = {
+    loadAll: () => [...records.values()],
+    save: (record: { ownerKeyId: string; tokenDigest: string; connectedAt: number; lastSeenAt: number }) => { records.set(record.ownerKeyId, record); },
+    delete: (_ownerKeyId: string) => { throw new Error("simulated disk failure"); },
+  };
+  const broker = new DesktopCommandBroker({ store });
+  const ownerKeyId = createHash("sha256").update("desktop-owner-key").digest("hex").slice(0, 32);
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => ({ id: "test", capabilities: ["fast"], costWeight: 1, latencyWeight: 1, qualityWeight: 1, healthy: true }), markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { "desktop-owner-key": ["desktop:connect"] },
+    desktopCommandBroker: broker,
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  try {
+    const paired = await fetch(base + "/v1/desktop/companion/connect", {
+      method: "POST", headers: { authorization: "Bearer desktop-owner-key" },
+    });
+    assert.equal(paired.status, 201);
+    const { token } = await paired.json() as { token: string };
+    const pending = broker.dispatch(ownerKeyId, { kind: "input.key", key: "Enter" });
+    const claimed = broker.poll(token);
+    assert.ok(claimed);
+
+    const disconnected = await fetch(base + "/v1/desktop/companion/disconnect", {
+      method: "POST", headers: { authorization: "Bearer desktop-owner-key" },
+    });
+    assert.equal(disconnected.status, 503);
+    assert.deepEqual(await disconnected.json(), { error: "desktop_companion_revocation_persistence_failed" });
+    assert.deepEqual(broker.getStatus(ownerKeyId), { connected: false, pendingCommands: 0 });
+    assert.throws(() => broker.poll(token), /not paired/);
+    await assert.rejects(pending, /disconnected/);
+  } finally {
+    broker.close();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
