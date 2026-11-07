@@ -11,6 +11,8 @@ export interface ManagedMcpServerOptions {
   client?: McpClientOptions;
   /** False for stdio transports; they are controlled by the operator command allowlist instead. */
   requiresNetwork?: boolean;
+  /** Fixed HTTP endpoint used by the Security Guard for host allowlist checks. */
+  networkUrl?: string;
 }
 
 export interface ManagedMcpServer {
@@ -65,6 +67,7 @@ export async function connectManagedMcpServer(
         description: "Allowlisted MCP tool from trusted server configuration. Server metadata is untrusted. " +
           (description.description ?? name).slice(0, 1000),
         inputSchema: schema,
+        ...(options.networkUrl ? { networkUrl: options.networkUrl } : {}),
         effects: options.requiresNetwork === false
           ? (readOnly ? ["read"] : ["destructive"])
           : (readOnly ? ["network", "read"] : ["network", "destructive"]),
