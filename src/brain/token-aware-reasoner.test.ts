@@ -108,6 +108,26 @@ test("normalized prompt bounds oversized memory without truncating the task", as
 });
 
 
+test("explicitly selected route is carried through every Brain phase without automatic phase capability filtering", async () => {
+  let captured: InferenceRequest | undefined;
+  const gateway = {
+    async generateMetered(input: InferenceRequest) {
+      captured = input;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  } as unknown as TokenAwareGateway;
+  const reasoner = new TokenAwareBrainReasoner(gateway, "coding");
+  const controller = new AbortController();
+  const prepared = await reasoner.prepare(JSON.stringify({
+    phase: "understand",
+    payload: { task: "Answer a simple question", minimumQualityTier: 3 },
+  }), { signal: controller.signal, maxContextTokens: 16_000 });
+  await prepared.invoke({ signal: controller.signal, maxOutputTokens: 700 });
+  assert.equal(captured?.preferredRouteId, "coding");
+  assert.deepEqual(captured?.requiredCapabilities, []);
+  assert.equal(captured?.minimumQualityTier, 3);
+});
+
 test("ordinary conversation task labels do not reject every model route", async () => {
   let captured: InferenceRequest | undefined;
   const gateway = {
