@@ -3,7 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0b1020">\n  <meta name="apple-mobile-web-app-capable" content="yes">\n  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n  <link rel="manifest" href="./manifest.webmanifest">\n  <link rel="icon" href="./sofia-icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./sofia-icon.svg" type="image/svg+xml">
   <meta name="description" content="Sofia Mobile Workspace — your AI-powered cloud browser, available from your phone.">
   <title>Sofia Workspace</title>
   <link rel="stylesheet" href="./workspace.css">
@@ -87,7 +91,8 @@
   </div>
 
   <nav class="mobile-nav" aria-label="Mobile navigation"><button class="selected"><span>▣</span>Browser</button><button id="mobileSofiaButton"><span>✦</span>Sofia</button><button id="mobileMoreButton"><span>···</span>More</button></nav>
-  <section class="remote-keyboard hidden" id="remoteKeyboard" aria-label="Remote browser keyboard"><div class="keyboard-grip"></div><div class="keyboard-head"><strong>Browser keyboard</strong><button id="keyboardClose" aria-label="Close keyboard">×</button></div><textarea id="remoteTyping" rows="2" placeholder="Type into the focused website field…"></textarea><button class="primary-button" id="remoteTypeSend">Send to browser <b>↑</b></button></section>\n  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <section class="remote-keyboard hidden" id="remoteKeyboard" aria-label="Remote browser keyboard"><div class="keyboard-grip"></div><div class="keyboard-head"><strong>Browser keyboard</strong><button id="keyboardClose" aria-label="Close keyboard">×</button></div><textarea id="remoteTyping" rows="2" placeholder="Type into the focused website field…"></textarea><button class="primary-button" id="remoteTypeSend">Send to browser <b>↑</b></button></section>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <dialog class="modal" id="infoModal"><div class="modal-mark">✦</div><button class="modal-close" id="modalClose" aria-label="Close">×</button><h3 id="modalTitle">Your private workspace</h3><p id="modalBody">Sofia runs your browser in an isolated cloud session. Your passwords and verification codes should be entered directly into the browser window — never into chat.</p><button class="primary-button modal-action" id="modalOk">Got it <b>→</b></button></dialog>
   <script src="./workspace.js" defer></script>
 </body>
