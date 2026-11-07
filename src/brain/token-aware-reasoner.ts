@@ -1,12 +1,9 @@
-import { TextEncoder } from "node:util";
 import type { BrainReasoner, PreparedInference } from "./types.js";
 import {
   TokenAwareGateway,
   type BrainPhase,
   type InferenceRequest,
 } from "./token-aware-gateway.js";
-
-const encoder = new TextEncoder();
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -146,10 +143,11 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
   ): Promise<PreparedInference> {
     options.signal.throwIfAborted();
     const input = asInferenceRequest(request);
-    // This is a conservative byte upper-bound for the normalized prompt, not
-    // the old constant "1". The route adapter performs its own final estimate
-    // immediately before reservation/provider invocation.
-    const inputTokens = encoder.encode(JSON.stringify(input)).byteLength;
+    // Character count is a conservative, tokenizer-independent preflight proxy:
+    // unlike UTF-8 bytes it does not multiply Thai/CJK characters by 3. The
+    // selected route's tokenizer remains authoritative before reservation.
+    const serialized = JSON.stringify(input);
+    const inputTokens = Array.from(serialized).length;
     return {
       inputTokens,
       invoke: async (invokeOptions) => {
