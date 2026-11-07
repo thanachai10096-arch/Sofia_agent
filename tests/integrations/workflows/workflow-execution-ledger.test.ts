@@ -44,6 +44,9 @@ class MemoryLedger implements WorkflowExecutionLedger {
   ) {
     const current = this.records.get(executionId);
     if (!current || current.status !== expectedStatus) return undefined;
+    if (!canTransitionWorkflowExecution(current.status, patch.status)) {
+      throw new Error("workflow_execution_invalid_transition");
+    }
     const updated = { ...current, ...structuredClone(patch), updatedAt: new Date().toISOString() };
     this.records.set(executionId, updated);
     return structuredClone(updated);
