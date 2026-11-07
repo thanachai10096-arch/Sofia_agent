@@ -5,6 +5,7 @@ import type {
   WorkflowExecutionLedger,
   WorkflowExecutionRecord,
 } from "../../../src/integrations/workflows/workflow-execution-ledger.js";
+import { canTransitionWorkflowExecution } from "../../../src/integrations/workflows/workflow-execution-ledger.js";
 import type { WorkflowExecutionState } from "../../../src/integrations/workflows/workflow-engine.js";
 
 /** Contract fixture only; production persistence must be supplied separately. */
