@@ -5,6 +5,7 @@ import type { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
 import type { CloudBrowserSessionManager } from "../browser/cloud-session-manager.js";
 import type { ApprovalInbox } from "../agent/approval-inbox.js";
 import type { FileApprovalAuditStore } from "../agent/approval-audit-store.js";
+import type { WorkspaceOidcAuth } from "./workspace-oidc-auth.js";
 
 export interface AgentRunInput {
   task: string;
@@ -69,6 +70,12 @@ export interface SofiaApiConfig {
   approvalInbox?: ApprovalInbox;
   /** Optional durable audit history for owner-bound approval decisions. */
   approvalAuditStore?: FileApprovalAuditStore;
+  /** Optional single-operator OIDC login and same-origin mobile workspace BFF. */
+  workspaceAuth?: WorkspaceOidcAuth;
+  /** Directory containing the static Mobile Workspace PWA assets. */
+  workspaceStaticDirectory?: string;
+  /** Server-only Sofia API key injected by the Workspace BFF. */
+  workspaceApiKey?: string;
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
     path?: string;
