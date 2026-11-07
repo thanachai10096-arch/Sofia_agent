@@ -157,11 +157,17 @@ if (discordConfigured) {
   // Gateway intake is opt-in and reuses the exact same allowlisted shared handler.
   // MESSAGE_CONTENT must also be enabled for the application in Discord Developer Portal.
   if (process.env.DISCORD_GATEWAY_ENABLED?.trim().toLowerCase() === "true") {
-    discordGatewayTransport = createDiscordGatewayTransport({
-      botToken: discordBotToken,
-      onError: (event, status) => console.error("Discord Gateway error:", event, status ?? ""),
-    });
-    await discordGatewayTransport.start(discordAbort.signal, handleDiscordMessage);
+    try {
+      discordGatewayTransport = createDiscordGatewayTransport({
+        botToken: discordBotToken,
+        onError: (event, status) => console.error("Discord Gateway event:", event, status ?? ""),
+      });
+      await discordGatewayTransport.start(discordAbort.signal, handleDiscordMessage);
+    } catch (error) {
+      // An optional Gateway failure must not take down the existing API or slash-command transport.
+      discordGatewayTransport = undefined;
+      console.error("Discord Gateway disabled:", error instanceof Error ? error.name : "UnknownError");
+    }
   }
 
   // Retry recovery notifications while the process is alive. A crashed worker may
