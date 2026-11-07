@@ -74,7 +74,7 @@ test("workspace OIDC rejects an identity other than the configured operator", as
     if (url === issuer + "/token") {
       const now = Math.floor(Date.now() / 1000);
       const head = Buffer.from(JSON.stringify({ alg: "RS256", kid: "k" })).toString("base64url");
-      const body = Buffer.from(JSON.stringify({ iss: issuer, sub: "someone-else", aud: "client", exp: now + 60, nonce })).toString("base64url");
+      const body = Buffer.from(JSON.stringify({ iss: issuer, sub: "someone-else", aud: "client", exp: now + 60, iat: now, nonce })).toString("base64url");
       const payload = head + "." + body;
       return Response.json({ id_token: payload + "." + sign("RSA-SHA256", Buffer.from(payload), privateKey).toString("base64url") });
     }
