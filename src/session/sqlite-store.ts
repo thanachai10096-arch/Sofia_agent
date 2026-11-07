@@ -32,12 +32,12 @@ function restrictSqlitePermissions(filePath: string): void {
 
 
 function sessionSearchTerms(query: string): string[] {
-  const words = query.toLocaleLowerCase().match(/[\\p{L}\\p{N}_-]+/gu) ?? [];
+  const words = query.toLocaleLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
   const terms = new Set<string>();
   for (const word of words) {
     const chars = Array.from(word);
     if (chars.length > 1) terms.add(word);
-    if (chars.length >= 4 && /[^\\u0000-\\u024F]/u.test(word)) {
+    if (chars.length >= 4 && /[^\u0000-\u024F]/u.test(word)) {
       for (let index = 0; index <= chars.length - 3 && terms.size < 32; index += 1) {
         terms.add(chars.slice(index, index + 3).join(""));
       }
