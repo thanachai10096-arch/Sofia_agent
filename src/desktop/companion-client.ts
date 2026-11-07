@@ -152,6 +152,36 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
 
   const clearToken = async () => { await config.credentials.delete(); };
 
+  // Retry only the completion transport request, never the native action.
+  // The broker accepts an exact replay idempotently for a short receipt window.
+  const postCompletion = async (
+    path: string,
+    token: string,
+    body: string,
+    signal?: AbortSignal,
+  ): Promise<Response> => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (signal?.aborted) throw signal.reason ?? new Error("Desktop completion aborted.");
+      try {
+        const response = await request(path, token, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+          signal,
+        });
+        if (response.status < 500 || attempt === 2) return response;
+        await response.body?.cancel().catch(() => undefined);
+      } catch (error) {
+        if (signal?.aborted) throw signal.reason ?? error;
+        lastError = error;
+        if (attempt === 2) throw error;
+      }
+      await abortableDelay(250 * (attempt + 1), signal ?? new AbortController().signal);
+    }
+    throw lastError instanceof Error ? lastError : new Error("Desktop completion transport failed.");
+  };
+
   const pollOnce = async (signal?: AbortSignal): Promise<boolean> => {
     if (signal?.aborted) return false;
     const token = await config.credentials.get();
@@ -180,15 +210,11 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
       error = cause instanceof Error ? cause.message : "Local desktop action failed.";
     }
     if (signal?.aborted) return false;
-    const completed = await request(
+    const completed = await postCompletion(
       "/v1/desktop/companion/commands/" + encodeURIComponent(typedCommand.id) + "/complete",
       token,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(error ? { error: error.slice(0, 1000) } : { result }),
-        signal,
-      },
+      JSON.stringify(error ? { error: error.slice(0, 1000) } : { result }),
+      signal,
     );
     if (completed.status === 401) {
       await clearToken();
