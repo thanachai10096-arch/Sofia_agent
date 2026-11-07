@@ -84,7 +84,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...createSkillsTools(skillsPlatform),
-      ...(!cronExecution && principalId && dependencies.cronScheduler?.() ? createCronManagementTools(dependencies.cronScheduler()!, principalId) : []),
+      ...(!cronExecution && dependencies.cronScheduler?.() ? createCronManagementTools(dependencies.cronScheduler()!, principalId ?? "local-agent") : []),
       ...(grantedDesktopCapabilities.length
         ? createDesktopTools({
             runtime: new DesktopRuntime({
