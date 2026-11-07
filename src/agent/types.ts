@@ -9,6 +9,7 @@ import type { BrainRunSnapshot } from "../brain/run-state.js";
 import type { SecurityController } from "../security/controller.js";
 import type { SecurityAuditSink } from "../security/audit.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import type { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
 export interface AgentRequest {
   task: string;
   context?: string;
@@ -34,6 +35,8 @@ export interface AgentResult {
   brainReport?: CompletionReport;
 }
 export interface AgentDependencies {
+ /** Optional authenticated relay to a paired local Desktop Companion. */
+ desktopCommandBroker?: DesktopCommandBroker;
  provider:ModelProvider;
  router:{select(kind:TaskKind,preferredRouteId?:string):ModelRoute;listRoutes?():ModelRoute[];markUnhealthy(id:string):void};
  reviewer:{review(task:string,output:string):Promise<{approved:boolean;reason:string}>};

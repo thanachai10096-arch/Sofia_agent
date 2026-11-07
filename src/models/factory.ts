@@ -39,13 +39,15 @@ import { EncryptedFileAudit } from "../security/persistent-audit.js";
 import { CompositeSecurityAudit } from "../security/audit.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
+import { createRemoteDesktopTools } from "../desktop/remote-tools.js";
+import type { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
 import type { DesktopCapability } from "../desktop/types.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager;desktopCommandBroker?:DesktopCommandBroker}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
@@ -100,10 +102,14 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
         })
       : [];
+    const runRemoteDesktopTools = principalId && dependencies.desktopCommandBroker
+      ? createRemoteDesktopTools({ broker: dependencies.desktopCommandBroker, ownerKeyId: principalId, capabilities: grantedDesktopCapabilities })
+      : [];
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...runBrowserTools,
       ...runDesktopTools,
+      ...runRemoteDesktopTools,
     ]);
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
@@ -118,7 +124,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   };
 }
 
-export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
+export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"],desktopCommandBroker?:DesktopCommandBroker):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
@@ -129,10 +135,10 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
     process.env.SOFIA_BROWSER_HEADLESS === "false" && process.env.SOFIA_BROWSER_PROFILE_DIR?.trim()
       ? new BrowserProfileSessionManager(new BrowserProfileStore(process.env.SOFIA_BROWSER_PROFILE_DIR), () => new PlaywrightBrowserRuntime())
       : undefined;
-  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions});
+  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions,desktopCommandBroker});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const userMemoryStore = new FileUserMemoryStore();
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,desktopCommandBroker,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
@@ -140,8 +146,9 @@ export async function createSofiaAgentDependenciesWithSessions(
   workspace = process.cwd(),
   approval?: AgentDependencies["approval"],
   databasePath?: string,
+  desktopCommandBroker?: DesktopCommandBroker,
 ): Promise<AgentDependencies & { closeSessionStore: () => void }> {
-  const dependencies = createSofiaAgentDependencies(workspace, approval);
+  const dependencies = createSofiaAgentDependencies(workspace, approval, desktopCommandBroker);
   const sessionStore = await SqliteSessionStore.open(databasePath);
   return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
 }

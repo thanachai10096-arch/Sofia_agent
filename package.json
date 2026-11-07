@@ -11,17 +11,19 @@
     "license:check": "node scripts/check-license.mjs",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/run-tests.mjs",
+    "test": "node scripts/run-tests.mjs && node --check web/mobile-workspace/workspace.js && node --check web/mobile-workspace/service-worker.js",
     "cli": "tsx src/cli/index.ts",
     "start": "node dist/api/entrypoint.js",
     "desktop:live-smoke": "npm run build && node scripts/live-desktop-smoke.mjs",
-    "discord:register-command": "node scripts/register-discord-command.mjs"
+    "discord:register-command": "node scripts/register-discord-command.mjs",
+    "desktop:companion": "tsx src/cli/index.ts desktop companion"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "playwright": "^1.55.0"
+    "playwright": "^1.55.0",
+    "@napi-rs/keyring": "2.1.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

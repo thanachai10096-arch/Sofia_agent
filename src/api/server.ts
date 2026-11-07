@@ -1,8 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import { DesktopCompanionAuthenticationError } from "../desktop/remote-command-broker.js";
 import type { AgentRunInput, AgentRunResponse, AgentRunStatus, SofiaApiConfig } from "./types.js";
 import { UsageLimiter } from "./usage.js";
 import { idempotencyFingerprint } from "./idempotency.js";
@@ -80,10 +83,55 @@ function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapabi
     "desktop:workspace:read": "workspace:read",
     "desktop:workspace:write": "workspace:write",
     "desktop:process:execute": "process:execute",
+    "desktop:remote:app:launch": "app:launch",
+    "desktop:remote:input:control": "input:control",
+    "desktop:remote:screen:capture": "screen:capture",
   };
-  return [...new Set(scopes.map((scope) => mapping[scope]).filter((capability): capability is DesktopCapability => capability !== undefined))];
+  const remoteEnabled = scopes.includes("desktop:connect");
+  return [...new Set(scopes
+    .filter((scope) => remoteEnabled || !scope.startsWith("desktop:remote:"))
+    .map((scope) => mapping[scope])
+    .filter((capability): capability is DesktopCapability => capability !== undefined))];
 }
 
+function cookieValue(header: string | undefined, name: string): string | undefined {
+  return (header ?? "").split(";").map((part) => part.trim())
+    .find((part) => part.startsWith(name + "="))?.slice(name.length + 1);
+}
+function safeEqualText(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const part = Buffer.from(chunk as Buffer);
+    size += part.length;
+    if (size > maxBytes) throw new Error("Request body too large.");
+    chunks.push(part);
+  }
+  return Buffer.concat(chunks);
+}
+function sameOriginRequest(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  const host = req.headers.host;
+  if (typeof host !== "string" || host.includes(",")) return false;
+  if (typeof origin !== "string") return req.headers["sec-fetch-site"] === "same-origin";
+  try {
+    const parsed = new URL(origin);
+    const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+    return parsed.host.toLowerCase() === host.toLowerCase() &&
+      (parsed.protocol === "https:" || (local && parsed.protocol === "http:"));
+  } catch { return false; }
+}
+function setWorkspaceCookies(res: ServerResponse, sessionCookie: string, csrf: string): void {
+  res.setHeader("set-cookie", [
+    sessionCookie,
+    "__Host-sofia_csrf=" + csrf + "; Path=/; Secure; SameSite=Strict; Max-Age=28800",
+  ]);
+}
 function normalizeContext(context: AgentRunInput["context"]): string | undefined {
   if (context === undefined) return undefined;
   return typeof context === "string" ? context : JSON.stringify(context);
@@ -264,6 +312,156 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const server = createServer(async (req, res) => {
     const origin = req.headers.origin;
     try {
+      const workspaceAuth = config.workspaceAuth;
+      const workspaceRoot = "/workspace";
+      if (workspaceAuth && req.url && (req.url === workspaceRoot || req.url.startsWith(workspaceRoot + "/"))) {
+        const pathname = new URL(req.url, "http://sofia.local").pathname;
+        if (req.method === "GET" && (pathname === workspaceRoot || pathname === workspaceRoot + "/")) {
+          const identity = workspaceAuth.authenticate(req.headers.cookie);
+          const loginFailed = !identity && new URL(req.url, "http://sofia.local").searchParams.get("auth") === "failed";
+          res.writeHead(302, {
+            location: workspaceRoot + (identity ? "/index.html" : "/login.html" + (loginFailed ? "?auth=failed" : "")),
+            "cache-control": "no-store",
+            "referrer-policy": "no-referrer",
+          });
+          return res.end();
+        }
+        if (req.method === "GET" && pathname === workspaceRoot + "/auth/login") {
+          try {
+            const login = await workspaceAuth.beginLogin();
+            res.writeHead(302, { location: login.url, "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          } catch {
+            return json(res, 503, { error: "workspace_identity_provider_unavailable" }, undefined, config);
+          }
+        }
+        if (req.method === "GET" && pathname === workspaceRoot + "/auth/callback") {
+          const callback = new URL(req.url, "http://sofia.local");
+          const code = callback.searchParams.get("code") ?? "";
+          const state = callback.searchParams.get("state") ?? "";
+          if (callback.searchParams.has("error")) {
+            res.writeHead(302, { location: workspaceRoot + "/?auth=failed", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          }
+          try {
+            const identity = await workspaceAuth.completeLogin(code, state);
+            const csrf = randomBytes(32).toString("base64url");
+            setWorkspaceCookies(res, workspaceAuth.sessionCookie(identity.sessionId, Math.floor((identity.expiresAt - Date.now()) / 1000)), csrf);
+            res.writeHead(302, { location: workspaceRoot + "/", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          } catch {
+            res.writeHead(302, { location: workspaceRoot + "/?auth=failed", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          }
+        }
+        if (req.method === "GET" && pathname === workspaceRoot + "/auth/session") {
+          const identity = workspaceAuth.authenticate(req.headers.cookie);
+          return identity
+            ? json(res, 200, { authenticated: true, expiresAt: identity.expiresAt }, origin, config)
+            : json(res, 401, { error: "workspace_sign_in_required" }, origin, config);
+        }
+        if (req.method === "POST" && pathname === workspaceRoot + "/auth/logout") {
+          if (!sameOriginRequest(req)) return json(res, 403, { error: "workspace_origin_rejected" }, origin, config);
+          const csrfCookie = cookieValue(req.headers.cookie, "__Host-sofia_csrf");
+          const csrfHeader = req.headers["x-csrf-token"];
+          if (!csrfCookie || typeof csrfHeader !== "string" || !safeEqualText(csrfCookie, csrfHeader)) {
+            return json(res, 403, { error: "workspace_csrf_rejected" }, origin, config);
+          }
+          const identity = workspaceAuth.authenticate(req.headers.cookie);
+          if (identity) workspaceAuth.revoke(identity.sessionId);
+          res.writeHead(204, { "set-cookie": [workspaceAuth.clearCookie(), "__Host-sofia_csrf=; Path=/; Secure; SameSite=Strict; Max-Age=0"], "cache-control": "no-store" });
+          return res.end();
+        }
+        if (pathname.startsWith("/workspace/") && req.method === "GET") {
+          const asset = pathname.slice((workspaceRoot + "/").length);
+          const allowedAssets = new Set(["index.html", "login.html", "login.js", "login.css", "workspace.css", "workspace.js", "manifest.webmanifest", "sofia-icon.svg", "service-worker.js"]);
+          if (!allowedAssets.has(asset)) return json(res, 404, { error: "not_found" }, origin, config);
+          const identity = workspaceAuth.authenticate(req.headers.cookie);
+          if (asset === "index.html" && !identity) {
+            res.writeHead(302, { location: workspaceRoot + "/login.html", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          }
+          if (asset === "login.html" && identity) {
+            res.writeHead(302, { location: workspaceRoot + "/index.html", "cache-control": "no-store" });
+            return res.end();
+          }
+          const directory = path.resolve(config.workspaceStaticDirectory ?? path.resolve(process.cwd(), "web/mobile-workspace"));
+          const file = path.resolve(directory, asset);
+          if (!file.startsWith(directory + path.sep)) return json(res, 404, { error: "not_found" }, origin, config);
+          try {
+            if (asset === "index.html" && !workspaceAuth.authenticate(req.headers.cookie)) {
+            res.writeHead(302, { location: workspaceRoot + "/auth/login", "cache-control": "no-store", "referrer-policy": "no-referrer" });
+            return res.end();
+          }
+          const content = readFileSync(file);
+            const types: Record<string, string> = {
+              ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
+              ".js": "text/javascript; charset=utf-8", ".webmanifest": "application/manifest+json",
+              ".svg": "image/svg+xml",
+            };
+            const isHtml = path.extname(file) === ".html";
+            const isServiceWorker = asset === "service-worker.js";
+            res.writeHead(200, {
+              "content-type": types[path.extname(file)] ?? "application/octet-stream",
+              // Never let browsers or intermediary caches retain authenticated HTML or a stale worker.
+              "cache-control": isHtml || isServiceWorker ? "no-store" : "public, max-age=300",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY",
+              "referrer-policy": "no-referrer",
+              "permissions-policy": "camera=(), microphone=(), geolocation=()",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+              ...(isServiceWorker ? { "service-worker-allowed": "/workspace/" } : {}),
+            });
+            return res.end(content);
+          } catch { return json(res, 404, { error: "workspace_asset_not_found" }, origin, config); }
+        }
+      }
+
+      if (workspaceAuth && req.url?.startsWith("/api/sofia/")) {
+        const identity = workspaceAuth.authenticate(req.headers.cookie);
+        if (!identity) return json(res, 401, { error: "workspace_sign_in_required" }, origin, config);
+        if (!config.workspaceApiKey) return json(res, 503, { error: "workspace_bff_unavailable" }, origin, config);
+        if (!sameOriginRequest(req)) return json(res, 403, { error: "workspace_origin_rejected" }, origin, config);
+        const csrfCookie = cookieValue(req.headers.cookie, "__Host-sofia_csrf");
+        const csrfHeader = req.headers["x-csrf-token"];
+        if (req.method !== "GET" && (!csrfCookie || typeof csrfHeader !== "string" || !safeEqualText(csrfCookie, csrfHeader))) {
+          return json(res, 403, { error: "workspace_csrf_rejected" }, origin, config);
+        }
+        const upstreamPath = req.url.slice("/api/sofia".length);
+        const upstreamUrl = new URL(upstreamPath, "http://sofia.local");
+        const allowedPath = /^\/v1\/(?:browser\/cloud\/sessions(?:\/[0-9a-f-]{36}(?:\/(?:navigate|action|screenshot))?)?|agent\/runs(?:\/[0-9a-f-]{36})?|approvals(?:\/audit|\/[0-9a-f-]{36}\/decision)?)$/i.test(upstreamUrl.pathname);
+        // The workspace UI has no query-string API requirements. Reject them rather
+        // than forwarding unreviewed parameters through the privileged BFF.
+        if (!allowedPath || upstreamUrl.search || upstreamUrl.hash || !["GET", "POST", "DELETE"].includes(req.method ?? "")) {
+          return json(res, 404, { error: "workspace_route_not_allowed" }, origin, config);
+        }
+        const address = server.address();
+        if (!address || typeof address === "string") return json(res, 503, { error: "workspace_upstream_unavailable" }, origin, config);
+        try {
+          const requestBody = req.method === "GET" || req.method === "DELETE" ? undefined : await readRawBody(req, maxBytes);
+          const upstream = await fetch("http://127.0.0.1:" + address.port + upstreamUrl.pathname + upstreamUrl.search, {
+            method: req.method ?? "GET",
+            headers: {
+              authorization: "Bearer " + config.workspaceApiKey,
+              ...(requestBody ? { "content-type": req.headers["content-type"] ?? "application/json" } : {}),
+              accept: "application/json",
+            },
+            ...(requestBody ? { body: requestBody.toString("utf8") } : {}),
+          });
+          const responseBody = Buffer.from(await upstream.arrayBuffer());
+          res.writeHead(upstream.status, {
+            "content-type": upstream.headers.get("content-type") ?? "application/json; charset=utf-8",
+            "cache-control": "no-store",
+            ...(upstream.headers.get("retry-after") ? { "retry-after": upstream.headers.get("retry-after")! } : {}),
+            "x-content-type-options": "nosniff",
+          });
+          return res.end(responseBody);
+        } catch {
+          return json(res, 502, { error: "workspace_upstream_failed" }, origin, config);
+        }
+      }
+
       if (discordRoute && req.url === discordRoutePath) {
         await handleDiscordInteractionHttpRequest(req, res, discordRoute.transport, discordMaxBodyBytes);
         return;
@@ -292,10 +490,182 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       if (!req.url?.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, origin, config);
 
+      const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      const desktopPath = requestUrl.pathname;
+      const desktopBroker = config.desktopCommandBroker;
+
+      // The companion uses a separate short-lived bearer token. It never receives
+      // the owner's Sofia API key and can only poll/complete its own claimed work.
+      if (desktopBroker && desktopPath === "/v1/desktop/companion/commands" && req.method === "GET") {
+        const header = req.headers.authorization ?? "";
+        const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+        if (!token) return json(res, 401, { error: "unauthorized" }, origin, config);
+        try {
+          const command = desktopBroker.poll(token);
+          return json(res, 200, { command }, origin, config);
+        } catch (error) {
+          return error instanceof DesktopCompanionAuthenticationError
+            ? json(res, 401, { error: "desktop_companion_unauthorized" }, origin, config)
+            : json(res, 503, { error: "desktop_companion_temporarily_unavailable" }, origin, config);
+        }
+      }
+
+      const completeMatch = desktopPath.match(/^\/v1\/desktop\/companion\/commands\/([0-9a-f-]{36})\/complete$/i);
+      if (desktopBroker && completeMatch && req.method === "POST") {
+        const header = req.headers.authorization ?? "";
+        const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+        if (!token) return json(res, 401, { error: "unauthorized" }, origin, config);
+        const raw = await body(req, Math.max(maxBytes, 6 * 1024 * 1024));
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_desktop_completion" }, origin, config);
+        const input = raw as Record<string, unknown>;
+        if (input.error !== undefined && (typeof input.error !== "string" || input.error.length > 1000)) {
+          return json(res, 400, { error: "invalid_desktop_completion" }, origin, config);
+        }
+        let resultSize = 0;
+        try { resultSize = Buffer.byteLength(JSON.stringify(input.result ?? null), "utf8"); } catch {
+          return json(res, 400, { error: "invalid_desktop_completion" }, origin, config);
+        }
+        if (resultSize > 5_500_000) return json(res, 413, { error: "desktop_result_too_large" }, origin, config);
+        try {
+          const completed = desktopBroker.complete(token, completeMatch[1]!, input.result ?? null, input.error as string | undefined);
+          return completed
+            ? json(res, 200, { completed: true }, origin, config)
+            : json(res, 404, { error: "desktop_command_not_found" }, origin, config);
+        } catch (error) {
+          return error instanceof DesktopCompanionAuthenticationError
+            ? json(res, 401, { error: "desktop_companion_unauthorized" }, origin, config)
+            : json(res, 503, { error: "desktop_companion_temporarily_unavailable" }, origin, config);
+        }
+      }
+
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
-      const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      // Approval Inbox is deliberately separate from run permissions. Reading and
+      // deciding approvals require explicit scopes and are always owner-bound.
+      if (requestUrl.pathname === "/v1/approvals/audit" && req.method === "GET") {
+        if (!auth.scopes.includes("approval:read") && !auth.scopes.includes("approval:decide")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "approval:read" }, origin, config);
+        }
+        if (!config.approvalAuditStore) return json(res, 503, { error: "approval_audit_unavailable" }, origin, config);
+        const rawLimit = Number(requestUrl.searchParams.get("limit") ?? "50");
+        const limit = Number.isSafeInteger(rawLimit) ? Math.max(1, Math.min(100, rawLimit)) : 50;
+        return json(res, 200, { events: config.approvalAuditStore.list(auth.keyId, limit) }, origin, config);
+      }
+
+      if (requestUrl.pathname === "/v1/approvals" || requestUrl.pathname.startsWith("/v1/approvals/")) {
+        const inbox = config.approvalInbox;
+        if (!inbox) return json(res, 503, { error: "approval_inbox_unavailable" }, origin, config);
+        if (req.method === "GET" && requestUrl.pathname === "/v1/approvals") {
+          if (!auth.scopes.includes("approval:read") && !auth.scopes.includes("approval:decide")) {
+            return json(res, 403, { error: "forbidden", requiredScope: "approval:read" }, origin, config);
+          }
+          return json(res, 200, { approvals: inbox.list(auth.keyId) }, origin, config);
+        }
+        const approvalMatch = requestUrl.pathname.match(/^\/v1\/approvals\/([0-9a-f-]{36})\/decision$/i);
+        if (req.method === "POST" && approvalMatch) {
+          if (!auth.scopes.includes("approval:decide")) {
+            return json(res, 403, { error: "forbidden", requiredScope: "approval:decide" }, origin, config);
+          }
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+            return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          }
+          const input = raw as Record<string, unknown>;
+          if ((input.decision !== "approve" && input.decision !== "deny") ||
+              typeof input.actionHash !== "string" || !/^[a-f0-9]{64}$/i.test(input.actionHash)) {
+            return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          }
+          const decided = inbox.decide(auth.keyId, approvalMatch[1]!, input.actionHash, input.decision);
+          return decided
+            ? json(res, 200, { decided: true }, origin, config)
+            : json(res, 409, { error: "approval_expired_or_not_found" }, origin, config);
+        }
+        return json(res, 404, { error: "approval_not_found" }, origin, config);
+      }
+
+      // Cloud browser sessions let phone-only users interact with a private,
+      // ephemeral browser hosted alongside Sofia. Every operation is owner-scoped.
+      if (requestUrl.pathname.startsWith("/v1/browser/cloud/")) {
+        const manager = config.cloudBrowserSessions;
+        if (!manager) return json(res, 503, { error: "cloud_browser_unavailable" }, origin, config);
+        if (!auth.scopes.includes("browser:cloud")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "browser:cloud" }, origin, config);
+        }
+        const basePath = "/v1/browser/cloud/sessions";
+        if (requestUrl.pathname === basePath && req.method === "POST") {
+          try {
+            const session = await manager.create(auth.keyId);
+            return json(res, 201, { session }, origin, config);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "";
+            const limited = message.includes("limit reached");
+            return json(res, limited ? 429 : 503, { error: limited ? "cloud_browser_session_limit" : "cloud_browser_start_failed" }, origin, config);
+          }
+        }
+        const match = requestUrl.pathname.match(/^\/v1\/browser\/cloud\/sessions\/([0-9a-f-]{36})(?:\/(navigate|action|screenshot))?$/i);
+        if (!match) return json(res, 404, { error: "cloud_browser_session_not_found" }, origin, config);
+        const sessionId = match[1]!;
+        const operation = match[2];
+        try {
+          if (!operation && req.method === "GET") {
+            return json(res, 200, await manager.status(auth.keyId, sessionId), origin, config);
+          }
+          if (operation === "navigate" && req.method === "POST") {
+            const raw = await body(req, maxBytes);
+            if (!raw || typeof raw !== "object" || Array.isArray(raw) || typeof (raw as Record<string, unknown>).url !== "string") {
+              return json(res, 400, { error: "invalid_cloud_browser_navigation" }, origin, config);
+            }
+            return json(res, 200, await manager.navigate(auth.keyId, sessionId, (raw as { url: string }).url), origin, config);
+          }
+          if (operation === "action" && req.method === "POST") {
+            const raw = await body(req, maxBytes);
+            if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_cloud_browser_action" }, origin, config);
+            return json(res, 200, await manager.act(auth.keyId, sessionId, raw as Record<string, unknown>), origin, config);
+          }
+          if (operation === "screenshot" && req.method === "GET") {
+            return json(res, 200, await manager.screenshot(auth.keyId, sessionId), origin, config);
+          }
+          if (!operation && req.method === "DELETE") {
+            await manager.close(auth.keyId, sessionId);
+            return json(res, 200, { closed: true }, origin, config);
+          }
+          return json(res, 405, { error: "method_not_allowed" }, origin, config);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          const notFound = message.includes("not found");
+          const tooLarge = message.includes("too large");
+          return json(res, notFound ? 404 : tooLarge ? 413 : 400, {
+            error: notFound ? "cloud_browser_session_not_found" : tooLarge ? "cloud_browser_screenshot_too_large" : "cloud_browser_action_rejected",
+          }, origin, config);
+        }
+      }
+
+      if (desktopPath.startsWith("/v1/desktop/")) {
+        if (!desktopBroker) return json(res, 503, { error: "desktop_companion_unavailable" }, origin, config);
+        if (!auth.scopes.includes("desktop:connect")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "desktop:connect" }, origin, config);
+        }
+        if (desktopPath === "/v1/desktop/companion/connect" && req.method === "POST") {
+          const session = desktopBroker.connect(auth.keyId);
+          return json(res, 201, { token: session.token, connectedAt: session.connectedAt }, origin, config);
+        }
+        if (desktopPath === "/v1/desktop/companion/status" && req.method === "GET") {
+          return json(res, 200, desktopBroker.getStatus(auth.keyId), origin, config);
+        }
+        if (desktopPath === "/v1/desktop/companion/disconnect" && req.method === "POST") {
+          try {
+            desktopBroker.disconnect(auth.keyId);
+            return json(res, 200, { disconnected: true }, origin, config);
+          } catch {
+            // The active pairing has already been revoked in memory, but durable
+            // deletion failed. Do not report a successful persistent disconnect.
+            return json(res, 503, { error: "desktop_companion_revocation_persistence_failed" }, origin, config);
+          }
+        }
+        return json(res, 404, { error: "not_found" }, origin, config);
+      }
+
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
         if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);

@@ -1,6 +1,11 @@
 import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import type { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
+import type { CloudBrowserSessionManager } from "../browser/cloud-session-manager.js";
+import type { ApprovalInbox } from "../agent/approval-inbox.js";
+import type { FileApprovalAuditStore } from "../agent/approval-audit-store.js";
+import type { WorkspaceOidcAuth } from "./workspace-oidc-auth.js";
 
 export interface AgentRunInput {
   task: string;
@@ -57,6 +62,20 @@ export interface SofiaApiConfig {
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
+  /** Optional owner-bound relay for a locally paired Desktop Companion. */
+  desktopCommandBroker?: DesktopCommandBroker;
+  /** Optional owner-isolated headless browser sessions controlled from mobile clients. */
+  cloudBrowserSessions?: CloudBrowserSessionManager;
+  /** Optional owner-bound, one-time approval inbox connected to the Brain approval handler. */
+  approvalInbox?: ApprovalInbox;
+  /** Optional durable audit history for owner-bound approval decisions. */
+  approvalAuditStore?: FileApprovalAuditStore;
+  /** Optional single-operator OIDC login and same-origin mobile workspace BFF. */
+  workspaceAuth?: WorkspaceOidcAuth;
+  /** Directory containing the static Mobile Workspace PWA assets. */
+  workspaceStaticDirectory?: string;
+  /** Server-only Sofia API key injected by the Workspace BFF. */
+  workspaceApiKey?: string;
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
     path?: string;
