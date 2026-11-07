@@ -155,7 +155,7 @@ test("screen capture requires a separate local capability and explicit approval"
   });
   assert.equal(await withoutGrant.pollOnce(), true);
   assert.deepEqual(calls, []);
-  assert.match(completion?.error as string, /not granted: screen:capture/);
+  assert.match(completion.value?.error as string, /not granted: screen:capture/);
   assert.equal(approvals, 0);
   completion.value = undefined;
   const enabled = createDesktopCompanionClient({
