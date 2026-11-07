@@ -9,6 +9,7 @@ import {
 
 export type BrainPhase =
   | "understand"
+  | "respond"
   | "plan"
   | "replan"
   | "implement"
