@@ -58,7 +58,12 @@ export function parseUnderstanding(value: unknown): TaskUnderstanding {
     );
   }
 
+  if (input.mode !== undefined && input.mode !== "conversation" && input.mode !== "action") {
+    throw new Error('Invalid field "mode": expected "conversation" or "action".');
+  }
+
   return {
+    ...(input.mode === "conversation" || input.mode === "action" ? { mode: input.mode } : {}),
     objective: text(input.objective, "objective"),
     constraints: texts(input.constraints, "constraints"),
     assumptions: texts(input.assumptions, "assumptions"),
