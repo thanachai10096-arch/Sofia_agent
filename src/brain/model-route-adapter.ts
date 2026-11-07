@@ -2,11 +2,11 @@ import type { ModelProvider, ModelRequest, ModelRoute, TaskKind } from "../model
 import type { InternalRoute, PackedPrompt, PreparedCall, ProviderReply } from "./token-aware-gateway.js";
 
 /**
- * Tokenizer-independent admission estimate. UTF-8 byte length is not a token
- * count: it multiplies Thai/CJK text by roughly 3. Estimate ASCII at 1 token
- * per 3 characters and non-ASCII at 1 token per code point. Provider-reported
- * usage remains authoritative after invocation; the reservation still fails
- * closed if actual usage exceeds the reserved cap.
+ * Tokenizer-independent admission estimate (not a mathematical upper bound).
+ * UTF-8 byte length is not a token count: it multiplies Thai/CJK text by
+ * roughly 3. Estimate ASCII at 1 token per 3 characters and non-ASCII at
+ * 1 token per code point. Provider-reported usage remains authoritative;
+ * TokenBudget fails closed if actual input or output exceeds the reservation.
  */
 export function estimatePromptTokensUpperBound(value: unknown): number {
   const characters = Array.from(JSON.stringify(value));
