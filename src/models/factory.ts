@@ -32,6 +32,8 @@ import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
+import { createAdvancedSkillRegistry } from "../skills/advanced-skill-registry.js";
+import { createAdvancedSkillTools } from "../skills/tools.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -100,10 +102,19 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
         })
       : [];
+    // The advanced catalog/handlers were previously exported but never mounted
+    // into the live Brain tool registry. Build a run-scoped, guarded registry and
+    // expose only verified handlers through the same policy-enforced gateway.
+    const advancedSkillRegistry = createAdvancedSkillRegistry({
+      projectMemoryStore: projectMemory,
+      securityController: dependencies.security,
+    });
+    const runSkillTools = createAdvancedSkillTools(advancedSkillRegistry, principalId ?? "anonymous");
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...runBrowserTools,
       ...runDesktopTools,
+      ...runSkillTools,
     ]);
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
