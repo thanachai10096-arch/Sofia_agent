@@ -109,8 +109,11 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
           }
           return { ok: true, closed: "page", pageId: id };
         }
+        const managedProfileSession = activeProfileId !== undefined;
         await dispose();
-        return { ok: true, closed: "session" };
+        return managedProfileSession
+          ? { ok: true, closed: "run-attachment", profileStillOpen: true }
+          : { ok: true, closed: "session" };
       },
     },
   ];
