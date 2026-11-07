@@ -4,6 +4,8 @@ export interface ApprovalRequest {
   principalId?:string;
   toolName:string;
   input:Record<string,unknown>;
+  /** Operator-configured destinations covered by this approval, when applicable. */
+  trustedNetworkTargets?: readonly string[];
   actionHash:string;
   risk:RiskLevel;
 }
