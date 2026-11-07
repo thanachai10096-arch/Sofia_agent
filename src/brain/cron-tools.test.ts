@@ -16,6 +16,7 @@ test("cron tools bind reads and writes to the authenticated actor", async () => 
     async history(id: string, actor: string) { calls.push({ method: "history", args: [id, actor] }); return []; },
   } as unknown as CronScheduler;
   const [readTool, writeTool] = createCronManagementTools(scheduler, "authenticated-principal");
+  assert.ok(readTool && writeTool);
   const context = { runtime: {} as never };
 
   await readTool.execute({ action: "list" }, context);
@@ -43,6 +44,7 @@ test("cron management tool creates owner-scoped schedules with the host principa
     },
   } as unknown as CronScheduler;
   const [, writeTool] = createCronManagementTools(scheduler, "owner-123");
+  assert.ok(writeTool);
   await writeTool.execute({
     action: "create",
     name: "daily",
