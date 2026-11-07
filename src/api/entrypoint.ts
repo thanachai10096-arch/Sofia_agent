@@ -46,6 +46,7 @@ const workspaceAuth = workspaceOidcValues.every((value) => Boolean(value?.trim()
       clientSecret: process.env.SOFIA_WORKSPACE_OIDC_CLIENT_SECRET!,
       redirectUri: process.env.SOFIA_WORKSPACE_OIDC_REDIRECT_URI!,
       allowedSubject: process.env.SOFIA_WORKSPACE_OIDC_ALLOWED_SUBJECT!,
+      sessionDirectory: path.join(workspace, ".sofia", "workspace-sessions"),
     })
   : undefined;
 if (workspaceOidcRequested && !workspaceAuth) {
