@@ -22,7 +22,7 @@ test("Discord approval inbox and decisions are scoped to the verified Discord pr
   try {
     const inbox = handleDiscordApprovalCommand(queue, owner, "/approvals");
     assert.match(inbox, new RegExp(pending.id));
-    assert.match(inbox, /workspace\\.write/);
+    assert.match(inbox, /workspace\.write/);
     assert.equal(handleDiscordApprovalCommand(queue, other, "/approvals"), "You have no pending approvals.");
     assert.equal(handleDiscordApprovalCommand(queue, other, "/approve", pending.id),
       "Approval not found or not accessible to this Discord user.");
