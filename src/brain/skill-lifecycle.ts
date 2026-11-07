@@ -28,8 +28,9 @@ function hasValidRuntimeEvidence(candidate: SkillPackage, evidence: SkillRuntime
       typeof evidence.runnerId !== "string" || !evidence.runnerId.trim() ||
       typeof evidence.isolatedWorkspaceId !== "string" || !evidence.isolatedWorkspaceId.trim() ||
       typeof evidence.completedAt !== "string" || !Number.isFinite(Date.parse(evidence.completedAt)) ||
-      !Array.isArray(evidence.executedChecks)) return false;
-  const names = evidence.executedChecks.map((item) => item?.name);
+      !Array.isArray(evidence.executedChecks) ||
+      !evidence.executedChecks.every((item) => isRecord(item) && typeof item.name === "string" && typeof item.passed === "boolean")) return false;
+  const names = evidence.executedChecks.map((item) => item.name);
   return new Set(names).size === names.length &&
     candidate.skill.verification.every((required) =>
       evidence.executedChecks.some((item) => item.name === required && item.passed === true));
