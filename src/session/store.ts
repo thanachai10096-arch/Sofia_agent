@@ -7,7 +7,7 @@ export class MemorySessionStore {
  save(s:Session){ s.updatedAt=Date.now(); this.sessions.set(s.id,s); }
  delete(id:string){ this.sessions.delete(id); }
  search(query:string, options:SessionSearchOptions = {}):Session[] {
-  const terms=[...new Set(query.toLocaleLowerCase().split(/\\s+/u).filter(Boolean))].slice(0,16);
+  const terms=[...new Set(query.toLocaleLowerCase().split(/\s+/u).filter(Boolean))].slice(0,16);
   if(terms.length===0)return [];
   const limit=Math.max(1,Math.min(20,Math.floor(options.limit??5)));
   const offset=Math.max(0,Math.floor(options.offset??0));
