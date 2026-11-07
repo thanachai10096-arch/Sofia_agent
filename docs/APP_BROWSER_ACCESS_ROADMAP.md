@@ -28,6 +28,18 @@ Sofia must be able to use websites and approved applications as an agent: authen
 
 ## P1 — User-controlled browser login and profiles
 
+**Implementation slice in progress:** owner-scoped local profile directories, persistent visible Playwright login handoff, profile listing/revocation tools, and run-scoped cleanup are being added on a dependent branch. This is not enabled by default and is not a Railway/cloud login feature.
+
+Local Desktop opt-in requires all of:
+- `SOFIA_BROWSER_LOGIN_ENABLED=true`
+- `SOFIA_BROWSER_HEADLESS=false`
+- `SOFIA_BROWSER_PROFILE_DIR=<private local directory>`
+- A local graphical session (Windows/macOS or Linux with DISPLAY/WAYLAND_DISPLAY)
+- An authenticated `principalId` and the existing browser policy enabled
+
+The profile store hashes owner IDs for directory partitioning, uses opaque UUID profile IDs, applies owner-only directory/file permissions, and exposes only profile IDs/timestamps to the model. Chromium's persistent user-data directory contains site session data (including cookies) on disk; it is not application-layer encrypted by this implementation. Use OS full-disk encryption and a local user account, do not place the profile directory on shared/network storage, and revoke profiles when no longer needed. Railway must not set these opt-in variables.
+
+
 1. Add an explicit profile manager with opaque IDs, owner binding, status, timestamps, and lifecycle operations.
 2. Login happens in a visible, user-controlled browser window or an approved local companion. Sofia must not ask the user to paste passwords, one-time codes, cookies, or bearer tokens into chat.
 3. Keep profile data in an operator-configured private directory with owner-only filesystem permissions, encryption at rest where a supported key provider exists, and no cloud sync by default.
