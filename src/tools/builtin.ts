@@ -103,6 +103,89 @@ export function createBuiltinTools(): SofiaTool[] {
       },
     },
     {
+      name: "web.search_news",
+      description: "Search current news articles and return titles, publishers, dates, descriptions, and source URLs. Requires BRAVE_SEARCH_API_KEY and network access explicitly enabled by the operator.",
+      effects: ["network", "read"],
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: str("News search query, maximum 400 characters and 50 words"),
+          country: str("Two-letter country code or ALL for worldwide results"),
+          searchLanguage: str("Search language code, for example th or en"),
+          freshness: { type: "string", enum: ["pd", "pw", "pm", "py"] },
+          maxResults: { type: "integer" },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      async execute(input, { signal }) {
+        const apiKey = process.env.BRAVE_SEARCH_API_KEY?.trim();
+        if (!apiKey) throw new Error("News search is not configured: set BRAVE_SEARCH_API_KEY.");
+        const query = typeof input.query === "string" ? input.query.trim() : "";
+        if (!query || query.length > 400 || query.split(/\\s+/).length > 50) {
+          throw new Error("News query must contain 1–400 characters and at most 50 words.");
+        }
+        const country = typeof input.country === "string" ? input.country.toUpperCase() : "TH";
+        if (country !== "ALL" && !/^[A-Z]{2}$/.test(country)) throw new Error("News country must be a two-letter code or ALL.");
+        const searchLanguage = typeof input.searchLanguage === "string" ? input.searchLanguage : "th";
+        if (!/^[a-zA-Z]{2,8}(?:-[a-zA-Z0-9]{2,8})?$/.test(searchLanguage)) {
+          throw new Error("News search language must be a valid short language code.");
+        }
+        const freshness = input.freshness;
+        if (freshness !== undefined && !["pd", "pw", "pm", "py"].includes(String(freshness))) {
+          throw new Error("Unsupported news freshness filter.");
+        }
+        const maxResults = input.maxResults === undefined ? 6 : Number(input.maxResults);
+        if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 10) {
+          throw new Error("maxResults must be an integer from 1 to 10.");
+        }
+        const url = new URL("https://api.search.brave.com/res/v1/news/search");
+        url.searchParams.set("q", query);
+        url.searchParams.set("country", country);
+        url.searchParams.set("search_lang", searchLanguage);
+        url.searchParams.set("count", String(maxResults));
+        url.searchParams.set("safesearch", "strict");
+        url.searchParams.set("extra_snippets", "true");
+        if (freshness) url.searchParams.set("freshness", String(freshness));
+        const response = await fetch(url, {
+          method: "GET",
+          headers: { accept: "application/json", "x-subscription-token": apiKey },
+          signal,
+        });
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) throw new Error("News search authentication failed. Check BRAVE_SEARCH_API_KEY.");
+          if (response.status === 429) throw new Error("News search rate limit reached. Retry later.");
+          throw new Error("News search provider returned HTTP " + response.status + ".");
+        }
+        const payload: unknown = await response.json();
+        const root = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+        const rawResults = Array.isArray(root.results) ? root.results : [];
+        const results = rawResults.slice(0, maxResults).flatMap((entry) => {
+          if (!entry || typeof entry !== "object") return [];
+          const item = entry as Record<string, unknown>;
+          const sourceUrl = typeof item.url === "string" ? item.url : "";
+          if (!sourceUrl.startsWith("https://") && !sourceUrl.startsWith("http://")) return [];
+          const profile = item.profile && typeof item.profile === "object"
+            ? item.profile as Record<string, unknown>
+            : {};
+          const extra = Array.isArray(item.extra_snippets)
+            ? item.extra_snippets.filter((value): value is string => typeof value === "string").slice(0, 3)
+            : [];
+          return [{
+            title: typeof item.title === "string" ? item.title.slice(0, 300) : sourceUrl,
+            url: sourceUrl,
+            description: typeof item.description === "string" ? item.description.slice(0, 1600) : "",
+            publisher: typeof profile.name === "string" ? profile.name.slice(0, 160) : undefined,
+            age: typeof item.age === "string" ? item.age.slice(0, 80) : undefined,
+            pageAge: typeof item.page_age === "string" ? item.page_age.slice(0, 80) : undefined,
+            breaking: item.breaking === true,
+            extraSnippets: extra.map((value) => value.slice(0, 1200)),
+          }];
+        });
+        return { provider: "Brave News Search", query, results, resultCount: results.length };
+      },
+    },
+    {
       name: "workspace.read_file",
       description: "Read a UTF-8 text file inside the current workspace.",
       inputSchema: {
