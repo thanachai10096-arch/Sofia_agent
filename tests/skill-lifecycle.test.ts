@@ -30,6 +30,28 @@ test("skill lifecycle requires evaluation and confidence before promotion", asyn
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("skill lifecycle rejects missing, blank, or duplicate provenance evidence", () => {
+  const root = dir();
+  try {
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, {
+      file: path.join(root, "lifecycle.json"),
+    });
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.0"), { source: "repair", evidenceIds: [], confidence: 1 }),
+      /Invalid skill provenance/,
+    );
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.1"), { source: "repair", evidenceIds: ["  "], confidence: 1 }),
+      /Invalid skill provenance/,
+    );
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.2"), { source: "repair", evidenceIds: ["e1", "e1"], confidence: 1 }),
+      /Invalid skill provenance/,
+    );
+    assert.equal(lifecycle.list().length, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill lifecycle rejects failed evaluations and low-confidence promotion", async () => {
   const root = dir();
   try {
