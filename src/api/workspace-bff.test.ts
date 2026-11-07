@@ -68,6 +68,17 @@ test("Mobile Workspace serves protected PWA and proxies only same-origin scoped 
     assert.equal(page.status, 200);
     assert.match(await page.text(), /private workspace/);
 
+    const logoutRejected = await fetch(base + "/workspace/auth/logout", {
+      method: "POST", headers: { cookie, origin },
+    });
+    assert.equal(logoutRejected.status, 403);
+
+    const logout = await fetch(base + "/workspace/auth/logout", {
+      method: "POST", headers: { cookie, origin, "x-csrf-token": csrf },
+    });
+    assert.equal(logout.status, 204);
+    assert.match(logout.headers.get("set-cookie") ?? "", /Max-Age=0/);
+
     const audit = await fetch(base + "/api/sofia/v1/approvals/audit", {
       headers: { cookie, origin, "sec-fetch-site": "same-origin" },
     });
