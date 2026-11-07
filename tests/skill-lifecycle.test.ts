@@ -165,3 +165,28 @@ test("skill lifecycle validates all persisted active skills before mutating the 
     assert.equal(conflictingPlatform.get("second-skill")?.version, "0.9.0");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("skill lifecycle never promotes when runtime verification is unavailable", async () => {
+  const root = dir();
+  try {
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, async () => ({
+      passed: false,
+      checks: [
+        { name: "skill-metadata", passed: true },
+        { name: "procedure", passed: true },
+        { name: "verification-requirements", passed: true },
+        { name: "runtime-verification", passed: false, detail: "No isolated verifier is configured." },
+      ],
+    }), { file: path.join(root, "runtime-unverified.json") });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["metadata-only"], confidence: 1,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.throws(() => lifecycle.promote(candidate.id), /evaluated/);
+    assert.equal(platform.get("repair-skill"), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
