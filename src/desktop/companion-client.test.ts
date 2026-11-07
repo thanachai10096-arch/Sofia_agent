@@ -54,6 +54,35 @@ test("Desktop Companion pairs without persisting the Sofia API key and executes 
   assert.equal(requests.some((item) => item.body?.includes("owner-api-secret")), false);
 });
 
+test("Desktop Companion retries a failed completion POST without repeating the native action", async () => {
+  const store = credentials();
+  store.value = "r".repeat(43);
+  const calls: string[] = [];
+  const completionBodies: string[] = [];
+  let completionAttempts = 0;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id: "00000000-0000-4000-8000-000000000099", createdAt: 123, action: { kind: "input.key", key: "Enter" } },
+    }), { status: 200 });
+    completionAttempts += 1;
+    completionBodies.push(String(init?.body));
+    if (completionAttempts === 1) return new Response("temporary failure", { status: 503 });
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver(calls),
+    allowedCapabilities: ["input:control"],
+    requestApproval: async () => true,
+    fetchImpl,
+  });
+  assert.equal(await client.pollOnce(), true);
+  assert.deepEqual(calls, ["key:Enter"], "the local action must execute exactly once");
+  assert.equal(completionAttempts, 2);
+  assert.equal(completionBodies[0], completionBodies[1], "retry must send the exact same completion payload");
+});
+
 test("Desktop Companion reports approval denial without performing the local action", async () => {
   const store = credentials();
   store.value = "d".repeat(43);
