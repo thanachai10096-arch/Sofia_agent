@@ -88,7 +88,7 @@ export function canTransitionWorkflowExecution(
   const transitions: Readonly<Record<WorkflowExecutionState, readonly WorkflowExecutionState[]>> = {
     accepted: ["running", "succeeded", "failed", "cancelled", "indeterminate"],
     running: ["succeeded", "failed", "cancelled", "indeterminate"],
-    indeterminate: ["running", "succeeded", "failed", "cancelled"],
+    indeterminate: ["succeeded", "failed", "cancelled"],
     succeeded: [],
     failed: [],
     cancelled: [],
