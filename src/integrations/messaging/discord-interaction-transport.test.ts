@@ -94,3 +94,41 @@ test("Discord transport accepts additional allowlisted slash command names and f
   await transport.stop();
 });
 
+
+
+test("Discord approval slash commands forward owner-scoped approval IDs", async () => {
+  const transport = createDiscordInteractionTransport({
+    publicKeyHex,
+    botToken,
+    additionalCommandNames: ["approvals", "approve", "reject"],
+    fetchImpl: async () => response({ id: "987654321" }),
+  });
+  const received: string[] = [];
+  await transport.start(new AbortController().signal, async (event) => { received.push(event.content); });
+  const commands = [
+    { name: "approvals", options: [] as Array<{ name: string; type: number; value: string }>, expected: "/approvals" },
+    { name: "approve", options: [{ name: "job_id", type: 3, value: "11111111-1111-4111-8111-111111111111" }], expected: "/approve 11111111-1111-4111-8111-111111111111" },
+    { name: "reject", options: [{ name: "job_id", type: 3, value: "22222222-2222-4222-8222-222222222222" }], expected: "/reject 22222222-2222-4222-8222-222222222222" },
+  ];
+  try {
+    for (let index = 0; index < commands.length; index++) {
+      const command = commands[index]!;
+      const body = Buffer.from(JSON.stringify({
+        type: 2,
+        id: String(333333333333 + index),
+        application_id: "111111111111",
+        token: "interaction-token-abc",
+        channel_id: "123456789",
+        member: { user: { id: "444444444444", username: "tester" } },
+        data: { name: command.name, options: command.options },
+      }));
+      assert.deepEqual(await transport.handleRequest(signed(body)), { status: 200, body: { type: 5 } });
+      for (let attempt = 0; attempt < 20 && received.length <= index; attempt++) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      assert.equal(received[index], command.expected);
+    }
+  } finally {
+    await transport.stop();
+  }
+});
