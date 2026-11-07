@@ -19,6 +19,21 @@ test("parseUnderstanding accepts each supported risk value", () => {
   }
 });
 
+test("parseUnderstanding normalizes a model singleton string into a one-item list", () => {
+  const parsed = parseUnderstanding({ ...valid, ambiguities: "No ambiguity; answer directly." });
+  assert.deepEqual(parsed.ambiguities, ["No ambiguity; answer directly."]);
+  assert.deepEqual(parseUnderstanding({ ...valid, ambiguities: "" }).ambiguities, []);
+});
+
+test("parseUnderstanding still rejects non-string, non-array list values", () => {
+  for (const ambiguities of [1, null, {}, true]) {
+    assert.throws(
+      () => parseUnderstanding({ ...valid, ambiguities }),
+      /field "ambiguities".*expected string array/,
+    );
+  }
+});
+
 test("parseUnderstanding rejects invalid risk with a safe field/type diagnostic", () => {
   for (const risk of ["critical", 1, null, [], {}]) {
     assert.throws(

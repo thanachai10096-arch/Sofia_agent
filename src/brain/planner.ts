@@ -36,6 +36,13 @@ function text(value: unknown, field = "value"): string {
 }
 
 function texts(value: unknown, field = "value"): string[] {
+  // Models occasionally emit a single string for a list-valued field even
+  // when the JSON contract explicitly requires an array. Normalize that
+  // harmless singleton shape at the parser boundary; keep rejecting other
+  // types so malformed or unsafe structures do not pass validation.
+  if (typeof value === "string") {
+    return value.trim() ? [text(value, field)] : [];
+  }
   if (!Array.isArray(value)) {
     throw new Error(`Invalid field "${field}": expected string array; received type ${receivedType(value)}.`);
   }
