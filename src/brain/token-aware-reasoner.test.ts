@@ -163,6 +163,34 @@ test("understand phase uses the fast route for low-latency intent and response g
   assert.deepEqual(captured?.requiredCapabilities, ["fast"]);
 });
 
+test("task and tool capabilities do not become model-route requirements", async () => {
+  let captured: InferenceRequest | undefined;
+  const gateway = {
+    async generateMetered(input: InferenceRequest) {
+      captured = input;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  } as unknown as TokenAwareGateway;
+  const reasoner = new TokenAwareBrainReasoner(gateway);
+  const controller = new AbortController();
+  const prepared = await reasoner.prepare(JSON.stringify({
+    phase: "plan",
+    payload: {
+      task: "Edit a file and inspect the browser",
+      requiredCapabilities: ["file-write", "browser.open", "workspace.read"],
+      understanding: {
+        requiredCapabilities: ["file-write", "browser.open"],
+        requiredTools: ["workspace.write_file", "browser.open"],
+      },
+    },
+  }), { signal: controller.signal, maxContextTokens: 16_000 });
+  await prepared.invoke({ signal: controller.signal, maxOutputTokens: 700 });
+
+  assert.deepEqual(captured?.requiredCapabilities, ["reasoning"]);
+  assert.match(JSON.stringify(captured?.core.state), /file-write/);
+  assert.match(JSON.stringify(captured?.core.state), /browser.open/);
+});
+
 test("implementation and response phases request their matching route capabilities", async () => {
   for (const [phase, expected] of [["implement", ["coding"]], ["respond", ["fast"]]] as const) {
     let captured: InferenceRequest | undefined;
