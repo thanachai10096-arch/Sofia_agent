@@ -51,7 +51,12 @@ request returns HTTP 409.
   `approval_audit` table.
 - Approval does not bypass the existing security policy, tool validation,
   or host cancellation checks.
-- This API currently exposes approvals for authenticated API-key principals.
-  Discord principals use a separate identity namespace; interactive Discord
-  approval controls are not wired by this change and must not be represented
-  as available until separately implemented and tested.
+- The HTTP inbox is scoped to authenticated API-key principals.
+- Discord approvals use the verified Discord identity namespace and the
+  allowlisted Discord user ID; they do not reuse or expose API keys.
+- Discord commands are `/approvals`, `/approve job_id:<approval-id>`, and
+  `/reject job_id:<approval-id>`. The approval ID is owner-scoped; the server
+  reads the action hash from the stored record and performs an atomic decision.
+- Register these additional slash commands in the Discord application with
+  the `job_id` string option for `approve` and `reject`. The existing
+  `run`, `status`, `cancel`, and `resume` command registrations are unchanged.
