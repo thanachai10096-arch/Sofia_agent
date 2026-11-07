@@ -15,7 +15,8 @@ export type BrainPhase =
   | "diagnose"
   | "review"
   | "finalize"
-  | "subagent";
+  | "subagent"
+  | "respond";
 
 export interface PromptCore {
   instructions: string;
