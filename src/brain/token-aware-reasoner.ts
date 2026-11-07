@@ -77,6 +77,25 @@ function routeCapabilities(values: unknown): string[] {
   return [...new Set(mapped)].slice(0, 24);
 }
 
+/** Keep phase-critical work off cheap routes that cannot reliably satisfy its output contract. */
+function phaseCapabilities(phase: BrainPhase): string[] {
+  switch (phase) {
+    case "understand":
+    case "plan":
+    case "replan":
+    case "diagnose":
+    case "review":
+      return ["reasoning"];
+    case "implement":
+      return ["coding"];
+    case "respond":
+    case "finalize":
+      return ["fast"];
+    case "subagent":
+      return [];
+  }
+}
+
 function outputContractFor(phase: BrainPhase): string {
   if (phase === "understand") return [
     "Return this exact JSON object shape:",
@@ -147,11 +166,14 @@ function asInferenceRequest(request: string): InferenceRequest {
     minimumQualityTier: typeof payload.minimumQualityTier === "number"
       ? payload.minimumQualityTier
       : 1,
-    requiredCapabilities: routeCapabilities(
-      Array.isArray(payload.requiredCapabilities)
-        ? payload.requiredCapabilities
-        : understanding.requiredCapabilities,
-    ),
+    requiredCapabilities: [...new Set([
+      ...phaseCapabilities(phase),
+      ...routeCapabilities(
+        Array.isArray(payload.requiredCapabilities)
+          ? payload.requiredCapabilities
+          : understanding.requiredCapabilities,
+      ),
+    ])],
     core: {
       instructions: [
         "Return only valid JSON. Do not use Markdown fences or surrounding prose.",
