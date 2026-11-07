@@ -58,6 +58,22 @@ test("MCP bootstrap rejects readOnlyTools outside the explicit allowedTools list
   });
 });
 
+test("MCP client rejects an unsupported server protocol version before initialization notification", async () => {
+  const methods: string[] = [];
+  const transport = {
+    async request(method: string) {
+      methods.push(method);
+      return { protocolVersion: "2099-01-01", serverInfo: { name: "future-server", version: "1" } };
+    },
+    async notify(method: string) { methods.push(method); },
+    async close() {},
+  };
+  const client = new McpClient(transport);
+  await assert.rejects(client.initialize(), /unsupported protocol version/);
+  assert.deepEqual(methods, ["initialize"]);
+  await assert.rejects(client.listTools(), /must be initialized first/);
+});
+
 test("MCP HTTP transport sends the server-negotiated protocol version after initialize", async () => {
   const requests: Array<{ method: string; protocolVersion: string | null }> = [];
   const fetchImpl: typeof fetch = async (_input, init = {}) => {
