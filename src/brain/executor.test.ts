@@ -1002,3 +1002,42 @@ test("explicit Thai file-edit requests stay on the action path even if the model
   assert.ok(!phases.includes("respond"));
   assert.ok(report.usage.toolCalls > 0);
 });
+
+
+test("Brain fails closed when a successful tool result has no evidence ID", async () => {
+  let executions = 0;
+  const tools = makeTools();
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.write_file") {
+      executions += 1;
+      return { ok: true, data: { written: true }, evidenceId: "" };
+    }
+    return originalExecute(call, context);
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({ task: "Create hello.txt" });
+
+  assert.equal(report.completed, false);
+  assert.match(report.summary, /no evidence ID/);
+  assert.equal(executions, 1, "a side-effecting tool must not be retried when its evidence is missing");
+});
