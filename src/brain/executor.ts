@@ -98,6 +98,8 @@ interface Dependencies {
   runStore?: RunStore;
   projectMemory?: ProjectMemoryStore;
   evolution?: EvolutionEngine;
+  /** Run-scoped resources (browser contexts, proxies) are always disposed after terminal completion. */
+  onFinally?: () => Promise<void>;
 }
 
 export interface BrainRunInput {
@@ -1369,6 +1371,11 @@ export class SofiaBrain {
       clearTimeout(timer);
       this.signal.removeEventListener("abort", onAbort);
       this.signal = originalSignal;
+      try {
+        await this.dependencies.onFinally?.();
+      } catch {
+        // Resource cleanup is best-effort and must not replace the run result.
+      }
     }
   }
 }
