@@ -88,8 +88,7 @@ export class DesktopCommandBroker {
     companion.lastSeenAt = this.now();
     const command = this.pending.get(commandId);
     if (!command || command.ownerKeyId !== companion.ownerKeyId || !command.assigned) return false;
-    this.pending.delete(commandId);
-    clearTimeout(command.timer);
+    this.removePending(commandId);
     if (error) command.reject(new Error("Local desktop action failed: " + safeError(error)));
     else command.resolve(result);
     return true;
