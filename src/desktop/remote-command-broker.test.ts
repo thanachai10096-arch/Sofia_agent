@@ -14,7 +14,10 @@ test("dispatch is delivered once and completed by the paired owner", async () =>
   assert.equal(broker.poll(token), null);
   assert.equal(broker.complete(token, command.id, { ok: true }), true);
   assert.deepEqual(await result, { ok: true });
-  assert.equal(broker.complete(token, command.id, { ok: true }), false);
+  assert.equal(broker.complete(token, command.id, { ok: true }), true,
+    "an exact completion retry from the same paired companion is idempotently acknowledged");
+  assert.equal(broker.complete(token, command.id, { ok: false }), false,
+    "a conflicting completion must not overwrite the first accepted result");
   broker.close();
 });
 
