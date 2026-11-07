@@ -57,3 +57,20 @@ export interface WorkflowExecutionLedger {
     idempotencyKey: string,
   ): Promise<WorkflowExecutionRecord | undefined>;
 }
+
+/** Terminal outcomes cannot be replayed as a fresh dispatch. An indeterminate
+ * outcome may only be resolved by reconciliation, never reset to accepted. */
+export function canTransitionWorkflowExecution(
+  current: WorkflowExecutionState,
+  next: WorkflowExecutionState,
+): boolean {
+  const transitions: Readonly<Record<WorkflowExecutionState, readonly WorkflowExecutionState[]>> = {
+    accepted: ["running", "succeeded", "failed", "cancelled", "indeterminate"],
+    running: ["succeeded", "failed", "cancelled", "indeterminate"],
+    indeterminate: ["running", "succeeded", "failed", "cancelled"],
+    succeeded: [],
+    failed: [],
+    cancelled: [],
+  };
+  return transitions[current].includes(next);
+}
