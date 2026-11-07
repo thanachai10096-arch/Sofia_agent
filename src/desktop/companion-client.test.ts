@@ -247,3 +247,25 @@ test("Desktop Companion forwards cancellation to an in-flight app launch and doe
   assert.equal(await polling, false);
   assert.equal(completionRequests, 0, "an aborted native action must not be posted as completed");
 });
+
+
+test("Desktop Companion start does not poll when its signal was already aborted", async () => {
+  const store = credentials();
+  store.value = "p".repeat(43);
+  let requests = 0;
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver([]),
+    allowedCapabilities: [],
+    requestApproval: async () => false,
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(JSON.stringify({ command: null }), { status: 200 });
+    },
+  });
+  const controller = new AbortController();
+  controller.abort(new Error("cancelled before start"));
+  await client.start(controller.signal);
+  assert.equal(requests, 0, "an already-aborted signal must prevent the first poll");
+});
