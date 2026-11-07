@@ -3,31 +3,33 @@ import test from "node:test";
 import { createCronManagementTools } from "./cron-tools.js";
 import type { CronScheduler } from "./cron-scheduler.js";
 
-test("cron management tool always uses the authenticated actor, never a model-supplied owner", async () => {
+test("cron tools bind reads and writes to the authenticated actor", async () => {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const scheduler = {
     async list(actor: string) { calls.push({ method: "list", args: [actor] }); return []; },
     async schedulerStatus(actor: string) { calls.push({ method: "status", args: [actor] }); return { paused: false, enabledSchedules: 0, activeExecutions: 0 }; },
-    async pauseAll(actor: string, reason?: string) { calls.push({ method: "pause", args: [actor, reason] }); return { paused: true, pausedAt: "2026-11-07T00:00:00.000Z", reason: reason ?? "Paused by operator" }; },
-    async resumeAll(actor: string) { calls.push({ method: "resume", args: [actor] }); return { paused: false, resumedAt: "2026-11-07T00:00:00.000Z" }; },
+    async pauseAll(actor: string, reason?: string) { calls.push({ method: "pause", args: [actor, reason] }); return { paused: true }; },
+    async resumeAll(actor: string) { calls.push({ method: "resume", args: [actor] }); return { paused: false }; },
     async create(input: unknown, actor: string) { calls.push({ method: "create", args: [input, actor] }); return { id: "schedule-1" }; },
     async setEnabled(id: string, enabled: boolean, actor: string) { calls.push({ method: "setEnabled", args: [id, enabled, actor] }); return { id, status: enabled ? "enabled" : "disabled" }; },
     async cancel(id: string, actor: string) { calls.push({ method: "cancel", args: [id, actor] }); return true; },
     async history(id: string, actor: string) { calls.push({ method: "history", args: [id, actor] }); return []; },
   } as unknown as CronScheduler;
-  const tool = createCronManagementTools(scheduler, "authenticated-principal")[0]!;
-  const execute = (input: Record<string, unknown>) => tool.execute(input, { runtime: {} as never });
+  const [readTool, writeTool] = createCronManagementTools(scheduler, "authenticated-principal");
+  const context = { runtime: {} as never };
 
-  await execute({ action: "list" });
-  await execute({ action: "pause", reason: "maintenance" });
-  assert.deepEqual(calls.slice(0, 2), [
+  await readTool.execute({ action: "list" }, context);
+  await writeTool.execute({ action: "pause", reason: "maintenance" }, context);
+  assert.deepEqual(calls, [
     { method: "list", args: ["authenticated-principal"] },
     { method: "pause", args: ["authenticated-principal", "maintenance"] },
   ]);
-  const properties = tool.inputSchema.properties as Record<string, unknown>;
-  assert.equal(properties.ownerKeyId, undefined);
-  assert.equal(tool.inputSchema.additionalProperties, false);
-  assert.equal(calls.some((call) => call.method === "create"), false);
+  assert.deepEqual(readTool.effects, ["read"]);
+  assert.deepEqual(writeTool.effects, ["write"]);
+  assert.equal((readTool.inputSchema.properties as Record<string, unknown>).ownerKeyId, undefined);
+  assert.equal((writeTool.inputSchema.properties as Record<string, unknown>).ownerKeyId, undefined);
+  assert.equal(readTool.inputSchema.additionalProperties, false);
+  assert.equal(writeTool.inputSchema.additionalProperties, false);
 });
 
 test("cron management tool creates owner-scoped schedules with the host principal", async () => {
@@ -40,8 +42,8 @@ test("cron management tool creates owner-scoped schedules with the host principa
       return { id: "schedule-1" };
     },
   } as unknown as CronScheduler;
-  const tool = createCronManagementTools(scheduler, "owner-123")[0]!;
-  await tool.execute({
+  const [, writeTool] = createCronManagementTools(scheduler, "owner-123");
+  await writeTool.execute({
     action: "create",
     name: "daily",
     task: "summarize updates",
