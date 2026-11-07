@@ -3,6 +3,7 @@ import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import type { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
 import type { CloudBrowserSessionManager } from "../browser/cloud-session-manager.js";
+import type { ApprovalInbox } from "../agent/approval-inbox.js";
 
 export interface AgentRunInput {
   task: string;
@@ -63,6 +64,8 @@ export interface SofiaApiConfig {
   desktopCommandBroker?: DesktopCommandBroker;
   /** Optional owner-isolated headless browser sessions controlled from mobile clients. */
   cloudBrowserSessions?: CloudBrowserSessionManager;
+  /** Optional owner-bound, one-time approval inbox connected to the Brain approval handler. */
+  approvalInbox?: ApprovalInbox;
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
     path?: string;
