@@ -907,3 +907,53 @@ test("subagent tool catalog rejects registry-policy effect mismatches and non-al
   assert.equal(isSubagentToolAllowed("shell.exec", gateway), false);
   assert.equal(isSubagentToolAllowed("workspace.list_files", gateway), true);
 });
+
+
+test("Brain answers explicit conversational turns without entering the coding or tool loop", async () => {
+  const phases: string[] = [];
+  let snapshots = 0;
+  let toolExecutions = 0;
+  const tools = makeTools();
+  const originalSnapshot = tools.snapshot.bind(tools);
+  const originalExecute = tools.execute.bind(tools);
+  tools.snapshot = async (signal) => { snapshots += 1; return originalSnapshot(signal); };
+  tools.execute = async (call, context) => { toolExecutions += 1; return originalExecute(call, context); };
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as { phase: string };
+      phases.push(parsed.phase);
+      const value = parsed.phase === "understand"
+        ? {
+            mode: "conversation",
+            objective: "Answer a greeting",
+            constraints: [],
+            assumptions: [],
+            requiredCapabilities: [],
+            requiredTools: [],
+            risk: "low",
+            successCriteria: [],
+            ambiguities: [],
+          }
+        : { response: "สวัสดีครับ มีอะไรให้ช่วยได้บ้างครับ?" };
+      return {
+        inputTokens: 12,
+        async invoke() {
+          return { value, usage: { inputTokens: 12, outputTokens: 18 } };
+        },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools, allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
+  });
+  const report = await brain.run({ task: "สวัสดี" });
+  assert.equal(report.completed, true);
+  assert.equal(report.state, "completed");
+  assert.match(report.summary, /สวัสดีครับ/);
+  assert.deepEqual(phases, ["understand", "respond"]);
+  assert.equal(snapshots, 0);
+  assert.equal(toolExecutions, 0);
+  assert.equal(report.usage.toolCalls, 0);
+  assert.equal(report.verification.length, 0);
+});
