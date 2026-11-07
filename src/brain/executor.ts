@@ -342,7 +342,7 @@ export class SofiaBrain {
   }
 
   private async infer(
-    phase: "understand" | "plan" | "replan" | "subagent",
+    phase: "understand" | "plan" | "replan" | "subagent" | "respond",
     payload: Record<string, unknown>,
   ): Promise<unknown> {
     if (this.usage.modelCalls >= this.limits.maxModelCalls) {
@@ -461,6 +461,29 @@ export class SofiaBrain {
 
       return result.value;
     }
+  }
+
+  private async respondToConversation(input: BrainRunInput, understanding: TaskUnderstanding): Promise<string> {
+    const value = await this.infer("respond", {
+      task: input.task,
+      referenceContext: priorReferenceContext(input.context),
+      understanding,
+      requiredCapabilities: understanding.requiredCapabilities,
+    });
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Stop("Conversation response did not match the response contract");
+    }
+    const answer = (value as Record<string, unknown>).answer;
+    if (typeof answer !== "string" || !answer.trim()) {
+      throw new Stop("Conversation response was empty or malformed");
+    }
+    return answer.trim().slice(0, 12_000);
+  }
+
+  private isConversationalUnderstanding(understanding: TaskUnderstanding): boolean {
+    const nonConversational = new Set(["coding", "vision", "long-context", "tool-use"]);
+    return understanding.requiredTools.length === 0 &&
+      understanding.requiredCapabilities.every((capability) => !nonConversational.has(capability));
   }
 
   private validatePlan(plan: ExecutionPlan): ExecutionPlan {
@@ -938,6 +961,21 @@ export class SofiaBrain {
         this.emit({
           type: "brain.understanding.completed",
         });
+
+        // Ordinary chat is a first-class Agent Loop turn, not a coding task:
+        // answer directly without workspace snapshots, plans, tool dispatch,
+        // build/test verification, or coding recovery.
+        if (
+          input.plan === undefined &&
+          (input.acceptanceCriteria?.length ?? 0) === 0 &&
+          this.isConversationalUnderstanding(understanding)
+        ) {
+          this.move("planning");
+          const answer = await this.respondToConversation(input, understanding);
+          this.move("completed");
+          this.emit({ type: "brain.conversation.completed", passed: true });
+          return this.report(true, answer, [], [], true, []);
+        }
 
         baselineId = (
           await this.io(() => this.dependencies.tools.snapshot(this.signal))
