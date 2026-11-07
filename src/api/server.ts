@@ -345,6 +345,39 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
+      // Approval Inbox is deliberately separate from run permissions. Reading and
+      // deciding approvals require explicit scopes and are always owner-bound.
+      if (requestUrl.pathname === "/v1/approvals" || requestUrl.pathname.startsWith("/v1/approvals/")) {
+        const inbox = config.approvalInbox;
+        if (!inbox) return json(res, 503, { error: "approval_inbox_unavailable" }, origin, config);
+        if (req.method === "GET" && requestUrl.pathname === "/v1/approvals") {
+          if (!auth.scopes.includes("approval:read") && !auth.scopes.includes("approval:decide")) {
+            return json(res, 403, { error: "forbidden", requiredScope: "approval:read" }, origin, config);
+          }
+          return json(res, 200, { approvals: inbox.list(auth.keyId) }, origin, config);
+        }
+        const approvalMatch = requestUrl.pathname.match(/^\\/v1\\/approvals\\/([0-9a-f-]{36})\\/decision$/i);
+        if (req.method === "POST" && approvalMatch) {
+          if (!auth.scopes.includes("approval:decide")) {
+            return json(res, 403, { error: "forbidden", requiredScope: "approval:decide" }, origin, config);
+          }
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+            return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          }
+          const input = raw as Record<string, unknown>;
+          if ((input.decision !== "approve" && input.decision !== "deny") ||
+              typeof input.actionHash !== "string" || !/^[a-f0-9]{64}$/i.test(input.actionHash)) {
+            return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          }
+          const decided = inbox.decide(auth.keyId, approvalMatch[1]!, input.actionHash, input.decision);
+          return decided
+            ? json(res, 200, { decided: true }, origin, config)
+            : json(res, 409, { error: "approval_expired_or_not_found" }, origin, config);
+        }
+        return json(res, 404, { error: "approval_not_found" }, origin, config);
+      }
+
       // Cloud browser sessions let phone-only users interact with a private,
       // ephemeral browser hosted alongside Sofia. Every operation is owner-scoped.
       if (requestUrl.pathname.startsWith("/v1/browser/cloud/")) {
