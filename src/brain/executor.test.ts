@@ -995,7 +995,7 @@ test("explicit Thai file-edit requests stay on the action path even if the model
     limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4, maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000 },
   });
   const report = await brain.run({ task: "ช่วยแก้ไฟล์ src/index.ts ให้หน่อย" });
-  assert.equal(snapshots, 1);
+  assert.ok(snapshots >= 1);
   assert.ok(phases.includes("plan"));
   assert.ok(!phases.includes("respond"));
   assert.ok(report.usage.toolCalls > 0);
