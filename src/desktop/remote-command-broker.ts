@@ -238,11 +238,13 @@ export class DesktopCommandBroker {
   private touch(companion: Companion): void {
     const lastSeenAt = this.now();
     if (lastSeenAt <= companion.lastSeenAt) return;
-    companion.lastSeenAt = lastSeenAt;
     if (lastSeenAt - companion.persistedAt >= 60_000) {
-      this.persist(companion);
+      // Persist before mutating the in-memory heartbeat. If storage is temporarily
+      // unavailable, the next poll must retry instead of believing it was saved.
+      this.persist({ ...companion, lastSeenAt });
       companion.persistedAt = lastSeenAt;
     }
+    companion.lastSeenAt = lastSeenAt;
   }
 
   private removePending(id: string): void {
