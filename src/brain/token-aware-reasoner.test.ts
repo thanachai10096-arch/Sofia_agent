@@ -141,7 +141,7 @@ test("task intent labels map to supported provider capabilities", async () => {
     payload: { task: "Analyze a code issue", understanding: { requiredCapabilities: ["analysis", "code", "general"] } },
   }), { signal: controller.signal, maxContextTokens: 16_000 });
   await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
-  assert.deepEqual(captured?.requiredCapabilities, ["fast", "reasoning", "coding"]);
+  assert.deepEqual(captured?.requiredCapabilities, ["fast"], "understanding selects its route independently of the capabilities it discovers");
 });
 
 
