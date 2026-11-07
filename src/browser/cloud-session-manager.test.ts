@@ -28,6 +28,7 @@ function harness() {
         screenshot: async () => Buffer.from("image").toString("base64"),
         clickAt: async (x, y) => { assert.equal(x, 12); assert.equal(y, 34); },
         typeFocused: async (text) => { assert.equal(text, "hello"); },
+        pressFocused: async (key) => { assert.equal(key, "Enter"); },
         viewportSize: async () => ({ width: 1280, height: 720 }),
         close: async () => {},
       };
@@ -65,6 +66,7 @@ test("cloud browser sessions are private to their owner and expose screenshot/ac
   });
   await h.manager.act("owner-a", created.id, { kind: "clickAt", x: 12, y: 34 });
   await h.manager.act("owner-a", created.id, { kind: "typeFocused", text: "hello" });
+  await h.manager.act("owner-a", created.id, { kind: "pressFocused", key: "Enter" });
   await assert.rejects(h.manager.act("owner-a", created.id, { kind: "type", selector: "input", text: "x".repeat(5000) }), /Unsupported/);
   await h.manager.close("owner-a", created.id);
   assert.equal(h.closes(), 1);
