@@ -65,6 +65,17 @@ class MemoryLedger implements WorkflowExecutionLedger {
     const id = this.keys.get(JSON.stringify([workflowId, idempotencyKey]));
     return id ? this.get(id) : undefined;
   }
+
+  async listForReconciliation(olderThan: string, limit: number) {
+    const cutoff = new Date(olderThan).getTime();
+    return [...this.records.values()]
+      .filter((record) =>
+        (record.status === "running" || record.status === "indeterminate") &&
+        new Date(record.updatedAt).getTime() <= cutoff)
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+      .slice(0, limit)
+      .map((record) => structuredClone(record));
+  }
 }
 
 const request = {
@@ -138,4 +149,19 @@ test("only one concurrent worker can claim an accepted execution for dispatch", 
 
   assert.equal(results.filter(Boolean).length, 1);
   assert.equal((await ledger.get(reservation.record.executionId))?.status, "running");
+});
+
+test("reconciliation listing returns only stale ambiguous executions", async () => {
+  const ledger = new MemoryLedger();
+  const old = await ledger.reserve({ ...request, idempotencyKey: "old" });
+  await ledger.update(old.record.executionId, "accepted", { status: "running" });
+  const fresh = await ledger.reserve({ ...request, idempotencyKey: "fresh" });
+  await ledger.update(fresh.record.executionId, "accepted", { status: "running" });
+  const cutoff = new Date(Date.now() + 1_000).toISOString();
+
+  const stale = await ledger.listForReconciliation(cutoff, 10);
+  assert.deepEqual(stale.map((record) => record.executionId), [
+    old.record.executionId,
+    fresh.record.executionId,
+  ]);
 });
