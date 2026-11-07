@@ -80,6 +80,10 @@ try {
     restartedLedger.update(executionId, "indeterminate", { status: "accepted" }),
     /workflow_execution_invalid_transition/,
   );
+  await assert.rejects(
+    restartedLedger.update(executionId, "indeterminate", { status: "running" }),
+    /workflow_execution_invalid_transition/,
+  );
 
   console.log("PostgreSQL workflow ledger integration passed:", {
     reservationRace: "one created, one existing",
