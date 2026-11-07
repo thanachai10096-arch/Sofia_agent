@@ -304,7 +304,28 @@ export class SofiaModelGateway implements ModelProvider {
       }
     }
 
-    const protocol = config.protocol ?? "openai-compatible";
+    const configuredProtocol = config.protocol ?? "openai-compatible";
+    let protocol = configuredProtocol;
+    let providerBaseUrl = config.baseUrl;
+    // DeepSeek's Anthropic-compatible Messages API does not expose its JSON
+    // Output mode. Brain phases require machine-readable JSON, so use the
+    // same DeepSeek credential/model through its official OpenAI-compatible
+    // Chat Completions endpoint for structured Brain calls. Ordinary chat and
+    // tool conversations continue using the explicitly configured protocol.
+    if (brainStructuredOutput && configuredProtocol === "anthropic-messages") {
+      try {
+        const parsedBaseUrl = new URL(config.baseUrl);
+        if (
+          parsedBaseUrl.hostname === "api.deepseek.com" &&
+          parsedBaseUrl.pathname.replace(/\\/+$/, "") === "/anthropic"
+        ) {
+          protocol = "openai-compatible";
+          providerBaseUrl = parsedBaseUrl.origin;
+        }
+      } catch {
+        // Invalid URLs are rejected by the request path below; do not infer a fallback.
+      }
+    }
     const outboundMessages: ChatMessage[] = brainStructuredOutput
       ? [
           {
