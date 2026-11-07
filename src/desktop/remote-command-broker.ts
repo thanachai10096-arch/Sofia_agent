@@ -21,6 +21,7 @@ interface PendingCommand extends DesktopCompanionCommand {
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
   abort?: () => void;
+  signal?: AbortSignal;
 }
 
 export interface DesktopCommandBrokerConfig {
@@ -123,6 +124,7 @@ export class DesktopCommandBroker {
         resolve,
         reject,
         timer,
+        ...(options.signal ? { signal: options.signal } : {}),
       };
       if (options.signal) {
         const abort = () => {
@@ -156,7 +158,7 @@ export class DesktopCommandBroker {
   }
 
   close(): void {
-    for (const ownerKeyId of this.companions.keys()) this.disconnect(ownerKeyId);
+    this.companions.clear();
     for (const [id, command] of this.pending) {
       this.removePending(id);
       command.reject(new Error("Desktop command broker shut down."));
@@ -183,6 +185,7 @@ export class DesktopCommandBroker {
     const command = this.pending.get(id);
     if (!command) return;
     clearTimeout(command.timer);
+    if (command.abort && command.signal) command.signal.removeEventListener("abort", command.abort);
     this.pending.delete(id);
   }
 }
