@@ -41,6 +41,7 @@ The BFF is a required integration; do not expose the privileged Sofia API direct
 - `POST /v1/agent/runs` with `{ "task": "...", "async": true }`
 - `GET /v1/agent/runs/:id`
 - `GET /v1/approvals` (requires `approval:read` or `approval:decide`)
+- `GET /v1/approvals/audit?limit=50` (requires `approval:read` or `approval:decide`; returns the owner audit history)
 - `POST /v1/approvals/:id/decision` with `{ "decision": "approve" | "deny", "actionHash": "<displayed-action-hash>" }` (requires `approval:decide`)
 
 ## Known UI/backend gaps
