@@ -44,7 +44,7 @@ export function createAdvancedSkillTools(
     async execute(input) {
       const query = typeof input.query === "string" ? input.query.trim().toLowerCase() : "";
       if (query.length < 2 || query.length > 500) throw new TypeError("query must contain 2 to 500 characters.");
-      const tokens = [...new Set(query.split(/[^\\p{L}\\p{N}._-]+/u).filter((token) => token.length >= 2))].slice(0, 40);
+      const tokens = [...new Set(query.split(/[^\p{L}\p{N}._-]+/u).filter((token) => token.length >= 2))].slice(0, 40);
       const limit = typeof input.limit === "number" && Number.isInteger(input.limit)
         ? Math.max(1, Math.min(10, input.limit))
         : 5;
