@@ -510,3 +510,40 @@ test("model-supplied URL cannot escape the trusted workflow host allowlist", asy
   assert.match(result.error?.message ?? "", /not allowlisted/i);
   assert.equal(executed, false);
 });
+
+
+test("trusted workflow targets reject plain HTTP and embedded credentials", async () => {
+  for (const target of [
+    "http://n8n.internal/api/run",
+    "https://user:password@n8n.internal/api/run",
+  ]) {
+    let executed = false;
+    const registry = new MapToolRegistry([{
+      name: "workflow.execute",
+      description: "Execute an operator-configured workflow",
+      inputSchema: { type: "object" },
+      effects: ["network"] as const,
+      trustedNetworkTargets: [target],
+      async execute() { executed = true; return { ok: true }; },
+    }]);
+    const policy = { ...defaultPolicy, allowNetwork: true, allowedHosts: ["n8n.internal"] };
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      policy,
+      async () => true,
+    );
+    const result = await gateway.execute(
+      { tool: "workflow.execute", input: {} },
+      {
+        runId: "unsafe-trusted-target",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.category, "permission_error");
+    assert.match(result.error?.message ?? "", /HTTPS URLs/i);
+    assert.equal(executed, false);
+  }
+});
