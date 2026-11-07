@@ -31,7 +31,12 @@ The companion should poll at a conservative interval and treat `401` as revoked 
 
 ## Enablement
 
-The API key's configured scope list must explicitly include `desktop:connect`. The default `SOFIA_API_SCOPES` does not grant this scope. Do not broaden the default scope list globally.
+The API key's configured scope list must explicitly include `desktop:connect`. Brain-side tools additionally require one or both granular scopes:
+
+- `desktop:remote:app:launch` — permit Sofia to request an allowlisted app launch.
+- `desktop:remote:input:control` — permit Sofia to request click, type, and key actions.
+
+The server also requires the separate policy gate `SOFIA_ALLOW_REMOTE_DESKTOP=true`; it defaults to disabled. The local Companion must independently grant matching capabilities and show a real approval prompt for every mutating action. The default `SOFIA_API_SCOPES` does not grant any of these scopes. Do not broaden the default scope list globally.
 
 ## Not yet implemented
 
@@ -39,7 +44,7 @@ This slice provides authenticated pairing, status, command polling and completio
 
 - a packaged Windows/macOS/Linux Desktop Companion installer or background client;
 - secure OS credential-store integration and device-specific pairing UI;
-- the Brain-side remote Desktop tool adapter that calls `broker.dispatch()`;
+- packaged desktop UX and production configuration for the Brain-side remote Desktop tool adapter (the per-run Brain tools now call `broker.dispatch()` and are gated by the API scopes plus `SOFIA_ALLOW_REMOTE_DESKTOP`);
 - delivery of existing desktop approvals to the user's local UI;
 - reconnect/backoff UX, multi-device selection, or durable multi-replica broker state.
 
