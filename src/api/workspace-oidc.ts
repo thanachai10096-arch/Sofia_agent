@@ -2,7 +2,7 @@ import {
   createHash, createPublicKey, randomBytes, timingSafeEqual, verify,
 } from "node:crypto";
 import {
-  chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync,
+  chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -121,11 +121,8 @@ function awaitlessReadDir(directory: string): string[] {
   return requireDirEntries(directory);
 }
 function requireDirEntries(directory: string): string[] {
-  // Imported lazily through a static module binding below.
   return readdirSync(directory);
 }
-import { readdirSync } from "node:fs";
-
 export class WorkspaceOidc {
   readonly cookieName: string;
   readonly sessions: FileWorkspaceSessionStore;
@@ -197,6 +194,11 @@ export class WorkspaceOidc {
 
   async complete(callbackUrl: string): Promise<{ token: string; session: WorkspaceSession }> {
     const url = new URL(callbackUrl);
+    const expectedRedirect = new URL(this.options.redirectUri);
+    if (url.origin !== expectedRedirect.origin || url.pathname !== expectedRedirect.pathname ||
+        (url.searchParams.has("iss") && url.searchParams.get("iss") !== this.options.issuer.replace(/\/$/, ""))) {
+      throw new Error("OIDC callback destination or issuer is invalid.");
+    }
     const state = url.searchParams.get("state") ?? "";
     const code = url.searchParams.get("code") ?? "";
     const pending = this.pending.get(state);
@@ -250,7 +252,7 @@ export class WorkspaceOidc {
     const nowSeconds = Math.floor(this.now() / 1000);
     if (typeof claims.exp !== "number" || claims.exp <= nowSeconds - 60 ||
         typeof claims.iat !== "number" || claims.iat > nowSeconds + 60 ||
-        (typeof claims.nbf === "number" && claims.nbf > nowSeconds + 60)) {
+        (claims.nbf !== undefined && (typeof claims.nbf !== "number" || claims.nbf > nowSeconds + 60))) {
       throw new Error("OIDC ID token is expired or not yet valid.");
     }
     const key = (await this.keys()).find((candidate) => candidate.kid === header.kid);
