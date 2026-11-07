@@ -49,6 +49,7 @@ export function createAdvancedSkillTools(
         {
           principalId,
           signal,
+          approval: context.approval,
           emitTrace: () => {
             // Skill traces are intentionally kept internal to the tool result
             // until Brain has a first-class skill-event channel.
