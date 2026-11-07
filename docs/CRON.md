@@ -25,3 +25,13 @@ The global pause state is persisted in the existing file-backed cron store. Olde
 Pause, resume, and status operations require an authorized non-empty actor through the scheduler's existing authorization callback. API adapters should only pass a principal established by their authentication layer; never trust a model-supplied actor string.
 
 This ports the operational pause/resume lifecycle from Hermes while retaining Sofia's existing owner checks, durable execution history, and misfire policies.
+## Brain management tools
+
+Authenticated Brain runs can manage their own schedules through two progressive tools:
+
+- `cronjob_list` reads the current principal's schedules, scheduler status, and a selected schedule's history.
+- `cronjob_manage` creates, enables, disables, cancels, pauses, or resumes schedules.
+
+The actor/owner is injected by Sofia from the authenticated principal; it is never accepted from model arguments. Mutating operations carry the existing `write` effect and therefore require the configured approval handler. The scheduler instance is shared with the API adapter, so chat and API operations observe the same persisted state.
+
+Jobs dispatched by the scheduler carry a persisted `cronExecution` marker. On initial execution and resume, the Brain factory omits cron management tools for these jobs, preventing scheduled tasks from recursively creating or modifying schedules.
