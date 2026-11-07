@@ -645,6 +645,35 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       if (isCronRequest && cronScheduler) {
+        if (req.method === "GET" && requestUrl.pathname === "/v1/cron/status") {
+          try {
+            return json(res, 200, await cronScheduler.schedulerStatus(auth.keyId), origin, config);
+          } catch (error) {
+            return json(res, 403, { error: "cron_status_unavailable", message: error instanceof Error ? error.message : "Cron status unavailable" }, origin, config);
+          }
+        }
+        if (req.method === "POST" && requestUrl.pathname === "/v1/cron/pause") {
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_cron_pause" }, origin, config);
+          const reason = (raw as Record<string, unknown>).reason;
+          if (reason !== undefined && (typeof reason !== "string" || reason.length > 500)) {
+            return json(res, 400, { error: "invalid_cron_pause", message: "reason must be a string of at most 500 characters" }, origin, config);
+          }
+          try {
+            return json(res, 200, await cronScheduler.pauseAll(auth.keyId, typeof reason === "string" ? reason : undefined), origin, config);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Cron pause failed";
+            return json(res, message.startsWith("Not authorized") ? 403 : 400, { error: "cron_pause_failed", message }, origin, config);
+          }
+        }
+        if (req.method === "POST" && requestUrl.pathname === "/v1/cron/resume") {
+          try {
+            return json(res, 200, await cronScheduler.resumeAll(auth.keyId), origin, config);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Cron resume failed";
+            return json(res, message.startsWith("Not authorized") ? 403 : 400, { error: "cron_resume_failed", message }, origin, config);
+          }
+        }
         const schedulePath = "/v1/cron/schedules";
         const historyMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/history$/);
         const actionMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/(enable|disable)$/);
