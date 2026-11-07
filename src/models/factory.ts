@@ -71,19 +71,27 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const budget=new TokenBudget(runLimit,models);
     const gateway=new TokenAwareGateway(budget,selectedRouteAdapters,intEnv("SOFIA_BRAIN_MODEL_TIMEOUT_MS",45000,1));
     const reasoner=new TokenAwareBrainReasoner(gateway);
+    // Browser tools own mutable page/session handles. Construct them per Brain run,
+    // never on the process-wide dependency registry, so concurrent users/runs cannot
+    // address each other's tabs or reuse each other's authenticated browser context.
+    const runBrowserTools = dependencies.policy.allowBrowser
+      ? createBrowserTools(new PlaywrightBrowserRuntime())
+      : [];
     const grantedDesktopCapabilities = desktopCapabilities ?? [];
-    const runTools = grantedDesktopCapabilities.length
-      ? createToolRegistry([
-          ...dependencies.tools.list(),
-          ...createDesktopTools({
-            runtime: new DesktopRuntime({
-              workspaceRoot: workspace,
-              allowedExecutables: (process.env.SOFIA_DESKTOP_ALLOWED_EXECUTABLES ?? "").split(",").map((value) => value.trim()).filter(Boolean),
-            }),
-            principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
+    const runDesktopTools = grantedDesktopCapabilities.length
+      ? createDesktopTools({
+          runtime: new DesktopRuntime({
+            workspaceRoot: workspace,
+            allowedExecutables: (process.env.SOFIA_DESKTOP_ALLOWED_EXECUTABLES ?? "").split(",").map((value) => value.trim()).filter(Boolean),
           }),
-        ])
-      : dependencies.tools;
+          principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
+        })
+      : [];
+    const runTools = createToolRegistry([
+      ...dependencies.tools.list(),
+      ...runBrowserTools,
+      ...runDesktopTools,
+    ]);
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
@@ -99,8 +107,9 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
 
 export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
-  const browserTools=policy.allowBrowser?createBrowserTools(new PlaywrightBrowserRuntime()):[];
-  const tools=createToolRegistry([...createBuiltinTools(),...browserTools]);
+  // Process-wide tools must be stateless. Browser tools are created per Brain run
+  // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
+  const tools=createToolRegistry(createBuiltinTools());
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit});
