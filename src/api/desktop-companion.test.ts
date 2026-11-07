@@ -152,6 +152,8 @@ test("Desktop Companion API returns 503 for transient store failures without rev
     });
     assert.equal(recovered.status, 200);
     assert.deepEqual(await recovered.json(), { command: null });
+    assert.equal(records.get(createHash("sha256").update("desktop-owner-key").digest("hex").slice(0, 32))?.lastSeenAt, now,
+      "a recovered poll must retry and persist the heartbeat that previously failed");
     const invalidToken = await fetch(base + "/v1/desktop/companion/commands", {
       headers: { authorization: "Bearer " + "x".repeat(43) },
     });
