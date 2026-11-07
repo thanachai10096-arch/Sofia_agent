@@ -23,6 +23,13 @@ function compactValue(value: unknown, depth = 0): unknown {
   return undefined;
 }
 
+function estimatePromptTokens(value: unknown): number {
+  const characters = Array.from(JSON.stringify(value));
+  const nonAscii = characters.filter((character) => character.codePointAt(0)! > 0x7f).length;
+  const ascii = characters.length - nonAscii;
+  return Math.ceil(ascii / 3) + nonAscii;
+}
+
 function phaseFromRequest(request: string): BrainPhase {
   try {
     const phase = (JSON.parse(request) as { phase?: unknown }).phase;
@@ -110,9 +117,11 @@ function asInferenceRequest(request: string): InferenceRequest {
     minimumQualityTier: typeof payload.minimumQualityTier === "number"
       ? payload.minimumQualityTier
       : 1,
-    requiredCapabilities: Array.isArray(payload.requiredCapabilities)
-      ? payload.requiredCapabilities.filter((value): value is string => typeof value === "string").slice(0, 24)
-      : [],
+    requiredCapabilities: (Array.isArray(payload.requiredCapabilities)
+      ? payload.requiredCapabilities
+      : Array.isArray(understanding.requiredCapabilities)
+        ? understanding.requiredCapabilities
+        : []).filter((value): value is string => typeof value === "string").slice(0, 24),
     core: {
       instructions: [
         "Return only valid JSON. Do not use Markdown fences or surrounding prose.",
@@ -143,11 +152,10 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
   ): Promise<PreparedInference> {
     options.signal.throwIfAborted();
     const input = asInferenceRequest(request);
-    // Character count is a conservative, tokenizer-independent preflight proxy:
-    // unlike UTF-8 bytes it does not multiply Thai/CJK characters by 3. The
-    // selected route's tokenizer remains authoritative before reservation.
-    const serialized = JSON.stringify(input);
-    const inputTokens = Array.from(serialized).length;
+    // Match the route-admission estimate so executor preflight does not
+    // reject Thai/CJK prompts merely because their UTF-8 representation is 3x.
+    // Provider-reported usage remains authoritative after invocation.
+    const inputTokens = estimatePromptTokens(input);
     return {
       inputTokens,
       invoke: async (invokeOptions) => {
