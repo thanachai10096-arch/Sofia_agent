@@ -449,3 +449,49 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
 });
+
+
+test("gateway forwards a single-use approval receipt bound to the approved action", async () => {
+  const rt = runtime();
+  let received: unknown;
+  const registry = new MapToolRegistry([{
+    name: "skill.test.privileged",
+    description: "Privileged skill test tool",
+    effects: ["destructive"] as const,
+    inputSchema: { type: "object", properties: { operation: { type: "string" } }, required: ["operation"] },
+    async execute(_input, context) {
+      received = context.approval;
+      return { executed: true };
+    },
+  }]);
+  let approvedRequest: Record<string, unknown> | undefined;
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    defaultPolicy,
+    async (request) => {
+      approvedRequest = request as unknown as Record<string, unknown>;
+      return true;
+    },
+  );
+
+  const result = await gateway.execute(
+    { tool: "skill.test.privileged", input: { operation: "rotate-key" } },
+    {
+      runId: "approval-receipt-test",
+      principalId: "principal-1",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.ok(approvedRequest);
+  assert.deepEqual(received, {
+    requestId: approvedRequest.requestId,
+    runId: "approval-receipt-test",
+    principalId: "principal-1",
+    toolName: "skill.test.privileged",
+    actionHash: approvedRequest.actionHash,
+  });
+});
