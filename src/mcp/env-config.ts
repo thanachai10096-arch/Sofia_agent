@@ -1,4 +1,5 @@
 import { McpStdioTransport, type McpStdioTransportOptions } from "./transports.js";
+import type { McpTransport } from "./client.js";
 import type { ManagedMcpServerConfig } from "./registry.js";
 
 type StdioServerInput = {
@@ -12,7 +13,7 @@ type StdioServerInput = {
   allowedTools: string[];
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+class LazyStdioTransport implements McpTransport {\n  private instance?: McpStdioTransport;\n  constructor(private readonly options: McpStdioTransportOptions) {}\n  request(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown> {\n    this.instance ??= new McpStdioTransport(this.options);\n    return this.instance.request(method, params, signal);\n  }\n  notify(method: string, params?: unknown): Promise<void> {\n    this.instance ??= new McpStdioTransport(this.options);\n    return this.instance.notify(method, params);\n  }\n  async close(): Promise<void> { await this.instance?.close(); }\n}\n\nfunction isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -70,7 +71,7 @@ export function loadManagedMcpServersFromEnv(
       ...(env ? { env } : {}),
     };
     return {
-      transport: new McpStdioTransport(options),
+      transport: new LazyStdioTransport(options),
       options: { id: item.id, allowedTools: item.allowedTools as string[] },
     };
   });
