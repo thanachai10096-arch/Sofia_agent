@@ -73,7 +73,7 @@ function pngDimensions(data: Buffer): { width: number; height: number } {
   }
   const width = data.readUInt32BE(16);
   const height = data.readUInt32BE(20);
-  if (width < 1 || height < 1 || width > 16384 || height > 16384 || data.length > 5 * 1024 * 1024) {
+  if (width < 1 || height < 1 || width > 16384 || height > 16384 || data.length > 3.75 * 1024 * 1024) {
     throw new Error("Native screen capture returned dimensions or size outside the supported limits.");
   }
   return { width, height };
@@ -208,7 +208,8 @@ export function createPlatformDesktopHostDriver(options: {
       { ...extra, SOFIA_NATIVE_OPERATION: operation }, 20_000);
 
   return {
-    async captureScreen() {
+    async captureScreen(options) {
+      if (options?.displayId !== undefined) throw new Error("Selecting an individual display is not supported; capture the full virtual desktop instead.");
       let data: Buffer;
       if (platform === "darwin") {
         ({ stdout: data } = await call("/usr/sbin/screencapture", ["-x", "-"]));
