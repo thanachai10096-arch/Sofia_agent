@@ -11,6 +11,7 @@ import { createDiscordSharedChatHandler } from "../integrations/messaging/discor
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 import { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
+import { FileDesktopCompanionStore } from "../desktop/companion-store.js";
 import { CloudBrowserSessionManager } from "../browser/cloud-session-manager.js";
 import { PlaywrightBrowserRuntime } from "../browser/runtime.js";
 import { ApprovalInbox } from "../agent/approval-inbox.js";
@@ -26,7 +27,8 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const desktopCommandBroker = new DesktopCommandBroker();
+const desktopCompanionStore = new FileDesktopCompanionStore(path.join(workspace, ".sofia", "desktop-companions"));
+const desktopCommandBroker = new DesktopCommandBroker({ store: desktopCompanionStore });
 const approvalAuditStore = new FileApprovalAuditStore(path.join(workspace, ".sofia"));
 // Never replay an approval after restart: close orphaned audit entries before accepting traffic.
 approvalAuditStore.recoverInterrupted();
