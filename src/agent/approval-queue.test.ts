@@ -97,3 +97,18 @@ test("queued approval handler fails closed when principal identity is missing", 
     assert.equal(f.queue.list("owner-a").length, 0);
   } finally { await f.cleanup(); }
 });
+
+
+test("expired approval is denied and cannot later be approved", async () => {
+  const f = await fixture();
+  try {
+    const pending = f.queue.create(request(), { ttlMs: 1_000 });
+    await new Promise((resolve) => setTimeout(resolve, 1_050));
+    assert.deepEqual(f.queue.list("owner-a"), []);
+    assert.equal(f.queue.get(pending.id, "owner-a")?.status, "expired");
+    assert.equal(f.queue.decide({
+      id: pending.id, ownerId: "owner-a", decidedBy: "owner-a",
+      actionHash: pending.actionHash, approved: true,
+    }), undefined);
+  } finally { await f.cleanup(); }
+});
