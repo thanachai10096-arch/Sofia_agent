@@ -54,6 +54,8 @@ test("Mobile Workspace serves protected PWA and proxies only same-origin scoped 
     const rootRedirect = await fetch(base + "/workspace/", { redirect: "manual" });
     assert.equal(rootRedirect.status, 302);
     assert.equal(rootRedirect.headers.get("location"), "/workspace/login.html");
+    const failedLogin = await fetch(base + "/workspace/?auth=failed", { redirect: "manual" });
+    assert.equal(failedLogin.headers.get("location"), "/workspace/login.html?auth=failed");
 
     const login = await fetch(base + "/workspace/auth/login", { redirect: "manual" });
     assert.equal(login.status, 302);
