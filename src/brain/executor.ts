@@ -271,6 +271,7 @@ export class SofiaBrain {
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
   private readonly selectedSkillIds = new Set<string>();
+  private readonly skillExecutionMetrics = new Map<string, { toolCalls: number; durationMs: number }>();
   private activeSkillId?: string;
 
   constructor(
@@ -697,14 +698,18 @@ export class SofiaBrain {
 
     // Evolution evidence must follow an actual registered skill invocation.
     // A skill merely matched during recovery planning is not usage evidence.
-    if (step.call.tool.startsWith("skill.")) {
-      const skillId = step.call.tool.slice("skill.".length);
-      if (skillId.trim()) {
-        this.selectedSkillIds.add(skillId);
-        this.activeSkillId = skillId;
-      }
+    const invokedSkillId = step.call.tool.startsWith("skill.")
+      ? step.call.tool.slice("skill.".length)
+      : undefined;
+    if (invokedSkillId?.trim()) {
+      this.selectedSkillIds.add(invokedSkillId);
+      this.activeSkillId = invokedSkillId;
+      const metrics = this.skillExecutionMetrics.get(invokedSkillId) ?? { toolCalls: 0, durationMs: 0 };
+      metrics.toolCalls += 1;
+      this.skillExecutionMetrics.set(invokedSkillId, metrics);
     }
 
+    const skillCallStartedAt = Date.now();
     this.emit({
       type: "brain.tool.started",
       stepId: step.id,
@@ -734,8 +739,17 @@ export class SofiaBrain {
         }),
       );
     } catch (error) {
+      if (invokedSkillId) {
+        const metrics = this.skillExecutionMetrics.get(invokedSkillId);
+        if (metrics) metrics.durationMs += Math.max(0, Date.now() - skillCallStartedAt);
+      }
       if (this.signal.aborted) throw error;
       throw new RecoverableFailure(failureCategory(error), errorMessage(error));
+    }
+
+    if (invokedSkillId) {
+      const metrics = this.skillExecutionMetrics.get(invokedSkillId);
+      if (metrics) metrics.durationMs += Math.max(0, Date.now() - skillCallStartedAt);
     }
 
     const p = preview(result.data);
@@ -1172,6 +1186,7 @@ export class SofiaBrain {
               this.activeSkillId,
               diagnosis.message,
               understanding?.requiredCapabilities[0] ?? "general",
+              this.skillExecutionMetrics.get(this.activeSkillId) ?? {},
             );
             this.selectedSkillIds.delete(this.activeSkillId);
             this.activeSkillId = undefined;
@@ -1249,7 +1264,13 @@ export class SofiaBrain {
         const taskType = understanding.requiredCapabilities[0] ?? "general";
         // This block is reachable only after trusted verification and code review pass.
         for (const skillId of this.selectedSkillIds) {
-          this.dependencies.evolution.recordSuccess(skillId, this.usage.steps, recoveryRounds, taskType);
+          this.dependencies.evolution.recordSuccess(
+            skillId,
+            this.skillExecutionMetrics.get(skillId)?.toolCalls ?? 1,
+            recoveryRounds,
+            taskType,
+            this.skillExecutionMetrics.get(skillId) ?? {},
+          );
         }
         this.dependencies.evolution.recordRun(taskType, true);
       }
