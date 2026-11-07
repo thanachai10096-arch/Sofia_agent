@@ -217,7 +217,7 @@ function assertDesktopAction(value: DesktopAction): void {
   if (value.kind === "app.launch") {
     if (typeof value.applicationId !== "string" || !value.applicationId.trim() || value.applicationId.length > 128 ||
         !Array.isArray(value.args) || value.args.length > 32 ||
-        value.args.some((arg) => typeof arg !== "string" || arg.length > 1000 || arg.includes("\\0"))) {
+        value.args.some((arg) => typeof arg !== "string" || arg.length > 1000 || arg.includes("\0"))) {
       throw new Error("Invalid desktop application launch action.");
     }
     return;
@@ -231,13 +231,13 @@ function assertDesktopAction(value: DesktopAction): void {
     return;
   }
   if (value.kind === "input.type") {
-    if (typeof value.text !== "string" || value.text.length > 2000 || value.text.includes("\\0")) {
+    if (typeof value.text !== "string" || value.text.length > 2000 || value.text.includes("\0")) {
       throw new Error("Invalid desktop text input action.");
     }
     return;
   }
   if (value.kind === "input.key") {
-    if (typeof value.key !== "string" || !/^(?:[A-Za-z0-9]|Enter|Escape|Tab|Backspace|Delete|Arrow(?:Up|Down|Left|Right)|Home|End|PageUp|PageDown|Space|F(?:[1-9]|1[0-2])|Ctrl\\+[A-Za-z0-9]|Alt\\+[A-Za-z0-9]|Shift\\+[A-Za-z0-9])$/.test(value.key)) {
+    if (typeof value.key !== "string" || !/^(?:[A-Za-z0-9]|Enter|Escape|Tab|Backspace|Delete|Arrow(?:Up|Down|Left|Right)|Home|End|PageUp|PageDown|Space|F(?:[1-9]|1[0-2])|Ctrl\+[A-Za-z0-9]|Alt\+[A-Za-z0-9]|Shift\+[A-Za-z0-9])$/.test(value.key)) {
       throw new Error("Invalid desktop key input action.");
     }
     return;
