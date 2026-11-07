@@ -112,6 +112,7 @@ export function assertSafePath(inputPath: string, blockedPaths: readonly string[
 
 const TRUSTED_READ_ONLY_NETWORK_ENDPOINTS: Record<string, string> = {
   "web.search": "https://api.search.brave.com/res/v1/llm/context",
+  "web.search_news": "https://api.search.brave.com/res/v1/news/search",
 };
 
 function isGitNetworkCommand(input: Record<string, unknown>): boolean {
