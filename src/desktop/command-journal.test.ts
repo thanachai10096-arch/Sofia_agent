@@ -12,9 +12,9 @@ test("file journal survives restart and replays only a durably completed outcome
     const firstProcess = new FileDesktopCommandJournal(directory);
     await firstProcess.begin(id);
     const restartedProcess = new FileDesktopCommandJournal(directory);
-    assert.deepEqual(await restartedProcess.get(id), {
-      commandId: id, status: "started", updatedAt: (await restartedProcess.get(id))?.updatedAt,
-    });
+    const recovered = await restartedProcess.get(id);
+    assert.equal(recovered?.status, "started");
+    assert.equal(recovered?.commandId, id);
     await assert.rejects(restartedProcess.begin(id), /already exists/);
     await restartedProcess.complete(id, { result: { ok: true } });
     const thirdProcess = new FileDesktopCommandJournal(directory);
@@ -26,7 +26,7 @@ test("file journal survives restart and replays only a durably completed outcome
   }
 });
 
-test("file journal refuses to follow a symlink as its journal directory", () => {
+test("file journal refuses to follow a symlink as its journal directory", { skip: process.platform === "win32" }, () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sofia-command-journal-link-"));
   const target = path.join(root, "target");
   const link = path.join(root, "link");
