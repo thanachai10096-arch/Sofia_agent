@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { SofiaApiError, SofiaClient } from "../../sdk/client.js";
 import { FileChatMessageDeduplicator } from "../file-chat-deduplicator.js";
 import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
@@ -11,6 +12,8 @@ import { redactSecrets } from "../../security/guard.js";
 export interface TelegramMessagingRuntime {
   start(): Promise<void>;
   stop(): Promise<void>;
+  /** Deliver an approval notice only to the private chat bound to the owning API key. */
+  notifyApproval(ownerKeyId: string, text: string): Promise<boolean>;
 }
 
 interface TelegramRunResult {
@@ -219,6 +222,11 @@ export function createTelegramMessagingRuntime(
       throw new Error("Per-user Telegram API keys are required when multiple Telegram users are allowed.");
     }
     const clients = new Map<string, SofiaClient>();
+    const ownerKeyToTelegramUser = new Map<string, string>();
+    for (const userId of allowedUsers) {
+      const key = userApiKeys?.get(userId) ?? apiKey;
+      if (key) ownerKeyToTelegramUser.set(createHash("sha256").update(key).digest("hex").slice(0, 32), userId);
+    }
     const clientForUser = (userId: string) => {
       const key = userApiKeys?.get(userId) ?? apiKey;
       if (!key) throw new Error("No Sofia API key is configured for this Telegram user.");
@@ -299,8 +307,15 @@ export function createTelegramMessagingRuntime(
       },
     });
     return {
-      start: () => gateway.start(),
-      stop: () => gateway.stop(),
+      start: () => gateway!.start(),
+      stop: () => gateway!.stop(),
+      notifyApproval: async (ownerKeyId: string, text: string) => {
+        const userId = ownerKeyToTelegramUser.get(ownerKeyId);
+        // Approval notices are sent only as a private DM. A group/channel ID is
+        // never accepted from the run request or used as an outbound target.
+        if (!userId || !allowedUsers.has(userId) || !allowedChats.has(userId) || !gateway) return false;
+        return gateway.send("telegram", { conversationId: userId, text: text.slice(0, 3_500) });
+      },
     };
   } catch (error) {
     // Report only the static validation message from our own constructors. Never log
