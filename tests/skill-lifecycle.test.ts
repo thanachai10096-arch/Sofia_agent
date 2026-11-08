@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VersionedSkillLifecycle, getSkillCandidateDigest } from "../src/brain/skill-lifecycle.js";
@@ -522,4 +522,34 @@ test("skill lifecycle restores benchmark baseline before revalidating active ski
     assert.equal(restored.active("repair-skill")?.status, "active");
     assert.equal(restoredPlatform.get("repair-skill")?.version, "1.0.0");
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("skill lifecycle rejects symbolic-link ancestors before writing persistence", async () => {
+  const root = dir();
+  try {
+    const realDirectory = path.join(root, "real");
+    const linkedDirectory = path.join(root, "linked");
+    mkdirSync(realDirectory);
+    symlinkSync(realDirectory, linkedDirectory, "dir");
+
+    const redirectedFile = path.join(realDirectory, "lifecycle.json");
+    const lifecycle = new VersionedSkillLifecycle(
+      new InMemorySkillsPlatform(),
+      passing,
+      { file: path.join(linkedDirectory, "lifecycle.json") },
+    );
+
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.0"), {
+        source: "repair",
+        evidenceIds: ["symlink-parent"],
+        confidence: 0.95,
+      }),
+      /must not contain symbolic links/,
+    );
+    assert.equal(existsSync(redirectedFile), false, "must not write lifecycle state through a symlinked parent");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
