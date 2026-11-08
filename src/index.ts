@@ -2,6 +2,15 @@ export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
 export { runSkillLifecycleWorkflow } from "./brain/skill-lifecycle-workflow.js";
 export { createManagedSkillLearningHandler } from "./brain/managed-skill-learning.js";
 export { SkillSelfImprovementLoop } from "./brain/skill-self-improvement.js";
+export { ResearchAugmentedSkillPlanner } from "./brain/skill-research.js";
+export type {
+  SkillResearchSource,
+  SkillResearchProvider,
+  SkillResearchPolicy,
+  SkillResearchCitation,
+  SkillResearchBundle,
+  SkillResearchAudit,
+} from "./brain/skill-research.js";
 export type {
   SkillImprovementEvidence,
   SkillImprovementProposal,
