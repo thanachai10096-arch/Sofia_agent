@@ -21,20 +21,25 @@ function candidate(): SkillPackage {
       format: "sofia-node-skill-v1",
       runtime: "node",
       entrypoint: "index.js",
-      files: {
-        "index.js": "export function run() { return 42; }",
-        "index.test.js": 'import test from "node:test"; import assert from "node:assert/strict"; import { run } from "./index.js"; test("run returns 42", () => assert.equal(run(), 42));',
-      },
-      tests: ["index.test.js"],
+      files: { "index.js": "export function run() { return 42; }" },
     },
   };
 }
+
+const trustedSuite = {
+  id: "trusted-fixture",
+  version: "1",
+  files: {
+    "skill.test.js": 'import test from "node:test"; import assert from "node:assert/strict"; import { run } from "../index.js"; test("trusted behavior", () => assert.equal(run(), 42));',
+  },
+  tests: ["skill.test.js"],
+};
 
 function fakeSandbox(run: Sandbox["run"], isolation: Sandbox["isolation"] = "container"): Sandbox {
   return { isolation, run };
 }
 
-test("isolated skill verifier executes syntax and tests with networking disabled", async () => {
+test("isolated skill verifier executes trusted tests with networking disabled", async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-verifier-test-"));
   const calls: Array<{ command: string; args: string[]; limits: SandboxLimits }> = [];
   try {
@@ -42,7 +47,9 @@ test("isolated skill verifier executes syntax and tests with networking disabled
       calls.push({ command, args, limits });
       return { stdout: "ok", stderr: "", code: 0 };
     });
-    const verifier = createIsolatedSkillVerifier({ sandbox, workspaceParent: parent });
+    const verifier = createIsolatedSkillVerifier({
+      sandbox, workspaceParent: parent, getTrustedTestSuite: () => trustedSuite,
+    });
     const pkg = candidate();
     const result = await verifier(pkg);
     assert.equal(result.passed, true);
@@ -51,7 +58,7 @@ test("isolated skill verifier executes syntax and tests with networking disabled
     assert.equal(getExecutableArtifactDigest(pkg.artifact!), getExecutableArtifactDigest(pkg.artifact!));
     assert.deepEqual(calls.map((call) => [call.command, ...call.args]), [
       ["node", "--check", "index.js"],
-      ["node", "--test", "index.test.js"],
+      ["node", "--test", "__sofia_trusted_tests__/skill.test.js"],
     ]);
     assert.ok(calls.every((call) => call.limits.allowNetwork === false));
     assert.ok(calls.every((call) => call.limits.workspaceRoot.startsWith(parent)));
@@ -68,6 +75,7 @@ test("isolated skill verifier stops after a failed check", async () => {
       calls += 1;
       return { stdout: "", stderr: "syntax error", code: 1 };
     }),
+    getTrustedTestSuite: () => trustedSuite,
   });
   const result = await verifier(candidate());
   assert.equal(result.passed, false);
@@ -82,6 +90,7 @@ test("isolated skill verifier rejects path traversal before executing", async ()
       calls += 1;
       return { stdout: "", stderr: "", code: 0 };
     }),
+    getTrustedTestSuite: () => trustedSuite,
   });
   const pkg = candidate();
   pkg.artifact!.files["../escape.js"] = "export {};";
@@ -93,7 +102,16 @@ test("isolated skill verifier refuses non-container sandbox implementations", ()
   assert.throws(
     () => createIsolatedSkillVerifier({
       sandbox: fakeSandbox(async () => ({ stdout: "", stderr: "", code: 0 }), "process"),
+      getTrustedTestSuite: () => trustedSuite,
     }),
     /container-enforcing sandbox/,
   );
+});
+
+test("isolated skill verifier fails closed without a trusted test suite", async () => {
+  const verifier = createIsolatedSkillVerifier({
+    sandbox: fakeSandbox(async () => ({ stdout: "", stderr: "", code: 0 })),
+    getTrustedTestSuite: () => undefined,
+  });
+  await assert.rejects(() => verifier(candidate()), /No valid trusted verification suite/);
 });
