@@ -294,6 +294,10 @@ export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options:
         try { options.onNotificationError?.(); } catch { /* notification diagnostics must not affect approval state */ }
       }
     }
+    if (request.signal?.aborted) {
+      try { queue.cancelPending(record.id, record.ownerId); } catch { /* cancellation still denies execution */ }
+      return false;
+    }
     while (Date.now() < record.expiresAt) {
       if (request.signal?.aborted) {
         try { queue.cancelPending(record.id, record.ownerId); } catch { /* cancellation still denies execution */ }
