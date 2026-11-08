@@ -41,6 +41,7 @@ export function handleDiscordApprovalCommand(
     const lines = pending.map((item) =>
       "- " + item.toolName + " (" + item.risk + ")\n  ID: " + item.id +
       "\n  Expires: " + new Date(item.expiresAt).toISOString() +
+      "\n  Action: " + safeApprovalInput(item.input) +
       "\n  Decide: /approve job_id:" + item.id + " or /reject job_id:" + item.id
     );
     const remaining = queue.list(principalId, { limit: 11 }).length > 10;
