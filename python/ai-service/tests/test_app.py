@@ -1,0 +1,345 @@
+import asyncio
+import json
+
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+
+from app import (
+    MAX_REQUEST_BYTES,
+    RequestBodyLimitMiddleware,
+    RequestIdLoggingMiddleware,
+    _authorize,
+    create_app,
+)
+
+
+class FakeEmbedder:
+    def encode(self, texts, *, normalize_embeddings=True):
+        return [[float(index + 1), 0.5] for index, _ in enumerate(texts)]
+
+
+class FakeReranker:
+    def predict(self, pairs):
+        return [float(len(document)) for _, document in pairs]
+
+
+@pytest.fixture
+def client(monkeypatch):
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    app = create_app(FakeEmbedder, FakeReranker)
+    return TestClient(app)
+
+
+def auth():
+    return {"Authorization": "Bearer test-secret"}
+
+
+def test_health_does_not_require_auth_or_load_models(monkeypatch):
+    calls = {"embedder": 0, "reranker": 0}
+
+    def embedder_factory():
+        calls["embedder"] += 1
+        return FakeEmbedder()
+
+    def reranker_factory():
+        calls["reranker"] += 1
+        return FakeReranker()
+
+    response = TestClient(create_app(embedder_factory, reranker_factory)).get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert calls == {"embedder": 0, "reranker": 0}
+
+
+def test_request_id_is_validated_returned_and_logged_without_secrets(client, caplog):
+    request_id = "a9f0c7a2-91e4-4b1d-8b7e-0c1f4a9d6e21"
+    caplog.set_level("INFO", logger="sofia.ai_service")
+    response = client.post(
+        "/v1/embeddings",
+        json={"texts": ["private-user-text"]},
+        headers={**auth(), "X-Request-ID": request_id},
+    )
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] == request_id
+    records = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.name == "sofia.ai_service"
+    ]
+    assert records[-1]["request_id"] == request_id
+    assert records[-1]["status_code"] == 200
+    serialized = json.dumps(records)
+    assert "test-secret" not in serialized
+    assert "private-user-text" not in serialized
+
+
+def test_invalid_request_id_is_replaced_with_server_generated_uuid(client):
+    response = client.get("/health", headers={"X-Request-ID": "not-a-uuid"})
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] != "not-a-uuid"
+    assert len(response.headers["x-request-id"]) == 36
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Authorization": "Basic test-secret"},
+        {"Authorization": "Bearer"},
+        {"Authorization": "Bearer wrong"},
+    ],
+)
+def test_ai_endpoints_reject_missing_or_invalid_auth(client, headers):
+    response = client.post(
+        "/v1/embeddings", json={"texts": ["hello"]}, headers=headers
+    )
+    assert response.status_code == 401
+
+
+def test_authorization_rejects_non_ascii_token_without_raising_encoding_error(monkeypatch):
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    with pytest.raises(HTTPException) as error:
+        _authorize("Bearer tóken")
+    assert error.value.status_code == 401
+
+
+def test_ai_endpoints_fail_closed_without_configured_token(monkeypatch):
+    monkeypatch.delenv("SOFIA_AI_SERVICE_TOKEN", raising=False)
+    client = TestClient(create_app(FakeEmbedder, FakeReranker))
+    response = client.post(
+        "/v1/embeddings",
+        json={"texts": ["hello"]},
+        headers={"Authorization": "Bearer anything"},
+    )
+    assert response.status_code == 503
+
+
+def test_embeddings_returns_bounded_vectors(client):
+    response = client.post(
+        "/v1/embeddings",
+        json={"texts": ["alpha", "beta"], "normalize": True},
+        headers=auth(),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dimensions"] == 2
+    assert len(payload["embeddings"]) == 2
+
+
+def test_rerank_returns_descending_scores_and_original_indices(client):
+    response = client.post(
+        "/v1/rerank",
+        json={"query": "q", "documents": ["a", "longer"]},
+        headers=auth(),
+    )
+    assert response.status_code == 200
+    assert [item["index"] for item in response.json()["results"]] == [1, 0]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"texts": []},
+        {"texts": ["   "]},
+        {"texts": ["x" * 20_001]},
+        {"texts": ["ok"], "unexpected": True},
+    ],
+)
+def test_embeddings_reject_invalid_payloads(client, payload):
+    response = client.post(
+        "/v1/embeddings", json=payload, headers=auth()
+    )
+    assert response.status_code in {413, 422}
+
+
+def test_embeddings_reject_more_than_64_texts(client):
+    response = client.post(
+        "/v1/embeddings",
+        json={"texts": [f"item-{index}" for index in range(65)]},
+        headers=auth(),
+    )
+    assert response.status_code == 422
+
+
+def test_rerank_rejects_empty_documents(client):
+    response = client.post(
+        "/v1/rerank",
+        json={"query": "q", "documents": []},
+        headers=auth(),
+    )
+    assert response.status_code == 422
+
+
+def test_model_output_with_non_finite_values_is_rejected(monkeypatch):
+    class BadEmbedder:
+        def encode(self, texts, *, normalize_embeddings=True):
+            return [[float("nan")]]
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(BadEmbedder, FakeReranker))
+    response = client.post(
+        "/v1/embeddings",
+        json={"texts": ["hello"]},
+        headers=auth(),
+    )
+    assert response.status_code == 502
+
+
+def test_reranker_output_with_wrong_length_is_rejected(monkeypatch):
+    class BadReranker:
+        def predict(self, pairs):
+            return []
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(FakeEmbedder, BadReranker))
+    response = client.post(
+        "/v1/rerank",
+        json={"query": "q", "documents": ["doc"]},
+        headers=auth(),
+    )
+    assert response.status_code == 502
+
+
+def test_embedding_model_load_failure_returns_unavailable(monkeypatch):
+    def broken_factory():
+        raise RuntimeError("private model download details")
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(broken_factory, FakeReranker))
+    response = client.post(
+        "/v1/embeddings", json={"texts": ["hello"]}, headers=auth()
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Embedding model is unavailable."
+    assert "private model download details" not in response.text
+
+
+def test_embedding_inference_failure_returns_sanitized_error(monkeypatch):
+    class BrokenEmbedder:
+        def encode(self, texts, *, normalize_embeddings=True):
+            raise RuntimeError("private inference details")
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(BrokenEmbedder, FakeReranker))
+    response = client.post(
+        "/v1/embeddings", json={"texts": ["hello"]}, headers=auth()
+    )
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Embedding inference returned an invalid result."
+    assert "private inference details" not in response.text
+
+
+def test_embedding_malformed_model_output_returns_bad_gateway(monkeypatch):
+    class MalformedEmbedder:
+        def encode(self, texts, *, normalize_embeddings=True):
+            return [object()]
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(MalformedEmbedder, FakeReranker))
+    response = client.post(
+        "/v1/embeddings", json={"texts": ["hello"]}, headers=auth()
+    )
+    assert response.status_code == 502
+
+
+def test_reranker_model_load_failure_returns_unavailable(monkeypatch):
+    def broken_factory():
+        raise RuntimeError("private model download details")
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(FakeEmbedder, broken_factory))
+    response = client.post(
+        "/v1/rerank", json={"query": "q", "documents": ["doc"]}, headers=auth()
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Reranker model is unavailable."
+    assert "private model download details" not in response.text
+
+
+def test_reranker_malformed_model_output_returns_bad_gateway(monkeypatch):
+    class MalformedReranker:
+        def predict(self, pairs):
+            return [object()]
+
+    monkeypatch.setenv("SOFIA_AI_SERVICE_TOKEN", "test-secret")
+    client = TestClient(create_app(FakeEmbedder, MalformedReranker))
+    response = client.post(
+        "/v1/rerank", json={"query": "q", "documents": ["doc"]}, headers=auth()
+    )
+    assert response.status_code == 502
+
+
+def test_ai_endpoints_reject_oversized_raw_json_body(client):
+    body = b'{"texts":["ok"]}' + (b" " * MAX_REQUEST_BYTES)
+    response = client.post(
+        "/v1/embeddings",
+        content=body,
+        headers={**auth(), "Content-Type": "application/json"},
+    )
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Request body exceeds the maximum byte limit."
+    assert "x-request-id" in response.headers
+
+
+
+def test_body_limit_rejects_chunked_request_without_content_length():
+    async def run_request():
+        messages = [
+            {"type": "http.request", "body": b"123", "more_body": True},
+            {"type": "http.request", "body": b"456", "more_body": False},
+        ]
+        sent = []
+
+        async def receive():
+            return messages.pop(0)
+
+        async def send(message):
+            sent.append(message)
+
+        async def downstream(scope, receive, send):
+            while True:
+                message = await receive()
+                if not message.get("more_body", False):
+                    break
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [],
+                }
+            )
+            await send(
+                {"type": "http.response.body", "body": b"unexpected success"}
+            )
+
+        app = RequestIdLoggingMiddleware(
+            RequestBodyLimitMiddleware(downstream, max_bytes=5)
+        )
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/v1/embeddings",
+            "raw_path": b"/v1/embeddings",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"x-request-id", b"a9f0c7a2-91e4-4b1d-8b7e-0c1f4a9d6e21")
+            ],
+            "server": ("testserver", 80),
+            "client": ("testclient", 123),
+        }
+
+        await app(scope, receive, send)
+
+        start = next(item for item in sent if item["type"] == "http.response.start")
+        body = next(item for item in sent if item["type"] == "http.response.body")
+        headers = dict(start["headers"])
+        assert start["status"] == 413
+        assert headers[b"x-request-id"] == b"a9f0c7a2-91e4-4b1d-8b7e-0c1f4a9d6e21"
+        assert b"maximum byte limit" in body["body"]
+
+    asyncio.run(run_request())
