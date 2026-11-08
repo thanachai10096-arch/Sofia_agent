@@ -100,7 +100,7 @@ test("research planner redacts secrets from evidence before external queries", a
     summary: `Verified failure with api_key=${secret}`,
   }]);
   assert.equal(captured.includes(secret), false);
-  assert.match(captured, /api_key=\\[REDACTED\\]/);
+  assert.match(captured, /api_key=\[REDACTED\]/);
 });
 
 test("research planner handles empty evidence without querying external provider", async () => {
