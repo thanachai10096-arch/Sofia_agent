@@ -85,8 +85,8 @@ function queryFor(evidence: SkillImprovementEvidence[]): string {
   // evidence-derived field before sending anything to an external provider.
   const safeText = (value: string, maxLength: number): string =>
     String(redactSecrets(value))
-      .replace(/[\\u0000-\\u001f\\u007f]/g, " ")
-      .replace(/\\s+/g, " ")
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/\s+/g, " ")
       .slice(0, maxLength);
   const skillId = safeText(evidence[0]!.skillId, 160);
   const categories = [...new Set(evidence.map((item) => safeText(item.category, 100)))].slice(0, 4);
