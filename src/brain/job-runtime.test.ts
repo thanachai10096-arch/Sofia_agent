@@ -997,3 +997,38 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime propagates authenticated owner and approval notification channel into Brain", async () => {
+  const namespace = "job-runtime-approval-notification-" + randomUUID();
+  let factoryPrincipal: string | undefined;
+  let factoryChannel: string | undefined;
+  let runPrincipal: string | undefined;
+  let runChannel: string | undefined;
+  const runtime = new DurableJobRuntime((options) => {
+    factoryPrincipal = options.principalId;
+    factoryChannel = options.notificationChannelId;
+    return {
+      run: async (input) => {
+        runPrincipal = input.principalId;
+        runChannel = input.notificationChannelId;
+        return { completed: true, state: "completed" };
+      },
+    } as unknown as SofiaBrain;
+  }, undefined, namespace);
+  const submitted = await runtime.submit({
+    task: "test approval notification routing",
+    ownerKeyId: "discord:12345",
+    notificationChannelId: "67890",
+  });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "completed"; attempt++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "completed");
+  assert.equal(factoryPrincipal, "discord:12345");
+  assert.equal(factoryChannel, "67890");
+  assert.equal(runPrincipal, "discord:12345");
+  assert.equal(runChannel, "67890");
+});
