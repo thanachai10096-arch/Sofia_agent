@@ -21,3 +21,6 @@ export { createDesktopCompanionClient } from "./companion-client.js";
 export type { DesktopCompanionClient, DesktopCompanionClientConfig, DesktopCompanionCredentialStore } from "./companion-client.js";
 export { assertDesktopAction } from "./remote-command-broker.js";
 export { createRemoteDesktopTools } from "./remote-tools.js";
+
+export { FileDesktopCommandJournal } from "./command-journal.js";
+export type { DesktopCommandJournal, DesktopCommandJournalEntry, DesktopCommandOutcome } from "./command-journal.js";
