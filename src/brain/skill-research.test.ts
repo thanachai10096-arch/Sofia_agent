@@ -89,6 +89,20 @@ test("research planner enforces query, result and excerpt bounds", async () => {
   assert.equal(queries, 1);
 });
 
+test("research planner redacts secrets from evidence before external queries", async () => {
+  const secret = "sk-1234567890abcdef123456";
+  let captured = "";
+  const planner = new ResearchAugmentedSkillPlanner({
+    search: async (query) => { captured = query; return []; },
+  }, async () => []);
+  await planner.propose([{
+    ...evidence[0]!,
+    summary: `Verified failure with api_key=${secret}`,
+  }]);
+  assert.equal(captured.includes(secret), false);
+  assert.match(captured, /api_key=\\[REDACTED\\]/);
+});
+
 test("research planner handles empty evidence without querying external provider", async () => {
   let calls = 0;
   const planner = new ResearchAugmentedSkillPlanner({
