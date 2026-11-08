@@ -204,14 +204,15 @@ export class VersionedSkillLifecycle {
         }
       }
     }
+    const runtimeEvidenceValid = hasValidRuntimeEvidence(candidate.package, result.runtimeVerification);
     const before = clone(this.snapshot);
     const record = this.requireRecord(candidateId);
     record.evaluation = {
       passed: result.passed === true &&
         result.checks.every((check) => check.passed === true) &&
-        hasValidRuntimeEvidence(candidate.package, result.runtimeVerification) &&
+        runtimeEvidenceValid &&
         benchmarkPassed,
-      ...(hasValidRuntimeEvidence(candidate.package, result.runtimeVerification)
+      ...(runtimeEvidenceValid
         ? { runtimeVerification: clone(result.runtimeVerification) }
         : {}),
       ...(benchmark ? { benchmark } : {}),
@@ -221,6 +222,13 @@ export class VersionedSkillLifecycle {
           passed: check.passed,
           ...(typeof check.detail === "string" ? { detail: String(redactSecrets(check.detail)).slice(0, 1000) } : {}),
         })),
+        {
+          name: "runtime-verification",
+          passed: runtimeEvidenceValid,
+          ...(!runtimeEvidenceValid ? {
+            detail: "Runtime evidence is missing, does not match the candidate, or does not satisfy every declared verification requirement.",
+          } : {}),
+        },
         ...(this.benchmarkEngine && !benchmarkPassed
           ? [{ name: "benchmark-regression", passed: false, detail: benchmark?.comparison.reasons.join("; ") ?? "Missing, mismatched, or invalid benchmark evidence" }]
           : []),
