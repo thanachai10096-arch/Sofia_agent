@@ -85,6 +85,7 @@ test("ContainerSandbox constructs a restrictive Docker command and disables netw
     const result = await sandbox.run("node", ["-e", "process.stdout.write('ok')"], limits({
       workspaceRoot,
       allowNetwork: false,
+      readOnlyWorkspace: true,
       timeoutMs: 1234,
       maxOutputBytes: 4096,
     }));
@@ -100,7 +101,7 @@ test("ContainerSandbox constructs a restrictive Docker command and disables netw
     assert.ok(capturedArgs.includes("--memory=512m"));
     assert.ok(capturedArgs.includes("--cpus=1"));
     assert.ok(capturedArgs.includes("none"));
-    assert.ok(capturedArgs.some((arg) => arg.startsWith("type=bind,source=") && arg.endsWith(",target=/workspace")));
+    assert.ok(capturedArgs.some((arg) => arg.startsWith("type=bind,source=") && arg.endsWith(",target=/workspace,readonly")));
     assert.ok(capturedArgs.includes("registry.example/sofia-runner@sha256:" + "a".repeat(64)));
     assert.deepEqual(capturedArgs.slice(-3), ["node", "-e", "process.stdout.write('ok')"]);
     assert.equal(capturedOptions?.timeoutMs, 1234);
