@@ -127,6 +127,9 @@ export class SkillSelfImprovementLoop {
         const provenance: SkillProvenance = {
           source: "skill-self-improvement-loop", evidenceIds: ids,
           confidence: proposal.provenance.confidence,
+          ...(proposal.provenance.researchSources
+            ? { researchSources: proposal.provenance.researchSources.map((source) => ({ ...source })) }
+            : {}),
         };
         const result = await runSkillLifecycleWorkflow(this.lifecycle, proposal.skillPackage, provenance, {
           approvePromotion: this.options.approvePromotion,
