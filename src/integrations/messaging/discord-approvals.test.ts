@@ -15,7 +15,7 @@ test("Discord approval inbox and decisions are scoped to the verified Discord pr
     runId: "run-discord-approval",
     principalId: owner,
     toolName: "workspace.write",
-    input: { path: "notes.txt" },
+    input: { path: "notes.txt", apiKey: "do-not-display-this", operation: "write" },
     actionHash: "d".repeat(64),
     risk: "high",
   });
