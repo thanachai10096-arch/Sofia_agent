@@ -7,6 +7,7 @@ import {
   REDIS_DESKTOP_COMMAND_ENQUEUE_SCRIPT,
   REDIS_DESKTOP_COMMAND_FAIL_SCRIPT,
   REDIS_DESKTOP_COMMAND_GET_SCRIPT,
+  REDIS_DESKTOP_COMMAND_PRUNE_TERMINAL_SCRIPT,
   RedisDesktopCommandQueue,
 } from "../../src/desktop/redis-command-queue.js";
 
@@ -18,6 +19,11 @@ function memoryRedis(): RedisEvalClient {
   const hash = (key: string) => { const value = hashes.get(key) ?? new Map<string, string>(); hashes.set(key, value); return value; };
   return {
     async eval(script, { keys, arguments: args }) {
+      if (script === REDIS_DESKTOP_COMMAND_PRUNE_TERMINAL_SCRIPT) {
+        const expired = [...zset(keys[1]!).entries()].filter(([, score]) => score <= Number(args[0])).slice(0, Number(args[1]));
+        for (const [id] of expired) { hash(keys[0]!).delete(id); zset(keys[1]!).delete(id); }
+        return expired.length;
+      }
       if (script === REDIS_DESKTOP_COMMAND_ENQUEUE_SCRIPT) {
         if (strings.has(keys[3]!)) return ["duplicate", strings.get(keys[3]!)!];
         if (hash(keys[2]!).size >= Number(args[3])) return ["full"];
@@ -37,7 +43,7 @@ function memoryRedis(): RedisEvalClient {
             delete command.leaseToken; delete command.leaseExpiresAt;
             command.updatedAt = now;
             if (Number(command.attempts) >= Number(command.maxAttempts)) {
-              command.status = "failed"; command.error = "Command lease expired after maximum attempts";
+              command.status = "failed"; command.error = "Command lease expired after maximum attempts"; zset(keys[3]!).set(id, now);
             } else {
               command.status = "queued"; zset(keys[0]!).set(id, now);
             }
@@ -65,7 +71,7 @@ function memoryRedis(): RedisEvalClient {
         if (command.status !== "leased" || command.leaseToken !== args[1]) return 0;
         command.status = "completed"; command.updatedAt = Number(args[2]); command.result = JSON.parse(args[3]!);
         delete command.leaseToken; delete command.leaseExpiresAt;
-        zset(keys[0]!).delete(args[0]!); hash(keys[1]!).set(args[0]!, JSON.stringify(command)); return 1;
+        zset(keys[0]!).delete(args[0]!); hash(keys[1]!).set(args[0]!, JSON.stringify(command)); zset(keys[2]!).set(args[0]!, Number(args[2])); return 1;
       }
       if (script === REDIS_DESKTOP_COMMAND_FAIL_SCRIPT) {
         const raw = hash(keys[2]!).get(args[0]!);
@@ -76,7 +82,7 @@ function memoryRedis(): RedisEvalClient {
         zset(keys[1]!).delete(args[0]!);
         if (args[3] === "1" && Number(command.attempts) < Number(command.maxAttempts)) {
           command.status = "queued"; zset(keys[0]!).set(args[0]!, Number(args[2]) + Number(args[5]));
-        } else command.status = "failed";
+        } else { command.status = "failed"; zset(keys[3]!).set(args[0]!, Number(args[2])); }
         hash(keys[2]!).set(args[0]!, JSON.stringify(command)); return 1;
       }
       if (script === REDIS_DESKTOP_COMMAND_GET_SCRIPT) return hash(keys[0]!).get(args[0]!) ?? null;
