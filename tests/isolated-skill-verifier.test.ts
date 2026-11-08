@@ -55,7 +55,8 @@ test("isolated skill verifier executes trusted tests with networking disabled", 
     assert.equal(result.passed, true);
     assert.equal(result.isolated, true);
     assert.equal(result.candidateDigest, getSkillCandidateDigest(pkg));
-    assert.equal(getExecutableArtifactDigest(pkg.artifact!), getExecutableArtifactDigest(pkg.artifact!));
+    const artifactDigest = getExecutableArtifactDigest(pkg.artifact!);
+    assert.notEqual(artifactDigest, getExecutableArtifactDigest({ ...pkg.artifact!, files: { ...pkg.artifact!.files, "extra.js": "export const changed = true;" } }));
     assert.deepEqual(calls.map((call) => [call.command, ...call.args]), [
       ["node", "--check", "index.js"],
       ["node", "--test", "__sofia_trusted_tests__/skill.test.js"],
