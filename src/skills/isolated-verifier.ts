@@ -51,7 +51,7 @@ function validateArtifact(value: unknown): asserts value is SkillExecutableArtif
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Executable skill artifact is required.");
   const artifact = value as Record<string, unknown>;
   if (artifact.format !== "sofia-node-skill-v1" || artifact.runtime !== "node" ||
-      !safeRelativePath(artifact.entrypoint) || !artifact.files || typeof artifact.files !== "object" ||
+      !safeRelativePath(artifact.entrypoint) || !artifact.entrypoint.endsWith(".mjs") || !artifact.files || typeof artifact.files !== "object" ||
       Array.isArray(artifact.files)) {
     throw new Error("Invalid executable skill artifact manifest.");
   }
