@@ -97,6 +97,8 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           isolated: true as const,
           executedChecks: evidence.executedChecks.map(({ name, passed }) => ({ name, passed })),
           completedAt: evidence.completedAt,
+          testSuiteId: evidence.testSuiteId,
+          testSuiteVersion: evidence.testSuiteVersion,
         },
       };
     } catch (error) {
