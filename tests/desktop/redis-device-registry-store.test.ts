@@ -96,8 +96,8 @@ test("Redis device record and owner index share a Redis Cluster hash slot", asyn
   const store = new RedisDesktopDeviceRegistryStore({ client });
   await store.create(device("owner-cluster", "desktop-device-0004"));
   assert.equal(client.lastKeys.length, 2);
-  const recordTag = client.lastKeys[0]?.match(/\\{([^}]+)\\}/)?.[1];
-  const ownerTag = client.lastKeys[1]?.match(/\\{([^}]+)\\}/)?.[1];
+  const recordTag = client.lastKeys[0]?.match(/\{([^}]+)\}/)?.[1];
+  const ownerTag = client.lastKeys[1]?.match(/\{([^}]+)\}/)?.[1];
   assert.ok(recordTag);
   assert.equal(recordTag, ownerTag);
 });
