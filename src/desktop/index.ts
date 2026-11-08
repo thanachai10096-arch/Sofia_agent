@@ -19,3 +19,5 @@ export type { DesktopRelayRequest, DesktopRelayAuthHeaders, DesktopRelayReplayGu
 
 export { DesktopDeviceCredentialVault } from "./device-registry.js";
 export type { EncryptedDesktopDeviceSecret, DesktopDeviceRecord, DesktopDeviceRegistryStore, DesktopDeviceCredentialVaultOptions } from "./device-registry.js";
+export { RedisDesktopDeviceRegistryStore, REDIS_DESKTOP_DEVICE_CREATE_SCRIPT, REDIS_DESKTOP_DEVICE_GET_SCRIPT, REDIS_DESKTOP_DEVICE_LIST_SCRIPT, REDIS_DESKTOP_DEVICE_REVOKE_SCRIPT } from "./redis-device-registry.js";
+export type { RedisDesktopDeviceRegistryStoreOptions } from "./redis-device-registry.js";
