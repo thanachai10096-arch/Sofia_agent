@@ -4,25 +4,27 @@ import type { SqliteApprovalQueue } from "../../agent/approval-queue.js";
  * Discord approval commands are bound to the verified Discord principal.
  * The action hash is read from the owner-scoped durable record, never supplied
  * by the chat user, and the queue performs the atomic one-time decision.
+ *
+ * Approval previews deliberately expose only a tiny, low-risk summary. Tool
+ * arguments are untrusted and may contain credentials under arbitrary keys;
+ * key-name redaction alone cannot safely classify every possible secret.
  */
 function safeApprovalInput(input: Record<string, unknown>): string {
-  const sensitive = /secret|token|password|authorization|api[_-]?key|credential|cookie|private[_-]?key/i;
-  const redact = (value: unknown, depth: number): unknown => {
-    if (depth > 4) return "[truncated]";
-    if (Array.isArray(value)) return value.slice(0, 8).map((item) => redact(item, depth + 1));
-    if (value && typeof value === "object") {
-      return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 20).map(([key, item]) =>
-        [key, sensitive.test(key) ? "[redacted]" : redact(item, depth + 1)]));
-    }
-    if (typeof value === "string") return value.length > 180 ? value.slice(0, 177) + "..." : value;
-    if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
-    return String(value).slice(0, 80);
-  };
-  try {
-    return JSON.stringify(redact(input, 0)).slice(0, 650);
-  } catch {
-    return "[input preview unavailable]";
+  const preview: Record<string, string> = {};
+  const path = input.path;
+  if (typeof path === "string" && path.length <= 160 &&
+      /^[A-Za-z0-9_./ -]+$/.test(path) &&
+      !/(^|[/.])(?:\.env(?:\.|$)|credentials?|secrets?|id_rsa|id_ed25519)(?:$|[/.])/i.test(path)) {
+    preview.path = path;
   }
+  const operation = input.operation;
+  if (typeof operation === "string" &&
+      /^(?:read|write|create|update|delete|move|copy|list|search|fetch|download|upload)$/i.test(operation)) {
+    preview.operation = operation;
+  }
+  return Object.keys(preview).length
+    ? JSON.stringify(preview)
+    : "[details hidden; review the secure approval inbox]";
 }
 
 export function handleDiscordApprovalCommand(
@@ -41,7 +43,7 @@ export function handleDiscordApprovalCommand(
     const lines = pending.map((item) =>
       "- " + item.toolName + " (" + item.risk + ")\n  ID: " + item.id +
       "\n  Expires: " + new Date(item.expiresAt).toISOString() +
-      "\n  Action: " + safeApprovalInput(item.input) +
+      "\n  Action summary: " + safeApprovalInput(item.input) +
       "\n  Decide: /approve job_id:" + item.id + " or /reject job_id:" + item.id
     );
     const remaining = queue.list(principalId, { limit: 11 }).length > 10;
