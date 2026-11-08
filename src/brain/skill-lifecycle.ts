@@ -3,6 +3,11 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import type { SkillPackage, SkillsPlatform } from "../skills/platform.js";
 import { redactSecrets } from "../security/guard.js";
+import {
+  SkillBenchmarkEngine,
+  type SkillBenchmarkReport,
+  type SkillBenchmarkComparison,
+} from "../skills/skill-benchmark.js";
 
 export type SkillLifecycleStatus = "candidate" | "verified" | "rejected" | "active" | "superseded" | "rolled_back";
 export interface SkillEvaluationCheck { name: string; passed: boolean; detail?: string; }
@@ -18,7 +23,9 @@ export interface SkillEvaluationResult {
   passed: boolean;
   checks: SkillEvaluationCheck[];
   runtimeVerification?: SkillRuntimeVerificationEvidence;
+  benchmark?: { report: SkillBenchmarkReport; comparison: SkillBenchmarkComparison };
   evaluatedAt?: string;
+  benchmarkReport?: SkillBenchmarkReport;
 }
 export function getSkillCandidateDigest(candidate: SkillPackage): string {
   return createHash("sha256").update(JSON.stringify(candidate)).digest("hex");
@@ -46,7 +53,12 @@ export interface SkillLifecycleRecord {
   updatedAt: string;
   evaluation?: SkillEvaluationResult;
 }
-export interface SkillLifecycleOptions { file: string; minimumConfidence?: number; }
+export interface SkillLifecycleOptions {
+  file: string;
+  minimumConfidence?: number;
+  /** When set, candidates must pass a same-version, same-fixture benchmark comparison. */
+  benchmarkEngine?: SkillBenchmarkEngine;
+}
 export type SkillCandidateEvaluator = (candidate: SkillPackage) => Promise<SkillEvaluationResult>;
 interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[]; activeBySkill: Record<string, string>; }
 
@@ -81,6 +93,7 @@ export class VersionedSkillLifecycle {
   private snapshot: LifecycleSnapshot = { schemaVersion: 1, records: [], activeBySkill: {} };
   private readonly file: string;
   private readonly minimumConfidence: number;
+  private readonly benchmarkEngine?: SkillBenchmarkEngine;
 
   constructor(
     private readonly platform: SkillsPlatform,
@@ -90,6 +103,7 @@ export class VersionedSkillLifecycle {
     if (!path.isAbsolute(options.file)) throw new Error("Skill lifecycle path must be absolute");
     this.file = options.file;
     this.minimumConfidence = options.minimumConfidence ?? 0.7;
+    this.benchmarkEngine = options.benchmarkEngine;
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
     this.load();
     const activeRecords: Array<{ skillId: string; record: SkillLifecycleRecord }> = [];
@@ -144,20 +158,44 @@ export class VersionedSkillLifecycle {
         !result.checks.every((check) => isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
       result = { passed: false, checks: [{ name: "evaluation-result", passed: false, detail: "Evaluator returned malformed or empty evidence" }] };
     }
+    let benchmark: SkillLifecycleRecord["evaluation"] extends infer _T ? { report: SkillBenchmarkReport; comparison: SkillBenchmarkComparison } | undefined : never;
+    let benchmarkPassed = true;
+    if (this.benchmarkEngine) {
+      if (!result.benchmarkReport ||
+          result.benchmarkReport.skillId !== candidate.skillId ||
+          result.benchmarkReport.version !== candidate.package.version) {
+        benchmarkPassed = false;
+      } else {
+        try {
+          const comparison = this.benchmarkEngine.compare(result.benchmarkReport);
+          benchmark = { report: clone(result.benchmarkReport), comparison: clone(comparison) };
+          benchmarkPassed = comparison.verdict === "stable" || comparison.verdict === "improved";
+        } catch {
+          benchmarkPassed = false;
+        }
+      }
+    }
     const before = clone(this.snapshot);
     const record = this.requireRecord(candidateId);
     record.evaluation = {
       passed: result.passed === true &&
         result.checks.every((check) => check.passed === true) &&
-        hasValidRuntimeEvidence(candidate.package, result.runtimeVerification),
+        hasValidRuntimeEvidence(candidate.package, result.runtimeVerification) &&
+        benchmarkPassed,
       ...(hasValidRuntimeEvidence(candidate.package, result.runtimeVerification)
         ? { runtimeVerification: clone(result.runtimeVerification) }
         : {}),
-      checks: result.checks.map((check) => ({
-        name: check.name.slice(0, 200),
-        passed: check.passed,
-        ...(typeof check.detail === "string" ? { detail: String(redactSecrets(check.detail)).slice(0, 1000) } : {}),
-      })),
+      ...(benchmark ? { benchmark } : {}),
+      checks: [
+        ...result.checks.map((check) => ({
+          name: check.name.slice(0, 200),
+          passed: check.passed,
+          ...(typeof check.detail === "string" ? { detail: String(redactSecrets(check.detail)).slice(0, 1000) } : {}),
+        })),
+        ...(this.benchmarkEngine && !benchmarkPassed
+          ? [{ name: "benchmark-regression", passed: false, detail: benchmark?.comparison.reasons.join("; ") ?? "Missing, mismatched, or invalid benchmark evidence" }]
+          : []),
+      ],
       evaluatedAt: new Date().toISOString(),
     };
     record.status = record.evaluation.passed ? "verified" : "rejected";
