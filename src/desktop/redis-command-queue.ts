@@ -42,7 +42,7 @@ export interface RedisDesktopCommandQueueOptions {
 
 export const REDIS_DESKTOP_COMMAND_ENQUEUE_SCRIPT = [
   "if redis.call('EXISTS', KEYS[4]) == 1 then return { 'duplicate', redis.call('GET', KEYS[4]) } end",
-  "if redis.call('HLEN', KEYS[3]) >= tonumber(ARGV[4]) then return { 'full' } end",
+  "if (redis.call('ZCARD', KEYS[1]) + redis.call('ZCARD', KEYS[2])) >= tonumber(ARGV[4]) then return { 'full' } end",
   "if redis.call('HEXISTS', KEYS[3], ARGV[1]) == 1 then return { 'id_conflict' } end",
   "redis.call('HSET', KEYS[3], ARGV[1], ARGV[2])",
   "redis.call('ZADD', KEYS[1], tonumber(ARGV[3]), ARGV[1])",
@@ -155,7 +155,7 @@ export class RedisDesktopCommandQueue {
     const command: DesktopCommand = {
       id, ownerId: input.ownerId, deviceId: input.deviceId, type: input.type,
       input: input.input, status: "queued", createdAt: now, updatedAt: now,
-      attempts: 0, maxAttempts, ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+      attempts: 0, maxAttempts,
     };
     const serialized = JSON.stringify(command);
     if (Buffer.byteLength(serialized, "utf8") > this.maxPayloadBytes) throw new Error("Desktop command payload too large.");
@@ -218,7 +218,7 @@ export class RedisDesktopCommandQueue {
   }
 
   private keys(ownerId: string, deviceId: string) {
-    const slot = `{owner-${createHash("sha256").update(ownerId).digest("hex")}-device-${createHash("sha256").update(deviceId).digest("hex")} }`.replace(" }", "}");
+    const slot = `{owner-${createHash("sha256").update(ownerId).digest("hex")}-device-${createHash("sha256").update(deviceId).digest("hex")}}`;
     const base = `${this.prefix}:${slot}`;
     return { slot, pending: `${base}:pending`, leased: `${base}:leased`, records: `${base}:records`, idempotencyPlaceholder: `${base}:idempotency:none` };
   }
