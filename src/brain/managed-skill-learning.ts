@@ -4,7 +4,7 @@ import type { ApprovalHandler } from "../agent/approval.js";
 import type { LearnedSkillCandidate } from "./learning.js";
 import { SkillSelfImprovementLoop } from "./skill-self-improvement.js";
 import type { VersionedSkillLifecycle } from "./skill-lifecycle.js";
-import type { SkillPackage } from "../skills/platform.js";
+import type { SkillExecutableArtifact, SkillPackage } from "../skills/platform.js";
 
 /**
  * Connects verified Brain repair outcomes to the bounded self-improvement loop.
@@ -13,18 +13,26 @@ import type { SkillPackage } from "../skills/platform.js";
 export function createManagedSkillLearningHandler(
   lifecycle: VersionedSkillLifecycle,
   approval?: ApprovalHandler,
+  buildArtifact?: (candidate: LearnedSkillCandidate) => Promise<SkillExecutableArtifact | undefined>,
 ): (candidate: LearnedSkillCandidate, runId: string, principalId?: string) => Promise<boolean> {
   return async (candidate, runId, principalId) => {
+    // Executable artifacts must come from a trusted compiler/adapter, never from
+    // model-authored prose. Without one, keep the candidate as guidance only.
+    const artifact = await buildArtifact?.(candidate);
+    if (!artifact) return false;
+    const verification = candidate.verification.filter((item): item is "test" => item === "test");
+    if (verification.length === 0) return false;
     const skillPackage: SkillPackage = {
+      artifact,
       skill: {
         id: `learned:${candidate.name}:${candidate.category}`,
         name: candidate.name,
-        description: "Learned from a repair that passed trusted verification.",
+        description: "Executable skill artifact compiled from a repair with trusted verification evidence.",
         triggers: [candidate.trigger],
         categories: [candidate.category],
         strategy: candidate.strategy,
         procedure: [...candidate.procedure],
-        verification: ["typecheck", "test", "build"],
+        verification,
       },
       source: "learned",
       version: "1.0.0",
