@@ -259,7 +259,7 @@ function requiresCodeVerification(
     return true;
   }
   return plan.steps.some((step) => {
-    if (/^(?:git\.|project\.verify$)/.test(step.call.tool)) return true;
+    if (step.call.tool === "project.verify") return true;
     return Object.entries(step.call.input).some(([key, value]) =>
       /^(?:path|file|filename|targetPath)$/i.test(key) &&
       typeof value === "string" &&
