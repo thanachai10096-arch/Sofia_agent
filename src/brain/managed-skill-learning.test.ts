@@ -8,6 +8,13 @@ import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "./managed-skill-learning.js";
 import type { LearnedSkillCandidate } from "./learning.js";
 
+const artifact = {
+  format: "sofia-node-skill-v1" as const,
+  runtime: "node" as const,
+  entrypoint: "index.mjs",
+  files: { "index.mjs": "export function run() { return 42; }" },
+};
+
 const candidate: LearnedSkillCandidate = {
   name: "repair-type_error",
   trigger: "compiler reported a type mismatch",
@@ -43,7 +50,7 @@ test("managed skill learning activates only after explicit approval", async () =
     const handler = createManagedSkillLearningHandler(f.lifecycle, async (request) => {
       approvalCalls.push({ toolName: request.toolName, risk: request.risk });
       return true;
-    });
+    }, async () => artifact);
     assert.equal(await handler(candidate, "run-1", "operator-1"), true);
     assert.equal(approvalCalls.length, 1);
     assert.equal(approvalCalls[0]?.toolName, "skill.lifecycle.promote");
@@ -57,9 +64,9 @@ test("managed skill learning activates only after explicit approval", async () =
 test("managed skill learning fails closed when approval is absent or declined", async () => {
   const f = fixture();
   try {
-    const noApproval = createManagedSkillLearningHandler(f.lifecycle);
-    assert.equal(await noApproval(candidate, "run-2"), false);
-    const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false);
+    const noArtifactCompiler = createManagedSkillLearningHandler(f.lifecycle, async () => true);
+    assert.equal(await noArtifactCompiler(candidate, "run-2"), false);
+    const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false, async () => artifact);
     assert.equal(await declined(candidate, "run-3"), false);
     assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
   } finally {
