@@ -10,6 +10,15 @@ export interface IsolatedSkillVerificationOptions {
   workspaceParent?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  /** Trusted tests are supplied by Sofia policy, never by the candidate artifact. */
+  getTrustedTestSuite: (candidate: SkillPackage) => TrustedSkillTestSuite | undefined;
+}
+
+export interface TrustedSkillTestSuite {
+  id: string;
+  version: string;
+  files: Record<string, string>;
+  tests: string[];
 }
 
 export interface IsolatedSkillVerificationResult {
@@ -20,6 +29,8 @@ export interface IsolatedSkillVerificationResult {
   isolated: true;
   executedChecks: Array<{ name: string; passed: boolean; exitCode: number }>;
   completedAt: string;
+  testSuiteId: string;
+  testSuiteVersion: string;
   output: Array<{ check: string; stdout: string; stderr: string }>;
 }
 
@@ -33,7 +44,7 @@ function safeRelativePath(value: unknown): value is string {
   const segments = value.split("/");
   return !path.posix.isAbsolute(value) &&
     segments.every((part) => part !== "." && part !== ".." && SAFE_SEGMENT.test(part)) &&
-    !segments.some((part) => part.toLowerCase() === "node_modules" || part.toLowerCase() === ".git");
+    !segments.some((part) => ["node_modules", ".git", "__sofia_trusted_tests__"].includes(part.toLowerCase()));
 }
 
 function validateArtifact(value: unknown): asserts value is SkillExecutableArtifact {
@@ -41,8 +52,7 @@ function validateArtifact(value: unknown): asserts value is SkillExecutableArtif
   const artifact = value as Record<string, unknown>;
   if (artifact.format !== "sofia-node-skill-v1" || artifact.runtime !== "node" ||
       !safeRelativePath(artifact.entrypoint) || !artifact.files || typeof artifact.files !== "object" ||
-      Array.isArray(artifact.files) || !Array.isArray(artifact.tests) || artifact.tests.length === 0 ||
-      artifact.tests.length > 32 || !artifact.tests.every(safeRelativePath)) {
+      Array.isArray(artifact.files)) {
     throw new Error("Invalid executable skill artifact manifest.");
   }
   const files = artifact.files as Record<string, unknown>;
@@ -98,6 +108,25 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
   return async (candidate: SkillPackage, signal?: AbortSignal): Promise<IsolatedSkillVerificationResult> => {
     const artifact: unknown = candidate.artifact;
     validateArtifact(artifact);
+    const suite = options.getTrustedTestSuite(candidate);
+    if (!suite || typeof suite.id !== "string" || !/^[A-Za-z0-9._:-]{1,120}$/.test(suite.id) ||
+        typeof suite.version !== "string" || !suite.version.trim() || suite.version.length > 100 ||
+        !suite.files || typeof suite.files !== "object" || Array.isArray(suite.files) ||
+        !Array.isArray(suite.tests) || suite.tests.length === 0 || suite.tests.length > 32 ||
+        !suite.tests.every((name) => safeRelativePath(name) && Object.hasOwn(suite.files, name)) ||
+        new Set(suite.tests).size !== suite.tests.length) {
+      throw new Error("No valid trusted verification suite is configured for this skill candidate.");
+    }
+    const suiteEntries = Object.entries(suite.files);
+    if (suiteEntries.length === 0 || suiteEntries.length > 64 ||
+        suiteEntries.some(([name, contents]) => !safeRelativePath(name) || typeof contents !== "string" ||
+          Buffer.byteLength(contents, "utf8") > MAX_FILE_BYTES) ||
+        suiteEntries.reduce((sum, [, contents]) => sum + Buffer.byteLength(contents, "utf8"), 0) > MAX_TOTAL_BYTES) {
+      throw new Error("Trusted verification suite is invalid or exceeds resource limits.");
+    }
+    if (suite.tests.some((name) => !/(?:^|\\/)test[^/]*\\.(?:js|mjs|cjs)$|\\.test\\.(?:js|mjs|cjs)$/.test(name))) {
+      throw new Error("Trusted test paths must be explicit JavaScript test files.");
+    }
     const candidateDigest = createHash("sha256").update(JSON.stringify(candidate)).digest("hex");
     const workspace = await mkdtemp(path.join(options.workspaceParent ?? os.tmpdir(), "sofia-skill-verify-"));
     const workspaceId = randomUUID();
@@ -111,6 +140,11 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
         await mkdir(path.dirname(destination), { recursive: true });
         await writeFile(destination, contents, { encoding: "utf8", flag: "wx", mode: 0o400 });
       }
+      for (const [relative, contents] of suiteEntries) {
+        const destination = path.join(workspace, "__sofia_trusted_tests__", ...relative.split("/"));
+        await mkdir(path.dirname(destination), { recursive: true });
+        await writeFile(destination, contents, { encoding: "utf8", flag: "wx", mode: 0o400 });
+      }
       const limits = {
         workspaceRoot: workspace,
         timeoutMs,
@@ -119,7 +153,7 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
       };
       const checks = [
         { name: "syntax", command: "node", args: ["--check", artifact.entrypoint] },
-        { name: "test", command: "node", args: ["--test", ...artifact.tests] },
+        { name: "test", command: "node", args: ["--test", ...suite.tests.map((name) => path.posix.join("__sofia_trusted_tests__", name))] },
       ];
       for (const check of checks) {
         const result = await options.sandbox.run(check.command, check.args, limits, signal);
@@ -140,6 +174,8 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
         isolated: true,
         executedChecks,
         completedAt: new Date().toISOString(),
+        testSuiteId: suite.id,
+        testSuiteVersion: suite.version,
         output,
       };
     } finally {
