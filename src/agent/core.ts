@@ -310,6 +310,7 @@ export class SofiaAgent {
               const approved = await this.deps.approval({
                 runId,
                 principalId: request.principalId,
+                ...(request.notificationChannelId ? { notificationChannelId: request.notificationChannelId } : {}),
                 toolName: call.name,
                 input: structuredClone(actionInput),
                 actionHash: actionHash(runId, call.name, actionInput, request.principalId),
