@@ -64,6 +64,7 @@ export class FileDesktopCommandJournal implements DesktopCommandJournal {
   }
 
   async begin(commandId: string): Promise<void> {
+    this.pruneCompleted();
     const existing = await this.get(commandId);
     if (existing) throw new Error("Desktop command journal entry already exists.");
     this.write(commandId, { commandId, status: "started", updatedAt: Date.now() });
@@ -75,6 +76,29 @@ export class FileDesktopCommandJournal implements DesktopCommandJournal {
     const serialized = JSON.stringify(outcome);
     if (Buffer.byteLength(serialized, "utf8") > 5 * 1024 * 1024) throw new Error("Desktop command outcome exceeds journal limit.");
     this.write(commandId, { commandId, status: "completed", updatedAt: Date.now(), outcome });
+  }
+
+  private pruneCompleted(): void {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    let retained = 0;
+    for (const name of readdirSync(this.directory)) {
+      if (!/^[a-f0-9]{64}\\.json$/.test(name)) continue;
+      const filename = path.join(this.directory, name);
+      try {
+        const stat = lstatSync(filename);
+        if (!stat.isFile() || stat.isSymbolicLink()) continue;
+        const value = JSON.parse(readFileSync(filename, "utf8")) as { status?: unknown };
+        if (value?.status === "completed" && stat.mtimeMs < cutoff) {
+          unlinkSync(filename);
+          continue;
+        }
+        retained += 1;
+      } catch {
+        // Preserve unreadable records rather than deleting evidence of an action.
+        retained += 1;
+      }
+    }
+    if (retained >= 10_000) throw new Error("Desktop command journal capacity reached; inspect and archive old records before accepting more actions.");
   }
 
   private write(commandId: string, entry: DesktopCommandJournalEntry): void {
