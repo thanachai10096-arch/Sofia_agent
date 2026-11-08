@@ -1002,3 +1002,55 @@ test("explicit Thai file-edit requests stay on the action path even if the model
   assert.ok(!phases.includes("respond"));
   assert.ok(report.usage.toolCalls > 0);
 });
+
+test("Brain verifies general actions from tool evidence without requiring code checks", async () => {
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "List workspace files",
+    understanding: {
+      objective: "List the files in the workspace",
+      constraints: [],
+      assumptions: [],
+      requiredCapabilities: ["research"],
+      requiredTools: ["workspace.list_files"],
+      risk: "low",
+      successCriteria: ["The workspace file listing is returned"],
+      ambiguities: [],
+    },
+    plan: {
+      strategy: "initial",
+      reason: "Read the workspace file listing",
+      steps: [{
+        id: "list-files",
+        objective: "List files in the workspace",
+        dependencies: [],
+        call: { tool: "workspace.list_files", input: { path: "." } },
+      }],
+    },
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(report.state, "completed");
+  assert.equal(report.verification.length, 1);
+  assert.equal(report.verification[0]?.criterionId, "tool-execution:list-files");
+  assert.equal(report.verification[0]?.passed, true);
+  assert.match(report.summary, /execution evidence was captured/i);
+});
