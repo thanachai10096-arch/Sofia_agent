@@ -741,3 +741,42 @@ test("runtime readiness never claims browser or terminal is ready without a real
   assert.match(browser?.runtimeReason ?? "", /browser-session probe/i);
   assert.match(terminal?.runtimeReason ?? "", /not invoked/i);
 });
+
+
+test("tool approval receives the authenticated principal and trusted notification destination", async () => {
+  let approval: { principalId?: string; notificationChannelId?: string; signal?: AbortSignal } | undefined;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Write a file after explicit approval",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+    async execute() { return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async (request) => {
+      approval = {
+        principalId: request.principalId,
+        notificationChannelId: request.notificationChannelId,
+        signal: request.signal,
+      };
+      return true;
+    },
+  );
+  const controller = new AbortController();
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/approved.txt", content: "approved" } },
+    {
+      runId: "approval-notification-context-test",
+      principalId: "discord:12345",
+      notificationChannelId: "67890",
+      signal: controller.signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(approval?.principalId, "discord:12345");
+  assert.equal(approval?.notificationChannelId, "67890");
+  assert.equal(approval?.signal, controller.signal);
+});
