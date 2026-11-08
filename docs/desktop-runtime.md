@@ -216,4 +216,13 @@ The desktop package also exports `DesktopDeviceEnrollmentService` and
 - The code expires after five minutes. A failed completion after code consumption requires the owner to start a new enrollment; this is intentionally fail-closed.
 - The companion must persist its plaintext device secret only in the operating system credential manager. The secret must never be logged, returned by list endpoints, or placed in model context.
 
-This is a domain/service foundation, **not yet a public HTTP enrollment route**. The API must inject a shared Redis client, the Redis device registry, the Redis challenge store, and a KMS-managed vault master key; authenticate enrollment creation with an owner identity and a dedicated scope; rate-limit unauthenticated completion attempts; and enforce TLS at the public edge. Device list/revoke API routes and end-to-end Companion onboarding are still pending.
+The API exposes optional, injectable routes when `SofiaApiConfig.desktopEnrollment` is supplied:
+
+- `POST /v1/desktop/enrollments` — requires the `desktop:manage` scope; creates a five-minute code owned by the authenticated API key.
+- `POST /v1/desktop/enrollments/complete` — Companion submits the code, display name, explicit capabilities, and a 32-byte base64url device secret. The one-time code is the credential; this route does not accept a caller-supplied owner ID or require a Sofia API key. It requires the configured atomic shared rate limiter and fails closed when the limiter is unavailable.
+- `GET /v1/desktop/devices` — requires `desktop:manage`; lists only the authenticated owner's devices and never returns credential envelopes.
+- `DELETE /v1/desktop/devices/:deviceId` — requires `desktop:manage`; owner-scoped durable revocation.
+
+The API host must inject a shared Redis device registry, Redis challenge store, KMS-managed vault master key, and atomic completion rate limiter. Do not enable the public completion route without these shared dependencies. The current completion limiter keys by the direct socket peer address; deployments behind a reverse proxy must also enforce per-client/IP limits at the trusted public edge rather than trusting arbitrary forwarded headers. Enforce HTTPS at the public edge and do not expose the local Desktop Action Host to the Internet.
+
+These routes are not wired into the default `src/api/entrypoint.ts` runtime yet, and end-to-end Companion onboarding is still pending. The service/API route tests do not constitute a live Redis or cloud deployment test.
