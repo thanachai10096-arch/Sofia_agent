@@ -150,6 +150,75 @@ test("API rejects unknown model routes before starting a run", async () => {
 });
 
 
+
+test("API derives remote desktop capabilities from authenticated scopes and passes them into Brain", async () => {
+  let received: { principalId?: string; desktopCapabilities?: string[] } | undefined;
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    brainFactory: (options) => {
+      received = options;
+      return {
+        run: async () => ({
+          completed: true,
+          state: "completed",
+          summary: "Brain test completed.",
+          changedFiles: [],
+          changedFilesKnown: true,
+          verification: [],
+          remainingRisks: [],
+          usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 10, replans: 0 },
+        }),
+      } as never;
+    },
+  }, {
+    apiKeys: {
+      "desktop-capable": ["agent:run", "desktop:connect", "desktop:remote:input:control"],
+      "desktop-connect-only": ["agent:run", "desktop:connect"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const startAndWait = async (key: string) => {
+    const started = await fetch(baseUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer " + key, "content-type": "application/json" },
+      body: JSON.stringify({ task: "verify remote desktop scope propagation", async: true }),
+    });
+    assert.equal(started.status, 202);
+    const run = await started.json() as { id: string };
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const response = await fetch(baseUrl + "/v1/agent/runs/" + run.id, {
+        headers: { authorization: "Bearer " + key },
+      });
+      assert.equal(response.status, 200);
+      const status = await response.json() as { status: string };
+      if (status.status === "completed") return;
+      if (status.status === "failed" || status.status === "cancelled") throw new Error("Brain test run did not complete.");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error("Brain test run timed out.");
+  };
+
+  try {
+    await startAndWait("desktop-capable");
+    assert.ok(received);
+    assert.equal(received.principalId, createHash("sha256").update("desktop-capable").digest("hex").slice(0, 32));
+    assert.deepEqual(received.desktopCapabilities, ["input:control"]);
+
+    received = undefined;
+    await startAndWait("desktop-connect-only");
+    assert.ok(received);
+    assert.deepEqual(received.desktopCapabilities, []);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("Desktop Companion API relay enforces owner scope and completes only the paired owner's command", async () => {
   const broker = new DesktopCommandBroker();
   const server = createSofiaApi({
