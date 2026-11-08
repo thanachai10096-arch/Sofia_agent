@@ -610,7 +610,7 @@ export class SofiaBrain {
     return result;
   }
 
-  private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string): Promise<boolean> {
+  private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string, notificationChannelId?: string): Promise<boolean> {
     // The same canonical catalog policy is used when exposing tools to the
     // specialist and when validating its proposal. ToolGateway remains the
     // final authority and executeStep still enforces effects/approvals.
@@ -622,7 +622,7 @@ export class SofiaBrain {
       objective: proposal.reason,
       dependencies: [],
       call: { tool: proposal.tool, input: proposal.input },
-    }, principalId);
+    }, principalId, notificationChannelId);
     this.move("observing");
     return true;
   }
@@ -667,7 +667,7 @@ export class SofiaBrain {
     });
   }
 
-  private async executeStep(step: ExecutionPlan["steps"][number], principalId?: string): Promise<Observation> {
+  private async executeStep(step: ExecutionPlan["steps"][number], principalId?: string, notificationChannelId?: string): Promise<Observation> {
     this.signal.throwIfAborted();
 
     if (this.usage.steps >= this.limits.maxSteps) {
@@ -702,6 +702,7 @@ export class SofiaBrain {
         this.dependencies.tools.execute(step.call, {
           runId: this.runId,
           ...(principalId ? { principalId } : {}),
+          ...(notificationChannelId ? { notificationChannelId } : {}),
           signal: this.signal,
           requireApproval:
             descriptor.effects.includes("destructive") ||
@@ -1075,7 +1076,7 @@ export class SofiaBrain {
               }
             }
 
-            await this.executeStep(step, input.principalId);
+            await this.executeStep(step, input.principalId, input.notificationChannelId);
             done.add(step.id);
             completedStepIds.add(step.id);
             await checkpointState(currentPlan);
@@ -1239,7 +1240,7 @@ export class SofiaBrain {
 
             // Only registered, explicitly permitted proposals enter ToolGateway.
             // Invalid proposals fall through to the primary planner's bounded replan.
-            const applied = await this.applySubagentProposal(specialist.proposedAction, input.principalId);
+            const applied = await this.applySubagentProposal(specialist.proposedAction, input.principalId, input.notificationChannelId);
             if (applied) {
               recoveryRounds += 1;
               recoveryFingerprints.add(diagnosis.fingerprint);
