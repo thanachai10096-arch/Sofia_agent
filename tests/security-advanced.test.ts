@@ -62,6 +62,12 @@ describe("risk-based approval policy",()=>{
   assert.equal(shouldRequireApproval(defaultPolicy,{},"high"),true);
   assert.equal(shouldRequireApproval(defaultPolicy,{},"critical"),true);
  });
+ it("loads the approval threshold from server environment configuration",()=>{
+  const previous=process.env.SOFIA_APPROVAL_RISK;
+  process.env.SOFIA_APPROVAL_RISK="medium";
+  try { assert.equal(loadExecutionPolicyFromEnv().approvalRisk,"medium"); }
+  finally { if(previous===undefined)delete process.env.SOFIA_APPROVAL_RISK;else process.env.SOFIA_APPROVAL_RISK=previous; }
+ });
  it("supports explicit per-tool overrides without allowing critical actions to bypass approval",()=>{
   assert.equal(shouldRequireApproval(defaultPolicy,{requireApproval:true},"low"),true);
   assert.equal(shouldRequireApproval(defaultPolicy,{requireApproval:false},"high"),false);
