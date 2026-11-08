@@ -210,7 +210,13 @@ function waitForApprovalPoll(ms: number, signal?: AbortSignal): Promise<boolean>
 }
 
 /** Waits for a user decision; timeout, cancellation, storage errors, and missing identity all deny. */
-export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options: { ttlMs?: number; pollMs?: number } = {}): ApprovalHandler {
+export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options: {
+  ttlMs?: number;
+  pollMs?: number;
+  /** Called after durable creation; delivery failure must never auto-approve or cancel the request. */
+  onCreated?: (record: ApprovalRecord, request: ApprovalRequest) => void | Promise<void>;
+  onNotificationError?: () => void;
+} = {}): ApprovalHandler {
   const ttlMs = options.ttlMs ?? 10 * 60_000;
   const pollMs = options.pollMs ?? 500;
   if (!Number.isSafeInteger(pollMs) || pollMs < 100 || pollMs > 10_000) throw new Error("Approval poll interval must be between 100 and 10000ms.");
@@ -218,6 +224,12 @@ export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options:
     if (request.signal?.aborted) return false;
     let record: ApprovalRecord;
     try { record = queue.create(request, { ttlMs }); } catch { return false; }
+    if (options.onCreated) {
+      try { await options.onCreated(record, request); }
+      catch {
+        try { options.onNotificationError?.(); } catch { /* notification diagnostics must not affect approval state */ }
+      }
+    }
     while (Date.now() < record.expiresAt) {
       if (request.signal?.aborted) return false;
       const current = queue.get(record.id, record.ownerId);
