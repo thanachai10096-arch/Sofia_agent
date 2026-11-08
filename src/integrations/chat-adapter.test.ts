@@ -14,7 +14,7 @@ const message = (overrides: Partial<VerifiedChatCommand> = {}): VerifiedChatComm
 
 function harness(options: { allowed?: boolean; failStart?: boolean; maxTaskCharacters?: number } = {}) {
   const claimed = new Set<string>();
-  const started: Array<{ task: string; context?: string; sessionId?: string }> = [];
+  const started: Array<{ task: string; context?: string; sessionId?: string; notificationChannelId?: string }> = [];
   let released = 0;
   const handler = createChatCommandHandler({
     client: {
@@ -48,6 +48,7 @@ test("dispatches a verified command through the shared Sofia client", async () =
   });
   assert.equal(h.started[0]?.task, "inspect the repository");
   assert.match(h.started[0]?.context ?? "", /telegram chat integration/);
+  assert.equal(h.started[0]?.notificationChannelId, "telegram:chat-1");
 });
 
 test("assigns a stable session ID scoped to platform, sender, and conversation", async () => {
