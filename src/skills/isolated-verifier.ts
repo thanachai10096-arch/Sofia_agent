@@ -116,7 +116,7 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
         suiteEntries.reduce((sum, [, contents]) => sum + Buffer.byteLength(contents, "utf8"), 0) > MAX_TOTAL_BYTES) {
       throw new Error("Trusted verification suite is invalid or exceeds resource limits.");
     }
-    if (suite.tests.some((name) => !/(?:^|\\/)test[^/]*\\.(?:js|mjs|cjs)$|\\.test\\.(?:js|mjs|cjs)$/.test(name))) {
+    if (suite.tests.some((name) => !/(?:^|\/)test[^/]*\.(?:js|mjs|cjs)$|\.test\.(?:js|mjs|cjs)$/.test(name))) {
       throw new Error("Trusted test paths must be explicit JavaScript test files.");
     }
     const candidateDigest = createHash("sha256").update(JSON.stringify(candidate)).digest("hex");
