@@ -76,6 +76,7 @@ export interface ToolResult {
 export interface ToolExecutionContext {
   runId: string;
   principalId?: string | undefined;
+  notificationChannelId?: string | undefined;
   signal: AbortSignal;
   requireApproval: boolean;
   notifyApproval(waiting: boolean): void;
