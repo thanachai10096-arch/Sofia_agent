@@ -100,7 +100,7 @@ test("research planner redacts secrets from evidence before external queries", a
     summary: `Verified failure\nwith\tapi_key=${secret}`,
   }]);
   assert.equal(captured.includes(secret), false);
-  assert.equal(/[\\u0000-\\u001f\\u007f]/.test(captured), false);
+  assert.equal(/[\u0000-\u001f\u007f]/.test(captured), false);
   assert.match(captured, /api_key=\[REDACTED\]/);
 });
 
