@@ -38,6 +38,9 @@ function fixture() {
       isolated: true as const,
       executedChecks: skill.skill.verification.map((name) => ({ name, passed: true })),
       completedAt: new Date().toISOString(),
+      testSuiteId: "trusted-test-fixture",
+      testSuiteVersion: "1",
+      testSuiteDigest: "a".repeat(64),
     },
   }), { file: path.join(directory, "lifecycle.json") });
   return { directory, platform, lifecycle };
