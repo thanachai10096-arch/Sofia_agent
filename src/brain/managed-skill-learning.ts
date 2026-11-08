@@ -23,8 +23,12 @@ export function createManagedSkillLearningHandler(
     // Preserve every requested verification requirement. The current isolated
     // runner proves syntax + trusted tests only; dropping typecheck/build here
     // would silently weaken the candidate's declared acceptance criteria.
-    const verification = [...candidate.verification];
-    if (!verification.includes("test")) return false;
+    const verification = candidate.verification.filter(
+      (item): item is "typecheck" | "test" | "build" =>
+        item === "typecheck" || item === "test" || item === "build",
+    );
+    // Do not silently discard unknown requirements from the learned candidate.
+    if (verification.length !== candidate.verification.length || !verification.includes("test")) return false;
     const skillPackage: SkillPackage = {
       artifact,
       skill: {
