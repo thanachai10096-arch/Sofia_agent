@@ -74,6 +74,20 @@ test("inspection tools are available without write approval", async () => {
 });
 
 
+test("medium-risk workspace writes run without interactive approval by default", async () => {
+  const rt = runtime();
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: createToolRegistry(createBuiltinTools()) },
+    defaultPolicy,
+  );
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/automatic.txt", content: "safe change" } },
+    { runId: "flexible-approval-test", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(await rt.readFile("src/automatic.txt"), "safe change");
+});
+
 test("security kill switch aborts an active tool execution", async () => {
   const rt = runtime();
   const security = new SecurityController();
