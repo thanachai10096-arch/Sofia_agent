@@ -203,3 +203,17 @@ This adapter is a persistence primitive only. It does not create enrollment or p
 HTTP endpoints, authenticate mobile users, deliver relay commands, or connect a
 Desktop Companion to the Cloud. The in-memory replay guard and multi-instance nonce
 storage remain separate concerns.
+
+
+## Single-use device enrollment foundation
+
+The desktop package also exports `DesktopDeviceEnrollmentService` and
+`RedisDesktopEnrollmentChallengeStore`.
+
+- An authenticated owner starts enrollment and receives a 256-bit random pairing code. Only its SHA-256 hash is stored in the challenge store.
+- The Redis challenge adapter uses an expiring key and an atomic GET+DEL Lua script, so a code is consumed at most once across API workers.
+- The companion submits the code, a freshly generated 32–128 byte device secret, a display name, and an explicit capability set over TLS. The service resolves the owner from the stored challenge and encrypts the device secret with the owner/device-bound credential vault before creating the registry record.
+- The code expires after five minutes. A failed completion after code consumption requires the owner to start a new enrollment; this is intentionally fail-closed.
+- The companion must persist its plaintext device secret only in the operating system credential manager. The secret must never be logged, returned by list endpoints, or placed in model context.
+
+This is a domain/service foundation, **not yet a public HTTP enrollment route**. The API must inject a shared Redis client, the Redis device registry, the Redis challenge store, and a KMS-managed vault master key; authenticate enrollment creation with an owner identity and a dedicated scope; rate-limit unauthenticated completion attempts; and enforce TLS at the public edge. Device list/revoke API routes and end-to-end Companion onboarding are still pending.

@@ -23,3 +23,15 @@ export type { EncryptedDesktopDeviceSecret, DesktopDeviceRecord, DesktopDeviceRe
 export { RedisDesktopDeviceRegistryStore } from "./redis-device-registry-store.js";
 export type { RedisDesktopDeviceRegistryStoreOptions } from "./redis-device-registry-store.js";
 export { REDIS_DESKTOP_DEVICE_CREATE_SCRIPT, REDIS_DESKTOP_DEVICE_GET_SCRIPT, REDIS_DESKTOP_DEVICE_LIST_SCRIPT, REDIS_DESKTOP_DEVICE_REVOKE_SCRIPT } from "./redis-device-registry-store.js";
+
+export { DesktopDeviceEnrollmentService } from "./device-enrollment.js";
+export type {
+  DesktopEnrollmentChallenge,
+  DesktopEnrollmentChallengeStore,
+  DesktopDeviceEnrollmentServiceOptions,
+  StartedDesktopEnrollment,
+  CompletedDesktopEnrollment,
+} from "./device-enrollment.js";
+export { RedisDesktopEnrollmentChallengeStore } from "./redis-enrollment-challenge-store.js";
+export type { RedisDesktopEnrollmentChallengeStoreOptions } from "./redis-enrollment-challenge-store.js";
+export { REDIS_DESKTOP_ENROLLMENT_CREATE_SCRIPT, REDIS_DESKTOP_ENROLLMENT_CONSUME_SCRIPT } from "./redis-enrollment-challenge-store.js";
