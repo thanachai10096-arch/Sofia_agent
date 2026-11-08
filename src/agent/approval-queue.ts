@@ -193,20 +193,42 @@ export class SqliteApprovalQueue {
   close(): void { this.db.close(); }
 }
 
-/** Waits for a user decision; timeout, storage errors, and missing identity all deny. */
+/** Wait for a poll interval, or stop immediately when the caller cancels. */
+function waitForApprovalPoll(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
+  if (!signal) return new Promise((resolve) => setTimeout(() => resolve(true), ms));
+  return new Promise((resolve) => {
+    const finish = (continued: boolean) => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      resolve(continued);
+    };
+    const onAbort = () => finish(false);
+    const timer = setTimeout(() => finish(true), ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** Waits for a user decision; timeout, cancellation, storage errors, and missing identity all deny. */
 export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options: { ttlMs?: number; pollMs?: number } = {}): ApprovalHandler {
   const ttlMs = options.ttlMs ?? 10 * 60_000;
   const pollMs = options.pollMs ?? 500;
   if (!Number.isSafeInteger(pollMs) || pollMs < 100 || pollMs > 10_000) throw new Error("Approval poll interval must be between 100 and 10000ms.");
   return async (request) => {
+    if (request.signal?.aborted) return false;
     let record: ApprovalRecord;
     try { record = queue.create(request, { ttlMs }); } catch { return false; }
     while (Date.now() < record.expiresAt) {
+      if (request.signal?.aborted) return false;
       const current = queue.get(record.id, record.ownerId);
       if (!current) return false;
       if (current.status === "approved") return sameHash(current.actionHash, request.actionHash);
       if (current.status !== "pending") return false;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs, Math.max(1, record.expiresAt - Date.now()))));
+      const continued = await waitForApprovalPoll(
+        Math.min(pollMs, Math.max(1, record.expiresAt - Date.now())),
+        request.signal,
+      );
+      if (!continued) return false;
     }
     return false;
   };
