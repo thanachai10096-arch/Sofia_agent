@@ -76,7 +76,7 @@ export class RegistryToolGateway implements ToolGateway {
       context.notifyApproval(true);
       try{
         const requestId=randomUUID();
-        const approved=await this.approval({requestId,runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk});
+        const approved=await this.approval({requestId,runId:context.runId,principalId:context.principalId,notificationChannelId:context.notificationChannelId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk,signal:context.signal});
         if(!approved){
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
