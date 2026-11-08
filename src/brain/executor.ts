@@ -109,6 +109,8 @@ export interface BrainRunInput {
   /** Prior conversation/project context; always passed to the model as untrusted reference data. */
   context?: string;
   principalId?: string;
+  /** Trusted messaging destination for approval notifications; never sent to the model. */
+  notificationChannelId?: string;
   understanding?: unknown;
   plan?: unknown;
   acceptanceCriteria?: AcceptanceCriterion[];
