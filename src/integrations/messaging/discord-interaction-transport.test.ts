@@ -104,7 +104,7 @@ test("Discord approval slash commands forward owner-scoped approval IDs", async 
     fetchImpl: async () => response({ id: "987654321" }),
   });
   const received: string[] = [];
-  await transport.start(new AbortController().signal, async (event) => { received.push(event.content); });
+  await transport.start(new AbortController().signal, async (event) => { assert.equal(event.source, "interaction"); received.push(event.content); });
   const commands = [
     { name: "approvals", options: [] as Array<{ name: string; type: number; value: string }>, expected: "/approvals" },
     { name: "approve", options: [{ name: "job_id", type: 3, value: "11111111-1111-4111-8111-111111111111" }], expected: "/approve 11111111-1111-4111-8111-111111111111" },
@@ -122,7 +122,10 @@ test("Discord approval slash commands forward owner-scoped approval IDs", async 
         member: { user: { id: "444444444444", username: "tester" } },
         data: { name: command.name, options: command.options },
       }));
-      assert.deepEqual(await transport.handleRequest(signed(body)), { status: 200, body: { type: 5 } });
+      assert.deepEqual(await transport.handleRequest(signed(body)), {
+        status: 200,
+        body: { type: 5, data: { flags: 64 } },
+      });
       for (let attempt = 0; attempt < 20 && received.length <= index; attempt++) {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
