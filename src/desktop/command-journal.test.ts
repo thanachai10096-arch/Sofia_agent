@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { FileDesktopCommandJournal } from "./command-journal.js";
@@ -32,7 +32,6 @@ test("file journal refuses to follow a symlink as its journal directory", () => 
   const link = path.join(root, "link");
   try {
     // The target is created first; the journal constructor must reject the link itself.
-    const { mkdirSync, symlinkSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(target);
     symlinkSync(target, link, "dir");
     assert.throws(() => new FileDesktopCommandJournal(link), /real directory/);
