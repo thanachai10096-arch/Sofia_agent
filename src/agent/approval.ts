@@ -6,6 +6,8 @@ export interface ApprovalRequest {
   input:Record<string,unknown>;
   actionHash:string;
   risk:RiskLevel;
+  /** Caller cancellation signal; never persisted with the approval record. */
+  signal?:AbortSignal;
 }
 export type ApprovalHandler=(request:ApprovalRequest)=>Promise<boolean>;
 /**
