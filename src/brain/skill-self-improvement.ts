@@ -65,6 +65,7 @@ function validateEvidence(input: readonly SkillImprovementEvidence[], options: S
 /** Bounded candidate orchestration. It never executes generated skill content. */
 export class SkillSelfImprovementLoop {
   private readonly options: SkillSelfImprovementOptions;
+  private running = false;
   constructor(
     private readonly lifecycle: VersionedSkillLifecycle,
     private readonly planner: SkillImprovementPlanner,
@@ -78,6 +79,16 @@ export class SkillSelfImprovementLoop {
   }
 
   async run(input: readonly SkillImprovementEvidence[]): Promise<SkillSelfImprovementReport> {
+    if (this.running) throw new Error("A skill self-improvement run is already in progress");
+    this.running = true;
+    try {
+      return await this.runOnce(input);
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async runOnce(input: readonly SkillImprovementEvidence[]): Promise<SkillSelfImprovementReport> {
     const evidence = validateEvidence(input, this.options);
     const trusted = evidence.filter((item) => item.verified);
     const runId = createHash("sha256").update(trusted.map((item) => item.id).sort().join("\n")).digest("hex").slice(0, 24);
