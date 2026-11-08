@@ -62,6 +62,7 @@ test("isolated skill verifier executes trusted tests with networking disabled", 
       ["node", "--test", "__sofia_trusted_tests__/skill.test.js"],
     ]);
     assert.ok(calls.every((call) => call.limits.allowNetwork === false));
+    assert.ok(calls.every((call) => call.limits.readOnlyWorkspace === true));
     assert.ok(calls.every((call) => call.limits.workspaceRoot.startsWith(parent)));
     assert.equal((await readdir(parent)).length, 0, "temporary workspace is removed after verification");
   } finally {
