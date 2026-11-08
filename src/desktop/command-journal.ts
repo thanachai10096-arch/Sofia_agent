@@ -67,7 +67,7 @@ export class FileDesktopCommandJournal implements DesktopCommandJournal {
     this.pruneCompleted();
     const existing = await this.get(commandId);
     if (existing) throw new Error("Desktop command journal entry already exists.");
-    this.write(commandId, { commandId, status: "started", updatedAt: Date.now() });
+    this.writeNew(commandId, { commandId, status: "started", updatedAt: Date.now() });
   }
 
   async complete(commandId: string, outcome: DesktopCommandOutcome): Promise<void> {
@@ -79,7 +79,7 @@ export class FileDesktopCommandJournal implements DesktopCommandJournal {
   }
 
   private pruneCompleted(): void {
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - 8 * 24 * 60 * 60 * 1000;
     let retained = 0;
     for (const name of readdirSync(this.directory)) {
       if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
@@ -99,6 +99,21 @@ export class FileDesktopCommandJournal implements DesktopCommandJournal {
       }
     }
     if (retained >= 10_000) throw new Error("Desktop command journal capacity reached; inspect and archive old records before accepting more actions.");
+  }
+
+  private writeNew(commandId: string, entry: DesktopCommandJournalEntry): void {
+    const target = this.filename(commandId);
+    try {
+      // O_EXCL semantics prevent two local Companion processes from both
+      // acquiring the same command and performing the native side effect.
+      writeFileSync(target, JSON.stringify(entry), { encoding: "utf8", mode: 0o600, flag: "wx" });
+      try { chmodSync(target, 0o600); } catch { /* best effort */ }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error("Desktop command journal entry already exists.");
+      }
+      throw new Error("Desktop command journal persistence failed.");
+    }
   }
 
   private write(commandId: string, entry: DesktopCommandJournalEntry): void {
