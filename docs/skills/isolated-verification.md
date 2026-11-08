@@ -62,8 +62,10 @@ The artifact is size-bounded and SHA-256-bound to the complete skill candidate.
 4. Uses the digest-pinned `ContainerSandbox` with network disabled, a read-only
    workspace mount, no added capabilities, no-new-privileges, and bounded CPU,
    memory, process count, time, and output.
-5. Records candidate digest, runner ID, isolated workspace ID, executed checks,
-   and trusted suite ID/version. The temporary workspace is removed afterward.
+5. Records the candidate digest, runner ID, isolated workspace ID, executed checks,
+   trusted suite ID/version, and a SHA-256 digest of the exact trusted suite contents
+   (including its ID, version, file contents, and test paths). The temporary
+   workspace is removed afterward.
 
 The v1 runner does not install dependencies and does not claim TypeScript
 `typecheck` or package `build` verification. Candidates that require checks the
