@@ -11,6 +11,8 @@ export interface AgentRunInput {
   maxSteps?: number;
   stream?: boolean;
   sessionId?: string;
+  /** Trusted host-supplied messaging destination for approval prompts. */
+  notificationChannelId?: string;
   /**
    * Mobile-friendly mode: return immediately and keep the agent running on
    * the server so the client can reconnect and poll for the result.
