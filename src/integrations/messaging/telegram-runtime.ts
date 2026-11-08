@@ -194,6 +194,7 @@ export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
   workspace = process.cwd(),
   onWarning: (message: string) => void = (message) => console.error(message),
+  options: { fetchImpl?: typeof fetch } = {},
 ): TelegramMessagingRuntime | undefined {
   const requested = env.SOFIA_MESSAGING_ENABLED === "true";
   if (!requested) return undefined;
@@ -269,6 +270,7 @@ export function createTelegramMessagingRuntime(
     });
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
       token,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       onError: (event, status, failureKind) => onWarning(
         "Telegram transport " + event +
         (failureKind ? " [" + failureKind + "]" : "") +
