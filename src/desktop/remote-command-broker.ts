@@ -74,7 +74,9 @@ export class DesktopCommandBroker {
 
   constructor(config: DesktopCommandBrokerConfig = {}) {
     this.now = config.now ?? Date.now;
-    this.commandTimeoutMs = clamp(config.commandTimeoutMs ?? 30_000, 1_000, 120_000);
+    // Keep the relay deadline longer than the local GUI approval window (60s by default),
+    // so an operator can review and approve a legitimate desktop action before it expires.
+    this.commandTimeoutMs = clamp(config.commandTimeoutMs ?? 90_000, 1_000, 120_000);
     this.idleTimeoutMs = clamp(config.companionIdleTimeoutMs ?? 7 * 24 * 60 * 60 * 1_000, 5_000, 30 * 24 * 60 * 60 * 1_000);
     this.maxPending = clamp(config.maxPendingPerOwner ?? 8, 1, 64);
     this.store = config.store;
