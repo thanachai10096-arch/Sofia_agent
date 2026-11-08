@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import { redactSecrets } from "../security/guard.js";
 import type { SkillPackage } from "../skills/platform.js";
 import type { SkillImprovementEvidence, SkillImprovementPlanner, SkillImprovementProposal } from "./skill-self-improvement.js";
@@ -44,14 +45,16 @@ const DEFAULT_POLICY: SkillResearchPolicy = {
 function safeUrl(value: string, allowedDomains?: readonly string[]): URL | undefined {
   try {
     const url = new URL(value);
+    const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
     if (url.protocol !== "https:" || url.username || url.password || url.port ||
-        url.hostname === "localhost" || url.hostname.endsWith(".localhost") ||
-        /^\d{1,3}(?:\.\d{1,3}){3}$/.test(url.hostname)) return undefined;
+        hostname === "localhost" || hostname.endsWith(".localhost") || isIP(hostname) !== 0) return undefined;
     if (allowedDomains?.length) {
       const host = url.hostname.toLowerCase();
       if (!allowedDomains.some((domain) => host === domain.toLowerCase() || host.endsWith(`.${domain.toLowerCase()}`))) return undefined;
     }
+    // Query strings may carry tracking tokens or credentials; citations use a clean canonical URL.
     url.hash = "";
+    url.search = "";
     return url;
   } catch { return undefined; }
 }
