@@ -218,6 +218,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
           ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
           ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
@@ -497,6 +498,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
@@ -551,6 +553,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             : undefined;
           const requestFingerprint = idempotencyFingerprint({
             task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
             ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
             ...(input.context !== undefined ? { context: input.context } : {}),
             ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
@@ -620,6 +623,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
@@ -675,7 +679,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 400, { error: "invalid_cron_schedule", message: "enabled must be a boolean" }, origin, config);
           }
           const scheduleInput: CronScheduleInput = {
-            name: input.name, task: input.task, timeZone: input.timeZone, ownerKeyId: auth.keyId,
+            name: input.name, task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}), timeZone: input.timeZone, ownerKeyId: auth.keyId,
             ...(typeof input.cron === "string" ? { cron: input.cron } : {}),
             ...(typeof input.runAt === "string" ? { runAt: input.runAt } : {}),
             ...(typeof input.enabled === "boolean" ? { enabled: input.enabled } : {}),
@@ -767,6 +772,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           const job = await deps.jobRuntime.submit({
             task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
