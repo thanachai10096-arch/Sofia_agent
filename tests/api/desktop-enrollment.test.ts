@@ -68,10 +68,12 @@ async function start() {
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const base = "http://127.0.0.1:" + address.port;
-  const request = (token: string, path: string, init: RequestInit = {}) => fetch(base + path, {
-    ...init,
-    headers: { authorization: "Bearer " + token, ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
-  });
+  const request = (token: string, path: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set("authorization", "Bearer " + token);
+    if (init.body) headers.set("content-type", "application/json");
+    return fetch(base + path, { ...init, headers });
+  };
   return { server, request, base, registry, getAttempts: () => attempts };
 }
 
