@@ -158,7 +158,21 @@ export class ResearchAugmentedSkillPlanner implements SkillImprovementPlanner {
       });
     }
     this.lastAudit = { bundles, rejectedSources };
-    return this.downstream(evidence, bundles);
+    const proposals = await this.downstream(evidence, bundles);
+    const citationsBySkill = new Map(bundles.map((bundle) => [
+      bundle.skillId,
+      bundle.citations.map(({ url, contentHash }) => ({ url, contentHash })),
+    ]));
+    return proposals.map((proposal) => {
+      const sources = citationsBySkill.get(proposal.skillPackage.skill.id) ?? [];
+      return {
+        ...proposal,
+        provenance: {
+          ...proposal.provenance,
+          ...(sources.length > 0 ? { researchSources: sources } : {}),
+        },
+      };
+    });
   }
 }
 
