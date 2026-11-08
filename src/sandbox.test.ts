@@ -22,7 +22,7 @@ test("ProcessSandbox rejects actual NUL bytes in commands and arguments", async 
     /valid command without NUL bytes/,
   );
   await assert.rejects(
-    () => sandbox.run("node", ["--version\\0"], limits()),
+    () => sandbox.run("node", ["--version\0"], limits()),
     /without NUL bytes/,
   );
 });
