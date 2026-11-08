@@ -76,3 +76,23 @@ produce executable artifacts. Therefore those candidates remain blocked from
 promotion. Operators must deliberately create an executable artifact and a
 matching trusted test suite before the runtime can verify it. No production
 deployment or automatic skill activation is implied by adding this verifier.
+
+
+## Learned repair integration boundary
+
+The current Brain learned-repair record contains strategy/procedure text and
+verification labels, not source code. It is not safe to turn that prose into
+an executable artifact by guessing or by treating a model-generated script as
+trusted.
+
+`createManagedSkillLearningHandler` therefore accepts an optional trusted
+artifact builder. It must be supplied by an operator-controlled compiler or
+reviewed implementation pipeline. If no builder is configured, or if it does
+not return a valid artifact, the candidate is not proposed and no promotion
+approval is requested. The current factory intentionally does not configure a
+builder, so ordinary learned repair guidance remains non-executable and cannot
+be promoted as an executable skill.
+
+The v1 verifier supports Node ESM syntax checking and independent trusted
+tests only. It does not claim typecheck/build coverage; candidates requiring
+those checks must wait for corresponding isolated runners.
