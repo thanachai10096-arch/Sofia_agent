@@ -26,7 +26,7 @@ test("device credential vault rejects tampering and malformed envelopes", () => 
   const envelope = vault.encrypt(deviceId, ownerId, secret);
   assert.throws(() => vault.decrypt(deviceId, ownerId, { ...envelope, ciphertext: Buffer.alloc(32, 1).toString("base64url") }));
   assert.throws(() => vault.decrypt(deviceId, ownerId, { ...envelope, tag: "invalid!" }));
-  assert.throws(() => vault.decrypt(deviceId, ownerId, { ...envelope, version: 2 as 1 }));
+  assert.throws(() => vault.decrypt(deviceId, ownerId, { ...envelope, version: 2 as unknown as 1 }));
 });
 
 test("device credential vault rejects weak keys, secrets and invalid ownership", () => {
