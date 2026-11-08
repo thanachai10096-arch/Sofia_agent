@@ -246,7 +246,7 @@ test("skill lifecycle deactivates legacy active records without isolated evidenc
     const persisted = JSON.parse(readFileSync(file, "utf8")) as {
       records: Array<{ evaluation?: { runtimeVerification?: unknown } }>;
     };
-    delete persisted.records[0].evaluation?.runtimeVerification;
+    delete persisted.records[0]?.evaluation?.runtimeVerification;
     writeFileSync(file, JSON.stringify(persisted), "utf8");
 
     const restoredPlatform = new InMemorySkillsPlatform();
