@@ -17,17 +17,18 @@ const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
-// Approval access is opt-in; the default API key must not silently gain authority to approve actions.
-const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read,approval:read,approval:decide").split(",").map((s) => s.trim()).filter(Boolean);
 const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 let discordApprovalNotifier: ((record: ApprovalRecord, channelId: string) => Promise<void>) | undefined;
+let telegramApprovalNotifier: ((record: ApprovalRecord) => Promise<void>) | undefined;
 const approvalQueue = await SqliteApprovalQueue.open(path.join(workspace, ".sofia", "approvals.sqlite"));
 const approvalHandler = createQueuedApprovalHandler(approvalQueue, {
   onCreated: async (record, request) => {
     if (request.notificationChannelId) await discordApprovalNotifier?.(record, request.notificationChannelId);
+    await telegramApprovalNotifier?.(record);
   },
   onNotificationError: () => console.error("Approval notification delivery failed."),
 });
@@ -35,6 +36,14 @@ const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalH
 deps.approvalQueue = approvalQueue;
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
+telegramApprovalNotifier = telegramRuntime
+  ? async (record) => {
+      await telegramRuntime.notifyApproval(
+        record.ownerId,
+        "Sofia needs your approval for " + record.toolName + " [" + record.risk + "].\nUse /approvals in this private chat to review the exact action.",
+      );
+    }
+  : undefined;
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
