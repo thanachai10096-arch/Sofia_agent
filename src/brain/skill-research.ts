@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 import { redactSecrets } from "../security/guard.js";
-import type { SkillPackage } from "../skills/platform.js";
 import type { SkillImprovementEvidence, SkillImprovementPlanner, SkillImprovementProposal } from "./skill-self-improvement.js";
 
 export interface SkillResearchSource {
