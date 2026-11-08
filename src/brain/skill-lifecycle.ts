@@ -208,7 +208,8 @@ export class VersionedSkillLifecycle {
   promote(candidateId: string): SkillLifecycleRecord {
     const candidate = this.requireRecord(candidateId);
     if (candidate.status !== "verified" || candidate.evaluation?.passed !== true ||
-        !hasValidRuntimeEvidence(candidate.package, candidate.evaluation.runtimeVerification)) {
+        !hasValidRuntimeEvidence(candidate.package, candidate.evaluation.runtimeVerification) ||
+        !this.hasValidBenchmarkEvidence(candidate.package, candidate.evaluation)) {
       throw new Error("Only candidates with valid isolated runtime verification can be promoted");
     }
     if (candidate.provenance.confidence < this.minimumConfidence) throw new Error("Skill candidate confidence is below the promotion threshold");
@@ -284,6 +285,18 @@ export class VersionedSkillLifecycle {
     return id ? this.get(id) : undefined;
   }
 
+  private hasValidBenchmarkEvidence(skillPackage: SkillPackage, evaluation: SkillEvaluationResult | undefined): boolean {
+    if (!this.benchmarkEngine) return true;
+    const report = evaluation?.benchmark?.report;
+    if (!report || report.skillId !== skillPackage.skill.id || report.version !== skillPackage.version) return false;
+    try {
+      const comparison = this.benchmarkEngine.compare(report);
+      return comparison.verdict === "stable" || comparison.verdict === "improved";
+    } catch {
+      return false;
+    }
+  }
+
   private requireRecord(id: string): SkillLifecycleRecord {
     const item = this.snapshot.records.find((record) => record.id === id);
     if (!item) throw new Error("Unknown skill lifecycle record: " + id);
@@ -323,6 +336,7 @@ export class VersionedSkillLifecycle {
            !Array.isArray(item.evaluation.checks) || item.evaluation.checks.length === 0 ||
            !item.evaluation.checks.every((check) => isRecord(check) && check.passed === true) ||
            !hasValidRuntimeEvidence(safePackage, item.evaluation.runtimeVerification as SkillRuntimeVerificationEvidence | undefined) ||
+           !this.hasValidBenchmarkEvidence(safePackage, restored.evaluation) ||
            item.provenance.confidence < this.minimumConfidence)) {
         // Schema-v1 records created before package-bound runtime evidence existed
         // must not keep executing, but must not make the whole agent fail to boot.
