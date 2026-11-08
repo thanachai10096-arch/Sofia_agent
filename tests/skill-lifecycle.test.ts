@@ -6,6 +6,7 @@ import path from "node:path";
 import { VersionedSkillLifecycle, getSkillCandidateDigest } from "../src/brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../src/skills/platform.js";
 import type { SkillPackage } from "../src/skills/platform.js";
+import { SkillBenchmarkEngine } from "../src/skills/skill-benchmark.js";
 
 function pkg(version: string): SkillPackage {
   return { source: "learned", version, publisher: "test", skill: {
@@ -262,5 +263,61 @@ test("skill lifecycle deactivates legacy active records without isolated evidenc
     assert.equal(migrated.activeBySkill["repair-skill"], undefined);
     assert.equal(migrated.records[0]?.status, "rejected");
     assert.equal(migrated.records[0]?.evaluation?.passed, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("skill lifecycle requires same-version benchmark evidence and blocks safety regressions", async () => {
+  const root = dir();
+  try {
+    const engine = new SkillBenchmarkEngine();
+    const baseline = engine.summarize("repair-skill", "1.0.0", [
+      { fixtureId: "case-a", passed: true, safetyPassed: true, durationMs: 120, toolCalls: 1, retries: 0 },
+      { fixtureId: "case-b", passed: true, safetyPassed: true, durationMs: 130, toolCalls: 1, retries: 0 },
+      { fixtureId: "case-c", passed: false, safetyPassed: true, durationMs: 140, toolCalls: 2, retries: 1 },
+    ]);
+    engine.setBaseline(baseline);
+
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, async (candidate) => ({
+      ...await passing(candidate),
+      benchmarkReport: engine.summarize("repair-skill", "1.0.0", [
+        { fixtureId: "case-a", passed: true, safetyPassed: true, durationMs: 90, toolCalls: 1, retries: 0 },
+        { fixtureId: "case-b", passed: true, safetyPassed: false, durationMs: 90, toolCalls: 1, retries: 0 },
+        { fixtureId: "case-c", passed: true, safetyPassed: true, durationMs: 90, toolCalls: 1, retries: 0 },
+      ]),
+    }), { file: path.join(root, "benchmark-gated.json"), benchmarkEngine: engine });
+
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["benchmark-safety-gate"], confidence: 0.99,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.equal(evaluated.evaluation?.benchmark?.comparison.verdict, "blocked_safety");
+    assert.throws(() => lifecycle.promote(candidate.id), /evaluated/);
+    assert.equal(platform.get("repair-skill"), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill lifecycle with benchmark gate rejects missing baseline or mismatched version evidence", async () => {
+  const root = dir();
+  try {
+    const engine = new SkillBenchmarkEngine();
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => ({
+      ...await passing(candidate),
+      benchmarkReport: engine.summarize("repair-skill", "0.9.0", [
+        { fixtureId: "a", passed: true, safetyPassed: true, durationMs: 1, toolCalls: 1, retries: 0 },
+        { fixtureId: "b", passed: true, safetyPassed: true, durationMs: 1, toolCalls: 1, retries: 0 },
+        { fixtureId: "c", passed: true, safetyPassed: true, durationMs: 1, toolCalls: 1, retries: 0 },
+      ]),
+    }), { file: path.join(root, "benchmark-missing.json"), benchmarkEngine: engine });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["no-baseline"], confidence: 0.99,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.benchmark?.comparison.verdict, "insufficient_evidence");
+    assert.equal(evaluated.evaluation?.checks.some((check) => check.name === "benchmark-regression" && !check.passed), true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
