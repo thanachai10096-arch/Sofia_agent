@@ -20,8 +20,11 @@ export function createManagedSkillLearningHandler(
     // model-authored prose. Without one, keep the candidate as guidance only.
     const artifact = await buildArtifact?.(candidate);
     if (!artifact) return false;
-    const verification = candidate.verification.filter((item): item is "test" => item === "test");
-    if (verification.length === 0) return false;
+    // Preserve every requested verification requirement. The current isolated
+    // runner proves syntax + trusted tests only; dropping typecheck/build here
+    // would silently weaken the candidate's declared acceptance criteria.
+    const verification = [...candidate.verification];
+    if (!verification.includes("test")) return false;
     const skillPackage: SkillPackage = {
       artifact,
       skill: {
