@@ -153,7 +153,7 @@ export async function handleTelegramApprovalCommand(
     const { approvals } = await client.listApprovals();
     if (!approvals.length) return "ไม่มีคำขออนุมัติที่รอดำเนินการ";
     return approvals.slice(0, 10).map((item, index) =>
-      (index + 1) + ". " + item.toolName + " [" + item.risk + "]\\n" +
+      (index + 1) + ". " + item.toolName + " [" + item.risk + "]\n" +
       "ID: " + item.id + "\n" +
       "หมดอายุ: " + new Date(item.expiresAt).toISOString() + "\n" +
       "Action hash: " + item.actionHash
