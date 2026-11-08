@@ -1095,7 +1095,7 @@ export class SofiaBrain {
             this.move("verifying");
             this.emit({ type: "brain.verification.started" });
             const snapshot = await this.io(() => this.dependencies.tools.snapshot(this.signal));
-            verification = this.observations.map((observation) => ({
+            verification = this.observations.filter((observation) => observation.ok && Boolean(observation.evidenceId)).map((observation) => ({
               criterionId: "tool-execution:" + observation.stepId,
               passed: observation.ok && Boolean(observation.evidenceId),
               detail: observation.ok
