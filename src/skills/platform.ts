@@ -7,7 +7,6 @@ export interface SkillExecutableArtifact {
   runtime: "node";
   entrypoint: string;
   files: Record<string, string>;
-  tests: string[];
 }
 
 export interface SkillPackage {
