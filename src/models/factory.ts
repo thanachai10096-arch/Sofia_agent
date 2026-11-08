@@ -80,12 +80,23 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         getTrustedTestSuite: (skillCandidate) => loadTrustedSkillTestSuite(skillCandidate),
       });
       const evidence = await verify(candidate);
+      const failedChecks = evidence.executedChecks
+        .filter((check) => !check.passed)
+        .map((check) => `${check.name} (exit ${check.exitCode})`);
+      const unsupportedRequirements = candidate.skill.verification
+        .filter((required) => !evidence.executedChecks.some((check) => check.name === required && check.passed));
       checks.push({
         name: "runtime-verification",
         passed: evidence.passed,
         detail: evidence.passed
-          ? "Executable artifact passed isolated syntax and test checks with networking disabled."
-          : "Executable artifact failed isolated syntax or test verification.",
+          ? "Executable artifact passed isolated syntax and trusted tests with networking disabled."
+          : [
+              failedChecks.length > 0 ? `Failed checks: ${failedChecks.join(", ")}.` : undefined,
+              unsupportedRequirements.length > 0
+                ? `Required checks not proven by this runner: ${unsupportedRequirements.join(", ")}.`
+                : undefined,
+              "No promotion is allowed until every required check has passing isolated evidence.",
+            ].filter(Boolean).join(" "),
       });
       return {
         passed: evidence.passed && checks.every((check) => check.passed),
