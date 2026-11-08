@@ -83,7 +83,7 @@ export class ProcessSandbox implements Sandbox {
     limits: SandboxLimits,
     signal?: AbortSignal,
   ): Promise<{ stdout: string; stderr: string; code: number }> {
-    if (!command.trim()) throw new Error("A command is required.");
+    if (!command.trim() || command.includes("\0")) throw new Error("A valid command without NUL bytes is required.");
     if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string" || arg.includes("\0"))) {
       throw new Error("Command arguments must be strings without NUL bytes.");
     }
