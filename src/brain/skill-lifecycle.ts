@@ -18,6 +18,8 @@ export interface SkillRuntimeVerificationEvidence {
   isolated: true;
   executedChecks: Array<{ name: string; passed: boolean }>;
   completedAt: string;
+  testSuiteId?: string;
+  testSuiteVersion?: string;
 }
 export interface SkillEvaluationResult {
   passed: boolean;
