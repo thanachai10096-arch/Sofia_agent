@@ -147,6 +147,7 @@ export class SofiaAgent {
       task: request.task,
       ...(request.context !== undefined ? { context: request.context } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
+      ...(request.notificationChannelId ? { notificationChannelId: request.notificationChannelId } : {}),
       ...(request.acceptanceCriteria
         ? { acceptanceCriteria: request.acceptanceCriteria }
         : {}),
