@@ -184,3 +184,22 @@ The desktop package exports a `DesktopDeviceRegistryStore` contract and `Desktop
 - The vault encrypts each device's random HMAC secret with AES-256-GCM. The 32-byte master key must be supplied by a KMS or secret manager and kept separate from the registry database. The authenticated encryption data binds the ciphertext to both the owner ID and device ID, preventing a credential row from being moved between accounts/devices.
 - The raw per-device secret should be shown to the Companion only once at enrollment, then stored in the OS credential manager. Never return it from ordinary device-list APIs, place it in model context, or write it to logs.
 - This is not yet an enrollment API or a durable registry implementation. Command delivery, outbound Companion transport, result streaming, and mobile control UI remain separate work. Do not advertise phone-to-PC remote control as available until the end-to-end path is implemented and tested.
+
+
+### Redis-backed device registry
+
+The optional `RedisDesktopDeviceRegistryStore` implements the device-registry persistence
+boundary for deployments that inject a shared Redis client. Create and revoke operations
+use atomic Lua scripts; owner indexes are separate from record keys, and owner/device
+identifiers are SHA-256 hashed before being used as Redis keys. Reads and list results
+are checked against the stored owner ID again.
+
+The registry stores only the encrypted credential envelope produced by
+`DesktopDeviceCredentialVault`, never the plaintext device HMAC secret. Configure
+Redis availability, persistence, backups, access controls, TLS, and an environment-
+specific key prefix operationally before using this store. Redis errors fail closed.
+
+This adapter is a persistence primitive only. It does not create enrollment or pairing
+HTTP endpoints, authenticate mobile users, deliver relay commands, or connect a
+Desktop Companion to the Cloud. The in-memory replay guard and multi-instance nonce
+storage remain separate concerns.
