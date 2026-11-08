@@ -13,6 +13,8 @@ import { loadModelConfigFromEnv } from "./config.js";
 import type { AgentDependencies } from "../agent/types.js";
 import { Reviewer } from "../review/reviewer.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
+import { ContainerSandbox } from "../sandbox.js";
+import { createIsolatedSkillVerifier } from "../skills/isolated-verifier.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
@@ -58,13 +60,50 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
       { name: "procedure", passed: candidate.skill.procedure.length >= 2 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
       { name: "verification-requirements", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
-      // Listing desired checks is not proof that they ran. Until the lifecycle is
-      // wired to an isolated verifier that executes the candidate against a
-      // controlled workspace and records fresh results, production promotion
-      // must fail closed rather than label metadata-only inspection "verified".
-      { name: "runtime-verification", passed: false, detail: "No isolated skill verification runner is configured; metadata checks cannot establish executable correctness." },
     ];
-    return { passed: false, checks };
+    const image = process.env.SOFIA_SKILL_SANDBOX_IMAGE;
+    if (!candidate.artifact || !image) {
+      checks.push({
+        name: "runtime-verification",
+        passed: false,
+        detail: !candidate.artifact
+          ? "Candidate has no executable SkillArtifact; prose metadata is not executable evidence."
+          : "SOFIA_SKILL_SANDBOX_IMAGE is not configured with a pinned container image.",
+      });
+      return { passed: false, checks };
+    }
+    try {
+      const verify = createIsolatedSkillVerifier({
+        sandbox: new ContainerSandbox({ image }),
+      });
+      const evidence = await verify(candidate);
+      checks.push({
+        name: "runtime-verification",
+        passed: evidence.passed,
+        detail: evidence.passed
+          ? "Executable artifact passed isolated syntax and test checks with networking disabled."
+          : "Executable artifact failed isolated syntax or test verification.",
+      });
+      return {
+        passed: evidence.passed && checks.every((check) => check.passed),
+        checks,
+        runtimeVerification: {
+          candidateDigest: evidence.candidateDigest,
+          runnerId: evidence.runnerId,
+          isolatedWorkspaceId: evidence.isolatedWorkspaceId,
+          isolated: true as const,
+          executedChecks: evidence.executedChecks.map(({ name, passed }) => ({ name, passed })),
+          completedAt: evidence.completedAt,
+        },
+      };
+    } catch (error) {
+      checks.push({
+        name: "runtime-verification",
+        passed: false,
+        detail: error instanceof Error ? error.message : "Isolated skill verification failed.",
+      });
+      return { passed: false, checks };
+    }
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
