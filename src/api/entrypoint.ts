@@ -9,7 +9,7 @@ import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.j
 import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { isDiscordMessageAllowed, parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { SqliteApprovalQueue, createQueuedApprovalHandler } from "../agent/approval-queue.js";
+import { SqliteApprovalQueue, createQueuedApprovalHandler, type ApprovalRecord } from "../agent/approval-queue.js";
 import { handleDiscordApprovalCommand } from "../integrations/messaging/discord-approvals.js";
 import { createTelegramMessagingRuntime, parseTelegramUserAllowlist, parseTelegramUserApiKeys } from "../integrations/messaging/telegram-runtime.js";
 
@@ -22,8 +22,14 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
+let discordApprovalNotifier: ((record: ApprovalRecord, channelId: string) => Promise<void>) | undefined;
 const approvalQueue = await SqliteApprovalQueue.open(path.join(workspace, ".sofia", "approvals.sqlite"));
-const approvalHandler = createQueuedApprovalHandler(approvalQueue);
+const approvalHandler = createQueuedApprovalHandler(approvalQueue, {
+  onCreated: async (record, request) => {
+    if (request.notificationChannelId) await discordApprovalNotifier?.(record, request.notificationChannelId);
+  },
+  onNotificationError: () => console.error("Approval notification delivery failed."),
+});
 const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalHandler);
 deps.approvalQueue = approvalQueue;
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
@@ -62,6 +68,19 @@ if (discordConfigured) {
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
   });
+  discordApprovalNotifier = async (record, channelId) => {
+    const prefix = "discord:";
+    const userId = record.ownerId.startsWith(prefix) ? record.ownerId.slice(prefix.length) : "";
+    if (!userId || !isDiscordMessageAllowed({ userId, channelId }, discordUserIds, discordChannelIds)) return;
+    const notice = [
+      "Sofia needs your approval before continuing.",
+      "Tool: " + record.toolName,
+      "Risk: " + record.risk,
+      "Approval ID: " + record.id,
+      "Review the action with /approvals, then use /approve job_id:<approval-id> or /reject job_id:<approval-id>.",
+    ].join("\\n");
+    await discordTransport?.sendMessage(channelId, notice);
+  };
   const discordDeduplicator = new FileChatMessageDeduplicator(
     path.resolve(process.env.SOFIA_CHAT_DEDUPE_DIR ?? path.join(workspace, ".sofia", "chat-dedupe")),
   );
