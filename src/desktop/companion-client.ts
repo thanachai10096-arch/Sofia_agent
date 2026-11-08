@@ -249,13 +249,21 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
       if (signal?.aborted) controller.abort(signal.reason);
       else signal?.addEventListener("abort", relayAbort, { once: true });
       try {
+        let retryDelayMs = pollIntervalMs;
         while (!controller.signal.aborted) {
-          try { await pollOnce(controller.signal); }
-          catch (error) {
+          try {
+            await pollOnce(controller.signal);
+            // Any successful API round-trip resets outage backoff.
+            retryDelayMs = pollIntervalMs;
+            await abortableDelay(pollIntervalMs, controller.signal);
+          } catch (error) {
             if (controller.signal.aborted) break;
             if (error instanceof Error && error.message.includes("pairing was revoked")) throw error;
+            // Avoid hammering a restarting or unreachable Cloud API. Keep retries
+            // bounded and responsive to local stop/disconnect signals.
+            await abortableDelay(retryDelayMs, controller.signal);
+            retryDelayMs = Math.min(30_000, Math.max(pollIntervalMs, retryDelayMs * 2));
           }
-          await abortableDelay(pollIntervalMs, controller.signal);
         }
       } finally {
         signal?.removeEventListener("abort", relayAbort);
