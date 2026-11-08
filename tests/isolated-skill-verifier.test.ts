@@ -21,7 +21,7 @@ function candidate(): SkillPackage {
       format: "sofia-node-skill-v1",
       runtime: "node",
       entrypoint: "index.mjs",
-      files: { "index.js": "export function run() { return 42; }" },
+      files: { "index.mjs": "export function run() { return 42; }" },
     },
   };
 }
@@ -30,7 +30,7 @@ const trustedSuite = {
   id: "trusted-fixture",
   version: "1",
   files: {
-    "skill.test.mjs": 'import test from "node:test"; import assert from "node:assert/strict"; import { run } from "../index.js"; test("trusted behavior", () => assert.equal(run(), 42));',
+    "skill.test.mjs": 'import test from "node:test"; import assert from "node:assert/strict"; import { run } from "../index.mjs"; test("trusted behavior", () => assert.equal(run(), 42));',
   },
   tests: ["skill.test.mjs"],
 };
