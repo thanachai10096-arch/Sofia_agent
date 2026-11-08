@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VersionedSkillLifecycle, getSkillCandidateDigest } from "../src/brain/skill-lifecycle.js";
@@ -124,6 +124,31 @@ test("skill lifecycle preserves prior version and can roll back", async () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+
+test("failed rollback restores a missing platform entry instead of leaving a partial registration", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "lifecycle.json");
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
+    const first = lifecycle.propose(pkg("1.0.0"), { source: "repair", evidenceIds: ["rollback-failure-1"], confidence: 0.9 });
+    await lifecycle.evaluate(first.id);
+    lifecycle.promote(first.id);
+    const second = lifecycle.propose(pkg("2.0.0"), { source: "repair", evidenceIds: ["rollback-failure-2"], confidence: 0.9 });
+    await lifecycle.evaluate(second.id);
+    lifecycle.promote(second.id);
+
+    // Simulate a missing platform entry and force persistence to fail after
+    // rollback has attempted to register the previous version.
+    platform.remove("repair-skill");
+    rmSync(file);
+    mkdirSync(file);
+
+    assert.throws(() => lifecycle.rollback("repair-skill"));
+    assert.equal(platform.get("repair-skill"), undefined, "failed rollback must not leave a partial platform registration");
+    assert.equal(lifecycle.active("repair-skill")?.package.version, "2.0.0", "in-memory lifecycle state must remain on the original active version");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test("skill lifecycle refuses to overwrite an unmanaged platform skill", async () => {
   const root = dir();
