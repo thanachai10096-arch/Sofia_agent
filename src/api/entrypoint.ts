@@ -104,6 +104,10 @@ if (discordConfigured) {
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
       const argument = message.content.trim().slice(command.length).trim();
       if (command === "/approvals" || command === "/approve" || command === "/reject") {
+        if (command === "/approvals" && message.source !== "interaction") {
+          await discordTransport?.sendMessage(message.channelId, "Use the private Discord /approvals slash command to review pending actions.", undefined, message.id);
+          return;
+        }
         const reply = handleDiscordApprovalCommand(approvalQueue, principalId, command, argument);
         await discordTransport?.sendMessage(message.channelId, reply, undefined, message.id);
         return;
