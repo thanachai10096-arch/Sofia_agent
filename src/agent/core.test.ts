@@ -97,3 +97,70 @@ for (const approved of [true, false]) {
     }
   });
 }
+
+
+test("Agent Core stops waiting for approval when the run is cancelled", async () => {
+  const queue = await SqliteApprovalQueue.open(":memory:");
+  const controller = new AbortController();
+  let executions = 0;
+  let modelCalls = 0;
+  const toolName = "custom.write";
+  const deps: AgentDependencies = {
+    provider: {
+      async generate() {
+        modelCalls += 1;
+        return modelCalls === 1
+          ? { text: "", toolCalls: [{ id: "call-cancel", name: toolName, input: { value: "never-write" } }] }
+          : { text: "unexpected continuation" };
+      },
+    },
+    router: {
+      select: () => ({
+        id: "cancel-route", capabilities: ["tool-use"], costWeight: 1,
+        latencyWeight: 1, qualityWeight: 1, healthy: true,
+      }),
+      markUnhealthy: () => undefined,
+    },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    runtime: {} as WorkspaceRuntime,
+    tools: new MapToolRegistry([{
+      name: toolName,
+      description: "Test cancellation while approval is pending.",
+      inputSchema: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+        additionalProperties: false,
+      },
+      effects: ["write"],
+      async execute() {
+        executions += 1;
+        return { saved: true };
+      },
+    }]),
+    policy: {
+      ...defaultPolicy,
+      permissions: { [toolName]: { requireApproval: true, maxRisk: "high" } },
+    },
+    approval: createQueuedApprovalHandler(queue, { pollMs: 5_000, ttlMs: 5_000 }),
+  };
+
+  try {
+    const running = new SofiaAgent(deps).run({
+      task: "Cancel while waiting for approval.",
+      principalId: "owner-a",
+      useBrain: false,
+      maxSteps: 3,
+      signal: controller.signal,
+    });
+    await waitForPending(queue, "owner-a");
+    const startedAt = Date.now();
+    controller.abort();
+    await assert.rejects(running);
+    assert.ok(Date.now() - startedAt < 1_000, "approval wait should stop promptly after cancellation");
+    assert.equal(executions, 0);
+    assert.equal(modelCalls, 1);
+  } finally {
+    queue.close();
+  }
+});
