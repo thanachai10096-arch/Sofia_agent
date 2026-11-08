@@ -316,7 +316,9 @@ export function createTelegramMessagingRuntime(
         // Approval notices are sent only as a private DM. A group/channel ID is
         // never accepted from the run request or used as an outbound target.
         if (!userId || !allowedUsers.has(userId) || !allowedChats.has(userId) || !gateway) return false;
-        return gateway.send("telegram", { conversationId: userId, text: text.slice(0, 3_500) });
+        const delivered = await gateway.send("telegram", { conversationId: userId, text: text.slice(0, 3_500) });
+        if (!delivered) onWarning("Telegram approval notification delivery failed.");
+        return delivered;
       },
     };
   } catch (error) {
