@@ -128,3 +128,6 @@ export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHA
 export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
+
+export { RedisDesktopDeviceRegistryStore, REDIS_DESKTOP_DEVICE_CREATE_SCRIPT, REDIS_DESKTOP_DEVICE_GET_SCRIPT, REDIS_DESKTOP_DEVICE_LIST_SCRIPT, REDIS_DESKTOP_DEVICE_REVOKE_SCRIPT } from "./desktop/redis-device-registry.js";
+export type { RedisDesktopDeviceRegistryStoreOptions } from "./desktop/redis-device-registry.js";
