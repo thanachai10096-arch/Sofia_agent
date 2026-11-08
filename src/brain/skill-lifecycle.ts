@@ -373,8 +373,10 @@ export class VersionedSkillLifecycle {
     return item;
   }
   private load(): void {
+    // Validate the complete path before reading; checking only the leaf file
+    // still follows a symlinked parent directory.
+    assertNoSymlinkPath(this.file);
     if (!existsSync(this.file)) return;
-    if (lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
     const parsed: unknown = JSON.parse(readFileSync(this.file, "utf8"));
     if (!isRecord(parsed) || parsed.schemaVersion !== 1 || !Array.isArray(parsed.records) || !isRecord(parsed.activeBySkill)) {
       throw new Error("Unsupported or corrupt skill lifecycle store");
