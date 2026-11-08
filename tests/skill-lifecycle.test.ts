@@ -265,10 +265,7 @@ test("artifact verification cannot satisfy typecheck with syntax and test eviden
     const evaluated = await lifecycle.evaluate(candidate.id);
     assert.equal(evaluated.status, "rejected");
     assert.equal(evaluated.evaluation?.passed, false);
-    assert.equal(
-      evaluated.evaluation?.checks.some((check) => check.name === "runtime-verification" && !check.passed),
-      true,
-    );
+    assert.equal(evaluated.evaluation?.runtimeVerification, undefined);
     assert.throws(() => lifecycle.promote(candidate.id), /valid isolated runtime verification/);
     assert.equal(platform.get("repair-skill"), undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
