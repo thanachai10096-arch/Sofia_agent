@@ -321,3 +321,39 @@ test("skill lifecycle with benchmark gate rejects missing baseline or mismatched
     assert.equal(evaluated.evaluation?.checks.some((check) => check.name === "benchmark-regression" && !check.passed), true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("skill lifecycle restores benchmark baseline before revalidating active skills", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "benchmark-restore.json");
+    const engine = new SkillBenchmarkEngine();
+    const baselineResults = [
+      { fixtureId: "restore-a", passed: true, safetyPassed: true, durationMs: 100, toolCalls: 1, retries: 0 },
+      { fixtureId: "restore-b", passed: true, safetyPassed: true, durationMs: 110, toolCalls: 1, retries: 0 },
+      { fixtureId: "restore-c", passed: false, safetyPassed: true, durationMs: 120, toolCalls: 2, retries: 1 },
+    ];
+    engine.setBaseline(engine.summarize("repair-skill", "1.0.0", baselineResults));
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, async (candidate) => ({
+      ...await passing(candidate),
+      benchmarkReport: engine.summarize("repair-skill", "1.0.0", baselineResults),
+    }), { file, benchmarkEngine: engine });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["benchmark-restore"], confidence: 0.99,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "verified");
+    assert.equal(evaluated.evaluation?.benchmark?.comparison.verdict, "stable");
+    lifecycle.promote(candidate.id);
+
+    const restoredEngine = new SkillBenchmarkEngine();
+    const restoredPlatform = new InMemorySkillsPlatform();
+    const restored = new VersionedSkillLifecycle(restoredPlatform, passing, {
+      file, benchmarkEngine: restoredEngine,
+    });
+    assert.ok(restoredEngine.getBaseline("repair-skill", "1.0.0"));
+    assert.equal(restored.active("repair-skill")?.status, "active");
+    assert.equal(restoredPlatform.get("repair-skill")?.version, "1.0.0");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
