@@ -135,6 +135,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStorePath);
+  const desktopCompletionAttempts = config.desktopEnrollment
+    ? integerSetting("desktopEnrollment.completionAttempts", config.desktopEnrollment.completionAttempts, 5, 1, 100)
+    : 5;
+  const desktopCompletionWindowMs = config.desktopEnrollment
+    ? integerSetting("desktopEnrollment.completionWindowMs", config.desktopEnrollment.completionWindowMs, 60_000, 1_000, 86_400_000)
+    : 60_000;
   const countToolCall = (keyId: string, controller: AbortController, event: { type: string }): boolean => {
     if (event.type !== "tool.started") return true;
     try { usage.consumeToolCall(keyId); return true; }
@@ -292,10 +298,123 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       if (!req.url?.startsWith("/v1/")) return json(res, 404, { error: "not_found" }, origin, config);
 
+      const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      const desktopConfig = config.desktopEnrollment;
+      const desktopCompletionPath = "/v1/desktop/enrollments/complete";
+
+      // Companion completion uses the one-time enrollment code as its credential.
+      // It is rate-limited before parsing/processing and never accepts an owner ID.
+      if (req.method === "POST" && requestUrl.pathname === desktopCompletionPath) {
+        if (!desktopConfig) return json(res, 503, { error: "desktop_enrollment_unavailable" }, origin, config);
+        const remoteAddress = req.socket.remoteAddress ?? "unknown";
+        const rateKey = "desktop-enrollment:" + createHash("sha256").update(remoteAddress).digest("hex");
+        let allowed = false;
+        try {
+          allowed = await desktopConfig.completionRateLimiter.consume({
+            key: rateKey,
+            limit: desktopCompletionAttempts,
+            windowMs: desktopCompletionWindowMs,
+            now: Date.now(),
+          });
+        } catch {
+          return json(res, 503, { error: "desktop_enrollment_rate_limiter_unavailable" }, origin, config);
+        }
+        if (!allowed) {
+          res.setHeader("retry-after", "60");
+          return json(res, 429, { error: "desktop_enrollment_rate_limited" }, origin, config);
+        }
+        const raw = await body(req, Math.min(maxBytes, 16_384));
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          return json(res, 400, { error: "invalid_desktop_enrollment" }, origin, config);
+        }
+        const input = raw as Record<string, unknown>;
+        if (typeof input.code !== "string" || typeof input.displayName !== "string" ||
+            typeof input.deviceSecret !== "string" || !Array.isArray(input.capabilities) ||
+            !input.capabilities.every((item) => typeof item === "string")) {
+          return json(res, 400, { error: "invalid_desktop_enrollment" }, origin, config);
+        }
+        if (!/^[A-Za-z0-9_-]{43}$/.test(input.deviceSecret)) {
+          return json(res, 400, { error: "invalid_desktop_enrollment" }, origin, config);
+        }
+        const secret = Buffer.from(input.deviceSecret, "base64url");
+        if (secret.byteLength !== 32 || secret.toString("base64url") !== input.deviceSecret) {
+          return json(res, 400, { error: "invalid_desktop_enrollment" }, origin, config);
+        }
+        try {
+          const completed = await desktopConfig.service.complete({
+            code: input.code,
+            displayName: input.displayName,
+            capabilities: input.capabilities as DesktopCapability[],
+            deviceSecret: secret,
+          });
+          const device = completed.device;
+          return json(res, 201, {
+            device: { id: device.id, displayName: device.displayName, capabilities: device.capabilities, createdAt: device.createdAt },
+          }, origin, config);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          if (message.includes("Invalid or expired")) return json(res, 400, { error: "invalid_or_expired_enrollment_code" }, origin, config);
+          if (message.startsWith("Invalid desktop") || message.startsWith("Desktop device secret")) {
+            return json(res, 400, { error: "invalid_desktop_enrollment" }, origin, config);
+          }
+          return json(res, 503, { error: "desktop_enrollment_failed" }, origin, config);
+        }
+      }
+
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
-      const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      const isDesktopRequest = requestUrl.pathname === "/v1/desktop/devices" ||
+        requestUrl.pathname === "/v1/desktop/enrollments" ||
+        requestUrl.pathname.startsWith("/v1/desktop/devices/");
+      if (isDesktopRequest) {
+        if (!desktopConfig) return json(res, 503, { error: "desktop_enrollment_unavailable" }, origin, config);
+        if (!auth.scopes.includes("desktop:manage")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "desktop:manage" }, origin, config);
+        }
+        if (req.method === "POST" && requestUrl.pathname === "/v1/desktop/enrollments") {
+          try {
+            const enrollment = await desktopConfig.service.start(auth.keyId);
+            return json(res, 201, enrollment, origin, config);
+          } catch {
+            return json(res, 503, { error: "desktop_enrollment_start_failed" }, origin, config);
+          }
+        }
+        if (req.method === "GET" && requestUrl.pathname === "/v1/desktop/devices") {
+          try {
+            const devices = await desktopConfig.registry.listOwned(auth.keyId);
+            return json(res, 200, {
+              devices: devices.map((device) => ({
+                id: device.id, displayName: device.displayName, capabilities: device.capabilities,
+                createdAt: device.createdAt, ...(device.lastSeenAt !== undefined ? { lastSeenAt: device.lastSeenAt } : {}),
+                ...(device.revokedAt !== undefined ? { revokedAt: device.revokedAt } : {}),
+              })),
+            }, origin, config);
+          } catch {
+            return json(res, 503, { error: "desktop_device_registry_unavailable" }, origin, config);
+          }
+        }
+        const deviceMatch = requestUrl.pathname.match(/^\/v1\/desktop\/devices\/([^/]+)$/);
+        if (req.method === "DELETE" && deviceMatch) {
+          let deviceId: string;
+          try { deviceId = decodeURIComponent(deviceMatch[1]!); } catch {
+            return json(res, 400, { error: "invalid_desktop_device_id" }, origin, config);
+          }
+          if (!/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(deviceId)) {
+            return json(res, 400, { error: "invalid_desktop_device_id" }, origin, config);
+          }
+          try {
+            const revoked = await desktopConfig.registry.revokeOwned(auth.keyId, deviceId, Date.now());
+            return revoked
+              ? json(res, 200, { id: deviceId, revoked: true }, origin, config)
+              : json(res, 404, { error: "desktop_device_not_found" }, origin, config);
+          } catch {
+            return json(res, 503, { error: "desktop_device_registry_unavailable" }, origin, config);
+          }
+        }
+        return json(res, 404, { error: "not_found" }, origin, config);
+      }
+
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
         if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
