@@ -16,3 +16,6 @@ export type { LocalDesktopActionHost, LocalDesktopActionHostConfig } from "./loc
 
 export { createDesktopRelayNonce, signDesktopRelayRequest, verifyDesktopRelayRequest, DesktopRelayReplayGuard } from "./relay-protocol.js";
 export type { DesktopRelayRequest, DesktopRelayAuthHeaders, DesktopRelayReplayGuardOptions } from "./relay-protocol.js";
+
+export { DesktopDeviceCredentialVault } from "./device-registry.js";
+export type { EncryptedDesktopDeviceSecret, DesktopDeviceRecord, DesktopDeviceRegistryStore, DesktopDeviceCredentialVaultOptions } from "./device-registry.js";
