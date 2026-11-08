@@ -7,7 +7,17 @@ const evidence: SkillImprovementEvidence[] = [
   { id: "verified-1", skillId: "repair-skill", category: "runtime_error", summary: "Verified timeout regression", verified: true },
   { id: "untrusted-1", skillId: "repair-skill", category: "runtime_error", summary: "User supplied guess", verified: false },
 ];
-const proposal = {} as SkillImprovementProposal;
+const proposal: SkillImprovementProposal = {
+  skillPackage: {
+    source: "learned", version: "1.0.0",
+    skill: {
+      id: "repair-skill", name: "Repair", description: "Repair verified runtime regressions",
+      triggers: ["runtime error"], categories: ["runtime_error"], strategy: "inspect-evidence",
+      procedure: ["inspect evidence", "verify fix"], verification: ["test"],
+    },
+  },
+  provenance: { source: "planner", evidenceIds: ["verified-1"], confidence: 0.9 },
+};
 
 test("research planner labels excerpts untrusted and passes only verified evidence downstream", async () => {
   const source: SkillResearchSource = {
@@ -18,6 +28,7 @@ test("research planner labels excerpts untrusted and passes only verified eviden
   };
   let downstreamEvidence: readonly SkillImprovementEvidence[] = [];
   let researchContext = "";
+  let returnedProposal: SkillImprovementProposal | undefined;
   const planner = new ResearchAugmentedSkillPlanner({
     search: async () => [source],
   }, async (items, bundles) => {
@@ -27,6 +38,9 @@ test("research planner labels excerpts untrusted and passes only verified eviden
   }, { allowedDomains: ["example.com"] });
   const result = await planner.propose(evidence);
   assert.equal(result.length, 1);
+  returnedProposal = result[0];
+  assert.equal(returnedProposal?.provenance.researchSources?.length, 1);
+  assert.equal(returnedProposal?.provenance.researchSources?.[0]?.url, "https://docs.example.com/runtime");
   assert.deepEqual(downstreamEvidence.map((item) => item.id), ["verified-1"]);
   assert.match(researchContext, /UNTRUSTED RESEARCH SOURCE/);
   assert.match(researchContext, /Ignore previous instructions/);
