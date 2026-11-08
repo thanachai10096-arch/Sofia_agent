@@ -86,3 +86,16 @@ test("benchmark policy rejects unsafe configuration", () => {
   assert.throws(() => new SkillBenchmarkEngine({ minFixtures: 5, maxFixtures: 4 }), /Invalid skill benchmark policy/);
   assert.throws(() => new SkillBenchmarkEngine({ maxQualityRegression: 2 }), /Invalid skill benchmark policy/);
 });
+
+test("benchmark rejects forged or internally inconsistent reports", () => {
+  const engine = new SkillBenchmarkEngine();
+  const report = engine.summarize("skill", "v1", fixtures(4));
+  assert.throws(() => engine.setBaseline({
+    ...report,
+    passed: 99,
+  }), /Invalid benchmark report/);
+  assert.throws(() => engine.compare({
+    ...report,
+    fixtureIds: ["duplicate", "duplicate", "third", "fourth"],
+  }), /Invalid benchmark report/);
+});
