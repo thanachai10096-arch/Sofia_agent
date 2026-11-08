@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { VersionedSkillLifecycle, getSkillCandidateDigest } from "../src/brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../src/skills/platform.js";
-import type { SkillPackage } from "../src/skills/platform.js";
+import type { SkillPackage, SkillsPlatform } from "../src/skills/platform.js";
 import { SkillBenchmarkEngine } from "../src/skills/skill-benchmark.js";
 
 function pkg(version: string): SkillPackage {
@@ -197,6 +197,44 @@ test("skill lifecycle refuses to restore persisted active state over a conflicti
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+
+test("skill lifecycle compensates partial platform registration when restore fails", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "restore-atomic.json");
+    const sourcePlatform = new InMemorySkillsPlatform();
+    const source = new VersionedSkillLifecycle(sourcePlatform, passing, { file });
+    const firstPackage = pkg("1.0.0");
+    const secondPackage = { ...pkg("1.0.0"), skill: { ...pkg("1.0.0").skill, id: "another-skill" } };
+    for (const candidatePackage of [firstPackage, secondPackage]) {
+      const candidate = source.propose(candidatePackage, {
+        source: "repair", evidenceIds: [candidatePackage.skill.id], confidence: 0.95,
+      });
+      await source.evaluate(candidate.id);
+      source.promote(candidate.id);
+    }
+
+    const backing = new InMemorySkillsPlatform();
+    let registrations = 0;
+    const flakyPlatform: SkillsPlatform = {
+      get: (id) => backing.get(id),
+      list: (sourceName) => backing.list(sourceName),
+      remove: (id) => backing.remove(id),
+      register: (skill) => {
+        registrations += 1;
+        if (registrations === 2) throw new Error("simulated platform registration failure");
+        backing.register(skill);
+      },
+    };
+
+    assert.throws(
+      () => new VersionedSkillLifecycle(flakyPlatform, passing, { file }),
+      /simulated platform registration failure/,
+    );
+    assert.equal(backing.get("repair-skill"), undefined, "first restored skill must be compensated");
+    assert.equal(backing.get("another-skill"), undefined, "failed skill must not appear in platform");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test("skill lifecycle validates all persisted active skills before mutating the platform", async () => {
   const root = dir();
