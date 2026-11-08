@@ -1,5 +1,8 @@
 import { createInterface } from "node:readline";
+import { homedir } from "node:os";
+import path from "node:path";
 import { createDesktopCompanionClient } from "../desktop/companion-client.js";
+import { FileDesktopCommandJournal } from "../desktop/command-journal.js";
 import { createLocalGuiApproval } from "../desktop/gui-approval.js";
 import { OsDesktopCredentialStore } from "../desktop/os-credential-store.js";
 import { createAllowlistedDesktopHostDriver, parseDesktopApplicationAllowlist, resolveLocalDesktopCapabilities } from "../desktop/local-host.js";
@@ -65,6 +68,7 @@ export async function runDesktopCompanion(): Promise<void> {
     apiBaseUrl,
     credentials,
     driver,
+    journal: new FileDesktopCommandJournal(path.join(homedir(), ".sofia", "desktop-command-journal")),
     allowedCapabilities,
     allowedApplications: Object.keys(applications),
     requestApproval: (action, signal) => approval.requestApproval(action, signal),
