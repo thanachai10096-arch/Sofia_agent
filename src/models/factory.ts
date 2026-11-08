@@ -99,6 +99,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           completedAt: evidence.completedAt,
           testSuiteId: evidence.testSuiteId,
           testSuiteVersion: evidence.testSuiteVersion,
+          testSuiteDigest: evidence.testSuiteDigest,
         },
       };
     } catch (error) {
