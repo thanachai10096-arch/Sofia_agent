@@ -12,6 +12,41 @@ import { SecurityController } from "../security/controller.js";
 import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, WorkspaceCheckpoint, ToolCall } from "./types.js";
 import { RuntimeCheckpointManager, type CheckpointManager } from "./checkpoint.js";
 
+function abortable<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(signal.reason ?? new Error("Aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve()
+      .then(() => {
+        signal.throwIfAborted();
+        return operation();
+      })
+      .then(
+        (value) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (signal.aborted) reject(signal.reason ?? new Error("Aborted"));
+          else resolve(value);
+        },
+        (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(error);
+        },
+      );
+  });
+}
+
 function digest(value:string){return createHash("sha256").update(value).digest("hex");}
 function deepFreeze<T>(value:T):T {
   if(value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -76,7 +111,7 @@ export class RegistryToolGateway implements ToolGateway {
       context.notifyApproval(true);
       try{
         const requestId=randomUUID();
-        const approved=await this.approval({requestId,runId:context.runId,principalId:context.principalId,notificationChannelId:context.notificationChannelId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk,signal:context.signal});
+        const approved=await abortable(context.signal,()=>this.approval!({requestId,runId:context.runId,principalId:context.principalId,notificationChannelId:context.notificationChannelId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk,signal:context.signal}));
         if(!approved){
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
