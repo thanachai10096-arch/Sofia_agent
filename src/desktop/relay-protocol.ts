@@ -135,3 +135,33 @@ function canonicalRequest(request: DesktopRelayRequest, timestamp: string): stri
     bodyHash,
   ].join("\n");
 }
+
+/** Async variant for shared replay stores used by multi-worker cloud relays. */
+export async function verifyDesktopRelayRequestAsync(
+  request: DesktopRelayRequest,
+  headers: Partial<DesktopRelayAuthHeaders>,
+  secret: Uint8Array,
+  replayGuard: { consume(deviceId: string, nonce: string, expiresAt: number, now?: number): Promise<boolean> },
+  options: { now?: () => number; maxClockSkewMs?: number } = {},
+): Promise<boolean> {
+  try {
+    validateRequest(request, secret);
+    const now = (options.now ?? Date.now)();
+    const maxSkew = options.maxClockSkewMs ?? 5 * 60_000;
+    if (!Number.isSafeInteger(maxSkew) || maxSkew < 1_000 || maxSkew > 15 * 60_000) return false;
+    if (Math.abs(now - request.timestamp) > maxSkew) return false;
+    if (headers["x-sofia-device-id"] !== request.deviceId ||
+        headers["x-sofia-timestamp"] !== String(request.timestamp) ||
+        headers["x-sofia-nonce"] !== request.nonce) return false;
+    const supplied = headers["x-sofia-signature"] ?? "";
+    if (!/^[a-f0-9]{64}$/.test(supplied)) return false;
+    const expected = createHmac("sha256", secret)
+      .update(canonicalRequest(request, String(request.timestamp)), "utf8")
+      .digest();
+    const actual = Buffer.from(supplied, "hex");
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return false;
+    return await replayGuard.consume(request.deviceId, request.nonce, request.timestamp + maxSkew, now);
+  } catch {
+    return false;
+  }
+}

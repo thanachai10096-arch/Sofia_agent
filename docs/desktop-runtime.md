@@ -226,3 +226,10 @@ The API exposes optional, injectable routes when `SofiaApiConfig.desktopEnrollme
 The API host must inject a shared Redis device registry, Redis challenge store, KMS-managed vault master key, and atomic completion rate limiter. Do not enable the public completion route without these shared dependencies. The current completion limiter keys by the direct socket peer address; deployments behind a reverse proxy must also enforce per-client/IP limits at the trusted public edge rather than trusting arbitrary forwarded headers. Enforce HTTPS at the public edge and do not expose the local Desktop Action Host to the Internet.
 
 These routes are not wired into the default `src/api/entrypoint.ts` runtime yet, and end-to-end Companion onboarding is still pending. The service/API route tests do not constitute a live Redis or cloud deployment test.
+
+
+## Shared replay protection for Cloud Relay workers
+
+`RedisDesktopRelayReplayGuard` and `verifyDesktopRelayRequestAsync` provide an asynchronous verification path backed by Redis atomic `SET NX PX`. The replay key is SHA-256 hashed from device ID and nonce, and expires at the request's allowed clock-skew boundary. Redis errors fail closed. This allows multiple API workers to share nonce-consumption state; the original synchronous in-memory guard remains available for local/single-process use only.
+
+This is still an authentication primitive, not a live relay transport. It does not establish Companion connections, queue or deliver desktop actions, acknowledge command execution, stream screenshots, or recover commands after reconnect. Do not describe remote Desktop control as operational until those paths are implemented and tested end-to-end.
