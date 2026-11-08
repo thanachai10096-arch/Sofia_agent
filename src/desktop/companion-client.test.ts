@@ -278,6 +278,33 @@ test("Desktop Companion forwards cancellation to an in-flight app launch and doe
 });
 
 
+test("Desktop Companion exponentially backs off failed Cloud polls and resets after recovery", async () => {
+  const store = credentials();
+  store.value = "b".repeat(43);
+  const requestTimes: number[] = [];
+  const controller = new AbortController();
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver([]),
+    allowedCapabilities: [],
+    requestApproval: async () => false,
+    pollIntervalMs: 500,
+    fetchImpl: async () => {
+      requestTimes.push(Date.now());
+      if (requestTimes.length < 3) return new Response("temporarily unavailable", { status: 503 });
+      controller.abort(new Error("test complete"));
+      return new Response(JSON.stringify({ command: null }), { status: 200 });
+    },
+  });
+  await client.start(controller.signal);
+  assert.equal(requestTimes.length, 3);
+  assert.ok(requestTimes[1]! - requestTimes[0]! >= 450,
+    "first retry should wait at least the configured poll interval");
+  assert.ok(requestTimes[2]! - requestTimes[1]! >= 900,
+    "second consecutive failure should double the retry delay");
+});
+
 test("Desktop Companion start does not poll when its signal was already aborted", async () => {
   const store = credentials();
   store.value = "p".repeat(43);
