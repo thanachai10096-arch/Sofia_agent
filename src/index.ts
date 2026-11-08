@@ -2,7 +2,7 @@ export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
 export { runSkillLifecycleWorkflow } from "./brain/skill-lifecycle-workflow.js";
 export { createManagedSkillLearningHandler } from "./brain/managed-skill-learning.js";
 export { SkillSelfImprovementLoop } from "./brain/skill-self-improvement.js";
-export { ResearchAugmentedSkillPlanner } from "./brain/skill-research.js";
+export { ResearchAugmentedSkillPlanner, createResearchBackedSkillSelfImprovementLoop } from "./brain/skill-research.js";
 export type {
   SkillResearchSource,
   SkillResearchProvider,
@@ -20,7 +20,7 @@ export type {
   SkillSelfImprovementReport,
 } from "./brain/skill-self-improvement.js";
 export type { SkillLifecycleWorkflowOptions, SkillLifecycleWorkflowResult } from "./brain/skill-lifecycle-workflow.js";
-export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
+export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillResearchProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
 
 export { SofiaAgent } from "./agent/core.js";
 export { classifyTask } from "./agent/classifier.js";
