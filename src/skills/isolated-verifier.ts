@@ -31,6 +31,7 @@ export interface IsolatedSkillVerificationResult {
   completedAt: string;
   testSuiteId: string;
   testSuiteVersion: string;
+  testSuiteDigest: string;
   output: Array<{ check: string; stdout: string; stderr: string }>;
 }
 
@@ -120,6 +121,12 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
       throw new Error("Trusted test paths must be explicit JavaScript test files.");
     }
     const candidateDigest = createHash("sha256").update(JSON.stringify(candidate)).digest("hex");
+    const trustedSuiteDigest = createHash("sha256").update(JSON.stringify({
+      id: suite.id,
+      version: suite.version,
+      files: Object.fromEntries(suiteEntries.sort(([a], [b]) => a.localeCompare(b))),
+      tests: [...suite.tests].sort(),
+    })).digest("hex");
     const workspace = await mkdtemp(path.join(options.workspaceParent ?? os.tmpdir(), "sofia-skill-verify-"));
     const workspaceId = randomUUID();
     const executedChecks: IsolatedSkillVerificationResult["executedChecks"] = [];
@@ -169,6 +176,7 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
         completedAt: new Date().toISOString(),
         testSuiteId: suite.id,
         testSuiteVersion: suite.version,
+        testSuiteDigest: trustedSuiteDigest,
         output,
       };
     } finally {
