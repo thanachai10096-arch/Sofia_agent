@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createDesktopCompanionClient } from "./companion-client.js";
+import type { DesktopCommandJournal, DesktopCommandJournalEntry, DesktopCommandOutcome } from "./command-journal.js";
 import type { DesktopCompanionCredentialStore } from "./companion-client.js";
 import type { DesktopHostDriver } from "./types.js";
 
@@ -81,6 +82,63 @@ test("Desktop Companion retries a failed completion POST without repeating the n
   assert.deepEqual(calls, ["key:Enter"], "the local action must execute exactly once");
   assert.equal(completionAttempts, 2);
   assert.equal(completionBodies[0], completionBodies[1], "retry must send the exact same completion payload");
+});
+
+test("Desktop Companion replays a journaled completion without repeating a native action", async () => {
+  const store = credentials();
+  store.value = "j".repeat(43);
+  const calls: string[] = [];
+  const entries = new Map<string, DesktopCommandJournalEntry>();
+  const journal: DesktopCommandJournal = {
+    async get(id) { return entries.get(id) ?? null; },
+    async begin(id) { entries.set(id, { commandId: id, status: "started", updatedAt: Date.now() }); },
+    async complete(id, outcome: DesktopCommandOutcome) {
+      entries.set(id, { commandId: id, status: "completed", updatedAt: Date.now(), outcome });
+    },
+  };
+  let completions: unknown[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id: "00000000-0000-4000-8000-000000000010", createdAt: 123, action: { kind: "input.type", text: "one-time" } },
+    }), { status: 200 });
+    completions.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com", credentials: store, driver: driver(calls),
+    allowedCapabilities: ["input:control"], requestApproval: async () => true, journal, fetchImpl,
+  });
+  assert.equal(await client.pollOnce(), true);
+  assert.equal(await client.pollOnce(), true);
+  assert.deepEqual(calls, ["type:one-time"]);
+  assert.deepEqual(completions[0], completions[1]);
+});
+
+test("Desktop Companion fails closed for a command left started by a previous process", async () => {
+  const store = credentials();
+  store.value = "k".repeat(43);
+  const calls: string[] = [];
+  const id = "00000000-0000-4000-8000-000000000011";
+  const journal: DesktopCommandJournal = {
+    async get() { return { commandId: id, status: "started", updatedAt: 123 }; },
+    async begin() { throw new Error("must not begin an existing command"); },
+    async complete() { throw new Error("must not overwrite an indeterminate command"); },
+  };
+  let completion: Record<string, unknown> | undefined;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id, createdAt: 123, action: { kind: "input.key", key: "Enter" } },
+    }), { status: 200 });
+    completion = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com", credentials: store, driver: driver(calls),
+    allowedCapabilities: ["input:control"], requestApproval: async () => true, journal, fetchImpl,
+  });
+  assert.equal(await client.pollOnce(), true);
+  assert.deepEqual(calls, []);
+  assert.match(completion?.error as string, /outcome is unknown/);
 });
 
 test("Desktop Companion reports approval denial without performing the local action", async () => {
