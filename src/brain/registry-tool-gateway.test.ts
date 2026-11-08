@@ -535,3 +535,42 @@ test("approval preserves trusted messaging destination and cancellation signal",
   assert.equal(received?.notificationChannelId, "telegram:trusted-chat");
   assert.equal(received?.signal, controller.signal);
 });
+
+
+test("caller cancellation interrupts a pending approval wait", async () => {
+  const controller = new AbortController();
+  let approvalSignal: AbortSignal | undefined;
+  let announceApproval!: () => void;
+  const approvalReached = new Promise<void>((resolve) => { announceApproval = resolve; });
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Controlled write tool for caller cancellation test",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute() { throw new Error("Tool must not execute after cancellation"); },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async (request) => {
+      approvalSignal = request.signal;
+      announceApproval();
+      return new Promise<boolean>(() => {});
+    },
+  );
+
+  const execution = gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/cancelled.txt", content: "must not write" } },
+    {
+      runId: "caller-cancel-approval-test",
+      signal: controller.signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  await approvalReached;
+  controller.abort(new Error("caller cancelled"));
+  await assert.rejects(execution, /caller cancelled/);
+  assert.equal(approvalSignal, controller.signal);
+  assert.equal(approvalSignal?.aborted, true);
+});
