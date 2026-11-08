@@ -525,7 +525,7 @@ test("skill lifecycle restores benchmark baseline before revalidating active ski
 });
 
 
-test("skill lifecycle rejects symbolic-link ancestors before writing persistence", async () => {
+test("skill lifecycle rejects symbolic-link ancestors and files before loading persisted state", () => {
   const root = dir();
   try {
     const realDirectory = path.join(root, "real");
@@ -533,22 +533,50 @@ test("skill lifecycle rejects symbolic-link ancestors before writing persistence
     mkdirSync(realDirectory);
     symlinkSync(realDirectory, linkedDirectory, "dir");
 
-    const redirectedFile = path.join(realDirectory, "lifecycle.json");
+    assert.throws(
+      () => new VersionedSkillLifecycle(
+        new InMemorySkillsPlatform(),
+        passing,
+        { file: path.join(linkedDirectory, "lifecycle.json") },
+      ),
+      /must not contain symbolic links/,
+    );
+
+    const externalFile = path.join(realDirectory, "external.json");
+    const linkedFile = path.join(root, "linked-file.json");
+    writeFileSync(externalFile, JSON.stringify({ schemaVersion: 1, records: [], activeBySkill: {} }));
+    symlinkSync(externalFile, linkedFile, "file");
+    assert.throws(
+      () => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file: linkedFile }),
+      /must not contain symbolic links/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skill lifecycle rechecks parent path before writing after construction", () => {
+  const root = dir();
+  try {
+    const realDirectory = path.join(root, "real");
+    const linkedDirectory = path.join(root, "late-link");
     const lifecycle = new VersionedSkillLifecycle(
       new InMemorySkillsPlatform(),
       passing,
       { file: path.join(linkedDirectory, "lifecycle.json") },
     );
+    mkdirSync(realDirectory);
+    symlinkSync(realDirectory, linkedDirectory, "dir");
 
     assert.throws(
       () => lifecycle.propose(pkg("1.0.0"), {
         source: "repair",
-        evidenceIds: ["symlink-parent"],
+        evidenceIds: ["symlink-parent-write"],
         confidence: 0.95,
       }),
       /must not contain symbolic links/,
     );
-    assert.equal(existsSync(redirectedFile), false, "must not write lifecycle state through a symlinked parent");
+    assert.equal(existsSync(path.join(realDirectory, "lifecycle.json")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
