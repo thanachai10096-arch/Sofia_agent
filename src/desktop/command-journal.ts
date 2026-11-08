@@ -82,7 +82,7 @@ export class FileDesktopCommandJournal implements DesktopCommandJournal {
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
     let retained = 0;
     for (const name of readdirSync(this.directory)) {
-      if (!/^[a-f0-9]{64}\\.json$/.test(name)) continue;
+      if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
       const filename = path.join(this.directory, name);
       try {
         const stat = lstatSync(filename);
