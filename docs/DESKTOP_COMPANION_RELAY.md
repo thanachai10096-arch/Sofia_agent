@@ -1,6 +1,6 @@
 # Sofia Desktop Companion Relay
 
-This document describes the first relay transport and reusable local Companion client library for connecting a desktop process to a Sofia API instance. A packaged desktop app, OS credential-store adapter, and Brain tool adapter are still separate required components.
+This document describes the HTTPS polling relay, CLI Desktop Companion, local GUI approval flow, and Brain tool adapter for connecting a desktop process to a Sofia API instance. The feature remains under development and is not production-ready.
 
 ## Security model
 
