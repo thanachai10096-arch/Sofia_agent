@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
-import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission } from "../security/policy.js";
+import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission, shouldRequireApproval } from "../security/policy.js";
 import { actionHash, riskFor } from "../security/guard.js";
 import { validateToolInput } from "../tools/types.js";
 
@@ -294,7 +294,7 @@ export class SofiaAgent {
             if (riskRank[risk] > riskRank[maximumRisk]) {
               throw new Error(`Tool risk ${risk} exceeds configured maximum ${maximumRisk}: ${call.name}`);
             }
-            const requiresApproval = permission.requireApproval ?? risk !== "low";
+            const requiresApproval = shouldRequireApproval(policy, permission, risk);
             if (requiresApproval && !this.deps.approval) {
               throw new Error(`Approval handler required for ${risk}-risk tool: ${call.name}`);
             }
