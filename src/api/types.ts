@@ -2,6 +2,10 @@ import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 
+import type { DesktopDeviceRegistryStore } from "../desktop/device-registry.js";
+import type { DesktopDeviceEnrollmentService } from "../desktop/device-enrollment.js";
+import type { MessagingRateLimiter } from "../integrations/messaging/gateway.js";
+
 export interface AgentRunInput {
   task: string;
   workspace?: string;
@@ -57,6 +61,14 @@ export interface SofiaApiConfig {
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
+  /** Optional owner-scoped desktop device management. Completion is unauthenticated but requires an atomic shared rate limiter. */
+  desktopEnrollment?: {
+    service: DesktopDeviceEnrollmentService;
+    registry: DesktopDeviceRegistryStore;
+    completionRateLimiter: MessagingRateLimiter;
+    completionAttempts?: number;
+    completionWindowMs?: number;
+  };
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
     path?: string;
