@@ -63,7 +63,7 @@ export class DesktopDeviceCredentialVault {
   encrypt(deviceId: string, ownerId: string, secret: Uint8Array): EncryptedDesktopDeviceSecret {
     validateBinding(deviceId, ownerId);
     if (!(secret instanceof Uint8Array) || secret.byteLength < 32 || secret.byteLength > 128) {
-      throw new Error("Desktop device secret must contain between 32 and 128 bytes.");
+      throw new Error("Desktop device secret must contain at least 32 bytes and at most 128 bytes.");
     }
 
     const iv = randomBytes(IV_BYTES);
