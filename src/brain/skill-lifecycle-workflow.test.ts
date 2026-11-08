@@ -3,16 +3,24 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { VersionedSkillLifecycle } from "./skill-lifecycle.js";
+import { VersionedSkillLifecycle, getSkillCandidateDigest } from "./skill-lifecycle.js";
 import { runSkillLifecycleWorkflow } from "./skill-lifecycle-workflow.js";
 import { InMemorySkillsPlatform, type SkillPackage } from "../skills/platform.js";
 
 function fixture(passes = true) {
   const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-skill-workflow-"));
   const platform = new InMemorySkillsPlatform();
-  const lifecycle = new VersionedSkillLifecycle(platform, async () => ({
+  const lifecycle = new VersionedSkillLifecycle(platform, async (candidate) => ({
     passed: passes,
     checks: [{ name: "policy-and-regression-tests", passed: passes }],
+    ...(passes ? { runtimeVerification: {
+      candidateDigest: getSkillCandidateDigest(candidate),
+      runnerId: "isolated-test-runner",
+      isolatedWorkspaceId: "workflow-test-workspace",
+      isolated: true as const,
+      executedChecks: candidate.skill.verification.map((name) => ({ name, passed: true })),
+      completedAt: new Date().toISOString(),
+    } } : {}),
   }), { file: path.join(directory, "lifecycle.json") });
   const skillPackage: SkillPackage = {
     skill: {
