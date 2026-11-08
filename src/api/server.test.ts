@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
+import { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
@@ -144,6 +145,76 @@ test("API rejects unknown model routes before starting a run", async () => {
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { error: "invalid_model_route" });
   } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("Desktop Companion API relay enforces owner scope and completes only the paired owner's command", async () => {
+  const broker = new DesktopCommandBroker();
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: {
+      "desktop-owner-one": ["desktop:connect"],
+      "desktop-owner-two": ["desktop:connect"],
+      "no-desktop-scope": ["agent:run"],
+    },
+    desktopCommandBroker: broker,
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const request = (path: string, token: string, init: RequestInit = {}) =>
+    fetch(baseUrl + path, {
+      ...init,
+      headers: { authorization: "Bearer " + token, ...(init.headers as Record<string, string> | undefined) },
+    });
+
+  try {
+    const denied = await request("/v1/desktop/companion/connect", "no-desktop-scope", { method: "POST" });
+    assert.equal(denied.status, 403);
+
+    const pairedOne = await request("/v1/desktop/companion/connect", "desktop-owner-one", { method: "POST" });
+    assert.equal(pairedOne.status, 201);
+    const tokenOne = (await pairedOne.json() as { token: string }).token;
+    const pairedTwo = await request("/v1/desktop/companion/connect", "desktop-owner-two", { method: "POST" });
+    assert.equal(pairedTwo.status, 201);
+    const tokenTwo = (await pairedTwo.json() as { token: string }).token;
+
+    const pending = broker.dispatch("".concat(
+      createHash("sha256").update("desktop-owner-one").digest("hex").slice(0, 32),
+    ), { kind: "input.click", x: 10, y: 20, button: "left" });
+    const polled = await request("/v1/desktop/companion/commands", tokenOne);
+    assert.equal(polled.status, 200);
+    const command = (await polled.json() as { command: { id: string } }).command;
+    assert.ok(command?.id);
+
+    const crossOwner = await request(
+      "/v1/desktop/companion/commands/" + command.id + "/complete",
+      tokenTwo,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ result: { ok: true } }) },
+    );
+    assert.equal(crossOwner.status, 404);
+
+    const completed = await request(
+      "/v1/desktop/companion/commands/" + command.id + "/complete",
+      tokenOne,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ result: { ok: true } }) },
+    );
+    assert.equal(completed.status, 200);
+    assert.deepEqual(await pending, { ok: true });
+
+    const disconnected = await request("/v1/desktop/companion/disconnect", "desktop-owner-one", { method: "POST" });
+    assert.equal(disconnected.status, 200);
+    const revokedPoll = await request("/v1/desktop/companion/commands", tokenOne);
+    assert.equal(revokedPoll.status, 401);
+  } finally {
+    broker.close();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
