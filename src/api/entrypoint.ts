@@ -27,8 +27,14 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const desktopCompanionStore = new FileDesktopCompanionStore(path.join(workspace, ".sofia", "desktop-companions"));
-const desktopCommandBroker = new DesktopCommandBroker({ store: desktopCompanionStore });
+// Remote desktop is an explicit deployment-level opt-in in addition to API-key scopes.
+const remoteDesktopEnabled = process.env.SOFIA_ALLOW_REMOTE_DESKTOP === "true";
+const desktopCompanionStore = remoteDesktopEnabled
+  ? new FileDesktopCompanionStore(path.join(workspace, ".sofia", "desktop-companions"))
+  : undefined;
+const desktopCommandBroker = desktopCompanionStore
+  ? new DesktopCommandBroker({ store: desktopCompanionStore })
+  : undefined;
 const approvalAuditStore = new FileApprovalAuditStore(path.join(workspace, ".sofia"));
 // Never replay an approval after restart: close orphaned audit entries before accepting traffic.
 approvalAuditStore.recoverInterrupted();
@@ -249,7 +255,7 @@ const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
-  desktopCommandBroker,
+  ...(desktopCommandBroker ? { desktopCommandBroker } : {}),
   approvalInbox,
   ...(workspaceAuth ? { workspaceAuth, workspaceApiKey: apiKey, workspaceStaticDirectory: path.resolve(process.cwd(), "web/mobile-workspace") } : {}),
   approvalAuditStore,
