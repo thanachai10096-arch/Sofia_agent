@@ -206,6 +206,8 @@ test("legacy approval databases migrate transactionally and preserve pending rec
     );
     INSERT INTO approvals(id,owner_id,run_id,tool_name,input_json,action_hash,risk,status,created_at,expires_at)
     VALUES('legacy-1','owner-a','run-legacy','skill.promote','{}','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','high','pending',1,9999999999999);
+    INSERT INTO approval_audit(id,approval_id,owner_id,decision,decided_by,action_hash,created_at)
+    VALUES('legacy-audit-1','legacy-1','owner-a','created','system:create','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1);
   `);
   legacy.close();
   try {
@@ -220,5 +222,12 @@ test("legacy approval databases migrate transactionally and preserve pending rec
         actionHash: "a".repeat(64), approved: true,
       }), undefined);
     } finally { queue.close(); }
+    const inspect = new DatabaseSync(file);
+    try {
+      const audit = inspect.prepare(
+        "SELECT decision FROM approval_audit WHERE approval_id=? ORDER BY created_at,decision",
+      ).all("legacy-1") as Array<{ decision: string }>;
+      assert.deepEqual(audit.map((item) => item.decision), ["created", "cancelled"]);
+    } finally { inspect.close(); }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
