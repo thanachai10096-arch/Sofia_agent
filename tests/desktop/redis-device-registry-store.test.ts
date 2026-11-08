@@ -13,8 +13,10 @@ import type { RedisEvalClient } from "../../src/integrations/messaging/redis-rat
 class FakeRedis implements RedisEvalClient {
   readonly values = new Map<string, string>();
   readonly sets = new Map<string, Set<string>>();
+  lastKeys: string[] = [];
 
   async eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown> {
+    this.lastKeys = options.keys;
     const [key, secondary] = options.keys;
     if (script === REDIS_DESKTOP_DEVICE_CREATE_SCRIPT) {
       if (this.values.has(key!)) return 0;
@@ -87,4 +89,15 @@ test("Redis device registry rejects malformed records and invalid timestamps", a
   const store = new RedisDesktopDeviceRegistryStore({ client: new FakeRedis() });
   await assert.rejects(store.create({ ...device("owner-alpha", "desktop-device-0003"), displayName: "" }));
   await assert.rejects(store.revokeOwned("owner-alpha", "desktop-device-0003", -1));
+});
+
+test("Redis device record and owner index share a Redis Cluster hash slot", async () => {
+  const client = new FakeRedis();
+  const store = new RedisDesktopDeviceRegistryStore({ client });
+  await store.create(device("owner-cluster", "desktop-device-0004"));
+  assert.equal(client.lastKeys.length, 2);
+  const recordTag = client.lastKeys[0]?.match(/\\{([^}]+)\\}/)?.[1];
+  const ownerTag = client.lastKeys[1]?.match(/\\{([^}]+)\\}/)?.[1];
+  assert.ok(recordTag);
+  assert.equal(recordTag, ownerTag);
 });
