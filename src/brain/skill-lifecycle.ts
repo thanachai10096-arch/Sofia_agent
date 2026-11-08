@@ -430,17 +430,23 @@ export class VersionedSkillLifecycle {
         }
       }
     }
+    const seenRecordIds = new Set<string>();
     const records: SkillLifecycleRecord[] = parsed.records.map((item) => {
       if (!isRecord(item) || typeof item.id !== "string" || !item.id.trim() || item.id.length > 200 ||
-          typeof item.skillId !== "string" || !item.skillId.trim() ||
+          seenRecordIds.has(item.id) ||
+          typeof item.skillId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(item.skillId) ||
           !["candidate", "verified", "rejected", "active", "superseded", "rolled_back"].includes(String(item.status)) ||
           !isRecord(item.provenance) || typeof item.provenance.source !== "string" || !item.provenance.source.trim() ||
-          !Array.isArray(item.provenance.evidenceIds) || !item.provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
+          !Array.isArray(item.provenance.evidenceIds) || item.provenance.evidenceIds.length === 0 ||
+          !item.provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
+          new Set(item.provenance.evidenceIds).size !== item.provenance.evidenceIds.length ||
           typeof item.provenance.confidence !== "number" || !Number.isFinite(item.provenance.confidence) ||
           item.provenance.confidence < 0 || item.provenance.confidence > 1 ||
-          typeof item.createdAt !== "string" || typeof item.updatedAt !== "string") {
+          typeof item.createdAt !== "string" || !Number.isFinite(Date.parse(item.createdAt)) ||
+          typeof item.updatedAt !== "string" || !Number.isFinite(Date.parse(item.updatedAt))) {
         throw new Error("Invalid skill lifecycle record");
       }
+      seenRecordIds.add(item.id);
       const safePackage = validatePackage(item.package as SkillPackage);
       if (safePackage.skill.id !== item.skillId) throw new Error("Skill lifecycle package id does not match record");
       if (item.evaluation !== undefined) {
