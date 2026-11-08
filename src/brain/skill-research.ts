@@ -158,7 +158,7 @@ export class ResearchAugmentedSkillPlanner implements SkillImprovementPlanner {
       });
     }
     this.lastAudit = { bundles, rejectedSources };
-    const proposals = await this.downstream(evidence, bundles);
+    const proposals = await this.downstream(trusted, bundles);
     const citationsBySkill = new Map(bundles.map((bundle) => [
       bundle.skillId,
       bundle.citations.map(({ url, contentHash }) => ({ url, contentHash })),
