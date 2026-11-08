@@ -303,8 +303,10 @@ export class VersionedSkillLifecycle {
       this.persist();
     } catch (error) {
       this.snapshot = before;
-      try { if (platformCurrent) this.platform.register(platformCurrent); }
-      catch { /* Keep original failure; operator must inspect platform consistency. */ }
+      try {
+        if (platformCurrent) this.platform.register(platformCurrent);
+        else this.platform.remove(skillId);
+      } catch { /* Keep original failure; operator must inspect platform consistency. */ }
       throw error;
     }
     return clone(previous);
