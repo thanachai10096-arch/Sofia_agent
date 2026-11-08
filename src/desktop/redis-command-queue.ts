@@ -180,7 +180,8 @@ export class RedisDesktopCommandQueue {
   async claim(ownerId: string, deviceId: string, options: { now?: number; leaseMs?: number; leaseToken?: string } = {}): Promise<DesktopCommand | null> {
     validateOwnerDevice(ownerId, deviceId);
     const now = options.now ?? Date.now();
-    const leaseMs = options.leaseMs ?? 30_000;
+    // Must outlive the broker's 90s command deadline and 60s local approval window.
+    const leaseMs = options.leaseMs ?? 120_000;
     const token = options.leaseToken ?? randomUUID();
     if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(leaseMs) || leaseMs < 1_000 || leaseMs > 300_000) throw new Error("Invalid desktop command lease settings.");
     if (!/^[A-Za-z0-9-]{8,64}$/.test(token)) throw new Error("Invalid desktop command lease token.");
