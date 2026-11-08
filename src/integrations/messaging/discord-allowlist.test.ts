@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseDiscordIdAllowlist } from "./discord-allowlist.js";
+import { isDiscordMessageAllowed, parseDiscordIdAllowlist } from "./discord-allowlist.js";
 
 test("parses and trims an explicit Discord ID allowlist", () => {
   assert.deepEqual(parseDiscordIdAllowlist(" 123,456 ", "DISCORD_ALLOWED_USER_IDS"), ["123", "456"]);
@@ -25,4 +25,15 @@ test("rejects duplicate Discord IDs rather than silently normalizing configurati
     () => parseDiscordIdAllowlist("123, 123", "DISCORD_ALLOWED_USER_IDS"),
     /DISCORD_ALLOWED_USER_IDS contains duplicate Discord IDs/,
   );
+});
+
+test("requires both user and channel allowlists for Discord message dispatch", () => {
+  const users = ["111", "222"];
+  const channels = ["333", "444"];
+  assert.equal(isDiscordMessageAllowed({ userId: "111", channelId: "333" }, users, channels), true);
+  assert.equal(isDiscordMessageAllowed({ userId: "999", channelId: "333" }, users, channels), false);
+  assert.equal(isDiscordMessageAllowed({ userId: "111", channelId: "999" }, users, channels), false);
+  assert.equal(isDiscordMessageAllowed({ userId: "999", channelId: "999" }, users, channels), false);
+  assert.equal(isDiscordMessageAllowed({ userId: "111", channelId: "333" }, [], channels), false);
+  assert.equal(isDiscordMessageAllowed({ userId: "111", channelId: "333" }, users, []), false);
 });
