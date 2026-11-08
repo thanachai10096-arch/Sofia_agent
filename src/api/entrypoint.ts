@@ -69,6 +69,18 @@ if (discordConfigured) {
     try {
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
+      // Enforce both allowlists before every command path, including Gateway
+      // messages. The interaction transport checks these too, but Gateway
+      // messages arrive through a separate transport and must fail closed here.
+      if (!discordUserIds.includes(message.author.id) || !discordChannelIds.includes(message.channelId)) {
+        await discordTransport?.sendMessage(
+          message.channelId,
+          "You are not authorized to use Sofia in this channel.",
+          undefined,
+          message.id,
+        );
+        return;
+      }
       const principalId = "discord:" + message.author.id;
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
       const argument = message.content.trim().slice(command.length).trim();
