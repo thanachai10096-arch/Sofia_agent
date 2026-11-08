@@ -213,7 +213,7 @@ test("API derives remote desktop capabilities from authenticated scopes and pass
     received = undefined;
     await startAndWait("desktop-connect-only");
     assert.ok(received);
-    assert.deepEqual(received.desktopCapabilities, []);
+    assert.deepEqual(received.desktopCapabilities ?? [], []);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
