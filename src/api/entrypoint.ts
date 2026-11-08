@@ -40,7 +40,7 @@ telegramApprovalNotifier = telegramRuntime
   ? async (record) => {
       await telegramRuntime.notifyApproval(
         record.ownerId,
-        "Sofia needs your approval for " + record.toolName + " [" + record.risk + "].\\nUse /approvals in this private chat to review the exact action.",
+        "Sofia needs your approval for " + record.toolName + " [" + record.risk + "].\nUse /approvals in this private chat to review the exact action.",
       );
     }
   : undefined;
