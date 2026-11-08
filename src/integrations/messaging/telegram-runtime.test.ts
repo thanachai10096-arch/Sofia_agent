@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { SofiaApiError } from "../../sdk/client.js";
 import {
@@ -235,4 +236,42 @@ test("Telegram approve and reject require the exact approval ID and action hash"
     { id, hash, approved: true },
     { id, hash, approved: false },
   ]);
+});
+
+
+test("Telegram approval notices require the API-key-bound user and an allowlisted private chat", async () => {
+  const key = "private-user-key";
+  const ownerKeyId = createHash("sha256").update(key).digest("hex").slice(0, 32);
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "-100999",
+    TELEGRAM_USER_API_KEYS_JSON: '{"123":"private-user-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.ok(runtime);
+  assert.equal(await runtime.notifyApproval(ownerKeyId, "approval"), false);
+  assert.equal(await runtime.notifyApproval("another-owner-key-id", "approval"), false);
+  await runtime.stop();
+  assert.deepEqual(warnings, []);
+});
+
+test("Telegram approval notices do not use an untrusted group chat as a destination", async () => {
+  const key = "private-user-key";
+  const ownerKeyId = createHash("sha256").update(key).digest("hex").slice(0, 32);
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    TELEGRAM_USER_API_KEYS_JSON: '{"123":"private-user-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.ok(runtime);
+  assert.equal(await runtime.notifyApproval(ownerKeyId, "approval"), false);
+  await runtime.stop();
+  assert.deepEqual(warnings, []);
 });
