@@ -184,3 +184,32 @@ The desktop package exports a `DesktopDeviceRegistryStore` contract and `Desktop
 - The vault encrypts each device's random HMAC secret with AES-256-GCM. The 32-byte master key must be supplied by a KMS or secret manager and kept separate from the registry database. The authenticated encryption data binds the ciphertext to both the owner ID and device ID, preventing a credential row from being moved between accounts/devices.
 - The raw per-device secret should be shown to the Companion only once at enrollment, then stored in the OS credential manager. Never return it from ordinary device-list APIs, place it in model context, or write it to logs.
 - This is not yet an enrollment API or a durable registry implementation. Command delivery, outbound Companion transport, result streaming, and mobile control UI remain separate work. Do not advertise phone-to-PC remote control as available until the end-to-end path is implemented and tested.
+
+
+## Redis-backed Cloud device registry (foundation only)
+
+`RedisDesktopDeviceRegistryStore` implements the `DesktopDeviceRegistryStore` contract using the existing minimal Redis `eval` client interface. It provides:
+
+- Atomic device creation and owner-index insertion in one Lua script, with a configurable per-owner device cap.
+- Owner-scoped get/list/revoke operations; each operation checks the owner ID in the serialized record inside Redis, not only in application memory.
+- Durable revocation timestamps and refusal of repeated revocation.
+- Redis Cluster-compatible key grouping: each owner's device record and index use the same hash tag. Raw owner IDs are SHA-256 hashed before being used in key names.
+- Encrypted credentials remain encrypted envelopes from `DesktopDeviceCredentialVault`; the Redis store does not receive or return plaintext device secrets.
+
+Example:
+
+`ts
+import {
+  RedisDesktopDeviceRegistryStore,
+  DesktopDeviceCredentialVault,
+} from "../src/desktop/index.js";
+
+const registry = new RedisDesktopDeviceRegistryStore({
+  client: redisClient, // node-redis v4-compatible eval client
+  keyPrefix: "sofia:prod:desktop:devices",
+  maxDevicesPerOwner: 25,
+});
+const vault = new DesktopDeviceCredentialVault({ masterKey: masterKeyFromKms });
+`
+
+Redis must be configured with persistence, replication, network access controls, TLS, and backups appropriate to the deployment. The `eval` client must be a trusted application dependency; never accept Redis credentials or key prefixes from user/model input. This registry is a storage primitive only: no public enrollment/list/revoke API routes, relay command queue, outbound Companion connection, or mobile UI are wired yet. Keep the feature disabled until those routes and the end-to-end authorization flow are implemented and tested.
