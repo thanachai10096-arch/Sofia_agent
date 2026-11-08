@@ -15,6 +15,7 @@ import { Reviewer } from "../review/reviewer.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { ContainerSandbox } from "../sandbox.js";
 import { createIsolatedSkillVerifier } from "../skills/isolated-verifier.js";
+import { loadTrustedSkillTestSuite } from "../skills/trusted-test-suites.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
@@ -75,9 +76,8 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     try {
       const verify = createIsolatedSkillVerifier({
         sandbox: new ContainerSandbox({ image }),
-        // No trusted suite is currently registered for learned candidates.
-        // Returning undefined deliberately blocks promotion until an operator-owned suite exists.
-        getTrustedTestSuite: () => undefined,
+        // Only operator-supplied deployment configuration can authorize trusted tests.
+        getTrustedTestSuite: (skillCandidate) => loadTrustedSkillTestSuite(skillCandidate),
       });
       const evidence = await verify(candidate);
       checks.push({
