@@ -145,3 +145,18 @@ test("self-improvement rejects overlapping runs to prevent duplicate candidate r
     rmSync(f.directory, { recursive: true, force: true });
   }
 });
+
+
+test("self-improvement preserves hashed research citations in lifecycle provenance", async () => {
+  const f = setup();
+  try {
+    f.proposal.provenance.researchSources = [{
+      url: "https://docs.example.com/repair",
+      contentHash: "a".repeat(64),
+    }];
+    await f.loop.run(evidence);
+    const saved = f.lifecycle.list("repair-skill")[0];
+    assert.equal(saved?.provenance.researchSources?.[0]?.url, "https://docs.example.com/repair");
+    assert.equal(saved?.provenance.researchSources?.[0]?.contentHash, "a".repeat(64));
+  } finally { rmSync(f.directory, { recursive: true, force: true }); }
+});
