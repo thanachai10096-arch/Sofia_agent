@@ -624,6 +624,7 @@ export class DurableJobRuntime implements JobRuntime {
       const result = await brain.run({
         ...input,
         ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
+        ...(record.notificationChannelId ? { notificationChannelId: record.notificationChannelId } : {}),
         signal: controller.signal,
         resume,
       });
