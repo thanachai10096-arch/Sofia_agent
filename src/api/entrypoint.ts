@@ -78,7 +78,7 @@ if (discordConfigured) {
       "Risk: " + record.risk,
       "Approval ID: " + record.id,
       "Review the action with /approvals, then use /approve job_id:<approval-id> or /reject job_id:<approval-id>.",
-    ].join("\\n");
+    ].join("\n");
     await discordTransport?.sendMessage(channelId, notice);
   };
   const discordDeduplicator = new FileChatMessageDeduplicator(
