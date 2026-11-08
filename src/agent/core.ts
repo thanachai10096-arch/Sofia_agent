@@ -314,6 +314,7 @@ export class SofiaAgent {
                 input: structuredClone(actionInput),
                 actionHash: actionHash(runId, call.name, actionInput, request.principalId),
                 risk,
+                ...(request.signal ? { signal: request.signal } : {}),
               });
 
               if (!approved) {
