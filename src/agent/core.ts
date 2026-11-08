@@ -312,10 +312,12 @@ export class SofiaAgent {
                 requestId: randomUUID(),
                 runId,
                 principalId: request.principalId,
+                notificationChannelId: request.notificationChannelId,
                 toolName: call.name,
                 input: structuredClone(actionInput),
                 actionHash: actionHash(runId, call.name, actionInput, request.principalId),
                 risk,
+                signal: request.signal,
               });
 
               if (!approved) {
