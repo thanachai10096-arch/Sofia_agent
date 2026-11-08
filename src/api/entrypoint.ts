@@ -72,13 +72,7 @@ if (discordConfigured) {
     const prefix = "discord:";
     const userId = record.ownerId.startsWith(prefix) ? record.ownerId.slice(prefix.length) : "";
     if (!userId || !isDiscordMessageAllowed({ userId, channelId }, discordUserIds, discordChannelIds)) return;
-    const notice = [
-      "Sofia needs your approval before continuing.",
-      "Tool: " + record.toolName,
-      "Risk: " + record.risk,
-      "Approval ID: " + record.id,
-      "Review the action with /approvals, then use /approve job_id:<approval-id> or /reject job_id:<approval-id>.",
-    ].join("\n");
+    const notice = "Sofia has an action waiting for your approval. Use the private Discord /approvals slash command to review it.";
     await discordTransport?.sendMessage(channelId, notice);
   };
   const discordDeduplicator = new FileChatMessageDeduplicator(
