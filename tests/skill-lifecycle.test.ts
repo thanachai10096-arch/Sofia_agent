@@ -581,3 +581,53 @@ test("skill lifecycle rechecks parent path before writing after construction", (
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("skill lifecycle rejects duplicate persisted record identities and invalid provenance", () => {
+  const root = dir();
+  try {
+    const baseRecord = {
+      id: "duplicate-record",
+      skillId: "repair-skill",
+      package: pkg("1.0.0"),
+      status: "candidate",
+      provenance: { source: "repair", evidenceIds: ["evidence-1"], confidence: 0.9 },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const cases = [
+      {
+        name: "duplicate record ids",
+        records: [baseRecord, { ...baseRecord, skillId: "another-skill", package: { ...pkg("1.0.0"), skill: { ...pkg("1.0.0").skill, id: "another-skill" } } }],
+      },
+      {
+        name: "blank evidence ids",
+        records: [{ ...baseRecord, provenance: { ...baseRecord.provenance, evidenceIds: ["  "] } }],
+      },
+      {
+        name: "duplicate evidence ids",
+        records: [{ ...baseRecord, provenance: { ...baseRecord.provenance, evidenceIds: ["same", "same"] } }],
+      },
+      {
+        name: "invalid skill ids",
+        records: [{ ...baseRecord, skillId: "__proto__" }],
+      },
+      {
+        name: "invalid timestamps",
+        records: [{ ...baseRecord, createdAt: "not-a-date" }],
+      },
+    ];
+
+    for (const [index, item] of cases.entries()) {
+      const file = path.join(root, `invalid-${index}.json`);
+      writeFileSync(file, JSON.stringify({ schemaVersion: 1, records: item.records, activeBySkill: {} }));
+      assert.throws(
+        () => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }),
+        /Invalid skill lifecycle record/,
+        item.name,
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
