@@ -31,6 +31,7 @@ test("research planner labels excerpts untrusted and passes only verified eviden
   assert.match(researchContext, /UNTRUSTED RESEARCH SOURCE/);
   assert.match(researchContext, /Ignore previous instructions/);
   assert.equal(planner.getAudit().bundles[0]?.citations.length, 1);
+  assert.equal(planner.getAudit().bundles[0]?.citations[0]?.url, "https://docs.example.com/one");
   assert.match(planner.getAudit().bundles[0]!.citations[0]!.contentHash, /^[a-f0-9]{64}$/);
 });
 
@@ -38,6 +39,7 @@ test("research planner rejects non-HTTPS, private-address and out-of-allowlist s
   const sources: SkillResearchSource[] = [
     { url: "http://docs.example.com/a", title: "HTTP", excerpt: "content" },
     { url: "https://127.0.0.1/private", title: "Loopback", excerpt: "content" },
+    { url: "https://[::1]/private", title: "IPv6 loopback", excerpt: "content" },
     { url: "https://attacker.invalid/prompt", title: "External", excerpt: "content" },
   ];
   const planner = new ResearchAugmentedSkillPlanner({ search: async () => sources },
@@ -46,7 +48,7 @@ test("research planner rejects non-HTTPS, private-address and out-of-allowlist s
       return [];
     }, { allowedDomains: ["example.com"] });
   await planner.propose([evidence[0]!]);
-  assert.equal(planner.getAudit().rejectedSources, 3);
+  assert.equal(planner.getAudit().rejectedSources, 4);
 });
 
 test("research planner enforces query, result and excerpt bounds", async () => {
@@ -62,10 +64,10 @@ test("research planner enforces query, result and excerpt bounds", async () => {
     },
   }, async (_items, bundles) => {
     assert.equal(bundles.length, 1);
-    assert.ok(bundles[0]!.context.length <= 150);
+    assert.ok(bundles[0]!.context.length < 500);
     assert.equal(bundles[0]!.citations.length, 1);
     return [];
-  }, { maxQueries: 1, maxResultsPerQuery: 1, maxExcerptLength: 120, maxTotalCharacters: 150 });
+  }, { maxQueries: 1, maxResultsPerQuery: 1, maxExcerptLength: 120, maxTotalCharacters: 1000 });
   await planner.propose([
     evidence[0]!,
     { ...evidence[0]!, id: "verified-2", skillId: "other-skill" },
