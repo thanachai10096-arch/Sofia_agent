@@ -5,6 +5,26 @@ import type { SqliteApprovalQueue } from "../../agent/approval-queue.js";
  * The action hash is read from the owner-scoped durable record, never supplied
  * by the chat user, and the queue performs the atomic one-time decision.
  */
+function safeApprovalInput(input: Record<string, unknown>): string {
+  const sensitive = /secret|token|password|authorization|api[_-]?key|credential|cookie|private[_-]?key/i;
+  const redact = (value: unknown, depth: number): unknown => {
+    if (depth > 4) return "[truncated]";
+    if (Array.isArray(value)) return value.slice(0, 8).map((item) => redact(item, depth + 1));
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 20).map(([key, item]) =>
+        [key, sensitive.test(key) ? "[redacted]" : redact(item, depth + 1)]));
+    }
+    if (typeof value === "string") return value.length > 180 ? value.slice(0, 177) + "..." : value;
+    if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
+    return String(value).slice(0, 80);
+  };
+  try {
+    return JSON.stringify(redact(input, 0)).slice(0, 650);
+  } catch {
+    return "[input preview unavailable]";
+  }
+}
+
 export function handleDiscordApprovalCommand(
   queue: Pick<SqliteApprovalQueue, "list" | "get" | "decide">,
   principalId: string,
