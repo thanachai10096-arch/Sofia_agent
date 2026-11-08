@@ -21,3 +21,5 @@ export { DesktopDeviceCredentialVault } from "./device-registry.js";
 export type { EncryptedDesktopDeviceSecret, DesktopDeviceRecord, DesktopDeviceRegistryStore, DesktopDeviceCredentialVaultOptions } from "./device-registry.js";
 export { RedisDesktopDeviceRegistryStore, REDIS_DESKTOP_DEVICE_CREATE_SCRIPT, REDIS_DESKTOP_DEVICE_GET_SCRIPT, REDIS_DESKTOP_DEVICE_LIST_SCRIPT, REDIS_DESKTOP_DEVICE_REVOKE_SCRIPT } from "./redis-device-registry.js";
 export type { RedisDesktopDeviceRegistryStoreOptions } from "./redis-device-registry.js";
+export { RedisDesktopCommandQueue, REDIS_DESKTOP_COMMAND_ENQUEUE_SCRIPT, REDIS_DESKTOP_COMMAND_CLAIM_SCRIPT, REDIS_DESKTOP_COMMAND_COMPLETE_SCRIPT, REDIS_DESKTOP_COMMAND_FAIL_SCRIPT, REDIS_DESKTOP_COMMAND_GET_SCRIPT } from "./redis-command-queue.js";
+export type { DesktopCommand, DesktopCommandStatus, EnqueueDesktopCommandInput, RedisDesktopCommandQueueOptions } from "./redis-command-queue.js";

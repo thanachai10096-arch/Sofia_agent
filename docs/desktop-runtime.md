@@ -213,3 +213,39 @@ const vault = new DesktopDeviceCredentialVault({ masterKey: masterKeyFromKms });
 `
 
 Redis must be configured with persistence, replication, network access controls, TLS, and backups appropriate to the deployment. The `eval` client must be a trusted application dependency; never accept Redis credentials or key prefixes from user/model input. This registry is a storage primitive only: no public enrollment/list/revoke API routes, relay command queue, outbound Companion connection, or mobile UI are wired yet. Keep the feature disabled until those routes and the end-to-end authorization flow are implemented and tested.
+
+
+## Redis desktop command queue (delivery foundation only)
+
+`RedisDesktopCommandQueue` is an opt-in Redis-backed queue partitioned by owner and paired device. It provides atomic enqueue, claim-with-lease, completion, retryable failure, and status lookup operations.
+
+- Enqueue supports a client idempotency key. Redis stores only a SHA-256-derived key name; the raw idempotency key is not persisted in the command record.
+- Claim uses a random lease token and expiry. Multiple workers cannot claim the same pending command at the same time.
+- Expired leases are recovered atomically; commands are retried up to `maxAttempts` and then marked failed.
+- Completion/failure requires the current lease token, so stale workers cannot overwrite a newer lease result.
+- Payload size, queue active capacity, retry count, lease duration, and idempotency TTL are bounded.
+- All queue keys for one owner/device share a Redis Cluster hash slot.
+
+Example:
+
+`ts
+import { RedisDesktopCommandQueue } from "../src/desktop/index.js";
+
+const queue = new RedisDesktopCommandQueue({
+  client: redisClient,
+  keyPrefix: "sofia:prod:desktop:commands",
+  maxCommandsPerDevice: 500,
+});
+const { command, duplicate } = await queue.enqueue({
+  ownerId,
+  deviceId,
+  type: "desktop.input.click",
+  input: { x: 100, y: 80 },
+  idempotencyKey: clientRequestId,
+});
+const lease = await queue.claim(ownerId, deviceId, { leaseMs: 30_000 });
+`
+
+**Delivery semantics:** this is at-least-once command delivery, not exactly-once side-effect execution. A Companion must persist/deduplicate command IDs before executing actions, and must send completion only after it has recorded the outcome. If a lease expires after an action ran but before completion was acknowledged, the command may be delivered again; the Companion must return the recorded outcome rather than repeat the side effect.
+
+The queue is not yet connected to API routes, device authentication, outbound Companion WSS, Brain tool routing, result streaming, or the mobile UI. Do not expose these operations publicly or claim remote desktop control is available until the full authorization and end-to-end path is implemented and tested. Redis must be private, TLS-protected, access-controlled, and configured with suitable persistence/replication/backups.

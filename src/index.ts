@@ -131,3 +131,6 @@ export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/u
 
 export { RedisDesktopDeviceRegistryStore, REDIS_DESKTOP_DEVICE_CREATE_SCRIPT, REDIS_DESKTOP_DEVICE_GET_SCRIPT, REDIS_DESKTOP_DEVICE_LIST_SCRIPT, REDIS_DESKTOP_DEVICE_REVOKE_SCRIPT } from "./desktop/redis-device-registry.js";
 export type { RedisDesktopDeviceRegistryStoreOptions } from "./desktop/redis-device-registry.js";
+
+export { RedisDesktopCommandQueue } from "./desktop/redis-command-queue.js";
+export type { DesktopCommand, DesktopCommandStatus, EnqueueDesktopCommandInput, RedisDesktopCommandQueueOptions } from "./desktop/redis-command-queue.js";
