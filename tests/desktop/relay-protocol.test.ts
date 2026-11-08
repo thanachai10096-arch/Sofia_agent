@@ -5,6 +5,7 @@ import {
   DesktopRelayReplayGuard,
   signDesktopRelayRequest,
   verifyDesktopRelayRequest,
+  verifyDesktopRelayRequestAsync,
 } from "../../src/desktop/relay-protocol.js";
 
 const secret = Buffer.alloc(32, 7);
@@ -60,4 +61,33 @@ test("replay guard expires old nonces and fails closed at capacity", () => {
     assert.equal(full.consume(deviceId, `nonce-${String(index).padStart(16, "0")}`, 20_000), true);
   }
   assert.equal(full.consume(deviceId, "nonce-one-more-entry", 20_000), false);
+});
+
+test("async relay verification supports a shared atomic replay guard", async () => {
+  const value = request();
+  const headers = signDesktopRelayRequest(value, secret);
+  const seen = new Set<string>();
+  const sharedGuard = {
+    async consume(id: string, nonce: string, expiresAt: number, now = value.timestamp): Promise<boolean> {
+      assert.equal(id, deviceId);
+      assert.equal(expiresAt, value.timestamp + 300_000);
+      assert.equal(now, value.timestamp);
+      const key = id + ":" + nonce;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    },
+  };
+  const options = { now: () => value.timestamp };
+  assert.equal(await verifyDesktopRelayRequestAsync(value, headers, secret, sharedGuard, options), true);
+  assert.equal(await verifyDesktopRelayRequestAsync(value, headers, secret, sharedGuard, options), false);
+});
+
+test("async relay verification fails closed when shared replay storage is unavailable", async () => {
+  const value = request();
+  const headers = signDesktopRelayRequest(value, secret);
+  const unavailable = { consume: async () => { throw new Error("redis unavailable"); } };
+  assert.equal(await verifyDesktopRelayRequestAsync(
+    value, headers, secret, unavailable, { now: () => value.timestamp },
+  ), false);
 });
