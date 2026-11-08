@@ -139,6 +139,36 @@ export function parseTelegramUserApiKeys(
   return new Map<string, string>(entries.map(([userId, key]) => [userId, (key as string).trim()] as const));
 }
 
+/**
+ * Approval decisions use the sender-specific API key, so the API derives the
+ * owner from authenticated credentials rather than trusting a Telegram user ID.
+ */
+export async function handleTelegramApprovalCommand(
+  client: Pick<SofiaClient, "listApprovals" | "decideApproval">,
+  commandText: string,
+): Promise<string | undefined> {
+  const [command = "", ...args] = commandText.trim().split(/\\s+/);
+  if (command === "/approvals") {
+    if (args.length) return "Usage: /approvals";
+    const { approvals } = await client.listApprovals();
+    if (!approvals.length) return "ไม่มีคำขออนุมัติที่รอดำเนินการ";
+    return approvals.slice(0, 10).map((item, index) =>
+      (index + 1) + ". " + item.toolName + " [" + item.risk + "]\\n" +
+      "ID: " + item.id + "\\n" +
+      "หมดอายุ: " + new Date(item.expiresAt).toISOString() + "\\n" +
+      "Action hash: " + item.actionHash
+    ).join("\\n\\n");
+  }
+  if (command === "/approve" || command === "/reject") {
+    if (args.length !== 2) return "Usage: " + command + " <approval-id> <action-hash>";
+    await client.decideApproval(args[0]!, args[1]!, command === "/approve");
+    return command === "/approve"
+      ? "อนุมัติแล้ว Sofia จะดำเนินการต่อเมื่อคำขอยังอยู่ในสถานะรอดำเนินการ"
+      : "ปฏิเสธคำขอแล้ว";
+  }
+  return undefined;
+}
+
 export interface TelegramMessagingEnvironment {
   SOFIA_MESSAGING_ENABLED?: string;
   TELEGRAM_BOT_TOKEN?: string;
@@ -244,7 +274,25 @@ export function createTelegramMessagingRuntime(
       // The command handler owns the shared dedupe claim. Do not claim it twice in the gateway.
       maxMessagesPerWindow: 5,
       rateWindowMs: 60_000,
-      onMessage: (message) => handler(message),
+      onMessage: async (message) => {
+        const command = message.text.trim().split(/\\s+/, 1)[0] ?? "";
+        if (command === "/approvals" || command === "/approve" || command === "/reject") {
+          try {
+            const reply = await handleTelegramApprovalCommand(clientForUser(message.identity.userId), message.text);
+            if (reply) await gateway?.send("telegram", { conversationId: message.identity.conversationId, text: reply });
+          } catch (error) {
+            const status = error instanceof SofiaApiError ? error.status : 0;
+            const reply = status === 403
+              ? "บัญชีนี้ไม่มีสิทธิ์จัดการคำขออนุมัติ"
+              : status === 409
+                ? "คำขอนี้หมดอายุ ถูกตัดสินแล้ว หรือ Action Hash ไม่ตรง กรุณาใช้ /approvals ตรวจสอบใหม่"
+                : "ไม่สามารถจัดการคำขออนุมัติได้ในขณะนี้";
+            await gateway?.send("telegram", { conversationId: message.identity.conversationId, text: reply });
+          }
+          return;
+        }
+        await handler(message);
+      },
       logger: {
         info: (event) => onWarning("Telegram messaging event: " + event + "."),
         warn: (event) => onWarning("Telegram messaging warning: " + event + "."),
