@@ -6,9 +6,11 @@ uses SQLite transactions for one-time decisions.
 
 ## Scopes
 
-The default hosted API scopes include `approval:read` and
-`approval:decide`. If `SOFIA_API_SCOPES` is explicitly configured, add both
-scopes to the API key that owns the run. Approval ownership is derived from the
+The default hosted API scopes remain `agent:run` and `agent:read`; approval
+permissions are opt-in. Set `SOFIA_API_SCOPES=agent:run,agent:read,approval:read,approval:decide`
+only for deployments whose API-key holders are trusted to approve actions.
+Telegram approval commands also require these scopes on the sender-specific key.
+Approval ownership is derived from the
 authenticated API key ID; callers cannot choose an owner in the request body.
 
 ## List pending approvals
