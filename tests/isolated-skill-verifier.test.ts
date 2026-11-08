@@ -70,6 +70,8 @@ test("isolated skill verifier executes trusted tests with networking disabled", 
     assert.deepEqual(calls.map((call) => [call.command, ...call.args]), [
       ["node", "--check", "index.mjs"],
       ["node", "--test", "__sofia_trusted_tests__/skill.test.mjs"],
+      ["node", "--check", "index.mjs"],
+      ["node", "--test", "__sofia_trusted_tests__/skill.test.mjs"],
     ]);
     assert.ok(calls.every((call) => call.limits.allowNetwork === false));
     assert.ok(calls.every((call) => call.limits.readOnlyWorkspace === true));
