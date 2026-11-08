@@ -56,6 +56,15 @@ test("isolated skill verifier executes trusted tests with networking disabled", 
     assert.equal(result.isolated, true);
     assert.equal(result.candidateDigest, getSkillCandidateDigest(pkg));
     assert.match(result.testSuiteDigest, /^[a-f0-9]{64}$/);
+    const changedSuite = {
+      ...trustedSuite,
+      files: { ...trustedSuite.files, "skill.test.mjs": 'import test from "node:test"; test("changed contract", () => {});' },
+    };
+    const changedVerifier = createIsolatedSkillVerifier({
+      sandbox, workspaceParent: parent, getTrustedTestSuite: () => changedSuite,
+    });
+    const changedResult = await changedVerifier(pkg);
+    assert.notEqual(result.testSuiteDigest, changedResult.testSuiteDigest);
     const artifactDigest = getExecutableArtifactDigest(pkg.artifact!);
     assert.notEqual(artifactDigest, getExecutableArtifactDigest({ ...pkg.artifact!, files: { ...pkg.artifact!.files, "extra.js": "export const changed = true;" } }));
     assert.deepEqual(calls.map((call) => [call.command, ...call.args]), [
