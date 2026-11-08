@@ -81,9 +81,16 @@ function normalizeExcerpt(value: string, maxLength: number): string {
   return String(redactSecrets(value)).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, " ").slice(0, maxLength);
 }
 function queryFor(evidence: SkillImprovementEvidence[]): string {
-  const skillId = evidence[0]!.skillId;
-  const categories = [...new Set(evidence.map((item) => item.category))].slice(0, 4);
-  const summaries = evidence.map((item) => item.summary).join(" ").slice(0, 1200);
+  // Research queries leave Sofia's trust boundary. Redact secrets from every
+  // evidence-derived field before sending anything to an external provider.
+  const safeText = (value: string, maxLength: number): string =>
+    String(redactSecrets(value))
+      .replace(/[\\u0000-\\u001f\\u007f]/g, " ")
+      .replace(/\\s+/g, " ")
+      .slice(0, maxLength);
+  const skillId = safeText(evidence[0]!.skillId, 160);
+  const categories = [...new Set(evidence.map((item) => safeText(item.category, 100)))].slice(0, 4);
+  const summaries = safeText(evidence.map((item) => item.summary).join(" "), 1200);
   return `Research reliable technical documentation and safe implementation patterns for Sofia skill ${skillId}; categories: ${categories.join(", ")}; problem evidence: ${summaries}`;
 }
 
