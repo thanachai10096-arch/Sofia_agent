@@ -158,7 +158,7 @@ export class VersionedSkillLifecycle {
         !result.checks.every((check) => isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
       result = { passed: false, checks: [{ name: "evaluation-result", passed: false, detail: "Evaluator returned malformed or empty evidence" }] };
     }
-    let benchmark: SkillLifecycleRecord["evaluation"] extends infer _T ? { report: SkillBenchmarkReport; comparison: SkillBenchmarkComparison } | undefined : never;
+    let benchmark: { report: SkillBenchmarkReport; comparison: SkillBenchmarkComparison } | undefined;
     let benchmarkPassed = true;
     if (this.benchmarkEngine) {
       if (!result.benchmarkReport ||
