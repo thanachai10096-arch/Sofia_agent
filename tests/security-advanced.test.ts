@@ -4,7 +4,7 @@ import {describe,it} from "node:test";
 import assert from "node:assert/strict";
 import {issueCapability,verifyCapability} from "../src/security/capability.js";
 import {ReplayProtector,signAgentMessage,verifyAgentMessage} from "../src/security/agent-message.js";
-import {assertSecurityConfiguration,loadExecutionPolicyFromEnv} from "../src/security/policy.js";
+import {assertSecurityConfiguration,defaultPolicy,loadExecutionPolicyFromEnv,shouldRequireApproval} from "../src/security/policy.js";
 import {SecurityController} from "../src/security/controller.js";
 
 describe("advanced security",()=>{
@@ -52,5 +52,19 @@ describe("advanced security",()=>{
   process.env.SOFIA_AUDIT_SECRET="test-audit"; process.env.SOFIA_ALLOW_NETWORK="true"; delete process.env.SOFIA_ALLOWED_HOSTS;
   assert.throws(()=>assertSecurityConfiguration(loadExecutionPolicyFromEnv()),/SOFIA_ALLOWED_HOSTS/);
   process.env=old;
+ });
+});
+
+describe("risk-based approval policy",()=>{
+ it("does not interrupt medium-risk work by default but requires approval for high and critical actions",()=>{
+  assert.equal(shouldRequireApproval(defaultPolicy,{},"low"),false);
+  assert.equal(shouldRequireApproval(defaultPolicy,{},"medium"),false);
+  assert.equal(shouldRequireApproval(defaultPolicy,{},"high"),true);
+  assert.equal(shouldRequireApproval(defaultPolicy,{},"critical"),true);
+ });
+ it("supports explicit per-tool overrides without allowing critical actions to bypass approval",()=>{
+  assert.equal(shouldRequireApproval(defaultPolicy,{requireApproval:true},"low"),true);
+  assert.equal(shouldRequireApproval(defaultPolicy,{requireApproval:false},"high"),false);
+  assert.equal(shouldRequireApproval(defaultPolicy,{requireApproval:false},"critical"),true);
  });
 });
