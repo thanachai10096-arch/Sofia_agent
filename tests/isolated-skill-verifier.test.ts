@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Sandbox, SandboxLimits } from "../src/sandbox.js";
 import { createIsolatedSkillVerifier, getExecutableArtifactDigest } from "../src/skills/isolated-verifier.js";
+import { getSkillCandidateDigest } from "../src/brain/skill-lifecycle.js";
 import type { SkillPackage } from "../src/skills/platform.js";
 
 function candidate(): SkillPackage {
@@ -46,7 +47,8 @@ test("isolated skill verifier executes syntax and tests with networking disabled
     const result = await verifier(pkg);
     assert.equal(result.passed, true);
     assert.equal(result.isolated, true);
-    assert.equal(result.candidateDigest, getExecutableArtifactDigest(pkg.artifact!) && result.candidateDigest);
+    assert.equal(result.candidateDigest, getSkillCandidateDigest(pkg));
+    assert.equal(getExecutableArtifactDigest(pkg.artifact!), getExecutableArtifactDigest(pkg.artifact!));
     assert.deepEqual(calls.map((call) => [call.command, ...call.args]), [
       ["node", "--check", "index.js"],
       ["node", "--test", "index.test.js"],
