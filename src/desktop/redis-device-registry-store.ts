@@ -121,11 +121,12 @@ export class RedisDesktopDeviceRegistryStore implements DesktopDeviceRegistrySto
   }
 
   private recordKey(ownerId: string, deviceId: string): string {
-    return this.keyPrefix + ":record:" + digest(ownerId + "\n" + deviceId);
+    // Keep the record and owner index in the same Redis Cluster hash slot.
+    return this.keyPrefix + ":{" + digest(ownerId) + "}:record:" + digest(deviceId);
   }
 
   private ownerIndexKey(ownerId: string): string {
-    return this.keyPrefix + ":owner:" + digest(ownerId);
+    return this.keyPrefix + ":{" + digest(ownerId) + "}:owner";
   }
 }
 
