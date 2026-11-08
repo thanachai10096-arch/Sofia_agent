@@ -104,6 +104,14 @@ test("Redis command queue enqueues and claims a command with an expiring lease",
   assert.equal(claimed?.leaseExpiresAt, 6_100);
 });
 
+test("Redis command queue default lease outlives broker timeout and GUI approval", async () => {
+  const queue = new RedisDesktopCommandQueue({ client: memoryRedis() });
+  await queue.enqueue({ ...base, id: "command-0000001", now: 1_000 });
+  const claimed = await queue.claim(base.ownerId, base.deviceId, { now: 1_100, leaseToken: "lease-token-000001" });
+  assert.equal(claimed?.leaseExpiresAt, 121_100,
+    "default lease must be 120s, longer than the 90s broker deadline and 60s approval window");
+});
+
 test("Redis command queue idempotency returns the original command", async () => {
   const queue = new RedisDesktopCommandQueue({ client: memoryRedis() });
   const first = await queue.enqueue({ ...base, id: "command-0000001", idempotencyKey: "client-request-0001", now: 1_000 });
