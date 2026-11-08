@@ -24,6 +24,7 @@ test("mobile approval inbox is served without exposing API credentials", async (
     assert.doesNotMatch(html, /test-key/);
     assert.match(html, /\/v1\/approvals/);
     assert.match(html, /actionHash/);
+    assert.match(html, /a\.toolName/);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
