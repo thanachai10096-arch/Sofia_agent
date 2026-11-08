@@ -297,3 +297,57 @@ test("Anthropic thinking-only recovery explicitly disables provider-default thin
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("Anthropic adapter reports a safe diagnostic for an invalid content shape", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    type: "message",
+    role: "assistant",
+    content: "not-an-array",
+    stop_reason: "end_turn",
+    usage: { input_tokens: 5, output_tokens: 3 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://api.deepseek.com/anthropic",
+        apiKey: "test",
+        model: "deepseek-flash",
+        protocol: "anthropic-messages",
+      },
+    });
+    await assert.rejects(
+      gateway.generate({ task: "test", kind: "analysis", step: 1 }, route),
+      /provider_invalid_anthropic_content_shape/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Anthropic adapter classifies malformed JSON without exposing response contents", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("{private-provider-payload", {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+  try {
+    const gateway = new SofiaModelGateway({
+      coding: {
+        baseUrl: "https://api.deepseek.com/anthropic",
+        apiKey: "test",
+        model: "deepseek-flash",
+        protocol: "anthropic-messages",
+      },
+    });
+    await assert.rejects(
+      gateway.generate({ task: "test", kind: "analysis", step: 1 }, route),
+      (error: unknown) => error instanceof Error &&
+        error.message.includes("provider_invalid_anthropic_json") &&
+        !error.message.includes("private-provider-payload"),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
