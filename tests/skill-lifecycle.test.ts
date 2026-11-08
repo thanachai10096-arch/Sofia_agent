@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VersionedSkillLifecycle, getSkillCandidateDigest } from "../src/brain/skill-lifecycle.js";
@@ -26,6 +26,34 @@ const passing = async (candidate: SkillPackage) => ({
     executedChecks: candidate.skill.verification.map((name) => ({ name, passed: true })),
     completedAt: new Date().toISOString(),
   },
+});
+
+test("skill lifecycle refuses a symbolic-link store without modifying its target", () => {
+  const root = dir();
+  try {
+    const target = path.join(root, "trusted.json");
+    const link = path.join(root, "lifecycle.json");
+    const original = JSON.stringify({ schemaVersion: 1, records: [], activeBySkill: {} });
+    writeFileSync(target, original, "utf8");
+    symlinkSync(target, link);
+
+    assert.throws(
+      () => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file: link }),
+      /must not be a symbolic link/,
+    );
+    assert.equal(readFileSync(target, "utf8"), original);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill lifecycle rejects corrupt persisted JSON without restoring platform entries", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "corrupt.json");
+    writeFileSync(file, "{not-json", "utf8");
+    const platform = new InMemorySkillsPlatform();
+    assert.throws(() => new VersionedSkillLifecycle(platform, passing, { file }));
+    assert.equal(platform.list().length, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("skill lifecycle requires evaluation and confidence before promotion", async () => {
