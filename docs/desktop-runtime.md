@@ -175,3 +175,12 @@ const accepted = verifyDesktopRelayRequest(
 ```
 
 This is only the cryptographic request boundary. It does **not** implement device enrollment, cloud-side device ownership/storage, command queues, WebSocket/long-poll delivery, result streaming, offline/reconnect handling, or API-to-companion routing. The existing loopback host remains loopback-only. Do not describe phone-to-PC control as available until those pieces are implemented and tested end to end.
+
+## Cloud device registry and credential vault (foundation only)
+
+The desktop package exports a `DesktopDeviceRegistryStore` contract and `DesktopDeviceCredentialVault` primitive for a future authenticated Cloud Relay enrollment flow.
+
+- The registry contract requires owner-scoped lookup/list/revoke operations and atomic device-ID creation. A production implementation must use durable shared storage and enforce ownership in its queries; process-local maps are not suitable for multi-instance deployments.
+- The vault encrypts each device's random HMAC secret with AES-256-GCM. The 32-byte master key must be supplied by a KMS or secret manager and kept separate from the registry database. The authenticated encryption data binds the ciphertext to both the owner ID and device ID, preventing a credential row from being moved between accounts/devices.
+- The raw per-device secret should be shown to the Companion only once at enrollment, then stored in the OS credential manager. Never return it from ordinary device-list APIs, place it in model context, or write it to logs.
+- This is not yet an enrollment API or a durable registry implementation. Command delivery, outbound Companion transport, result streaming, and mobile control UI remain separate work. Do not advertise phone-to-PC remote control as available until the end-to-end path is implemented and tested.
