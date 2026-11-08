@@ -271,7 +271,7 @@ test("Telegram approval notices do not use an untrusted group chat as a destinat
     SOFIA_API_BASE_URL: "https://sofia.example.invalid",
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.ok(runtime);
-  assert.equal(await runtime.notifyApproval(ownerKeyId, "approval"), false);
   await runtime.stop();
+  assert.equal(await runtime.notifyApproval(ownerKeyId, "approval"), false);
   assert.deepEqual(warnings, []);
 });
