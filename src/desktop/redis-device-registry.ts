@@ -27,7 +27,7 @@ export const REDIS_DESKTOP_DEVICE_GET_SCRIPT = [
   "local value = redis.call('GET', KEYS[1])",
   "if not value then return false end",
   "local ok, record = pcall(cjson.decode, value)",
-  "if not ok or record.ownerId ~= ARGV[1] or record.id ~= ARGV[2] then return false end",
+  "if not ok or type(record) ~= 'table' or record.ownerId ~= ARGV[1] or record.id ~= ARGV[2] then return false end",
   "return value",
 ].join("\n");
 
@@ -56,7 +56,7 @@ export const REDIS_DESKTOP_DEVICE_REVOKE_SCRIPT = [
   "local value = redis.call('GET', KEYS[1])",
   "if not value then return 0 end",
   "local ok, record = pcall(cjson.decode, value)",
-  "if not ok or record.ownerId ~= ARGV[1] or record.id ~= ARGV[2] then return 0 end",
+  "if not ok or type(record) ~= 'table' or record.ownerId ~= ARGV[1] or record.id ~= ARGV[2] then return 0 end",
   "if record.revokedAt ~= nil then return 0 end",
   "record.revokedAt = tonumber(ARGV[3])",
   "redis.call('SET', KEYS[1], cjson.encode(record))",
