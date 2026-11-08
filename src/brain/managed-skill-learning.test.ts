@@ -36,7 +36,11 @@ function fixture() {
       runnerId: "isolated-test-runner",
       isolatedWorkspaceId: "managed-skill-test-workspace",
       isolated: true as const,
-      executedChecks: skill.skill.verification.map((name) => ({ name, passed: true })),
+      // The production v1 runner proves only syntax and trusted test execution.
+      executedChecks: [
+        { name: "syntax", passed: true },
+        { name: "test", passed: true },
+      ],
       completedAt: new Date().toISOString(),
       testSuiteId: "trusted-test-fixture",
       testSuiteVersion: "1",
@@ -54,7 +58,7 @@ test("managed skill learning activates only after explicit approval", async () =
       approvalCalls.push({ toolName: request.toolName, risk: request.risk });
       return true;
     }, async () => artifact);
-    assert.equal(await handler(candidate, "run-1", "operator-1"), true);
+    assert.equal(await handler({ ...candidate, verification: ["test"] }, "run-1", "operator-1"), true);
     assert.equal(approvalCalls.length, 1);
     assert.equal(approvalCalls[0]?.toolName, "skill.lifecycle.promote");
     assert.equal(approvalCalls[0]?.risk, "high");
@@ -71,6 +75,24 @@ test("managed skill learning fails closed when approval is absent or declined", 
     assert.equal(await noArtifactCompiler(candidate, "run-2"), false);
     const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false, async () => artifact);
     assert.equal(await declined(candidate, "run-3"), false);
+    assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
+  } finally {
+    rmSync(f.directory, { recursive: true, force: true });
+  }
+});
+
+test("managed skill learning does not discard unsupported requested verification", async () => {
+  const f = fixture();
+  try {
+    const handler = createManagedSkillLearningHandler(
+      f.lifecycle,
+      async () => true,
+      async () => artifact,
+    );
+    // The original candidate requires typecheck + test + build. The v1
+    // runner proves only syntax + test, so silently narrowing requirements
+    // must never make this candidate eligible for promotion.
+    assert.equal(await handler(candidate, "run-unsupported"), false);
     assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
   } finally {
     rmSync(f.directory, { recursive: true, force: true });
