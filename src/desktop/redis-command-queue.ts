@@ -38,6 +38,7 @@ export interface RedisDesktopCommandQueueOptions {
   maxPayloadBytes?: number;
   maxCommandsPerDevice?: number;
   idempotencyTtlSeconds?: number;
+  terminalRetentionSeconds?: number;
 }
 
 export const REDIS_DESKTOP_COMMAND_ENQUEUE_SCRIPT = [
@@ -59,7 +60,7 @@ export const REDIS_DESKTOP_COMMAND_CLAIM_SCRIPT = [
   "    if ok and type(command) == 'table' and command.status == 'leased' then",
   "      command.leaseToken = nil; command.leaseExpiresAt = nil",
   "      if tonumber(command.attempts) >= tonumber(command.maxAttempts) then",
-  "        command.status = 'failed'; command.error = 'Command lease expired after maximum attempts'; command.updatedAt = tonumber(ARGV[1])",
+  "        command.status = 'failed'; command.error = 'Command lease expired after maximum attempts'; command.updatedAt = tonumber(ARGV[1]); redis.call('ZADD', KEYS[4], tonumber(ARGV[1]), id)",
   "      else",
   "        command.status = 'queued'; command.updatedAt = tonumber(ARGV[1]); redis.call('ZADD', KEYS[1], tonumber(ARGV[1]), id)",
   "      end",
@@ -89,7 +90,7 @@ export const REDIS_DESKTOP_COMMAND_COMPLETE_SCRIPT = [
   "if not ok or type(command) ~= 'table' or command.status ~= 'leased' or command.leaseToken ~= ARGV[2] then return 0 end",
   "command.status = 'completed'; command.updatedAt = tonumber(ARGV[3]); command.result = cjson.decode(ARGV[4])",
   "command.leaseToken = nil; command.leaseExpiresAt = nil",
-  "redis.call('ZREM', KEYS[1], ARGV[1]); redis.call('HSET', KEYS[2], ARGV[1], cjson.encode(command))",
+  "redis.call('ZREM', KEYS[1], ARGV[1]); redis.call('HSET', KEYS[2], ARGV[1], cjson.encode(command)); redis.call('ZADD', KEYS[3], tonumber(ARGV[3]), ARGV[1])",
   "return 1",
 ].join("\n");
 
@@ -102,8 +103,14 @@ export const REDIS_DESKTOP_COMMAND_FAIL_SCRIPT = [
   "redis.call('ZREM', KEYS[2], ARGV[1])",
   "if ARGV[4] == '1' and tonumber(command.attempts) < tonumber(command.maxAttempts) then",
   "  command.status = 'queued'; redis.call('ZADD', KEYS[1], tonumber(ARGV[3]) + tonumber(ARGV[6]), ARGV[1])",
-  "else command.status = 'failed' end",
+  "else command.status = 'failed'; redis.call('ZADD', KEYS[4], tonumber(ARGV[3]), ARGV[1]) end",
   "redis.call('HSET', KEYS[3], ARGV[1], cjson.encode(command)); return 1",
+].join("\n");
+
+export const REDIS_DESKTOP_COMMAND_PRUNE_TERMINAL_SCRIPT = [
+  "local ids = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1], 'LIMIT', 0, tonumber(ARGV[2]))",
+  "for _, id in ipairs(ids) do redis.call('HDEL', KEYS[1], id); redis.call('ZREM', KEYS[2], id) end",
+  "return #ids",
 ].join("\n");
 
 export const REDIS_DESKTOP_COMMAND_GET_SCRIPT = [
@@ -122,6 +129,7 @@ export class RedisDesktopCommandQueue {
   private readonly maxPayloadBytes: number;
   private readonly maxCommandsPerDevice: number;
   private readonly idempotencyTtlSeconds: number;
+  private readonly terminalRetentionSeconds: number;
 
   constructor(options: RedisDesktopCommandQueueOptions) {
     if (!options?.client || typeof options.client.eval !== "function") {
@@ -132,9 +140,11 @@ export class RedisDesktopCommandQueue {
     this.maxPayloadBytes = options.maxPayloadBytes ?? 65_536;
     this.maxCommandsPerDevice = options.maxCommandsPerDevice ?? 500;
     this.idempotencyTtlSeconds = options.idempotencyTtlSeconds ?? 86_400;
+    this.terminalRetentionSeconds = options.terminalRetentionSeconds ?? 604_800;
     if (!Number.isSafeInteger(this.maxPayloadBytes) || this.maxPayloadBytes < 1_024 || this.maxPayloadBytes > 1_048_576) throw new Error("Invalid desktop command payload limit.");
     if (!Number.isSafeInteger(this.maxCommandsPerDevice) || this.maxCommandsPerDevice < 1 || this.maxCommandsPerDevice > 100_000) throw new Error("Invalid desktop command queue capacity.");
     if (!Number.isSafeInteger(this.idempotencyTtlSeconds) || this.idempotencyTtlSeconds < 60 || this.idempotencyTtlSeconds > 2_592_000) throw new Error("Invalid desktop command idempotency TTL.");
+    if (!Number.isSafeInteger(this.terminalRetentionSeconds) || this.terminalRetentionSeconds < this.idempotencyTtlSeconds || this.terminalRetentionSeconds > 7_776_000) throw new Error("Invalid desktop command terminal retention period.");
     this.client = options.client;
     this.prefix = prefix;
   }
@@ -160,6 +170,7 @@ export class RedisDesktopCommandQueue {
     const serialized = JSON.stringify(command);
     if (Buffer.byteLength(serialized, "utf8") > this.maxPayloadBytes) throw new Error("Desktop command payload too large.");
     const keys = this.keys(input.ownerId, input.deviceId);
+    await this.pruneTerminal(input.ownerId, input.deviceId, now);
     const idemKey = input.idempotencyKey ? this.idempotencyRedisKey(keys.slot, input.idempotencyKey) : keys.idempotencyPlaceholder;
     const result = await this.client.eval(REDIS_DESKTOP_COMMAND_ENQUEUE_SCRIPT, {
       keys: [keys.pending, keys.leased, keys.records, idemKey],
@@ -185,7 +196,8 @@ export class RedisDesktopCommandQueue {
     if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(leaseMs) || leaseMs < 1_000 || leaseMs > 300_000) throw new Error("Invalid desktop command lease settings.");
     if (!/^[A-Za-z0-9-]{8,64}$/.test(token)) throw new Error("Invalid desktop command lease token.");
     const keys = this.keys(ownerId, deviceId);
-    const raw = await this.client.eval(REDIS_DESKTOP_COMMAND_CLAIM_SCRIPT, { keys: [keys.pending, keys.leased, keys.records], arguments: [String(now), String(leaseMs), token] });
+    await this.pruneTerminal(ownerId, deviceId, now);
+    const raw = await this.client.eval(REDIS_DESKTOP_COMMAND_CLAIM_SCRIPT, { keys: [keys.pending, keys.leased, keys.records, keys.terminal], arguments: [String(now), String(leaseMs), token] });
     if (raw === null || raw === undefined || raw === false) return null;
     return parseCommand(raw, ownerId, deviceId);
   }
@@ -195,7 +207,7 @@ export class RedisDesktopCommandQueue {
     const serialized = JSON.stringify(result ?? null);
     if (Buffer.byteLength(serialized, "utf8") > this.maxPayloadBytes) throw new Error("Desktop command result too large.");
     const keys = this.keys(ownerId, deviceId);
-    return redisBoolean(await this.client.eval(REDIS_DESKTOP_COMMAND_COMPLETE_SCRIPT, { keys: [keys.leased, keys.records], arguments: [commandId, leaseToken, String(now), serialized] }));
+    return redisBoolean(await this.client.eval(REDIS_DESKTOP_COMMAND_COMPLETE_SCRIPT, { keys: [keys.leased, keys.records, keys.terminal], arguments: [commandId, leaseToken, String(now), serialized] }));
   }
 
   async fail(ownerId: string, deviceId: string, commandId: string, leaseToken: string, options: { now?: number; retryable?: boolean; retryDelayMs?: number; error: string }): Promise<boolean> {
@@ -205,7 +217,18 @@ export class RedisDesktopCommandQueue {
     const retryDelayMs = options.retryDelayMs ?? 1_000;
     if (!Number.isSafeInteger(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > 300_000) throw new Error("Invalid desktop command retry delay.");
     const keys = this.keys(ownerId, deviceId);
-    return redisBoolean(await this.client.eval(REDIS_DESKTOP_COMMAND_FAIL_SCRIPT, { keys: [keys.pending, keys.leased, keys.records], arguments: [commandId, leaseToken, String(now), options.retryable === true ? "1" : "0", options.error, String(retryDelayMs)] }));
+    return redisBoolean(await this.client.eval(REDIS_DESKTOP_COMMAND_FAIL_SCRIPT, { keys: [keys.pending, keys.leased, keys.records, keys.terminal], arguments: [commandId, leaseToken, String(now), options.retryable === true ? "1" : "0", options.error, String(retryDelayMs)] }));
+  }
+
+  async pruneTerminal(ownerId: string, deviceId: string, now = Date.now(), limit = 100): Promise<number> {
+    validateOwnerDevice(ownerId, deviceId);
+    if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) throw new Error("Invalid desktop command retention prune settings.");
+    const keys = this.keys(ownerId, deviceId);
+    const cutoff = now - this.terminalRetentionSeconds * 1_000;
+    const removed = await this.client.eval(REDIS_DESKTOP_COMMAND_PRUNE_TERMINAL_SCRIPT, { keys: [keys.records, keys.terminal], arguments: [String(cutoff), String(limit)] });
+    if (typeof removed === "number" && Number.isSafeInteger(removed) && removed >= 0 && removed <= limit) return removed;
+    if (typeof removed === "string" && /^\d+$/.test(removed) && Number(removed) <= limit) return Number(removed);
+    throw new Error("Redis returned an invalid desktop command prune result.");
   }
 
   async get(ownerId: string, deviceId: string, commandId: string): Promise<DesktopCommand | null> {
@@ -220,7 +243,7 @@ export class RedisDesktopCommandQueue {
   private keys(ownerId: string, deviceId: string) {
     const slot = `{owner-${createHash("sha256").update(ownerId).digest("hex")}-device-${createHash("sha256").update(deviceId).digest("hex")}}`;
     const base = `${this.prefix}:${slot}`;
-    return { slot, pending: `${base}:pending`, leased: `${base}:leased`, records: `${base}:records`, idempotencyPlaceholder: `${base}:idempotency:none` };
+    return { slot, pending: `${base}:pending`, leased: `${base}:leased`, records: `${base}:records`, terminal: `${base}:terminal`, idempotencyPlaceholder: `${base}:idempotency:none` };
   }
 
   private idempotencyRedisKey(slot: string, value: string): string {
