@@ -269,6 +269,10 @@ test("artifact verification cannot satisfy typecheck with syntax and test eviden
       evaluated.evaluation?.checks.some((check) => check.name === "runtime-verification" && !check.passed),
       true,
     );
+    assert.match(
+      evaluated.evaluation?.checks.find((check) => check.name === "runtime-verification")?.detail ?? "",
+      /does not satisfy every declared verification requirement/,
+    );
     assert.throws(() => lifecycle.promote(candidate.id), /valid isolated runtime verification/);
     assert.equal(platform.get("repair-skill"), undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
