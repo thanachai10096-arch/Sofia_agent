@@ -196,3 +196,43 @@ test("Telegram run completion records timeout and failed delivery separately", a
     "telegram_completion_delivery_failed run_id=run-timeout",
   ]);
 });
+
+test("Telegram approval commands list only the sender API key's pending approvals", async () => {
+  const { handleTelegramApprovalCommand } = await import("./telegram-runtime.js");
+  let listed = 0;
+  const reply = await handleTelegramApprovalCommand({
+    listApprovals: async () => {
+      listed += 1;
+      return { approvals: [{
+        id: "123e4567-e89b-12d3-a456-426614174000",
+        runId: "run-1", toolName: "workspace.write", input: { path: "notes.txt" },
+        actionHash: "a".repeat(64), risk: "high", status: "pending", expiresAt: 1_900_000_000_000,
+      }] };
+    },
+    decideApproval: async () => ({}),
+  }, "/approvals");
+  assert.equal(listed, 1);
+  assert.match(reply ?? "", /workspace.write/);
+  assert.match(reply ?? "", /Action hash: a{64}/);
+});
+
+test("Telegram approve and reject require the exact approval ID and action hash", async () => {
+  const { handleTelegramApprovalCommand } = await import("./telegram-runtime.js");
+  const decisions: Array<{ id: string; hash: string; approved: boolean }> = [];
+  const client = {
+    listApprovals: async () => ({ approvals: [] }),
+    decideApproval: async (id: string, hash: string, approved: boolean) => {
+      decisions.push({ id, hash, approved });
+      return {};
+    },
+  };
+  const id = "123e4567-e89b-12d3-a456-426614174000";
+  const hash = "b".repeat(64);
+  assert.match(await handleTelegramApprovalCommand(client, "/approve") ?? "", /Usage/);
+  assert.match(await handleTelegramApprovalCommand(client, "/approve " + id + " " + hash) ?? "", /อนุมัติแล้ว/);
+  assert.match(await handleTelegramApprovalCommand(client, "/reject " + id + " " + hash) ?? "", /ปฏิเสธ/);
+  assert.deepEqual(decisions, [
+    { id, hash, approved: true },
+    { id, hash, approved: false },
+  ]);
+});
