@@ -134,3 +134,6 @@ export type { RedisDesktopDeviceRegistryStoreOptions } from "./desktop/redis-dev
 
 export { RedisDesktopCommandQueue } from "./desktop/redis-command-queue.js";
 export type { DesktopCommand, DesktopCommandStatus, EnqueueDesktopCommandInput, RedisDesktopCommandQueueOptions } from "./desktop/redis-command-queue.js";
+
+export { RedisDesktopCompanionPresenceStore } from "./desktop/redis-companion-presence.js";
+export type { DesktopCompanionPresence, RedisDesktopCompanionPresenceOptions } from "./desktop/redis-companion-presence.js";

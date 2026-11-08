@@ -23,3 +23,6 @@ export { RedisDesktopDeviceRegistryStore, REDIS_DESKTOP_DEVICE_CREATE_SCRIPT, RE
 export type { RedisDesktopDeviceRegistryStoreOptions } from "./redis-device-registry.js";
 export { RedisDesktopCommandQueue, REDIS_DESKTOP_COMMAND_ENQUEUE_SCRIPT, REDIS_DESKTOP_COMMAND_CLAIM_SCRIPT, REDIS_DESKTOP_COMMAND_COMPLETE_SCRIPT, REDIS_DESKTOP_COMMAND_FAIL_SCRIPT, REDIS_DESKTOP_COMMAND_GET_SCRIPT } from "./redis-command-queue.js";
 export type { DesktopCommand, DesktopCommandStatus, EnqueueDesktopCommandInput, RedisDesktopCommandQueueOptions } from "./redis-command-queue.js";
+
+export { RedisDesktopCompanionPresenceStore, REDIS_DESKTOP_PRESENCE_REFRESH_SCRIPT, REDIS_DESKTOP_PRESENCE_RELEASE_SCRIPT } from "./redis-companion-presence.js";
+export type { DesktopCompanionPresence, RedisDesktopCompanionPresenceOptions } from "./redis-companion-presence.js";

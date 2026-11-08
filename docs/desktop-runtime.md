@@ -249,3 +249,16 @@ const lease = await queue.claim(ownerId, deviceId, { leaseMs: 30_000 });
 **Delivery semantics:** this is at-least-once command delivery, not exactly-once side-effect execution. A Companion must persist/deduplicate command IDs before executing actions, and must send completion only after it has recorded the outcome. If a lease expires after an action ran but before completion was acknowledged, the command may be delivered again; the Companion must return the recorded outcome rather than repeat the side effect.
 
 The queue is not yet connected to API routes, device authentication, outbound Companion WSS, Brain tool routing, result streaming, or the mobile UI. Do not expose these operations publicly or claim remote desktop control is available until the full authorization and end-to-end path is implemented and tested. Redis must be private, TLS-protected, access-controlled, and configured with suitable persistence/replication/backups.
+
+
+## Shared Companion connection presence
+
+`RedisDesktopCompanionPresenceStore` tracks which Cloud worker currently owns a paired Desktop Companion connection. Each owner/device pair has one TTL-backed presence record containing the session ID, worker ID, connection time, and last heartbeat.
+
+- `claim` atomically replaces the current session when a new authenticated connection takes over.
+- `refresh` and `release` compare the current session ID inside Redis Lua. A stale socket cannot refresh or delete a newer connection's presence.
+- The TTL (10–300 seconds) makes abandoned connections expire after process crashes or network loss.
+- Redis keys are partitioned by owner/device using a shared Redis Cluster hash slot.
+- The store is a coordination primitive only. It does not open a WebSocket, authenticate a device, route commands to a worker, or expose a public endpoint.
+
+A future public WSS relay must authenticate each device request using the registered device credential, call `claim` after successful authentication, heartbeat while the socket is alive, and call `release` on close. Every operation must remain owner/device scoped. The companion must connect outbound over TLS; do not expose the local loopback Desktop Action Host or require router port forwarding.
