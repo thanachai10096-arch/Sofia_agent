@@ -14,7 +14,7 @@ export type { LocalPairingHost, LocalPairingHostConfig } from "./local-pairing-h
 export { startLocalDesktopActionHost } from "./local-action-host.js";
 export type { LocalDesktopActionHost, LocalDesktopActionHostConfig } from "./local-action-host.js";
 
-export { createDesktopRelayNonce, signDesktopRelayRequest, verifyDesktopRelayRequest, DesktopRelayReplayGuard } from "./relay-protocol.js";
+export { createDesktopRelayNonce, signDesktopRelayRequest, verifyDesktopRelayRequest, verifyDesktopRelayRequestAsync, DesktopRelayReplayGuard } from "./relay-protocol.js";
 export type { DesktopRelayRequest, DesktopRelayAuthHeaders, DesktopRelayReplayGuardOptions } from "./relay-protocol.js";
 
 export { DesktopDeviceCredentialVault } from "./device-registry.js";
@@ -35,3 +35,5 @@ export type {
 export { RedisDesktopEnrollmentChallengeStore } from "./redis-enrollment-challenge-store.js";
 export type { RedisDesktopEnrollmentChallengeStoreOptions } from "./redis-enrollment-challenge-store.js";
 export { REDIS_DESKTOP_ENROLLMENT_CREATE_SCRIPT, REDIS_DESKTOP_ENROLLMENT_CONSUME_SCRIPT } from "./redis-enrollment-challenge-store.js";
+
+export { RedisDesktopRelayReplayGuard, REDIS_DESKTOP_REPLAY_GUARD_SCRIPT } from "./redis-relay-replay-guard.js";
