@@ -224,6 +224,7 @@ Redis must be configured with persistence, replication, network access controls,
 - Expired leases are recovered atomically; commands are retried up to `maxAttempts` and then marked failed.
 - Completion/failure requires the current lease token, so stale workers cannot overwrite a newer lease result.
 - Payload size, queue active capacity, retry count, lease duration, and idempotency TTL are bounded.
+- Terminal `completed`/`failed` records are indexed separately and pruned in bounded batches after a configurable retention period (default 7 days). Retention must be at least as long as the idempotency-key TTL; pruning runs automatically during enqueue/claim and can also be invoked explicitly.
 - All queue keys for one owner/device share a Redis Cluster hash slot.
 
 Example:
