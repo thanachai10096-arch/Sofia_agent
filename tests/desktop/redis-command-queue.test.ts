@@ -162,3 +162,29 @@ test("Redis command queue validates payload sizes, retry settings and identity",
   await assert.rejects(queue.claim(" ", base.deviceId), /owner ID/);
   await assert.rejects(queue.claim(base.ownerId, base.deviceId, { leaseMs: 100 }), /lease settings/);
 });
+
+
+test("Redis command queue prunes terminal records after retention without touching active commands", async () => {
+  const queue = new RedisDesktopCommandQueue({
+    client: memoryRedis(),
+    idempotencyTtlSeconds: 3_600,
+    terminalRetentionSeconds: 3_600,
+  });
+  await queue.enqueue({ ...base, id: "command-0000001", now: 1_000 });
+  await queue.enqueue({ ...base, id: "command-0000002", now: 1_001 });
+  const first = await queue.claim(base.ownerId, base.deviceId, { now: 1_100, leaseToken: "lease-token-000001" });
+  assert.ok(first);
+  assert.equal(await queue.complete(base.ownerId, base.deviceId, first.id, "lease-token-000001", { ok: true }, 1_200), true);
+  const removed = await queue.pruneTerminal(base.ownerId, base.deviceId, 3_602_000, 10);
+  assert.equal(removed, 1);
+  assert.equal(await queue.get(base.ownerId, base.deviceId, "command-0000001"), null);
+  assert.equal((await queue.get(base.ownerId, base.deviceId, "command-0000002"))?.status, "queued");
+});
+
+test("Redis command queue requires terminal retention to cover idempotency TTL", () => {
+  assert.throws(() => new RedisDesktopCommandQueue({
+    client: memoryRedis(),
+    idempotencyTtlSeconds: 7_200,
+    terminalRetentionSeconds: 3_600,
+  }), /terminal retention period/);
+});
