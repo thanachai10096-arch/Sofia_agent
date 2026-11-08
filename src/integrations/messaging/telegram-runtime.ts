@@ -147,17 +147,17 @@ export async function handleTelegramApprovalCommand(
   client: Pick<SofiaClient, "listApprovals" | "decideApproval">,
   commandText: string,
 ): Promise<string | undefined> {
-  const [command = "", ...args] = commandText.trim().split(/\\s+/);
+  const [command = "", ...args] = commandText.trim().split(/\s+/);
   if (command === "/approvals") {
     if (args.length) return "Usage: /approvals";
     const { approvals } = await client.listApprovals();
     if (!approvals.length) return "ไม่มีคำขออนุมัติที่รอดำเนินการ";
     return approvals.slice(0, 10).map((item, index) =>
       (index + 1) + ". " + item.toolName + " [" + item.risk + "]\\n" +
-      "ID: " + item.id + "\\n" +
-      "หมดอายุ: " + new Date(item.expiresAt).toISOString() + "\\n" +
+      "ID: " + item.id + "\n" +
+      "หมดอายุ: " + new Date(item.expiresAt).toISOString() + "\n" +
       "Action hash: " + item.actionHash
-    ).join("\\n\\n");
+    ).join("\n\n");
   }
   if (command === "/approve" || command === "/reject") {
     if (args.length !== 2) return "Usage: " + command + " <approval-id> <action-hash>";
@@ -275,7 +275,7 @@ export function createTelegramMessagingRuntime(
       maxMessagesPerWindow: 5,
       rateWindowMs: 60_000,
       onMessage: async (message) => {
-        const command = message.text.trim().split(/\\s+/, 1)[0] ?? "";
+        const command = message.text.trim().split(/\s+/, 1)[0] ?? "";
         if (command === "/approvals" || command === "/approve" || command === "/reject") {
           try {
             const reply = await handleTelegramApprovalCommand(clientForUser(message.identity.userId), message.text);
