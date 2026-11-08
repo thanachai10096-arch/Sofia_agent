@@ -306,7 +306,7 @@ test("skill lifecycle with benchmark gate rejects missing baseline or mismatched
     const engine = new SkillBenchmarkEngine();
     const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => ({
       ...await passing(candidate),
-      benchmarkReport: engine.summarize("repair-skill", "0.9.0", [
+      benchmarkReport: engine.summarize("repair-skill", "1.0.0", [
         { fixtureId: "a", passed: true, safetyPassed: true, durationMs: 1, toolCalls: 1, retries: 0 },
         { fixtureId: "b", passed: true, safetyPassed: true, durationMs: 1, toolCalls: 1, retries: 0 },
         { fixtureId: "c", passed: true, safetyPassed: true, durationMs: 1, toolCalls: 1, retries: 0 },
