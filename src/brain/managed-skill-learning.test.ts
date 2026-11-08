@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { VersionedSkillLifecycle } from "./skill-lifecycle.js";
+import { VersionedSkillLifecycle, getSkillCandidateDigest } from "./skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "./managed-skill-learning.js";
 import type { LearnedSkillCandidate } from "./learning.js";
@@ -22,8 +22,16 @@ function fixture() {
   const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-managed-skill-"));
   const platform = new InMemorySkillsPlatform();
   const lifecycle = new VersionedSkillLifecycle(platform, async (skill) => ({
-    passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length),
-    checks: [{ name: "metadata-and-verification", passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length) }],
+    passed: true,
+    checks: [{ name: "metadata-and-verification", passed: true }],
+    runtimeVerification: {
+      candidateDigest: getSkillCandidateDigest(skill),
+      runnerId: "isolated-test-runner",
+      isolatedWorkspaceId: "managed-skill-test-workspace",
+      isolated: true as const,
+      executedChecks: skill.skill.verification.map((name) => ({ name, passed: true })),
+      completedAt: new Date().toISOString(),
+    },
   }), { file: path.join(directory, "lifecycle.json") });
   return { directory, platform, lifecycle };
 }
