@@ -13,6 +13,9 @@ const ALLOWED_CAPABILITIES = new Set<DesktopCapability>([
   "workspace:read",
   "workspace:write",
   "process:execute",
+  "screen:capture",
+  "app:launch",
+  "input:control",
 ]);
 
 export interface DesktopEnrollmentChallenge {
@@ -102,6 +105,9 @@ export class DesktopDeviceEnrollmentService {
     }
     validateOwner(challenge.ownerId);
     const id = this.createDeviceId();
+    if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(id)) {
+      throw new Error("Invalid generated desktop device ID.");
+    }
     const record: DesktopDeviceRecord = {
       id,
       ownerId: challenge.ownerId,
