@@ -262,6 +262,7 @@ test("Telegram approval notices do not use an untrusted group chat as a destinat
   const key = "private-user-key";
   const ownerKeyId = createHash("sha256").update(key).digest("hex").slice(0, 32);
   const warnings: string[] = [];
+  const sent: Array<{ url: string; body: string }> = [];
   const runtime = createTelegramMessagingRuntime({
     SOFIA_MESSAGING_ENABLED: "true",
     TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
@@ -269,9 +270,18 @@ test("Telegram approval notices do not use an untrusted group chat as a destinat
     TELEGRAM_ALLOWED_CHAT_IDS: "123",
     TELEGRAM_USER_API_KEYS_JSON: '{"123":"private-user-key"}',
     SOFIA_API_BASE_URL: "https://sofia.example.invalid",
-  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  }, "/tmp/sofia-test", (message) => warnings.push(message), {
+    fetchImpl: async (input, init) => {
+      sent.push({ url: String(input), body: String(init?.body ?? "") });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 7 } }), { status: 200 });
+    },
+  });
   assert.ok(runtime);
+  assert.equal(await runtime.notifyApproval(ownerKeyId, "approval"), true);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0]!.url, /\/sendMessage$/);
+  assert.equal(JSON.parse(sent[0]!.body).chat_id, "123");
+  assert.equal(JSON.parse(sent[0]!.body).text, "approval");
   await runtime.stop();
-  assert.equal(await runtime.notifyApproval(ownerKeyId, "approval"), false);
   assert.deepEqual(warnings, []);
 });
