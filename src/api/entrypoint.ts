@@ -8,7 +8,7 @@ import { createDiscordGatewayTransport } from "../integrations/messaging/discord
 import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.js";
 import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
-import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
+import { isDiscordMessageAllowed, parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { SqliteApprovalQueue, createQueuedApprovalHandler } from "../agent/approval-queue.js";
 import { handleDiscordApprovalCommand } from "../integrations/messaging/discord-approvals.js";
 import { createTelegramMessagingRuntime, parseTelegramUserAllowlist, parseTelegramUserApiKeys } from "../integrations/messaging/telegram-runtime.js";
@@ -72,7 +72,7 @@ if (discordConfigured) {
       // Enforce both allowlists before every command path, including Gateway
       // messages. The interaction transport checks these too, but Gateway
       // messages arrive through a separate transport and must fail closed here.
-      if (!discordUserIds.includes(message.author.id) || !discordChannelIds.includes(message.channelId)) {
+      if (!isDiscordMessageAllowed({ userId: message.author.id, channelId: message.channelId }, discordUserIds, discordChannelIds)) {
         await discordTransport?.sendMessage(
           message.channelId,
           "You are not authorized to use Sofia in this channel.",
