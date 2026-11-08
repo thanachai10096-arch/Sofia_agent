@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 import { redactSecrets } from "../security/guard.js";
-import type { SkillImprovementEvidence, SkillImprovementPlanner, SkillImprovementProposal } from "./skill-self-improvement.js";
+import {
+  SkillSelfImprovementLoop,
+  type SkillImprovementEvidence,
+  type SkillImprovementPlanner,
+  type SkillImprovementProposal,
+  type SkillSelfImprovementOptions,
+} from "./skill-self-improvement.js";
+import type { VersionedSkillLifecycle } from "./skill-lifecycle.js";
 
 export interface SkillResearchSource {
   readonly url: string;
@@ -153,4 +160,18 @@ export class ResearchAugmentedSkillPlanner implements SkillImprovementPlanner {
     this.lastAudit = { bundles, rejectedSources };
     return this.downstream(evidence, bundles);
   }
+}
+
+/** Compose internet research with the existing approval- and benchmark-gated lifecycle. */
+export function createResearchBackedSkillSelfImprovementLoop(
+  lifecycle: VersionedSkillLifecycle,
+  researcher: SkillResearchProvider,
+  proposeCandidate: (evidence: readonly SkillImprovementEvidence[], research: readonly SkillResearchBundle[]) => Promise<readonly SkillImprovementProposal[]>,
+  options: {
+    readonly research?: Partial<SkillResearchPolicy>;
+    readonly selfImprovement?: Partial<SkillSelfImprovementOptions>;
+  } = {},
+): SkillSelfImprovementLoop {
+  const planner = new ResearchAugmentedSkillPlanner(researcher, proposeCandidate, options.research);
+  return new SkillSelfImprovementLoop(lifecycle, planner, options.selfImprovement);
 }
