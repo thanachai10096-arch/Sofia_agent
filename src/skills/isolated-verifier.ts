@@ -142,6 +142,7 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
         timeoutMs,
         maxOutputBytes,
         allowNetwork: false,
+        readOnlyWorkspace: true,
       };
       const checks = [
         { name: "syntax", command: "node", args: ["--check", artifact.entrypoint] },
