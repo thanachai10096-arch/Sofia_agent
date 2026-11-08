@@ -112,3 +112,57 @@ test("expired approval is denied and cannot later be approved", async () => {
     }), undefined);
   } finally { await f.cleanup(); }
 });
+
+
+test("queued approval handler notifies the trusted originating channel after durable creation", async () => {
+  const f = await fixture();
+  const controller = new AbortController();
+  let notified: { id: string; ownerId: string; channelId?: string } | undefined;
+  try {
+    const handler = createQueuedApprovalHandler(f.queue, {
+      pollMs: 100,
+      onCreated: (record, approvalRequest) => {
+        notified = {
+          id: record.id,
+          ownerId: record.ownerId,
+          channelId: approvalRequest.notificationChannelId,
+        };
+      },
+    });
+    const pending = handler(request({
+      principalId: "discord:12345",
+      notificationChannelId: "67890",
+      signal: controller.signal,
+    }));
+    for (let attempt = 0; attempt < 20 && !notified; attempt++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(notified);
+    assert.equal(notified.ownerId, "discord:12345");
+    assert.equal(notified.channelId, "67890");
+    assert.equal(f.queue.get(notified.id, "discord:12345")?.status, "pending");
+    controller.abort();
+    assert.equal(await pending, false);
+  } finally { await f.cleanup(); }
+});
+
+test("approval notification delivery failure does not approve or crash the waiting handler", async () => {
+  const f = await fixture();
+  const controller = new AbortController();
+  let notificationErrors = 0;
+  try {
+    const handler = createQueuedApprovalHandler(f.queue, {
+      pollMs: 100,
+      onCreated: async () => { throw new Error("delivery failed"); },
+      onNotificationError: () => { notificationErrors++; },
+    });
+    const pending = handler(request({ signal: controller.signal }));
+    for (let attempt = 0; attempt < 20 && notificationErrors === 0; attempt++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(notificationErrors, 1);
+    assert.equal(f.queue.list("owner-a").length, 1);
+    controller.abort();
+    assert.equal(await pending, false);
+  } finally { await f.cleanup(); }
+});
