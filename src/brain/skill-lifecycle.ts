@@ -136,7 +136,22 @@ export class VersionedSkillLifecycle {
       activeRecords.push({ skillId, record });
     }
     // Validate the entire restore set before mutating the supplied platform.
-    for (const { record } of activeRecords) this.platform.register(clone(record.package));
+    // If a platform adapter fails partway through registration, compensate so
+    // construction cannot leave a partially restored active-skill set behind.
+    const registeredDuringRestore: string[] = [];
+    try {
+      for (const { skillId, record } of activeRecords) {
+        if (this.platform.get(skillId)) continue;
+        this.platform.register(clone(record.package));
+        registeredDuringRestore.push(skillId);
+      }
+    } catch (error) {
+      for (const skillId of registeredDuringRestore.reverse()) {
+        try { this.platform.remove(skillId); }
+        catch { /* Preserve the original restore failure. */ }
+      }
+      throw error;
+    }
   }
 
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
