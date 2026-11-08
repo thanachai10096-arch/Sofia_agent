@@ -31,7 +31,7 @@ test("Discord approval inbox and decisions are scoped to the verified Discord pr
     assert.match(inbox, /workspace\.write/);
     assert.match(inbox, /"path":"notes\.txt"/);
     assert.match(inbox, /"operation":"write"/);
-    assert.doesNotMatch(inbox, /apiKey|payload|note|do-not-display-this|hidden-token-value|private customer information/);
+    assert.doesNotMatch(inbox, /apiKey|payload|\"note\"|do-not-display-this|hidden-token-value|private customer information/);
     assert.equal(handleDiscordApprovalCommand(queue, other, "/approvals"), "You have no pending approvals.");
     assert.equal(handleDiscordApprovalCommand(queue, other, "/approve", pending.id),
       "Approval not found or not accessible to this Discord user.");
