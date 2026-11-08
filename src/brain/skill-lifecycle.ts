@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import type { SkillPackage, SkillsPlatform } from "../skills/platform.js";
@@ -83,6 +83,37 @@ interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[];
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
+function resolveLifecycleFilePath(target: string): string {
+  const resolved = path.resolve(target);
+  const parent = path.dirname(resolved);
+  try {
+    if (lstatSync(resolved).isSymbolicLink()) {
+      throw new Error("Skill lifecycle file must not be a symbolic link");
+    }
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+  }
+
+  let ancestor = parent;
+  const missing: string[] = [];
+  while (true) {
+    try {
+      if (lstatSync(ancestor).isSymbolicLink()) {
+        throw new Error("Skill lifecycle parent directory must not be a symbolic link");
+      }
+      break;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      const next = path.dirname(ancestor);
+      if (next === ancestor) throw error;
+      missing.unshift(path.basename(ancestor));
+      ancestor = next;
+    }
+  }
+  // Canonicalize existing OS path aliases (for example macOS /var -> /private/var)
+  // before storing the path, so later checks do not reject legitimate system paths.
+  return path.join(realpathSync(ancestor), ...missing, path.basename(resolved));
+}
 function assertNoSymlinkPath(target: string): void {
   const resolved = path.resolve(target);
   const root = path.parse(resolved).root;
@@ -136,7 +167,7 @@ export class VersionedSkillLifecycle {
     options: SkillLifecycleOptions,
   ) {
     if (!path.isAbsolute(options.file)) throw new Error("Skill lifecycle path must be absolute");
-    this.file = options.file;
+    this.file = resolveLifecycleFilePath(options.file);
     this.minimumConfidence = options.minimumConfidence ?? 0.7;
     this.benchmarkEngine = options.benchmarkEngine;
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
