@@ -2,6 +2,8 @@ import type { RiskLevel } from "../security/guard.js";
 export interface ApprovalRequest {
   runId:string;
   principalId?:string;
+  /** Trusted reply destination, carried from the authenticated messaging job. */
+  notificationChannelId?:string;
   toolName:string;
   input:Record<string,unknown>;
   actionHash:string;
