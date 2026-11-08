@@ -229,6 +229,52 @@ test("skill lifecycle never promotes when runtime verification is unavailable", 
 });
 
 
+test("artifact verification cannot satisfy typecheck with syntax and test evidence", async () => {
+  const root = dir();
+  try {
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, async (candidate) => ({
+      passed: true,
+      checks: [{ name: "metadata", passed: true }],
+      runtimeVerification: {
+        candidateDigest: getSkillCandidateDigest(candidate),
+        runnerId: "test-isolated-runner",
+        isolatedWorkspaceId: "test-workspace",
+        isolated: true,
+        executedChecks: [
+          { name: "syntax", passed: true },
+          { name: "test", passed: true },
+        ],
+        completedAt: new Date().toISOString(),
+        testSuiteId: "operator-suite",
+        testSuiteVersion: "1",
+        testSuiteDigest: "a".repeat(64),
+      },
+    }), { file: path.join(root, "unsupported-check.json") });
+    const candidate = lifecycle.propose({
+      ...pkg("1.0.0"),
+      skill: { ...pkg("1.0.0").skill, verification: ["typecheck"] },
+      artifact: {
+        format: "sofia-node-skill-v1",
+        runtime: "node",
+        entrypoint: "index.mjs",
+        files: { "index.mjs": "export function run() { return 1; }" },
+      },
+    }, { source: "repair", evidenceIds: ["unsupported-typecheck"], confidence: 1 });
+
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.equal(
+      evaluated.evaluation?.checks.some((check) => check.name === "runtime-verification" && !check.passed),
+      true,
+    );
+    assert.throws(() => lifecycle.promote(candidate.id), /valid isolated runtime verification/);
+    assert.equal(platform.get("repair-skill"), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
 test("skill lifecycle rejects missing or mismatched isolated runtime evidence", async () => {
   const root = dir();
   try {
