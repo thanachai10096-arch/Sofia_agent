@@ -6,6 +6,8 @@ export interface SandboxLimits {
   timeoutMs: number;
   maxOutputBytes: number;
   allowNetwork: boolean;
+  /** Mount the workspace read-only inside a container when true. */
+  readOnlyWorkspace?: boolean;
   workspaceRoot: string;
   /** Optional workspace-relative working directory. */
   cwd?: string;
@@ -331,7 +333,7 @@ export class ContainerSandbox implements Sandbox {
       "--memory=512m",
       "--cpus=1",
       "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-      "--mount", `type=bind,source=${workspaceRoot},target=/workspace`,
+      "--mount", `type=bind,source=${workspaceRoot},target=/workspace${limits.readOnlyWorkspace ? ",readonly" : ""}`,
       "--workdir", path.posix.join("/workspace", relativeWorkingDirectory.split(path.sep).join("/")),
       this.options.image,
       command,
