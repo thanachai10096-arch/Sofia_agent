@@ -20,7 +20,7 @@ function candidate(): SkillPackage {
     artifact: {
       format: "sofia-node-skill-v1",
       runtime: "node",
-      entrypoint: "index.js",
+      entrypoint: "index.mjs",
       files: { "index.js": "export function run() { return 42; }" },
     },
   };
@@ -30,9 +30,9 @@ const trustedSuite = {
   id: "trusted-fixture",
   version: "1",
   files: {
-    "skill.test.js": 'import test from "node:test"; import assert from "node:assert/strict"; import { run } from "../index.js"; test("trusted behavior", () => assert.equal(run(), 42));',
+    "skill.test.mjs": 'import test from "node:test"; import assert from "node:assert/strict"; import { run } from "../index.js"; test("trusted behavior", () => assert.equal(run(), 42));',
   },
-  tests: ["skill.test.js"],
+  tests: ["skill.test.mjs"],
 };
 
 function fakeSandbox(run: Sandbox["run"], isolation: Sandbox["isolation"] = "container"): Sandbox {
@@ -58,8 +58,8 @@ test("isolated skill verifier executes trusted tests with networking disabled", 
     const artifactDigest = getExecutableArtifactDigest(pkg.artifact!);
     assert.notEqual(artifactDigest, getExecutableArtifactDigest({ ...pkg.artifact!, files: { ...pkg.artifact!.files, "extra.js": "export const changed = true;" } }));
     assert.deepEqual(calls.map((call) => [call.command, ...call.args]), [
-      ["node", "--check", "index.js"],
-      ["node", "--test", "__sofia_trusted_tests__/skill.test.js"],
+      ["node", "--check", "index.mjs"],
+      ["node", "--test", "__sofia_trusted_tests__/skill.test.mjs"],
     ]);
     assert.ok(calls.every((call) => call.limits.allowNetwork === false));
     assert.ok(calls.every((call) => call.limits.readOnlyWorkspace === true));
