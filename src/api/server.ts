@@ -135,6 +135,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStorePath);
+  const desktopCompletionAttempts = config.desktopEnrollment
+    ? integerSetting("desktopEnrollment.completionAttempts", config.desktopEnrollment.completionAttempts, 5, 1, 100)
+    : 5;
+  const desktopCompletionWindowMs = config.desktopEnrollment
+    ? integerSetting("desktopEnrollment.completionWindowMs", config.desktopEnrollment.completionWindowMs, 60_000, 1_000, 86_400_000)
+    : 60_000;
   const countToolCall = (keyId: string, controller: AbortController, event: { type: string }): boolean => {
     if (event.type !== "tool.started") return true;
     try { usage.consumeToolCall(keyId); return true; }
@@ -306,8 +312,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           allowed = await desktopConfig.completionRateLimiter.consume({
             key: rateKey,
-            limit: desktopConfig.completionAttempts ?? 5,
-            windowMs: desktopConfig.completionWindowMs ?? 60_000,
+            limit: desktopCompletionAttempts,
+            windowMs: desktopCompletionWindowMs,
             now: Date.now(),
           });
         } catch {
