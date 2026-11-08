@@ -107,6 +107,29 @@ function validateResults(
   }
 }
 
+function validateReport(report: SkillBenchmarkReport, policy: SkillBenchmarkPolicy): void {
+  validateIdentity(report.skillId, report.version);
+  if (
+    !Number.isSafeInteger(report.fixtureCount) ||
+    report.fixtureCount < policy.minFixtures ||
+    report.fixtureCount > policy.maxFixtures ||
+    !Array.isArray(report.fixtureIds) ||
+    report.fixtureIds.length !== report.fixtureCount ||
+    report.fixtureIds.some((id) => typeof id !== "string" || !id.trim() || id.length > 160) ||
+    new Set(report.fixtureIds).size !== report.fixtureCount ||
+    !Number.isSafeInteger(report.passed) || report.passed < 0 || report.passed > report.fixtureCount ||
+    !Number.isSafeInteger(report.safetyFailures) || report.safetyFailures < 0 || report.safetyFailures > report.fixtureCount ||
+    !Number.isFinite(report.passRate) || report.passRate < 0 || report.passRate > 1 ||
+    report.passRate !== report.passed / report.fixtureCount ||
+    !validMetric(report.medianDurationMs) ||
+    !validMetric(report.medianToolCalls) ||
+    !validMetric(report.medianRetries) ||
+    typeof report.completedAt !== "string" || !Number.isFinite(Date.parse(report.completedAt))
+  ) {
+    throw new TypeError("Invalid benchmark report");
+  }
+}
+
 export class SkillBenchmarkEngine {
   private readonly policy: SkillBenchmarkPolicy;
   private readonly baselines = new Map<string, SkillBenchmarkReport>();
@@ -155,15 +178,8 @@ export class SkillBenchmarkEngine {
    * or incomplete fixture set can never become a baseline.
    */
   setBaseline(report: SkillBenchmarkReport): void {
-    validateIdentity(report.skillId, report.version);
-    if (
-      report.fixtureCount < this.policy.minFixtures ||
-      report.fixtureCount > this.policy.maxFixtures ||
-      report.fixtureIds.length !== report.fixtureCount ||
-      new Set(report.fixtureIds).size !== report.fixtureCount ||
-      report.safetyFailures !== 0 ||
-      !Number.isFinite(report.passRate) || report.passRate < 0 || report.passRate > 1
-    ) {
+    validateReport(report, this.policy);
+    if (report.safetyFailures !== 0) {
       throw new Error("Only complete, safety-clean benchmark reports can become baselines");
     }
     const key = this.key(report.skillId, report.version);
@@ -174,7 +190,7 @@ export class SkillBenchmarkEngine {
   }
 
   compare(current: SkillBenchmarkReport): SkillBenchmarkComparison {
-    validateIdentity(current.skillId, current.version);
+    validateReport(current, this.policy);
     const baseline = this.baselines.get(this.key(current.skillId, current.version));
     if (!baseline) {
       return {
@@ -185,8 +201,9 @@ export class SkillBenchmarkEngine {
         reasons: ["No baseline exists for this exact skill version"],
       };
     }
-    const sameFixtures = baseline.fixtureIds.length === current.fixtureIds.length &&
-      baseline.fixtureIds.every((id, index) => id === [...current.fixtureIds].sort()[index]);
+    const currentFixtureIds = [...current.fixtureIds].sort();
+    const sameFixtures = baseline.fixtureIds.length === currentFixtureIds.length &&
+      baseline.fixtureIds.every((id, index) => id === currentFixtureIds[index]);
     const comparableFixtures = sameFixtures
       ? Math.min(baseline.fixtureCount, current.fixtureCount)
       : 0;
