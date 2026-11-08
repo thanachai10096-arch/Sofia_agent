@@ -15,6 +15,18 @@ function limits(overrides: Partial<SandboxLimits> = {}): SandboxLimits {
   };
 }
 
+test("ProcessSandbox rejects actual NUL bytes in commands and arguments", async () => {
+  const sandbox = new ProcessSandbox();
+  await assert.rejects(
+    () => sandbox.run("node\\0", [], limits()),
+    /valid command without NUL bytes/,
+  );
+  await assert.rejects(
+    () => sandbox.run("node", ["--version\\0"], limits()),
+    /without NUL bytes/,
+  );
+});
+
 test("ProcessSandbox fails closed when network isolation is requested", async () => {
   const sandbox = new ProcessSandbox();
   await assert.rejects(
