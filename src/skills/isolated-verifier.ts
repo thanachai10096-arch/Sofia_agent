@@ -3,15 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Sandbox } from "../sandbox.js";
-import type { SkillPackage } from "./platform.js";
-
-export interface SkillExecutableArtifact {
-  format: "sofia-node-skill-v1";
-  runtime: "node";
-  entrypoint: string;
-  files: Record<string, string>;
-  tests: string[];
-}
+import type { SkillExecutableArtifact, SkillPackage } from "./platform.js";
 
 export interface IsolatedSkillVerificationOptions {
   sandbox: Sandbox;
@@ -104,7 +96,7 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
   }
 
   return async (candidate: SkillPackage, signal?: AbortSignal): Promise<IsolatedSkillVerificationResult> => {
-    const artifact = (candidate as SkillPackage & { artifact?: unknown }).artifact;
+    const artifact: unknown = candidate.artifact;
     validateArtifact(artifact);
     const candidateDigest = createHash("sha256").update(JSON.stringify(candidate)).digest("hex");
     const workspace = await mkdtemp(path.join(options.workspaceParent ?? os.tmpdir(), "sofia-skill-verify-"));
