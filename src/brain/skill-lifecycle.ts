@@ -83,6 +83,22 @@ interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[];
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
+function assertNoSymlinkPath(target: string): void {
+  const resolved = path.resolve(target);
+  const root = path.parse(resolved).root;
+  let current = root;
+  for (const part of resolved.slice(root.length).split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        throw new Error("Skill lifecycle path must not contain symbolic links");
+      }
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") break;
+      throw error;
+    }
+  }
+}
 function validatePackage(value: SkillPackage): SkillPackage {
   if (!isRecord(value) || !isRecord(value.skill) || typeof value.skill.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value.skill.id)) {
     throw new Error("Invalid skill package or skill id");
@@ -445,8 +461,11 @@ export class VersionedSkillLifecycle {
   }
   private persist(): void {
     const directory = path.dirname(this.file);
+    // Check before and after mkdir: recursive creation follows existing symlink
+    // ancestors, so checking only the final file does not protect its location.
+    assertNoSymlinkPath(this.file);
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    if (existsSync(this.file) && lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
+    assertNoSymlinkPath(this.file);
     const temporary = this.file + "." + process.pid + "." + randomUUID() + ".tmp";
     try {
       writeFileSync(temporary, JSON.stringify(this.snapshot, null, 2) + "\n", { encoding: "utf8", flag: "wx", mode: 0o600 });
