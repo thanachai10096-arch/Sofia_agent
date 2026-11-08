@@ -68,13 +68,6 @@ function validateArtifact(value: unknown): asserts value is SkillExecutableArtif
     total += bytes;
   }
   if (total > MAX_TOTAL_BYTES) throw new Error("Artifact exceeds the total size limit.");
-  if (new Set(artifact.tests).size !== artifact.tests.length ||
-      artifact.tests.some((name) => !Object.hasOwn(files, name))) {
-    throw new Error("Artifact tests must be unique files included in the artifact.");
-  }
-  if (artifact.tests.some((name) => !/(?:^|\/)test[^/]*\.(?:js|mjs|cjs)$|\.test\.(?:js|mjs|cjs)$/.test(name))) {
-    throw new Error("Artifact test paths must be explicit JavaScript test files.");
-  }
 }
 
 export function getExecutableArtifactDigest(artifact: SkillExecutableArtifact): string {
@@ -85,7 +78,6 @@ export function getExecutableArtifactDigest(artifact: SkillExecutableArtifact): 
     runtime: artifact.runtime,
     entrypoint: artifact.entrypoint,
     files,
-    tests: [...artifact.tests].sort(),
   })).digest("hex");
 }
 
