@@ -23,7 +23,11 @@ export interface SkillEvaluationResult {
   passed: boolean;
   checks: SkillEvaluationCheck[];
   runtimeVerification?: SkillRuntimeVerificationEvidence;
-  benchmark?: { report: SkillBenchmarkReport; comparison: SkillBenchmarkComparison };
+  benchmark?: {
+    report: SkillBenchmarkReport;
+    comparison: SkillBenchmarkComparison;
+    baselineReport?: SkillBenchmarkReport;
+  };
   evaluatedAt?: string;
   benchmarkReport?: SkillBenchmarkReport;
 }
@@ -168,7 +172,12 @@ export class VersionedSkillLifecycle {
       } else {
         try {
           const comparison = this.benchmarkEngine.compare(result.benchmarkReport);
-          benchmark = { report: clone(result.benchmarkReport), comparison: clone(comparison) };
+          const baselineReport = this.benchmarkEngine.getBaseline(candidate.skillId, candidate.package.version);
+          benchmark = {
+            report: clone(result.benchmarkReport),
+            comparison: clone(comparison),
+            ...(baselineReport ? { baselineReport: clone(baselineReport) } : {}),
+          };
           benchmarkPassed = comparison.verdict === "stable" || comparison.verdict === "improved";
         } catch {
           benchmarkPassed = false;
@@ -310,6 +319,23 @@ export class VersionedSkillLifecycle {
       throw new Error("Unsupported or corrupt skill lifecycle store");
     }
     const legacyUnverifiedIds = new Set<string>();
+    // Restore only validated, safety-clean baselines captured alongside a
+    // lifecycle evaluation. This keeps active skills verifiable after restart.
+    if (this.benchmarkEngine) {
+      for (const item of parsed.records) {
+        if (!isRecord(item) || !isRecord(item.evaluation) || !isRecord(item.evaluation.benchmark)) continue;
+        const benchmark = item.evaluation.benchmark;
+        if (!isRecord(benchmark.baselineReport) ||
+            typeof benchmark.baselineReport.skillId !== "string" ||
+            typeof benchmark.baselineReport.version !== "string") continue;
+        if (this.benchmarkEngine.getBaseline(benchmark.baselineReport.skillId, benchmark.baselineReport.version)) continue;
+        try {
+          this.benchmarkEngine.setBaseline(benchmark.baselineReport as unknown as SkillBenchmarkReport);
+        } catch {
+          // Invalid persisted baselines are ignored; active records then fail closed.
+        }
+      }
+    }
     const records: SkillLifecycleRecord[] = parsed.records.map((item) => {
       if (!isRecord(item) || typeof item.id !== "string" || !item.id.trim() || item.id.length > 200 ||
           typeof item.skillId !== "string" || !item.skillId.trim() ||
