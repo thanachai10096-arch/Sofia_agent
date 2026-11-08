@@ -52,7 +52,14 @@ function hasValidRuntimeEvidence(candidate: SkillPackage, evidence: SkillRuntime
     candidate.skill.verification.every((required) =>
       evidence.executedChecks.some((item) => item.name === required && item.passed === true));
 }
-export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; }
+export interface SkillResearchProvenance { url: string; contentHash: string; }
+export interface SkillProvenance {
+  source: string;
+  evidenceIds: string[];
+  confidence: number;
+  /** Bounded source references supporting research-assisted candidates; no raw excerpts are persisted. */
+  researchSources?: SkillResearchProvenance[];
+}
 export interface SkillLifecycleRecord {
   id: string;
   skillId: string;
@@ -136,7 +143,12 @@ export class VersionedSkillLifecycle {
         !Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length === 0 ||
         !provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
         new Set(provenance.evidenceIds).size !== provenance.evidenceIds.length ||
-        !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1) {
+        !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1 ||
+        (provenance.researchSources !== undefined &&
+          (!Array.isArray(provenance.researchSources) || provenance.researchSources.length > 32 ||
+           !provenance.researchSources.every((item) => isRecord(item) &&
+             typeof item.url === "string" && item.url.startsWith("https://") && item.url.length <= 2048 &&
+             typeof item.contentHash === "string" && /^[a-f0-9]{64}$/.test(item.contentHash))))) {
       throw new Error("Invalid skill provenance");
     }
     const now = new Date().toISOString();
