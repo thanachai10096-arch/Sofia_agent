@@ -11,6 +11,8 @@ This document describes the first relay transport and reusable local Companion c
 - Commands are claimed once, completed once, bounded per owner, and expire. Replacing or disconnecting a companion rejects its pending commands.
 - Broker state is in-memory. A server restart drops pairings and pending commands; it does not replay native actions.
 - Mutating native actions must still pass the existing local operator approval flow before dispatch. This relay does not grant OS permissions or bypass approvals.
+- The CLI Companion stores a local execution journal under `~/.sofia/desktop-command-journal` with restrictive directory/file permissions. Completed action outcomes can be resent after a lost response without repeating the native action.
+- If the process stops after recording an action as started but before recording its outcome, the action is treated as indeterminate and is not automatically repeated. The operator must inspect the desktop before manually retrying. Screen capture is read-only and is not journaled.
 
 ## API
 
@@ -27,7 +29,7 @@ Companion endpoints require `Authorization: Bearer <COMPANION_TOKEN>`:
 - `GET /v1/desktop/companion/commands` — long-polling client may poll; currently this endpoint returns immediately with the next command or `null`.
 - `POST /v1/desktop/companion/commands/:commandId/complete` — submit a JSON result or a bounded error string for a command claimed by this token.
 
-The companion should poll at a conservative interval and treat `401` as revoked pairing. Tokens must be stored in the OS credential store by the eventual packaged client, not in browser local storage or logs.
+The companion polls at a conservative interval, applies bounded exponential backoff during Cloud API outages, and treats `401` as revoked pairing. The CLI stores the restricted companion token in the OS credential store, never the Sofia API key.
 
 ## Enablement
 
@@ -42,10 +44,9 @@ The server also requires the separate policy gate `SOFIA_ALLOW_REMOTE_DESKTOP=tr
 
 This slice provides authenticated pairing, status, command polling and completion transport plus the in-memory broker primitive. It does not yet include:
 
-- a packaged Windows/macOS/Linux Desktop Companion installer or background client;
-- secure OS credential-store integration and device-specific pairing UI;
-- packaged desktop UX and production configuration for the Brain-side remote Desktop tool adapter (the per-run Brain tools now call `broker.dispatch()` and are gated by the API scopes plus `SOFIA_ALLOW_REMOTE_DESKTOP`);
-- delivery of existing desktop approvals to the user's local UI;
-- reconnect/backoff UX, multi-device selection, or durable multi-replica broker state.
+- a signed installer and polished background-client UX for Windows/macOS/Linux;
+- durable, multi-replica Cloud command broker state and device registry wiring;
+- a public WSS transport (the current relay uses HTTPS polling);
+- end-to-end validation against a real Railway deployment and physical desktop, including restart/reconnect and OS-specific approval flows.
 
-The reusable client is created with `createDesktopCompanionClient()` and requires an injected credential store, native driver, explicit capability list, application allowlist, and real approval callback. It accepts only HTTPS remote API URLs (loopback HTTP is permitted for local development), does not persist the Sofia API key, and clears its companion token when the API reports revocation.\n\nUntil the packaged host, OS credential-store adapter, and Brain dispatch/approval wiring are complete, the relay is not a usable remote desktop-control feature and should not be enabled in Production. Railway deployment and environment changes are intentionally out of scope.
+The reusable client is created with `createDesktopCompanionClient()` and requires an injected credential store, native driver, explicit capability list, application allowlist, and real approval callback. It accepts only HTTPS remote API URLs (loopback HTTP is permitted for local development), does not persist the Sofia API key, and clears its companion token when the API reports revocation.\n\nThe CLI Companion and Brain dispatch adapter are present in this development branch, but this is not evidence of production readiness. The broker is still in-memory, the relay uses HTTPS polling rather than WSS, and physical-device end-to-end tests remain outstanding. Do not enable this feature in Production until durable server-side delivery, device lifecycle wiring, and real desktop verification are complete. Railway deployment and environment changes are intentionally out of scope.
