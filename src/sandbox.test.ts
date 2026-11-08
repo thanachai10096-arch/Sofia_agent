@@ -111,6 +111,31 @@ test("ContainerSandbox constructs a restrictive Docker command and disables netw
   }
 });
 
+test("ContainerSandbox rejects actual NUL bytes in image, command, and arguments", async () => {
+  const validImage = "registry.example/sofia-runner@sha256:" + "e".repeat(64);
+  assert.throws(
+    () => new ContainerSandbox({ image: validImage + "\0" }),
+    /pinned by an immutable sha256 digest/,
+  );
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "sofia-container-sandbox-"));
+  const sandbox = new ContainerSandbox({
+    image: validImage,
+    runner: async () => ({ stdout: "", stderr: "", code: 0 }),
+  });
+  try {
+    await assert.rejects(
+      () => sandbox.run("node\0", [], limits({ workspaceRoot })),
+      /valid container command/,
+    );
+    await assert.rejects(
+      () => sandbox.run("node", ["--version\0"], limits({ workspaceRoot })),
+      /without NUL bytes/,
+    );
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test("ContainerSandbox requires a digest-pinned image and never silently pulls images", async () => {
   assert.throws(
     () => new ContainerSandbox({ image: "node:24" }),
