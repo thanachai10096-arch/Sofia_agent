@@ -62,7 +62,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
-  return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
+  return ({signal,maxSteps,principalId,notificationChannelId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
     if (requestedRouteId && !requestedRoute) throw new Error("Unknown model route: " + requestedRouteId);
