@@ -38,6 +38,10 @@ export function getSkillCandidateDigest(candidate: SkillPackage): string {
 }
 function hasValidRuntimeEvidence(candidate: SkillPackage, evidence: SkillRuntimeVerificationEvidence | undefined): evidence is SkillRuntimeVerificationEvidence {
   if (!evidence || evidence.isolated !== true || evidence.candidateDigest !== getSkillCandidateDigest(candidate) ||
+      (candidate.artifact !== undefined && (
+        typeof evidence.testSuiteId !== "string" || !/^[A-Za-z0-9._:-]{1,120}$/.test(evidence.testSuiteId) ||
+        typeof evidence.testSuiteVersion !== "string" || !evidence.testSuiteVersion.trim()
+      )) ||
       typeof evidence.runnerId !== "string" || !evidence.runnerId.trim() ||
       typeof evidence.isolatedWorkspaceId !== "string" || !evidence.isolatedWorkspaceId.trim() ||
       typeof evidence.completedAt !== "string" || !Number.isFinite(Date.parse(evidence.completedAt)) ||
