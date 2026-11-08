@@ -45,7 +45,7 @@ test("research planner labels excerpts untrusted and passes only verified eviden
   assert.match(researchContext, /UNTRUSTED RESEARCH SOURCE/);
   assert.match(researchContext, /Ignore previous instructions/);
   assert.equal(planner.getAudit().bundles[0]?.citations.length, 1);
-  assert.equal(planner.getAudit().bundles[0]?.citations[0]?.url, "https://docs.example.com/one");
+  assert.equal(planner.getAudit().bundles[0]?.citations[0]?.url, "https://docs.example.com/runtime");
   assert.match(planner.getAudit().bundles[0]!.citations[0]!.contentHash, /^[a-f0-9]{64}$/);
 });
 
