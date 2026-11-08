@@ -75,6 +75,9 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     try {
       const verify = createIsolatedSkillVerifier({
         sandbox: new ContainerSandbox({ image }),
+        // No trusted suite is currently registered for learned candidates.
+        // Returning undefined deliberately blocks promotion until an operator-owned suite exists.
+        getTrustedTestSuite: () => undefined,
       });
       const evidence = await verify(candidate);
       checks.push({
