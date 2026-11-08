@@ -20,6 +20,7 @@ export interface SkillRuntimeVerificationEvidence {
   completedAt: string;
   testSuiteId?: string;
   testSuiteVersion?: string;
+  testSuiteDigest?: string;
 }
 export interface SkillEvaluationResult {
   passed: boolean;
@@ -40,7 +41,8 @@ function hasValidRuntimeEvidence(candidate: SkillPackage, evidence: SkillRuntime
   if (!evidence || evidence.isolated !== true || evidence.candidateDigest !== getSkillCandidateDigest(candidate) ||
       (candidate.artifact !== undefined && (
         typeof evidence.testSuiteId !== "string" || !/^[A-Za-z0-9._:-]{1,120}$/.test(evidence.testSuiteId) ||
-        typeof evidence.testSuiteVersion !== "string" || !evidence.testSuiteVersion.trim()
+        typeof evidence.testSuiteVersion !== "string" || !evidence.testSuiteVersion.trim() ||
+        typeof evidence.testSuiteDigest !== "string" || !/^[a-f0-9]{64}$/.test(evidence.testSuiteDigest)
       )) ||
       typeof evidence.runnerId !== "string" || !evidence.runnerId.trim() ||
       typeof evidence.isolatedWorkspaceId !== "string" || !evidence.isolatedWorkspaceId.trim() ||
