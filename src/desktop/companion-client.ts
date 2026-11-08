@@ -1,4 +1,5 @@
 import type { DesktopAction, DesktopCapability, DesktopHostDriver } from "./types.js";
+import type { DesktopCommandJournal, DesktopCommandOutcome } from "./command-journal.js";
 import { assertDesktopAction, type DesktopCompanionCommand } from "./remote-command-broker.js";
 
 export interface DesktopCompanionCredentialStore {
@@ -14,6 +15,8 @@ export interface DesktopCompanionClientConfig {
   allowedCapabilities: readonly DesktopCapability[];
   allowedApplications?: readonly string[];
   requestApproval: (action: DesktopAction, signal?: AbortSignal) => Promise<boolean>;
+  /** Durable local journal for side-effecting actions; recommended for CLI/Desktop use. */
+  journal?: DesktopCommandJournal;
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch;
 }
@@ -202,13 +205,37 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
         !Number.isFinite(command.createdAt)) throw new Error("Invalid Desktop Companion command metadata.");
     assertDesktopAction(command.action as DesktopAction);
     const typedCommand = command as unknown as DesktopCompanionCommand;
-    let result: unknown = null;
-    let error: string | undefined;
-    try {
-      result = await execute(typedCommand.action, signal);
-    } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Local desktop action failed.";
+    let outcome: DesktopCommandOutcome;
+    const journal = config.journal;
+    const needsJournal = typedCommand.action.kind !== "screen.capture" && journal !== undefined;
+    if (needsJournal) {
+      const previous = await journal!.get(typedCommand.id);
+      if (previous?.status === "completed") {
+        // The native action already finished; only replay its recorded response.
+        outcome = previous.outcome;
+      } else if (previous?.status === "started") {
+        // It may have run before a crash. Never repeat a non-idempotent desktop action.
+        outcome = { error: "Execution outcome is unknown after a previous Companion interruption. Check the desktop before manually retrying this action." };
+      } else {
+        await journal!.begin(typedCommand.id);
+        try {
+          outcome = { result: await execute(typedCommand.action, signal) };
+        } catch (cause) {
+          outcome = { error: cause instanceof Error ? cause.message : "Local desktop action failed." };
+        }
+        if (!signal?.aborted) {
+          try { await journal!.complete(typedCommand.id, outcome); }
+          catch {
+            outcome = { error: "The desktop action may have run, but its result could not be safely recorded. Check the desktop before retrying." };
+          }
+        }
+      }
+    } else {
+      try { outcome = { result: await execute(typedCommand.action, signal) }; }
+      catch (cause) { outcome = { error: cause instanceof Error ? cause.message : "Local desktop action failed." }; }
     }
+    const error = outcome.error;
+    const result = outcome.result;
     if (signal?.aborted) return false;
     const completed = await postCompletion(
       "/v1/desktop/companion/commands/" + encodeURIComponent(typedCommand.id) + "/complete",
