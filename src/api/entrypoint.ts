@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
+import { resolveApiScopes } from "./scopes.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
@@ -17,7 +18,8 @@ const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
-const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read,approval:read,approval:decide").split(",").map((s) => s.trim()).filter(Boolean);
+// Approval access is opt-in; the default API key must not silently gain authority to approve actions.
+const scopes = resolveApiScopes(process.env.SOFIA_API_SCOPES);
 const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
