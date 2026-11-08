@@ -126,3 +126,22 @@ test("self-improvement rejects duplicate and malformed evidence identifiers", as
     await assert.rejects(() => f.loop.run([{ ...evidence[0]!, summary: " " }]), /Invalid skill improvement evidence/);
   } finally { rmSync(f.directory, { recursive: true, force: true }); }
 });
+
+
+test("self-improvement rejects overlapping runs to prevent duplicate candidate races", async () => {
+  const f = setup();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const loop = new SkillSelfImprovementLoop(f.lifecycle, {
+    propose: async () => { await gate; return []; },
+  });
+  try {
+    const first = loop.run(evidence);
+    await assert.rejects(() => loop.run(evidence), /already in progress/);
+    release();
+    await first;
+  } finally {
+    release();
+    rmSync(f.directory, { recursive: true, force: true });
+  }
+});
