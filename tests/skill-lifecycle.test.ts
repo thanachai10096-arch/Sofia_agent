@@ -42,6 +42,31 @@ test("skill lifecycle requires evaluation and confidence before promotion", asyn
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("skill artifacts cannot promote without trusted verification suite provenance", async () => {
+  const root = dir();
+  try {
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, {
+      file: path.join(root, "artifact.json"),
+    });
+    const executable = {
+      ...pkg("1.0.0"),
+      artifact: {
+        format: "sofia-node-skill-v1" as const,
+        runtime: "node" as const,
+        entrypoint: "index.js",
+        files: { "index.js": "export function run() { return 1; }" },
+      },
+    };
+    const candidate = lifecycle.propose(executable, {
+      source: "repair", evidenceIds: ["artifact-evidence"], confidence: 1,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.throws(() => lifecycle.promote(candidate.id), /valid isolated runtime verification/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill lifecycle rejects missing, blank, or duplicate provenance evidence", () => {
   const root = dir();
   try {
