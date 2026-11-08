@@ -495,3 +495,43 @@ test("gateway forwards a single-use approval receipt bound to the approved actio
     actionHash: approvedRequest.actionHash,
   });
 });
+
+
+test("approval preserves trusted messaging destination and cancellation signal", async () => {
+  const controller = new AbortController();
+  let received: import("../agent/approval.js").ApprovalRequest | undefined;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Controlled write tool for approval context propagation",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" }, content: { type: "string" } },
+    },
+    async execute() { return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async (request) => {
+      received = request;
+      return true;
+    },
+  );
+
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/approved.txt", content: "approved" } },
+    {
+      runId: "approval-context-test",
+      principalId: "principal-1",
+      notificationChannelId: "telegram:trusted-chat",
+      signal: controller.signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.ok(received?.requestId);
+  assert.equal(received?.notificationChannelId, "telegram:trusted-chat");
+  assert.equal(received?.signal, controller.signal);
+});
