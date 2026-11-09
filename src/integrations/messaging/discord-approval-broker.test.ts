@@ -90,6 +90,26 @@ test("Discord approval denies on explicit denial, cancellation, and delivery fai
   unavailable.close();
 });
 
+test("Discord approval broker shutdown denies every pending request", async () => {
+  const broker = createDiscordApprovalBroker({ sendMessage: async () => undefined });
+  const first = broker.handle(request({
+    requestId: "323e4567-e89b-42d3-a456-426614174000",
+  }));
+  const second = broker.handle(request({
+    requestId: "423e4567-e89b-42d3-a456-426614174000",
+  }));
+  await new Promise((resolve) => setImmediate(resolve));
+  broker.close();
+  assert.equal(await first, false);
+  assert.equal(await second, false);
+  assert.equal(broker.respond({
+    channelId: "222222",
+    authorId: "111111",
+    content: "/approve 323e4567-e89b-42d3-a456-426614174000 " + "a".repeat(64),
+  }), "not_found");
+});
+
+
 test("Discord approval rejects non-Discord or incomplete request identity", async () => {
   const broker = createDiscordApprovalBroker({ sendMessage: async () => undefined });
   assert.equal(await broker.handle(request({ principalId: "api-key-1" })), false);
