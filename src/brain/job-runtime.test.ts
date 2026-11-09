@@ -41,6 +41,47 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
 });
 
 
+test("DurableJobRuntime rejects a late completion from a worker whose lease expired", async () => {
+  const namespace = "job-runtime-expired-late-result-" + randomUUID();
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const brain = {
+    run: async () => {
+      await pending;
+      return { completed: true, state: "completed", output: "late result" };
+    },
+  } as unknown as SofiaBrain;
+
+  const firstRuntime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await firstRuntime.submit({ task: "finish after lease expiry" });
+  let active = await firstRuntime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && active?.status !== "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    active = await firstRuntime.get(submitted.id);
+  }
+  assert.equal(active?.status, "running");
+
+  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
+  const saved = records.find((item) => item.id === submitted.id);
+  assert.ok(saved);
+  saved.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+  // The old process wakes up after its lease has expired, before another worker
+  // has reclaimed the job. Its matching token must not authorize a late commit.
+  release();
+  await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+  const restartedRuntime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const recovered = await restartedRuntime.get(submitted.id);
+  assert.equal(recovered?.status, "failed");
+  assert.match(recovered?.error ?? "", /lease expired/i);
+  await rm(stateFile, { force: true });
+  await rm(stateFile + ".lock", { force: true });
+});
+
 test("DurableJobRuntime expires only the interrupted run owner's pending approvals during recovery", async () => {
   const namespace = "job-runtime-approval-recovery-" + randomUUID();
   const runId = "approval-recovery-run-" + randomUUID();
