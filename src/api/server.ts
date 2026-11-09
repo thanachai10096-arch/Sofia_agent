@@ -501,7 +501,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
         if (!token) return json(res, 401, { error: "unauthorized" }, origin, config);
         try {
-          const command = desktopBroker.poll(token);
+          const command = await desktopBroker.poll(token);
           return json(res, 200, { command }, origin, config);
         } catch (error) {
           return error instanceof DesktopCompanionAuthenticationError
@@ -527,7 +527,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (resultSize > 5_500_000) return json(res, 413, { error: "desktop_result_too_large" }, origin, config);
         try {
-          const completed = desktopBroker.complete(token, completeMatch[1]!, input.result ?? null, input.error as string | undefined);
+          const completed = await desktopBroker.complete(token, completeMatch[1]!, input.result ?? null, input.error as string | undefined);
           return completed
             ? json(res, 200, { completed: true }, origin, config)
             : json(res, 404, { error: "desktop_command_not_found" }, origin, config);
@@ -647,15 +647,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 403, { error: "forbidden", requiredScope: "desktop:connect" }, origin, config);
         }
         if (desktopPath === "/v1/desktop/companion/connect" && req.method === "POST") {
-          const session = desktopBroker.connect(auth.keyId);
+          const session = await desktopBroker.connect(auth.keyId);
           return json(res, 201, { token: session.token, connectedAt: session.connectedAt }, origin, config);
         }
         if (desktopPath === "/v1/desktop/companion/status" && req.method === "GET") {
-          return json(res, 200, desktopBroker.getStatus(auth.keyId), origin, config);
+          return json(res, 200, await desktopBroker.getStatus(auth.keyId), origin, config);
         }
         if (desktopPath === "/v1/desktop/companion/disconnect" && req.method === "POST") {
           try {
-            desktopBroker.disconnect(auth.keyId);
+            await desktopBroker.disconnect(auth.keyId);
             return json(res, 200, { disconnected: true }, origin, config);
           } catch {
             // The active pairing has already been revoked in memory, but durable
