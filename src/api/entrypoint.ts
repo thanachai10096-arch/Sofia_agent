@@ -11,6 +11,7 @@ import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplica
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime, parseTelegramChatAllowlist } from "../integrations/messaging/telegram-runtime.js";
+import { createDiscordApprovalBroker } from "../integrations/messaging/discord-approval-broker.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -21,7 +22,14 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
+const approvalBroker = createDiscordApprovalBroker({
+  sendMessage: async (channelId, message) => {
+    if (!discordTransport) throw new Error("Discord approval transport is unavailable.");
+    return discordTransport.sendMessage(channelId, message);
+  },
+});
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalBroker.handle);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -36,7 +44,6 @@ const discordConfigured = Boolean(discordPublicKey && discordBotToken && rawDisc
 if (discordRequested && !discordConfigured) {
   console.error("Discord integration disabled: required configuration is incomplete; API will continue without Discord.");
 }
-let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
 let discordGatewayTransport: ReturnType<typeof createDiscordGatewayTransport> | undefined;
 const discordAbort = new AbortController();
 let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
@@ -67,6 +74,26 @@ if (discordConfigured) {
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       const principalId = "discord:" + message.author.id;
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
+      if (command === "/approve" || command === "/deny") {
+        const decision = approvalBroker.respond({
+          channelId: message.channelId,
+          authorId: message.author.id,
+          content: message.content,
+        });
+        const response = decision === "approved"
+          ? "Approval accepted. Sofia may now execute the exact reviewed action."
+          : decision === "denied"
+            ? "Approval denied. The action will not be executed."
+            : decision === "unauthorized"
+              ? "This approval request belongs to another user or channel."
+              : decision === "action_mismatch"
+                ? "The action hash does not match. The action remains blocked."
+                : decision === "not_found"
+                  ? "Approval request not found or expired."
+                  : "Invalid approval command. Use /approve <request-id> <action-hash> or /deny <request-id> <action-hash>.";
+        await discordTransport?.sendMessage(message.channelId, response, undefined, message.id);
+        return;
+      }
       const argument = message.content.trim().slice(command.length).trim();
       if (command === "/status" || command === "/cancel" || command === "/resume") {
         if (!/^([0-9a-f]{8}-[0-9a-f-]{27,})$/i.test(argument)) {
@@ -232,6 +259,7 @@ const server = createSofiaApi(deps, {
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
+  approvalBroker.close();
   deps.closeSessionStore();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
