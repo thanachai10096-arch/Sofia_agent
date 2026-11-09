@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type { AdvancedSkillDefinition } from "./advanced-skill-catalog.js";
 import type { AdvancedSkillExecutionContext, AdvancedSkillRegistry } from "./advanced-skill-runtime.js";
 import { getExecutableArtifactDigest } from "./isolated-verifier.js";
@@ -107,5 +107,5 @@ export function registerActiveSkillArtifacts(
 }
 
 function cryptoRandomId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return randomUUID();
 }
