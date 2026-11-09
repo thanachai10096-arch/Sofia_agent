@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "Sofia Mobile Workspace",
+  "short_name": "Sofia",
+  "description": "Your private AI-powered cloud browser.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#090e1b",
+  "theme_color": "#0b1020",
+  "icons": [
+    { "src": "./sofia-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -13,7 +13,7 @@ export type SubagentRole =
 export interface SubagentToolDescriptor {
   name: string;
   description: string;
-  effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[];
+  effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive" | "desktop")[];
 }
 
 export const SUBAGENT_TOOL_ALLOWLIST = [

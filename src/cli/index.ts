@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { SofiaClient } from "../sdk/client.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
+import { disconnectDesktopCompanion, runDesktopCompanion } from "./desktop-companion.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -13,15 +14,21 @@ Commands:
   sofia init
   sofia run "<task>"
   sofia status
+  sofia desktop companion
 
 Environment:
   SOFIA_API_KEY   API key for Sofia
   SOFIA_API_URL   API base URL (default: http://localhost:3000)
+  SOFIA_DESKTOP_ALLOWED_APPS  JSON map of app IDs to absolute executable paths
+  SOFIA_DESKTOP_ENABLE_INPUT  Set true to opt in to local mouse/keyboard control
+  SOFIA_DESKTOP_ENABLE_SCREEN_CAPTURE  Set true to opt in to local screen capture
 `);
 }
 
 async function main() {
   if (!command || command === "help" || command === "--help") return help();
+  if (command === "desktop" && args[1] === "companion" && args[2] === "disconnect") return disconnectDesktopCompanion();
+  if (command === "desktop" && args[1] === "companion") return runDesktopCompanion();
 
   const runtime = createNodeWorkspaceRuntime();
   if (command === "init") {

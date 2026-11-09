@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./sofia-icon.svg" type="image/svg+xml">
+  <meta name="description" content="Sofia Mobile Workspace — your AI-powered cloud browser, available from your phone.">
+  <title>Sofia Workspace</title>
+  <link rel="stylesheet" href="./workspace.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="rail" aria-label="Main navigation">
+      <a class="brand" href="#" aria-label="Sofia home"><span class="brand-mark">S</span><span class="brand-name">sofia<span>.</span></span></a>
+      <div class="rail-label">WORKSPACE</div>
+      <button class="rail-item active" type="button"><span class="rail-icon">▣</span><span>Browser</span></button>
+      <button class="rail-item" type="button" id="activityNav"><span class="rail-icon">◷</span><span>Activity</span></button>
+      <div class="rail-spacer"></div>
+      <div class="rail-profile"><div class="avatar">S</div><div><strong>Sofia Agent</strong><small>Cloud workspace</small></div><span class="online-dot"></span></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-mark">S</span><span class="brand-name">sofia<span>.</span></span></div>
+        <div class="crumb"><span>Workspace</span><b>/</b><strong>Cloud Browser</strong></div>
+        <div class="top-actions"><span class="secure-label"><i></i> Private session</span><button class="icon-button" id="workspaceLogout" aria-label="Sign out" title="Sign out">↗</button><button class="icon-button" id="helpButton" aria-label="Help">?</button></div>
+      </header>
+
+      <section class="workspace-heading">
+        <div><div class="eyebrow"><span class="pulse"></span> YOUR PERSONAL CLOUD</div><h1>Good things happen <em>in motion.</em></h1><p>Give Sofia a task, or take the wheel yourself. Your browser goes wherever you do.</p></div>
+        <div class="heading-status"><span class="status-dot" id="statusDot"></span><span id="statusText">Not connected</span></div>
+      </section>
+
+      <section class="workspace-grid">
+        <div class="browser-column">
+          <div class="browser-card">
+            <div class="browser-chrome">
+              <div class="window-dots"><i></i><i></i><i></i></div>
+              <div class="address-bar"><span class="lock">⌑</span><input id="urlInput" type="url" inputmode="url" placeholder="Search or enter a website address" autocomplete="url"><button id="goButton" aria-label="Go to address">↵</button></div>
+              <button class="chrome-icon" id="refreshButton" aria-label="Refresh">↻</button>
+            </div>
+            <div class="browser-toolbar">
+              <button class="tool-button" id="backButton" aria-label="Go back">←</button>
+              <button class="tool-button" id="forwardButton" aria-label="Go forward">→</button>
+              <span class="toolbar-divider"></span><span class="page-indicator" id="pageTitle">Your browser is ready</span>
+              <button class="tool-button" id="keyboardButton" aria-label="Open keyboard">⌨</button>
+              <button class="tool-button" id="fullScreenButton" aria-label="Focus browser">⛶</button>
+            </div>
+            <div class="browser-stage" id="browserStage">
+              <div class="welcome-screen" id="welcomeScreen">
+                <div class="welcome-orbit"><div class="orbit-ring"></div><div class="browser-glyph">⌘</div><span class="spark spark-one">✦</span><span class="spark spark-two">✧</span></div>
+                <div class="welcome-kicker">A browser without borders</div>
+                <h2>Your world, one tap away.</h2>
+                <p>Start a private cloud browser. No computer, downloads, or setup required.</p>
+                <button class="primary-button" id="startButton"><span>✦</span> Start cloud browser <b>→</b></button>
+                <div class="welcome-foot"><span>◈</span> Isolated session <span>·</span> Encrypted connection <span>·</span> You stay in control</div>
+              </div>
+              <div class="screen-wrap hidden" id="screenWrap">
+                <img id="browserScreenshot" alt="Live cloud browser screen" draggable="false">
+                <div class="screen-hint" id="screenHint">Tap anywhere to interact</div>
+              </div>
+              <div class="loading-overlay hidden" id="loadingOverlay"><div class="loader"></div><span id="loadingText">Starting your private browser…</span></div>
+            </div>
+            <div class="browser-footer"><span><i class="live-dot"></i><span id="browserState">Waiting for connection</span></span><span id="sessionTimer">SESSION · —</span><button id="closeSessionButton" class="text-button hidden">Close session</button></div>
+          </div>
+          <div class="quick-actions">
+            <button class="quick-action" id="newTabHint"><span>＋</span><span><b>New page</b><small>Go to another website</small></span></button>
+            <button class="quick-action" id="signInHint"><span>♙</span><span><b>Sign in safely</b><small>You enter your own password</small></span></button>
+            <button class="quick-action" id="privacyHint"><span>◈</span><span><b>Private by design</b><small>Your session is isolated</small></span></button>
+          </div>
+        </div>
+
+        <aside class="copilot-card">
+          <div class="copilot-head"><div class="copilot-avatar"><span>✦</span><i></i></div><div><strong>Sofia</strong><small>Your AI companion</small></div><button class="more-button" id="copilotInfo" aria-label="About Sofia">···</button></div>
+          <div class="copilot-body" id="copilotMessages">
+            <div class="date-divider"><span>YOUR WORKSPACE</span></div>
+            <div class="message sofia-message"><div class="message-avatar">S</div><div class="message-content"><p>Hey there! ✨ I'm ready when you are.</p><p>I can navigate websites, research information, compare options, and help you get things done. Or you can browse directly in the window.</p><span class="message-time">Sofia · just now</span></div></div>
+            <div class="suggestion-label">TRY ASKING</div>
+            <div class="suggestions"><button data-prompt="Find the official website for " class="suggestion">Find a website <span>↗</span></button><button data-prompt="Research the latest information about " class="suggestion">Research a topic <span>⌕</span></button><button data-prompt="Compare prices for " class="suggestion">Compare options <span>⇄</span></button></div>
+          </div>
+          <section class="approval-inbox hidden" id="approvalInbox" aria-live="polite"><div class="approval-inbox-head"><span class="approval-icon">!</span><div><strong>Approval inbox</strong><small id="approvalText">Review actions waiting for you.</small></div><button id="approvalRefresh" type="button">Refresh</button></div><div class="approval-list" id="approvalList"></div></section>
+          <form class="composer" id="chatForm"><textarea id="chatInput" rows="1" placeholder="Ask Sofia to do something…" aria-label="Message Sofia"></textarea><button type="submit" id="sendButton" aria-label="Send message">↑</button><div class="composer-meta"><span>↵ to send · Shift + ↵ for new line</span><span>SOFIA AI <i>✦</i></span></div></form>
+        </aside>
+      </section>
+      <footer class="page-footer"><span>SOFIA WORKSPACE</span><span>Built for wherever life takes you <b>✦</b></span><a href="./README.md">Security & privacy</a></footer>
+    </main>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Mobile navigation"><button class="selected"><span>▣</span>Browser</button><button id="mobileSofiaButton"><span>✦</span>Sofia</button><button id="mobileMoreButton"><span>···</span>More</button></nav>
+  <section class="remote-keyboard hidden" id="remoteKeyboard" aria-label="Remote browser keyboard"><div class="keyboard-grip"></div><div class="keyboard-head"><strong>Browser keyboard</strong><button id="keyboardClose" aria-label="Close keyboard">×</button></div><textarea id="remoteTyping" rows="2" placeholder="Type into the focused website field…"></textarea><div class="remote-key-row"><button type="button" data-remote-key="Tab">Tab</button><button type="button" data-remote-key="Backspace">⌫</button><button type="button" data-remote-key="Escape">Esc</button><button type="button" data-remote-key="Enter">Enter ↵</button></div><button class="primary-button" id="remoteTypeSend">Send to browser <b>↑</b></button></section>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <dialog class="modal" id="infoModal"><div class="modal-mark">✦</div><button class="modal-close" id="modalClose" aria-label="Close">×</button><h3 id="modalTitle">Your private workspace</h3><p id="modalBody">Sofia runs your browser in an isolated cloud session. Your passwords and verification codes should be entered directly into the browser window — never into chat.</p><button class="primary-button modal-action" id="modalOk">Got it <b>→</b></button></dialog>
+  <script src="./workspace.js" defer></script>
+</body>
+</html>
