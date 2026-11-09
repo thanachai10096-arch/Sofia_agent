@@ -141,6 +141,33 @@ test("Desktop Companion fails closed for a command left started by a previous pr
   assert.match(completion?.error as string, /outcome is unknown/);
 });
 
+test("Desktop Companion fails closed when another process wins the journal claim race", async () => {
+  const store = credentials();
+  store.value = "m".repeat(43);
+  const id = "00000000-0000-4000-8000-000000000012";
+  const calls: string[] = [];
+  let completion: Record<string, unknown> | undefined;
+  const journal: DesktopCommandJournal = {
+    async get() { return { commandId: id, status: "started", updatedAt: Date.now() }; },
+    async begin() { throw new Error("already exists"); },
+    async complete() { throw new Error("must not overwrite another process journal"); },
+  };
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id, createdAt: 123, action: { kind: "input.type", text: "do-not-duplicate" } },
+    }), { status: 200 });
+    completion = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com", credentials: store, driver: driver(calls),
+    allowedCapabilities: ["input:control"], requestApproval: async () => true, journal, fetchImpl,
+  });
+  assert.equal(await client.pollOnce(), true);
+  assert.deepEqual(calls, []);
+  assert.match(completion?.error as string, /already claimed/);
+});
+
 test("Desktop Companion reports approval denial without performing the local action", async () => {
   const store = credentials();
   store.value = "d".repeat(43);
