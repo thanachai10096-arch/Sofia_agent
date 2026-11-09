@@ -68,7 +68,7 @@ export function createDiscordApprovalBroker(options: {
     }
 
     const safeInput = redactSecrets(request.input);
-    const serializedInput = JSON.stringify(safeInput);
+    const serializedInput = JSON.stringify(safeInput) ?? "[unavailable]";
     const prompt = [
       "Sofia is requesting approval for a privileged action.",
       "Tool: " + request.toolName,
@@ -117,7 +117,11 @@ export function createDiscordApprovalBroker(options: {
       const id = match[2];
       const actionHash = match[3].toLowerCase();
       const item = pending.get(id);
-      if (!item || item.expiresAt <= Date.now()) return "not_found";
+      if (!item) return "not_found";
+      if (item.expiresAt <= Date.now()) {
+        settle(id, item, false);
+        return "not_found";
+      }
       if (item.request.notificationChannelId !== reply.channelId ||
           item.request.principalId !== "discord:" + reply.authorId) return "unauthorized";
       if (item.request.actionHash.toLowerCase() !== actionHash) return "action_mismatch";
