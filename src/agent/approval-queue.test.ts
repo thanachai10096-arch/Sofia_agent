@@ -73,6 +73,35 @@ test("pending approvals survive reopening the SQLite store", async () => {
   } finally { await rm(f.directory, { recursive: true, force: true }); }
 });
 
+test("interrupted run expires only its pending owner-scoped approvals after store restart", async () => {
+  const f = await fixture();
+  try {
+    const pending = f.queue.create(request({ runId: "run-interrupted" }));
+    const otherRun = f.queue.create(request({ runId: "run-other" }));
+    const otherOwner = f.queue.create(request({ runId: "run-interrupted", principalId: "owner-b" }));
+    const approved = f.queue.create(request({ runId: "run-interrupted", input: { candidateId: "already-approved" } }));
+    assert.ok(f.queue.decide({
+      id: approved.id, ownerId: "owner-a", decidedBy: "owner-a",
+      actionHash: approved.actionHash, approved: true,
+    }));
+
+    f.queue.close();
+    const reopened = await SqliteApprovalQueue.open(f.file);
+    try {
+      assert.equal(reopened.expirePendingForRun("run-interrupted", "owner-a"), 1);
+      assert.equal(reopened.get(pending.id, "owner-a")?.status, "expired");
+      assert.equal(reopened.get(otherRun.id, "owner-a")?.status, "pending");
+      assert.equal(reopened.get(otherOwner.id, "owner-b")?.status, "pending");
+      assert.equal(reopened.get(approved.id, "owner-a")?.status, "approved");
+      assert.equal(reopened.decide({
+        id: pending.id, ownerId: "owner-a", decidedBy: "owner-a",
+        actionHash: pending.actionHash, approved: true,
+      }), undefined);
+      assert.equal(reopened.expirePendingForRun("run-interrupted", "owner-a"), 0);
+    } finally { reopened.close(); }
+  } finally { await rm(f.directory, { recursive: true, force: true }); }
+});
+
 test("queued approval handler resolves only after the owner approves the stored action", async () => {
   const f = await fixture();
   try {
