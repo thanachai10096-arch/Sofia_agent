@@ -301,3 +301,51 @@ test("legacy executor honors tool-level approval even for low-risk read actions"
   assert.equal(approvals, 1, "tool metadata must require approval even when the action risk is low");
   assert.equal(executions, 1, "the approved tool should execute exactly once");
 });
+
+test("legacy approval wait aborts promptly and never starts the pending tool", async () => {
+  const { defaultPolicy } = await import("../src/security/policy.js");
+  const controller = new AbortController();
+  let markApprovalStarted!: () => void;
+  let executions = 0;
+  const approvalStarted = new Promise<void>((resolve) => { markApprovalStarted = resolve; });
+  const readTool = {
+    name: "workspace.read_file",
+    description: "Read a workspace file",
+    effects: ["read"] as const,
+    requiresApproval: true,
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    async execute() { executions += 1; return { content: "file contents" }; },
+  };
+  const agent = new SofiaAgent({
+    provider: {
+      async generate() {
+        return { text: "", toolCalls: [{ id: "abort-approval", name: readTool.name, input: { path: "safe.txt" } }] };
+      },
+    },
+    router: new ModelRouter([
+      { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: new Reviewer(),
+    runtime: {} as never,
+    tools: {
+      get(name: string) { return name === readTool.name ? readTool : undefined; },
+      list() { return [readTool]; },
+    },
+    policy: { ...defaultPolicy, maxSteps: 1, maxRisk: "high", permissions: {} },
+    approval: async () => {
+      markApprovalStarted();
+      return new Promise<boolean>(() => {});
+    },
+  });
+
+  const pending = agent.run({ task: "read a file after approval", signal: controller.signal });
+  await approvalStarted;
+  controller.abort(new Error("operator cancelled approval"));
+  await assert.rejects(pending, /operator cancelled approval/i);
+  assert.equal(executions, 0, "the tool must not execute after its approval wait is cancelled");
+});
