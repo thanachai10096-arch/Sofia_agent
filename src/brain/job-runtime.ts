@@ -464,21 +464,24 @@ export class DurableJobRuntime implements JobRuntime {
   }
 
   private async recoverInterrupted(record: JobRecord): Promise<JobRecord> {
-    if (record.status === "running" && !this.controllers.has(record.id)) {
+    if (this.controllers.has(record.id)) return record;
+    if (record.status === "running") {
       const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
       if (!Number.isFinite(expires) || expires <= Date.now()) {
         const recovered = await this.state.markInterruptedIfExpired(record.id);
-        if (recovered) {
-          Object.assign(record, recovered);
-          const runId = recovered.snapshot?.runId;
-          const ownerId = recovered.ownerKeyId;
-          if (recovered.status === "failed" && runId && ownerId) {
-            // Expire only pending approvals owned by this principal for this exact
-            // interrupted run. The queue keeps the decision audit trail; approved
-            // records are immutable and are never replayed during resume.
-            this.approvalRecoveryStore?.expirePendingForRun(runId, ownerId);
-          }
-        }
+        if (recovered) Object.assign(record, recovered);
+      }
+    }
+    // Retry this idempotent cleanup on subsequent reads if the approval database
+    // was temporarily unavailable during the first recovery attempt.
+    if (record.status === "failed" && /Job lease expired/i.test(record.error ?? "")) {
+      const runId = record.snapshot?.runId;
+      const ownerId = record.ownerKeyId;
+      if (runId && ownerId) {
+        // Expire only pending approvals owned by this principal for this exact
+        // interrupted run. The queue keeps the decision audit trail; approved
+        // records are immutable and are never replayed during resume.
+        this.approvalRecoveryStore?.expirePendingForRun(runId, ownerId);
       }
     }
     return record;
