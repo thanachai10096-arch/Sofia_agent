@@ -41,6 +41,22 @@ interface PendingCommand extends DesktopCompanionCommand {
   signal?: AbortSignal;
 }
 
+/**
+ * Async-capable broker contract for API routes. The in-memory implementation
+ * remains synchronous for pairing/poll/completion; durable or remote adapters
+ * may perform those operations asynchronously without changing HTTP semantics.
+ */
+export type MaybePromise<T> = T | Promise<T>;
+
+export interface DesktopCommandBrokerPort {
+  connect(ownerKeyId: string): MaybePromise<{ token: string; connectedAt: number }>;
+  disconnect(ownerKeyId: string): MaybePromise<void>;
+  poll(token: string): MaybePromise<DesktopCompanionCommand | null>;
+  complete(token: string, commandId: string, result: unknown, error?: string): MaybePromise<boolean>;
+  getStatus(ownerKeyId: string): MaybePromise<{ connected: boolean; lastSeenAt?: number; pendingCommands: number }>;
+  close(): MaybePromise<void>;
+}
+
 export interface DesktopCommandBrokerConfig {
   now?: () => number;
   commandTimeoutMs?: number;
