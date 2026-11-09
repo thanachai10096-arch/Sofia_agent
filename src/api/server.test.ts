@@ -287,3 +287,81 @@ test("Desktop Companion API relay enforces owner scope and completes only the pa
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("Desktop Companion API awaits asynchronous broker adapters", async () => {
+  const calls: string[] = [];
+  const commandId = "11111111-1111-4111-8111-111111111111";
+  const broker = {
+    async connect(ownerKeyId: string) {
+      calls.push("connect:" + ownerKeyId);
+      return { token: "async-companion-token", connectedAt: 123 };
+    },
+    async disconnect(ownerKeyId: string) { calls.push("disconnect:" + ownerKeyId); },
+    async poll(token: string) {
+      calls.push("poll:" + token);
+      return { id: commandId, action: { kind: "screen.capture" as const }, createdAt: 123 };
+    },
+    async complete(token: string, id: string, result: unknown) {
+      calls.push("complete:" + token + ":" + id + ":" + JSON.stringify(result));
+      return true;
+    },
+    async getStatus(ownerKeyId: string) {
+      calls.push("status:" + ownerKeyId);
+      return { connected: true, pendingCommands: 0 };
+    },
+    async close() {},
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { "async-desktop-owner": ["desktop:connect"] },
+    desktopCommandBroker: broker,
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const ownerRequest = (path: string, init: RequestInit = {}) => fetch(baseUrl + path, {
+    ...init,
+    headers: { authorization: "Bearer async-desktop-owner", ...(init.headers as Record<string, string> | undefined) },
+  });
+
+  try {
+    const connected = await ownerRequest("/v1/desktop/companion/connect", { method: "POST" });
+    assert.equal(connected.status, 201);
+    assert.deepEqual(await connected.json(), { token: "async-companion-token", connectedAt: 123 });
+
+    const status = await ownerRequest("/v1/desktop/companion/status");
+    assert.equal(status.status, 200);
+    assert.deepEqual(await status.json(), { connected: true, pendingCommands: 0 });
+
+    const polled = await fetch(baseUrl + "/v1/desktop/companion/commands", {
+      headers: { authorization: "Bearer async-companion-token" },
+    });
+    assert.equal(polled.status, 200);
+    assert.equal(((await polled.json()) as { command: { id: string } }).command.id, commandId);
+
+    const completed = await fetch(baseUrl + "/v1/desktop/companion/commands/" + commandId + "/complete", {
+      method: "POST",
+      headers: { authorization: "Bearer async-companion-token", "content-type": "application/json" },
+      body: JSON.stringify({ result: { ok: true } }),
+    });
+    assert.equal(completed.status, 200);
+
+    const disconnected = await ownerRequest("/v1/desktop/companion/disconnect", { method: "POST" });
+    assert.equal(disconnected.status, 200);
+    assert.deepEqual(calls, [
+      "connect:async-desktop-owner",
+      "status:async-desktop-owner",
+      "poll:async-companion-token",
+      "complete:async-companion-token:" + commandId + ":{\\"ok\\":true}",
+      "disconnect:async-desktop-owner",
+    ]);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
