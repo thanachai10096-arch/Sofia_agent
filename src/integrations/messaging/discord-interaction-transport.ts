@@ -171,11 +171,11 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
         return { status: 200, body: { type: 4, data: { content: "You are not authorized to use Sofia in this channel.", flags: 64 } } };
       }
       const optionsList = interaction.data?.options ?? [];
-      const optionName = incomingCommand === commandName ? taskOptionName : "job_id";
+      const approvalCommand = incomingCommand === "approve" || incomingCommand === "deny";
+      const optionName = incomingCommand === commandName ? taskOptionName : approvalCommand ? "request_id" : "job_id";
       const optionValue = optionsList.find((option) => option.name === optionName)?.value;
       const argument = typeof optionValue === "string" ? optionValue : "";
       const approvalHash = optionsList.find((option) => option.name === "action_hash")?.value;
-      const approvalCommand = incomingCommand === "approve" || incomingCommand === "deny";
       if (approvalCommand && (!/^[0-9a-f-]{36}$/i.test(argument) ||
           typeof approvalHash !== "string" || !/^[0-9a-f]{64}$/i.test(approvalHash))) {
         return { status: 200, body: { type: 4, data: { content: "Provide a valid request_id and action_hash.", flags: 64 } } };
