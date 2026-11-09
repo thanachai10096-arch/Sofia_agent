@@ -53,6 +53,7 @@ export interface DesktopCommandBrokerPort {
   disconnect(ownerKeyId: string): MaybePromise<void>;
   poll(token: string): MaybePromise<DesktopCompanionCommand | null>;
   complete(token: string, commandId: string, result: unknown, error?: string): MaybePromise<boolean>;
+  dispatch(ownerKeyId: string, action: DesktopAction, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<unknown>;
   getStatus(ownerKeyId: string): MaybePromise<{ connected: boolean; lastSeenAt?: number; pendingCommands: number }>;
   close(): MaybePromise<void>;
 }
