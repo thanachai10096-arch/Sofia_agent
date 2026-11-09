@@ -56,6 +56,11 @@ export interface SofiaApiConfig {
   requestTimeoutMs?: number;
   maxConcurrentRunsPerKey?: number;
   securityAdminScope?: string;
+  /**
+   * Server-owned allowlist of messaging destinations per hashed API key ID.
+   * A request-body channel ID is never trusted unless it matches this map.
+   */
+  notificationChannelAllowlistByKey?: Record<string, string[]>;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
