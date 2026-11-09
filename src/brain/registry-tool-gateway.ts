@@ -100,7 +100,9 @@ export class RegistryToolGateway implements ToolGateway {
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:"Risk exceeds policy maximum.",input:redactSecrets(input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Action risk exceeds Sofia security policy."}};
     }
-    const requiresApproval=shouldRequireApproval(this.policy,permission,assessment.risk);
+    // Skill metadata can require approval even when the underlying action is read-only.
+    // This explicit requirement is additive and cannot be weakened by risk thresholds.
+    const requiresApproval=registeredTool.requiresApproval===true||shouldRequireApproval(this.policy,permission,assessment.risk);
     const capabilitySecret=this.policy.capabilitySecret;
     const capability=capabilitySecret?issueCapability({principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret):undefined;
     if(capabilitySecret && capability && !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret)) return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability verification failed."}};
