@@ -79,7 +79,7 @@ The code outline above is not a claim that the repository's API server is alread
 
 ## Discord privileged-action approvals
 
-The standalone Discord runtime accepts `/approve` and `/deny` as additional signed slash commands. Register each with two required string options: `request_id` and `action_hash`. The same commands can also be sent as ordinary Discord messages when the Gateway message intake is enabled:
+The standalone Discord runtime accepts `/approve` and `/deny` as additional signed slash commands. Register each with two required string options: `request_id` and `action_hash`. The repository registration helper now includes these commands; run `npm run discord:register-command` with `DISCORD_APPLICATION_ID`, `DISCORD_GUILD_ID`, and `DISCORD_BOT_TOKEN` configured in the environment. The same commands can also be sent as ordinary Discord messages when the Gateway message intake is enabled:
 
 ```text
 /approve <request-id> <action-hash>
