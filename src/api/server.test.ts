@@ -300,11 +300,11 @@ test("Desktop Companion API awaits asynchronous broker adapters", async () => {
     async disconnect(ownerKeyId: string) { calls.push("disconnect:" + ownerKeyId); },
     async poll(token: string) {
       calls.push("poll:" + token);
-      return { id: commandId, action: { kind: "screen.capture" as const }, createdAt: 123 };
+      return { id: commandId, action: { kind: "screen.capture" as const }, createdAt: 123, leaseToken: "lease-token-12345678" };
     },
     async dispatch() { return { ok: true }; },
-    async complete(token: string, id: string, result: unknown) {
-      calls.push("complete:" + token + ":" + id + ":" + JSON.stringify(result));
+    async complete(token: string, id: string, result: unknown, error?: string, leaseToken?: string) {
+      calls.push("complete:" + token + ":" + id + ":" + JSON.stringify(result) + ":" + (leaseToken ?? "none"));
       return true;
     },
     async getStatus(ownerKeyId: string) {
@@ -349,7 +349,7 @@ test("Desktop Companion API awaits asynchronous broker adapters", async () => {
     const completed = await fetch(baseUrl + "/v1/desktop/companion/commands/" + commandId + "/complete", {
       method: "POST",
       headers: { authorization: "Bearer async-companion-token", "content-type": "application/json" },
-      body: JSON.stringify({ result: { ok: true } }),
+      body: JSON.stringify({ result: { ok: true }, leaseToken: "lease-token-12345678" }),
     });
     assert.equal(completed.status, 200);
 
@@ -359,7 +359,7 @@ test("Desktop Companion API awaits asynchronous broker adapters", async () => {
       "connect:async-desktop-owner",
       "status:async-desktop-owner",
       "poll:async-companion-token",
-      "complete:async-companion-token:" + commandId + ":" + JSON.stringify({ ok: true }),
+      "complete:async-companion-token:" + commandId + ":" + JSON.stringify({ ok: true }) + ":lease-token-12345678",
       "disconnect:async-desktop-owner",
     ]);
   } finally {
