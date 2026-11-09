@@ -72,7 +72,13 @@ test("DurableJobRuntime rejects a late completion from a worker whose lease expi
   // The old process wakes up after its lease has expired, before another worker
   // has reclaimed the job. Its matching token must not authorize a late commit.
   release();
-  await new Promise<void>((resolve) => setTimeout(resolve, 50));
+  let oldWorkerSettled = await firstRuntime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && oldWorkerSettled?.status === "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    oldWorkerSettled = await firstRuntime.get(submitted.id);
+  }
+  assert.equal(oldWorkerSettled?.status, "failed");
+  assert.match(oldWorkerSettled?.error ?? "", /lease expired/i);
 
   const restartedRuntime = new DurableJobRuntime(() => brain, undefined, namespace);
   const recovered = await restartedRuntime.get(submitted.id);
