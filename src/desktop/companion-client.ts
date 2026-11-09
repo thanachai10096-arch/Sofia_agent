@@ -202,7 +202,10 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
     }
     const command = payload.command as Record<string, unknown>;
     if (typeof command.id !== "string" || !/^[0-9a-f-]{36}$/i.test(command.id) ||
-        !Number.isFinite(command.createdAt)) throw new Error("Invalid Desktop Companion command metadata.");
+        !Number.isFinite(command.createdAt) ||
+        (command.leaseToken !== undefined && (typeof command.leaseToken !== "string" || !/^[A-Za-z0-9-]{8,64}$/.test(command.leaseToken)))) {
+      throw new Error("Invalid Desktop Companion command metadata.");
+    }
     assertDesktopAction(command.action as DesktopAction);
     const typedCommand = command as unknown as DesktopCompanionCommand;
     let outcome: DesktopCommandOutcome;
@@ -258,7 +261,7 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
     const completed = await postCompletion(
       "/v1/desktop/companion/commands/" + encodeURIComponent(typedCommand.id) + "/complete",
       token,
-      JSON.stringify(error ? { error: error.slice(0, 1000) } : { result }),
+      JSON.stringify({ ...(error ? { error: error.slice(0, 1000) } : { result }), ...(typedCommand.leaseToken ? { leaseToken: typedCommand.leaseToken } : {}) }),
       signal,
     );
     if (completed.status === 401) {
