@@ -255,3 +255,49 @@ test("legacy execution cannot downgrade a reserved terminal tool to read-only", 
   await assert.rejects(agent.run({ task: "run a terminal command" }), /Tool execution is disabled by policy: terminal\.run/);
   assert.equal(executions, 0, "the terminal tool must not execute when shell access is disabled");
 });
+
+test("legacy executor honors tool-level approval even for low-risk read actions", async () => {
+  const { defaultPolicy } = await import("../src/security/policy.js");
+  let executions = 0;
+  let approvals = 0;
+  let providerCalls = 0;
+  const readTool = {
+    name: "workspace.read_file",
+    description: "Read a workspace file",
+    effects: ["read"] as const,
+    requiresApproval: true,
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    async execute() { executions += 1; return { content: "file contents" }; },
+  };
+  const agent = new SofiaAgent({
+    provider: {
+      async generate() {
+        providerCalls += 1;
+        return providerCalls === 1
+          ? { text: "", toolCalls: [{ id: "read-requires-approval", name: "workspace.read_file", input: { path: "safe.txt" } }] }
+          : { text: "Read completed." };
+      },
+    },
+    router: new ModelRouter([
+      { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: { async review() { return { approved: true, reason: "Verified." }; } } as Reviewer,
+    runtime: {} as never,
+    tools: {
+      get(name: string) { return name === readTool.name ? readTool : undefined; },
+      list() { return [readTool]; },
+    },
+    policy: { ...defaultPolicy, maxSteps: 2, maxRisk: "high", permissions: {} },
+    approval: async () => { approvals += 1; return true; },
+  });
+
+  const result = await agent.run({ task: "read a file" });
+  assert.equal(result.output, "Read completed.");
+  assert.equal(approvals, 1, "tool metadata must require approval even when the action risk is low");
+  assert.equal(executions, 1, "the approved tool should execute exactly once");
+});
