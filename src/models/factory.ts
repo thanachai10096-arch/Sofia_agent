@@ -57,7 +57,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
   const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
-    const checks = [
+    const checks: Array<{ name: string; passed: boolean; detail?: string }> = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
       { name: "procedure", passed: candidate.skill.procedure.length >= 2 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
       { name: "verification-requirements", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
