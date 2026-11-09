@@ -117,3 +117,27 @@ test("Discord approval rejects non-Discord or incomplete request identity", asyn
   assert.equal(await broker.handle(request({ actionHash: "not-a-hash" })), false);
   broker.close();
 });
+
+test("Discord approval cannot be accepted until the exact prompt is delivered", async () => {
+  let releaseDelivery!: () => void;
+  const delivery = new Promise<void>((resolve) => { releaseDelivery = resolve; });
+  const broker = createDiscordApprovalBroker({
+    sendMessage: async () => delivery,
+    timeoutMs: 5_000,
+  });
+  const pending = broker.handle(request());
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const reply = {
+    channelId: "222222",
+    authorId: "111111",
+    content: "/approve 123e4567-e89b-42d3-a456-426614174000 " + "a".repeat(64),
+  };
+  assert.equal(broker.respond(reply), "not_ready");
+
+  releaseDelivery();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(broker.respond(reply), "approved");
+  assert.equal(await pending, true);
+  broker.close();
+});
