@@ -10,3 +10,9 @@ VersionedSkillLifecycle is an opt-in gate layered beside Sofia's existing skill 
 - Promotion changes only the supplied SkillsPlatform. The lifecycle manager does not execute skill procedures.
 - A local JSON store is single-process only. Use an appropriately transactional shared store for multi-process deployments.
 - If persistence fails during promotion/rollback, the manager attempts to restore the previous platform package and reports the original failure; inspect consistency before continuing.
+
+## Executable Node skill contract
+
+Executable artifacts using `sofia-node-skill-v1` must expose a named `run(input, context)` function from the declared `.mjs` entrypoint. The isolated verifier checks this export inside the container before running the operator-owned test suite. A trusted suite must import the entrypoint and exercise `run` with representative inputs and expected outputs; merely exporting the function is not behavioral proof.
+
+The current verifier reports syntax, runtime-contract, and trusted-test checks separately. It does not claim TypeScript typecheck or build evidence for this JavaScript artifact format. Candidate requirements for checks the runner cannot prove remain fail-closed.
