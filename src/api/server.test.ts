@@ -302,6 +302,7 @@ test("Desktop Companion API awaits asynchronous broker adapters", async () => {
       calls.push("poll:" + token);
       return { id: commandId, action: { kind: "screen.capture" as const }, createdAt: 123 };
     },
+    async dispatch() { return { ok: true }; },
     async complete(token: string, id: string, result: unknown) {
       calls.push("complete:" + token + ":" + id + ":" + JSON.stringify(result));
       return true;
