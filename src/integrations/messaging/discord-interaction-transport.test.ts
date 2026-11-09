@@ -17,6 +17,8 @@ test("Discord transport verifies raw signatures and edits deferred interaction r
   const transport = createDiscordInteractionTransport({
     publicKeyHex,
     botToken,
+    allowedUserIds: ["333333333333"],
+    allowedChannelIds: ["123456789"],
     additionalCommandNames: ["status", "cancel", "resume"],
     fetchImpl: async (input, init) => {
       sent.push({ url: String(input), init });
@@ -76,7 +78,7 @@ test("Discord transport rejects invalid configuration", () => {
 });
 
 test("Discord transport accepts additional allowlisted slash command names and forwards their job ID", async () => {
-  const transport = createDiscordInteractionTransport({ publicKeyHex, botToken, additionalCommandNames: ["status", "cancel", "resume"], fetchImpl: async () => response({ id: "987654321" }) });
+  const transport = createDiscordInteractionTransport({ publicKeyHex, botToken, allowedUserIds: ["333333333333"], allowedChannelIds: ["123456789"], additionalCommandNames: ["status", "cancel", "resume"], fetchImpl: async () => response({ id: "987654321" }) });
   let received = "";
   await transport.start(new AbortController().signal, async (event) => { received = event.content; });
   const body = Buffer.from(JSON.stringify({
@@ -99,6 +101,8 @@ test("Discord signed slash approval commands forward request ID and action hash"
   const transport = createDiscordInteractionTransport({
     publicKeyHex,
     botToken,
+    allowedUserIds: ["333333333333"],
+    allowedChannelIds: ["123456789"],
     additionalCommandNames: ["approve", "deny"],
     fetchImpl: async () => response({ id: "987654321" }),
   });
@@ -129,6 +133,8 @@ test("Discord signed slash approval rejects malformed action hash before dispatc
   const transport = createDiscordInteractionTransport({
     publicKeyHex,
     botToken,
+    allowedUserIds: ["333333333333"],
+    allowedChannelIds: ["123456789"],
     additionalCommandNames: ["approve"],
   });
   let dispatched = false;
@@ -147,6 +153,26 @@ test("Discord signed slash approval rejects malformed action hash before dispatc
         { name: "action_hash", type: 3, value: "bad" },
       ],
     },
+  }));
+  const result = await transport.handleRequest(signed(body));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.type, 4);
+  assert.equal(dispatched, false);
+  await transport.stop();
+});
+
+test("Discord transport denies commands when user or channel allowlists are missing", async () => {
+  const transport = createDiscordInteractionTransport({ publicKeyHex, botToken });
+  let dispatched = false;
+  await transport.start(new AbortController().signal, async () => { dispatched = true; });
+  const body = Buffer.from(JSON.stringify({
+    type: 2,
+    id: "222222222226",
+    application_id: "111111111111",
+    token: "interaction-token-abc",
+    channel_id: "123456789",
+    member: { user: { id: "333333333333", username: "tester" } },
+    data: { name: "run", options: [{ name: "task", type: 3, value: "inspect repository" }] },
   }));
   const result = await transport.handleRequest(signed(body));
   assert.equal(result.status, 200);
