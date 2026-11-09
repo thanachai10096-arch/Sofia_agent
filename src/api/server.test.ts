@@ -358,7 +358,7 @@ test("Desktop Companion API awaits asynchronous broker adapters", async () => {
       "connect:async-desktop-owner",
       "status:async-desktop-owner",
       "poll:async-companion-token",
-      "complete:async-companion-token:" + commandId + ":{\\"ok\\":true}",
+      "complete:async-companion-token:" + commandId + ":" + JSON.stringify({ ok: true }),
       "disconnect:async-desktop-owner",
     ]);
   } finally {
