@@ -465,6 +465,42 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
 });
 
 
+test("explicit skill approval requirement is enforced even for read-only risk", async () => {
+  const rt = runtime();
+  let approvalCalls = 0;
+  let receivedEvidence: unknown;
+  const registry = new MapToolRegistry([{
+    name: "skill.test.read-only-approval",
+    description: "Read-only skill that explicitly requires approval",
+    effects: ["read"] as const,
+    requiresApproval: true,
+    inputSchema: { type: "object", properties: {} },
+    async execute(_input, context) {
+      receivedEvidence = context.approval;
+      return { executed: true };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    defaultPolicy,
+    async () => { approvalCalls += 1; return true; },
+  );
+  const result = await gateway.execute(
+    { tool: "skill.test.read-only-approval", input: {} },
+    {
+      runId: "read-only-explicit-approval-test",
+      principalId: "principal-1",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+  assert.equal(approvalCalls, 1, "explicit skill approval must not be bypassed by the low-risk threshold");
+  assert.equal(result.ok, true);
+  assert.ok(receivedEvidence, "the tool must receive action-bound approval evidence");
+});
+
+
 test("gateway forwards a single-use approval receipt bound to the approved action", async () => {
   const rt = runtime();
   let received: unknown;
