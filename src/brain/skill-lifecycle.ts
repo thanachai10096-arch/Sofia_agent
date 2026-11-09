@@ -83,9 +83,40 @@ interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[];
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
+function isAllowedSystemPathAlias(candidate: string): boolean {
+  // macOS exposes these conventional paths as symlinks into /private.
+  // Permit only the exact OS-owned aliases; arbitrary symlink ancestors remain forbidden.
+  if (process.platform !== "darwin" || (candidate !== "/var" && candidate !== "/tmp")) return false;
+  try {
+    const canonical = realpathSync(candidate);
+    return canonical === path.join("/private", path.basename(candidate));
+  } catch {
+    return false;
+  }
+}
+
+function assertNoSymlinkAncestors(target: string): void {
+  const resolved = path.resolve(target);
+  const root = path.parse(resolved).root;
+  let current = path.dirname(resolved);
+  while (current !== root) {
+    try {
+      if (lstatSync(current).isSymbolicLink() && !isAllowedSystemPathAlias(current)) {
+        throw new Error("Skill lifecycle path must not contain symbolic links");
+      }
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+}
+
 function resolveLifecycleFilePath(target: string): string {
   const resolved = path.resolve(target);
   const parent = path.dirname(resolved);
+  assertNoSymlinkAncestors(resolved);
   try {
     if (lstatSync(resolved).isSymbolicLink()) {
       throw new Error("Skill lifecycle file must not be a symbolic link");
