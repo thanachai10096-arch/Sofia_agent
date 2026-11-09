@@ -94,7 +94,9 @@ if (discordConfigured) {
                 ? "The action hash does not match. The action remains blocked."
                 : decision === "not_found"
                   ? "Approval request not found or expired."
-                  : "Invalid approval command. Use /approve <request-id> <action-hash> or /deny <request-id> <action-hash>.";
+                  : decision === "not_ready"
+                    ? "Approval is not available until Sofia has delivered the action details. Please wait and retry."
+                    : "Invalid approval command. Use /approve <request-id> <action-hash> or /deny <request-id> <action-hash>.";
         await discordTransport?.sendMessage(message.channelId, response, undefined, message.id);
         return;
       }
