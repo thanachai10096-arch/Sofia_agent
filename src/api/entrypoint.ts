@@ -209,9 +209,10 @@ const notificationDestinations = new Set<string>();
 // Only adapter destinations that were enabled and validated by this server
 // are eligible for approval notifications. Public API request bodies cannot
 // expand this list.
-if (telegramRuntime && process.env.TELEGRAM_ALLOWED_CHAT_IDS?.trim()) {
+const rawTelegramChatIds = process.env.TELEGRAM_ALLOWED_CHAT_IDS?.trim();
+if (telegramRuntime && rawTelegramChatIds) {
   try {
-    for (const chatId of parseTelegramChatAllowlist(process.env.TELEGRAM_ALLOWED_CHAT_IDS)) {
+    for (const chatId of parseTelegramChatAllowlist(rawTelegramChatIds)) {
       notificationDestinations.add("telegram:" + chatId);
     }
   } catch {
