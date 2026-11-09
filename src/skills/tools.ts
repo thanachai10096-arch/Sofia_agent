@@ -10,6 +10,7 @@ import { listUnregisteredVerifiedSkills } from "./advanced-skill-registry.js";
 export function createAdvancedSkillTools(
   registry: AdvancedSkillRegistry,
   principalId: string,
+  options: { managedArtifactsUnavailable?: boolean } = {},
 ): SofiaTool[] {
   const listTool: SofiaTool = {
     name: "skills.list",
@@ -24,6 +25,10 @@ export function createAdvancedSkillTools(
       return {
         registered: registry.list(),
         unregisteredVerified: listUnregisteredVerifiedSkills(registry),
+        managedArtifactsAvailable: options.managedArtifactsUnavailable !== true,
+        ...(options.managedArtifactsUnavailable ? {
+          managedArtifactsNote: "Promoted learned artifacts are unavailable: a pinned container sandbox or valid active artifact could not be mounted.",
+        } : {}),
       };
     },
   };
