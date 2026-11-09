@@ -505,12 +505,6 @@ export class VersionedSkillLifecycle {
       }
     }
     this.snapshot = { schemaVersion: 1, records, activeBySkill };
-    // Rehydrate only records that survived package-bound runtime evidence checks.
-    for (const record of records) {
-      if (record.status === "active" && activeBySkill[record.skillId] === record.id) {
-        this.platform.register(clone(record.package));
-      }
-    }
     if (legacyUnverifiedIds.size > 0) this.persist();
   }
   private persist(): void {
