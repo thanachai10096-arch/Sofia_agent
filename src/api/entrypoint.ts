@@ -206,9 +206,9 @@ if (discordConfigured) {
 }
 
 const notificationDestinations = new Set<string>();
-// Only adapter destinations that were enabled and validated by this server
-// are eligible for approval notifications. Public API request bodies cannot
-// expand this list.
+// Telegram is the only adapter that submits runs through this public API.
+// Discord jobs use the in-process JobRuntime and keep their own verified route.
+// Public API request bodies cannot expand the Telegram destination allowlist.
 const rawTelegramChatIds = process.env.TELEGRAM_ALLOWED_CHAT_IDS?.trim();
 if (telegramRuntime && rawTelegramChatIds) {
   try {
@@ -217,15 +217,6 @@ if (telegramRuntime && rawTelegramChatIds) {
     }
   } catch {
     // The adapter already fails closed on invalid configuration.
-  }
-}
-if (discordConfigured && rawDiscordChannelIds?.trim()) {
-  try {
-    for (const channelId of parseDiscordIdAllowlist(rawDiscordChannelIds, "DISCORD_ALLOWED_CHANNEL_IDS")) {
-      notificationDestinations.add("discord:" + channelId);
-    }
-  } catch {
-    // Discord startup validates this allowlist before enabling its transport.
   }
 }
 const apiKeyId = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
