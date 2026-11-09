@@ -555,6 +555,29 @@ test("skill lifecycle rejects symbolic-link ancestors and files before loading p
   }
 });
 
+test("skill lifecycle rejects a symlink ancestor even when the immediate parent is a real directory", () => {
+  const root = dir();
+  try {
+    const realDirectory = path.join(root, "real");
+    const nestedDirectory = path.join(realDirectory, "nested");
+    const linkedDirectory = path.join(root, "linked");
+    mkdirSync(nestedDirectory, { recursive: true });
+    symlinkSync(realDirectory, linkedDirectory, "dir");
+
+    assert.throws(
+      () => new VersionedSkillLifecycle(
+        new InMemorySkillsPlatform(),
+        passing,
+        { file: path.join(linkedDirectory, "nested", "lifecycle.json") },
+      ),
+      /must not contain symbolic links/,
+    );
+    assert.equal(existsSync(path.join(nestedDirectory, "lifecycle.json")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("skill lifecycle rechecks parent path before writing after construction", () => {
   const root = dir();
   try {
