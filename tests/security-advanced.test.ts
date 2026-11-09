@@ -59,8 +59,8 @@ describe("advanced security",()=>{
 describe("shared action assessment",()=>{
  it("denies secret paths and workspace traversal",()=>{
   const base={runId:"r",principalId:"p",toolName:"workspace.write_file",effects:["write"] as const};
-  assert.throws(() => assessAction({...base,input:{path:".env",content:"x"}}), /credential\/secret files/i);
-  assert.throws(() => assessAction({...base,input:{path:"../outside.txt",content:"x"}}), /escapes the configured root/i);
+  assert.equal(assessAction({...base,input:{path:".env",content:"x"}}).allowed,false);
+  assert.equal(assessAction({...base,input:{path:"../outside.txt",content:"x"}}).allowed,false);
  });
  it("denies unallowlisted network hosts and suspicious control instructions",()=>{
   const network={runId:"r",principalId:"p",toolName:"browser.goto",effects:["network","read"] as const};
