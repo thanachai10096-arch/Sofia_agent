@@ -11,7 +11,7 @@ export interface AgentRunInput {
   maxSteps?: number;
   stream?: boolean;
   sessionId?: string;
-  /** Trusted host-supplied messaging destination for approval prompts. */
+  /** Optional approval destination; forwarded only when the server-side per-key allowlist permits it. */
   notificationChannelId?: string;
   /**
    * Mobile-friendly mode: return immediately and keep the agent running on
