@@ -4,7 +4,7 @@ import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
 import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission, shouldRequireApproval } from "../security/policy.js";
-import { actionHash, riskFor } from "../security/guard.js";
+import { actionHash, assessAction } from "../security/guard.js";
 import { validateToolInput } from "../tools/types.js";
 
 export class SofiaAgent {
@@ -289,7 +289,20 @@ export class SofiaAgent {
             const effects = effectiveToolEffects(call.name, tool.effects);
             assertToolAllowed(policy, call.name, effects);
             const permission = toolPermission(policy, call.name, effects);
-            const risk = riskFor(effects, actionInput);
+            // Apply the same path, URL allowlist, prompt-injection, and risk
+            // assessment used by the Brain gateway. The legacy executor must not
+            // become a less-protected fallback when Brain is disabled.
+            const assessment = assessAction({
+              runId,
+              principalId: request.principalId,
+              toolName: call.name,
+              input: actionInput,
+              effects,
+            }, policy.blockedPaths, policy.allowedHosts);
+            if (!assessment.allowed) {
+              throw new Error(assessment.reason ?? "Security policy denied the action.");
+            }
+            const risk = assessment.risk;
             const maximumRisk = permission.maxRisk ?? policy.maxRisk;
             if (riskRank[risk] > riskRank[maximumRisk]) {
               throw new Error(`Tool risk ${risk} exceeds configured maximum ${maximumRisk}: ${call.name}`);
