@@ -267,6 +267,7 @@ if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("In
 server.on("close", () => {
   approvalBroker.close();
   deps.closeSessionStore();
+  void deps.closeMcpRegistry().catch(() => console.error("MCP registry shutdown failed."));
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
 server.listen(port, "0.0.0.0", () => {
