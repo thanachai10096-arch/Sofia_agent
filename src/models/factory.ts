@@ -193,6 +193,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     // Lifecycle promotion is persisted across runs. Mount only active, package-bound
     // artifacts into this run-scoped registry; never expose candidates or prose-only skills.
     const skillSandboxImage = process.env.SOFIA_SKILL_SANDBOX_IMAGE;
+    let managedArtifactsUnavailable = !skillSandboxImage;
     if (skillSandboxImage) {
       try {
         registerActiveSkillArtifacts(
@@ -200,12 +201,18 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           skillLifecycle.activePackages(),
           new ContainerSandbox({ image: skillSandboxImage }),
         );
+        managedArtifactsUnavailable = false;
       } catch {
         // Fail closed: a mount/configuration error leaves managed artifacts unavailable
         // without preventing ordinary Brain conversations or built-in tools.
+        managedArtifactsUnavailable = true;
       }
     }
-    const runSkillTools = createAdvancedSkillTools(advancedSkillRegistry, principalId ?? "anonymous");
+    const runSkillTools = createAdvancedSkillTools(
+      advancedSkillRegistry,
+      principalId ?? "anonymous",
+      { managedArtifactsUnavailable },
+    );
     const approvalHandler: AgentDependencies["approval"] = dependencies.approval
       ? async (request) => {
           const approved = await dependencies.approval!(request);
