@@ -329,10 +329,6 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const raw = await body(req, maxBytes);
           if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_memory_entry" }, origin, config);
           const input = raw as Record<string, unknown>;
-          if (input.notificationChannelId !== undefined &&
-              !isNotificationChannelAllowed(auth.keyId, input.notificationChannelId)) {
-            return json(res, 403, { error: "notification_channel_forbidden" }, origin, config);
-          }
           const kinds = ["preference", "fact", "goal", "instruction"];
           if (typeof input.kind !== "string" || !kinds.includes(input.kind) ||
               typeof input.content !== "string" || input.content.trim().length < 3 || input.content.length > 1200) {
@@ -682,6 +678,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const raw = await body(req, maxBytes);
           if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_cron_schedule" }, origin, config);
           const input = raw as Record<string, unknown>;
+          if (input.notificationChannelId !== undefined &&
+              !isNotificationChannelAllowed(auth.keyId, input.notificationChannelId)) {
+            return json(res, 403, { error: "notification_channel_forbidden" }, origin, config);
+          }
           if (typeof input.name !== "string" || input.name.length > 200 ||
               typeof input.task !== "string" || input.task.length > 20_000 ||
               typeof input.timeZone !== "string" || input.timeZone.length > 100) {
