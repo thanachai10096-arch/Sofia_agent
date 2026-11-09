@@ -101,7 +101,10 @@ export function createDiscordApprovalBroker(options: {
     }
 
     try {
-      await options.sendMessage(channelId, prompt);
+      await Promise.race([
+        options.sendMessage(channelId, prompt),
+        decision.then(() => undefined),
+      ]);
     } catch {
       settle(request.requestId, item, false);
       return false;
