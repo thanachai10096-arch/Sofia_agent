@@ -73,7 +73,7 @@ if (discordConfigured) {
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       const principalId = "discord:" + message.author.id;
-      if (!discordUserIds.has(message.author.id) || !discordChannelIds.has(message.channelId)) {
+      if (!discordUserIds.includes(message.author.id) || !discordChannelIds.includes(message.channelId)) {
         await discordTransport?.sendMessage(message.channelId, "You are not authorized to approve or run Sofia in this channel.", undefined, message.id);
         return;
       }
