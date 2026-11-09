@@ -307,7 +307,7 @@ export class SofiaAgent {
             if (riskRank[risk] > riskRank[maximumRisk]) {
               throw new Error(`Tool risk ${risk} exceeds configured maximum ${maximumRisk}: ${call.name}`);
             }
-            const requiresApproval = shouldRequireApproval(policy, permission, risk);
+            const requiresApproval = tool.requiresApproval === true || shouldRequireApproval(policy, permission, risk);
             if (requiresApproval && !this.deps.approval) {
               throw new Error(`Approval handler required for ${risk}-risk tool: ${call.name}`);
             }
