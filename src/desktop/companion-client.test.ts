@@ -34,7 +34,7 @@ test("Desktop Companion pairs without persisting the Sofia API key and executes 
     requests.push({ url, authorization: headers?.authorization, body: typeof init?.body === "string" ? init.body : undefined });
     if (url.endsWith("/connect")) return new Response(JSON.stringify({ token: "c".repeat(43), connectedAt: 123 }), { status: 201 });
     if (url.endsWith("/commands")) return new Response(JSON.stringify({
-      command: { id: "00000000-0000-4000-8000-000000000001", createdAt: 123, action: { kind: "input.type", text: "hello" } },
+      command: { id: "00000000-0000-4000-8000-000000000001", createdAt: 123, leaseToken: "lease-token-12345678", action: { kind: "input.type", text: "hello" } },
     }), { status: 200 });
     return new Response(JSON.stringify({ completed: true }), { status: 200 });
   };
@@ -51,7 +51,7 @@ test("Desktop Companion pairs without persisting the Sofia API key and executes 
   assert.equal(requests[0]?.authorization, "Bearer owner-api-secret");
   assert.equal(await client.pollOnce(), true);
   assert.deepEqual(calls, ["type:hello"]);
-  assert.deepEqual(JSON.parse(requests[2]!.body!), { result: { ok: true } });
+  assert.deepEqual(JSON.parse(requests[2]!.body!), { result: { ok: true }, leaseToken: "lease-token-12345678" });
   assert.equal(requests.some((item) => item.body?.includes("owner-api-secret")), false);
 });
 
