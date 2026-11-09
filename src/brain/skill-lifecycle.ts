@@ -386,6 +386,15 @@ export class VersionedSkillLifecycle {
     return id ? this.get(id) : undefined;
   }
 
+  /** Return defensive copies of packages currently promoted by this lifecycle. */
+  activePackages(): SkillPackage[] {
+    return Object.keys(this.snapshot.activeBySkill)
+      .sort()
+      .map((skillId) => this.active(skillId))
+      .filter((record): record is SkillLifecycleRecord => Boolean(record))
+      .map((record) => clone(record.package));
+  }
+
   private hasValidBenchmarkEvidence(skillPackage: SkillPackage, evaluation: SkillEvaluationResult | undefined): boolean {
     if (!this.benchmarkEngine) return true;
     const report = evaluation?.benchmark?.report;
