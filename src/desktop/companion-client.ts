@@ -217,16 +217,31 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
         // It may have run before a crash. Never repeat a non-idempotent desktop action.
         outcome = { error: "Execution outcome is unknown after a previous Companion interruption. Check the desktop before manually retrying this action." };
       } else {
-        await journal!.begin(typedCommand.id);
         try {
-          outcome = { result: await execute(typedCommand.action, signal) };
-        } catch (cause) {
-          outcome = { error: cause instanceof Error ? cause.message : "Local desktop action failed." };
+          await journal!.begin(typedCommand.id);
+        } catch (beginError) {
+          // Another local Companion process may have won the atomic create.
+          // Re-read the journal and settle this delivery without repeating a side effect.
+          const raced = await journal!.get(typedCommand.id);
+          if (raced?.status === "completed") {
+            outcome = raced.outcome;
+          } else if (raced?.status === "started") {
+            outcome = { error: "Another Companion process has already claimed this command, or its previous execution was interrupted. Check the desktop before retrying." };
+          } else {
+            throw beginError;
+          }
         }
-        if (!signal?.aborted) {
-          try { await journal!.complete(typedCommand.id, outcome); }
-          catch {
-            outcome = { error: "The desktop action may have run, but its result could not be safely recorded. Check the desktop before retrying." };
+        if (!outcome!) {
+          try {
+            outcome = { result: await execute(typedCommand.action, signal) };
+          } catch (cause) {
+            outcome = { error: cause instanceof Error ? cause.message : "Local desktop action failed." };
+          }
+          if (!signal?.aborted) {
+            try { await journal!.complete(typedCommand.id, outcome); }
+            catch {
+              outcome = { error: "The desktop action may have run, but its result could not be safely recorded. Check the desktop before retrying." };
+            }
           }
         }
       }
