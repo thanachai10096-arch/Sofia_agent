@@ -174,6 +174,24 @@ test("approval notification delivery failure does not approve or crash the waiti
     assert.equal(await pending, false);
   } finally { await f.cleanup(); }
 });
+test("cancellation persistence failures are reported while execution remains denied", async () => {
+  const f = await fixture();
+  const controller = new AbortController();
+  const reported: unknown[] = [];
+  try {
+    f.queue.cancelPending = () => { throw new Error("sqlite unavailable"); };
+    const handler = createQueuedApprovalHandler(f.queue, {
+      onCreated: () => controller.abort(),
+      onCancellationError: (error) => reported.push(error),
+    });
+    assert.equal(await handler(request({ signal: controller.signal })), false);
+    assert.equal(reported.length, 1);
+    assert.match(String(reported[0]), /sqlite unavailable/);
+    // Persistence failed, so the record remains pending and the diagnostic is essential.
+    assert.equal(f.queue.list("owner-a").length, 1);
+  } finally { await f.cleanup(); }
+});
+
 test("legacy approval databases migrate transactionally and preserve pending records", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "sofia-approval-legacy-"));
   const file = path.join(directory, "approvals.sqlite");
