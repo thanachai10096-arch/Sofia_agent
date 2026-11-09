@@ -7,6 +7,7 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
   const namespace = "job-runtime-restart-" + randomUUID();
@@ -25,7 +26,7 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
     active = await firstRuntime.get(submitted.id);
   }
   assert.equal(active?.status, "running");
-  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const stateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
   const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
   const saved = records.find((item) => item.id === submitted.id);
   assert.ok(saved);
@@ -61,7 +62,7 @@ test("DurableJobRuntime rejects a late completion from a worker whose lease expi
   }
   assert.equal(active?.status, "running");
 
-  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const stateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
   const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
   const saved = records.find((item) => item.id === submitted.id);
   assert.ok(saved);
@@ -112,7 +113,7 @@ test("DurableJobRuntime expires only the interrupted run owner's pending approva
   assert.equal(active?.status, "running");
   assert.equal(active?.snapshot?.runId, runId);
 
-  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const stateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
   const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
   const saved = records.find((item) => item.id === submitted.id);
   assert.ok(saved);
@@ -451,7 +452,7 @@ test("DurableJobRuntime recovers a persisted running job across an actual Node.j
   const jobId = start.stdout.trim();
   assert.ok(jobId, "first worker should print the persisted job ID");
 
-  const recoveryStateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const recoveryStateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
   const recoveryRecords = JSON.parse(await readFile(recoveryStateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
   const interrupted = recoveryRecords.find((item) => item.id === jobId);
   assert.ok(interrupted);
@@ -548,7 +549,7 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
   const jobId = started.stdout.trim();
   assert.ok(jobId, "checkpoint worker should print its job ID");
 
-  const resumeStateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const resumeStateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
   const resumeRecords = JSON.parse(await readFile(resumeStateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
   const resumable = resumeRecords.find((item) => item.id === jobId);
   assert.ok(resumable);
@@ -752,7 +753,7 @@ test("DurableJobRuntime admits only one resumed execution across separate proces
     assert.equal(results.filter((result) => JSON.parse(result).status === "completed").length, 1);
     assert.equal(results.filter((result) => JSON.parse(result).status !== "completed").length, 1);
   } finally {
-    const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+    const stateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
     await rm(stateFile, { force: true });
     await rm(stateFile + ".lock", { force: true });
     await rm(markerFile, { force: true });
@@ -762,7 +763,7 @@ test("DurableJobRuntime admits only one resumed execution across separate proces
 
 test("DurableJobRuntime serializes competing stale-lock reclamation without losing jobs", async () => {
   const namespace = "job-runtime-stale-lock-reclaim-" + randomUUID();
-  const stateDirectory = path.join(os.tmpdir(), "sofia-agents-jobs");
+  const stateDirectory = sofiaStateDirectory("jobs");
   const stateFile = path.join(stateDirectory, createHash("sha256").update(namespace).digest("hex") + ".json");
   const lockFile = stateFile + ".lock";
   const reclaimFile = lockFile + ".reclaim";
