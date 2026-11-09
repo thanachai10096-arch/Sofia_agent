@@ -217,6 +217,7 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
         // It may have run before a crash. Never repeat a non-idempotent desktop action.
         outcome = { error: "Execution outcome is unknown after a previous Companion interruption. Check the desktop before manually retrying this action." };
       } else {
+        let shouldExecute = true;
         try {
           await journal!.begin(typedCommand.id);
         } catch (beginError) {
@@ -225,13 +226,15 @@ export function createDesktopCompanionClient(config: DesktopCompanionClientConfi
           const raced = await journal!.get(typedCommand.id);
           if (raced?.status === "completed") {
             outcome = raced.outcome;
+            shouldExecute = false;
           } else if (raced?.status === "started") {
             outcome = { error: "Another Companion process has already claimed this command, or its previous execution was interrupted. Check the desktop before retrying." };
+            shouldExecute = false;
           } else {
             throw beginError;
           }
         }
-        if (!outcome!) {
+        if (shouldExecute) {
           try {
             outcome = { result: await execute(typedCommand.action, signal) };
           } catch (cause) {
