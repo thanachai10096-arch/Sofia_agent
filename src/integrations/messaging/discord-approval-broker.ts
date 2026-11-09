@@ -117,8 +117,9 @@ export function createDiscordApprovalBroker(options: {
     respond(reply) {
       const match = /^\/(approve|deny)\s+([0-9a-f-]{36})\s+([0-9a-f]{64})$/i.exec(reply.content.trim());
       if (!match) return null;
-      const id = match[2];
-      const actionHash = match[3].toLowerCase();
+      const [, decisionValue, id, capturedActionHash] = match;
+      if (!decisionValue || !id || !capturedActionHash) return "invalid";
+      const actionHash = capturedActionHash.toLowerCase();
       const item = pending.get(id);
       if (!item) return "not_found";
       if (item.expiresAt <= Date.now()) {
@@ -128,7 +129,7 @@ export function createDiscordApprovalBroker(options: {
       if (item.request.notificationChannelId !== reply.channelId ||
           item.request.principalId !== "discord:" + reply.authorId) return "unauthorized";
       if (item.request.actionHash.toLowerCase() !== actionHash) return "action_mismatch";
-      const approved = match[1].toLowerCase() === "approve";
+      const approved = decisionValue.toLowerCase() === "approve";
       settle(id, item, approved);
       return approved ? "approved" : "denied";
     },
