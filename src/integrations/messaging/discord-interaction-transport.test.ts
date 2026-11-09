@@ -114,7 +114,7 @@ test("Discord signed slash approval commands forward request ID and action hash"
     data: {
       name: "approve",
       options: [
-        { name: "job_id", type: 3, value: "123e4567-e89b-42d3-a456-426614174000" },
+        { name: "request_id", type: 3, value: "123e4567-e89b-42d3-a456-426614174000" },
         { name: "action_hash", type: 3, value: "a".repeat(64) },
       ],
     },
