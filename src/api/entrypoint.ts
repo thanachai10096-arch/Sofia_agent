@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
@@ -9,7 +10,7 @@ import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.j
 import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { createTelegramMessagingRuntime, parseTelegramChatAllowlist } from "../integrations/messaging/telegram-runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -204,8 +205,33 @@ if (discordConfigured) {
   discordRecoveryTimer.unref?.();
 }
 
+const notificationDestinations = new Set<string>();
+// Only adapter destinations that were enabled and validated by this server
+// are eligible for approval notifications. Public API request bodies cannot
+// expand this list.
+if (telegramRuntime && process.env.TELEGRAM_ALLOWED_CHAT_IDS?.trim()) {
+  try {
+    for (const chatId of parseTelegramChatAllowlist(process.env.TELEGRAM_ALLOWED_CHAT_IDS)) {
+      notificationDestinations.add("telegram:" + chatId);
+    }
+  } catch {
+    // The adapter already fails closed on invalid configuration.
+  }
+}
+if (discordConfigured && rawDiscordChannelIds?.trim()) {
+  try {
+    for (const channelId of parseDiscordIdAllowlist(rawDiscordChannelIds, "DISCORD_ALLOWED_CHANNEL_IDS")) {
+      notificationDestinations.add("discord:" + channelId);
+    }
+  } catch {
+    // Discord startup validates this allowlist before enabling its transport.
+  }
+}
+const apiKeyId = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
+
 const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
+  notificationChannelAllowlistByKey: { [apiKeyId]: [...notificationDestinations] },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
