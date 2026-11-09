@@ -6,6 +6,8 @@ export interface DesktopCompanionCommand {
   id: string;
   action: DesktopAction;
   createdAt: number;
+  /** Opaque per-claim fence; durable queue adapters require it on completion. */
+  leaseToken?: string;
 }
 
 /** Invalid or revoked companion bearer token; safe to translate to HTTP 401. */
@@ -52,7 +54,7 @@ export interface DesktopCommandBrokerPort {
   connect(ownerKeyId: string): MaybePromise<{ token: string; connectedAt: number }>;
   disconnect(ownerKeyId: string): MaybePromise<void>;
   poll(token: string): MaybePromise<DesktopCompanionCommand | null>;
-  complete(token: string, commandId: string, result: unknown, error?: string): MaybePromise<boolean>;
+  complete(token: string, commandId: string, result: unknown, error?: string, leaseToken?: string): MaybePromise<boolean>;
   dispatch(ownerKeyId: string, action: DesktopAction, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<unknown>;
   getStatus(ownerKeyId: string): MaybePromise<{ connected: boolean; lastSeenAt?: number; pendingCommands: number }>;
   close(): MaybePromise<void>;
