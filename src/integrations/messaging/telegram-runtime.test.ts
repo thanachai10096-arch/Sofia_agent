@@ -279,7 +279,7 @@ test("Telegram approval notices do not use an untrusted group chat as a destinat
   assert.ok(runtime);
   assert.equal(await runtime.notifyApproval(ownerKeyId, "approval"), true);
   assert.equal(sent.length, 1);
-  assert.match(sent[0]!.url, /\\/sendMessage$/);
+  assert.match(sent[0]!.url, /\/sendMessage$/);
   assert.equal(JSON.parse(sent[0]!.body).chat_id, "123");
   assert.equal(JSON.parse(sent[0]!.body).text, "approval");
   await runtime.stop();
