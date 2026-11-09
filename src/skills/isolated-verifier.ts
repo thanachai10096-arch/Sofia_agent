@@ -156,7 +156,7 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
         'import { pathToFileURL } from "node:url";',
         'const entry = await import(pathToFileURL(path.resolve(process.argv[1])).href);',
         'if (typeof entry.run !== "function") throw new Error("Skill entrypoint must export run(input, context)");',
-      ].join("\\n");
+      ].join("\n");
       const checks = [
         { name: "syntax", command: "node", args: ["--check", artifact.entrypoint] },
         {
