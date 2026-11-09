@@ -74,7 +74,12 @@ function publicJobRecord(record: JobRecord): JobRecord {
 }
 
 
+export interface ApprovalRecoveryStore {
+  expirePendingForRun(runId: string, ownerId: string): number;
+}
+
 export interface JobRuntime {
+  setApprovalRecoveryStore?(store: ApprovalRecoveryStore): void;
   submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
@@ -419,6 +424,7 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly resuming = new Set<string>();
   private readonly starting = new Set<string>();
   private readonly state: FileJobStateStore;
+  private approvalRecoveryStore?: ApprovalRecoveryStore;
 
   constructor(
     private readonly brainFactory: (options: {
@@ -433,6 +439,10 @@ export class DurableJobRuntime implements JobRuntime {
     namespace = process.cwd(),
   ) {
     this.state = new FileJobStateStore(namespace);
+  }
+
+  setApprovalRecoveryStore(store: ApprovalRecoveryStore): void {
+    this.approvalRecoveryStore = store;
   }
 
   async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
@@ -458,7 +468,17 @@ export class DurableJobRuntime implements JobRuntime {
       const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
       if (!Number.isFinite(expires) || expires <= Date.now()) {
         const recovered = await this.state.markInterruptedIfExpired(record.id);
-        if (recovered) Object.assign(record, recovered);
+        if (recovered) {
+          Object.assign(record, recovered);
+          const runId = recovered.snapshot?.runId;
+          const ownerId = recovered.ownerKeyId;
+          if (recovered.status === "failed" && runId && ownerId) {
+            // Expire only pending approvals owned by this principal for this exact
+            // interrupted run. The queue keeps the decision audit trail; approved
+            // records are immutable and are never replayed during resume.
+            this.approvalRecoveryStore?.expirePendingForRun(runId, ownerId);
+          }
+        }
       }
     }
     return record;
