@@ -166,8 +166,10 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
       }
       const allowedUsers = options.allowedUserIds;
       const allowedChannels = options.allowedChannelIds;
-      if ((allowedUsers && (!allowedUsers.length || !allowedUsers.includes(author.id))) ||
-          (allowedChannels && (!allowedChannels.length || !allowedChannels.includes(interaction.channel_id)))) {
+      // Missing or empty allowlists deny all access. Never interpret omitted
+      // security configuration as permission for every Discord user/channel.
+      if (!allowedUsers?.length || !allowedChannels?.length ||
+          !allowedUsers.includes(author.id) || !allowedChannels.includes(interaction.channel_id)) {
         return { status: 200, body: { type: 4, data: { content: "You are not authorized to use Sofia in this channel.", flags: 64 } } };
       }
       const optionsList = interaction.data?.options ?? [];
