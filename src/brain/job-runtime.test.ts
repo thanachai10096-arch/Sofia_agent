@@ -41,6 +41,53 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
 });
 
 
+test("DurableJobRuntime expires only the interrupted run owner's pending approvals during recovery", async () => {
+  const namespace = "job-runtime-approval-recovery-" + randomUUID();
+  const runId = "approval-recovery-run-" + randomUUID();
+  const snapshot = {
+    version: 1, runId, task: "wait for approval", understanding: {}, plan: {},
+    acceptanceCriteria: [], completedStepIds: [], checkpointId: "approval-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [], diagnoses: [], decisions: [], recoveryRounds: 0, trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const firstRuntime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async () => {
+      await onRunSnapshot?.(snapshot);
+      return new Promise(() => undefined);
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+  const submitted = await firstRuntime.submit({ task: snapshot.task, ownerKeyId: "owner-a" });
+  let active = await firstRuntime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && (!active?.snapshot || active.status !== "running"); attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    active = await firstRuntime.get(submitted.id);
+  }
+  assert.equal(active?.status, "running");
+  assert.equal(active?.snapshot?.runId, runId);
+
+  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
+  const saved = records.find((item) => item.id === submitted.id);
+  assert.ok(saved);
+  saved.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+  const expired: Array<{ runId: string; ownerId: string }> = [];
+  const restartedRuntime = new DurableJobRuntime(() => ({
+    run: async () => ({ completed: false, state: "failed" }),
+  } as unknown as SofiaBrain), undefined, namespace);
+  restartedRuntime.setApprovalRecoveryStore({
+    expirePendingForRun(id, ownerId) { expired.push({ runId: id, ownerId }); return 1; },
+  });
+  const recovered = await restartedRuntime.get(submitted.id);
+  assert.equal(recovered?.status, "failed");
+  assert.deepEqual(expired, [{ runId, ownerId: "owner-a" }]);
+
+  await rm(stateFile, { force: true });
+  await rm(stateFile + ".lock", { force: true });
+});
+
 test("DurableJobRuntime cancels an active run and persists the terminal state", async () => {
   const namespace = "job-runtime-cancel-" + randomUUID();
   let started!: () => void;
