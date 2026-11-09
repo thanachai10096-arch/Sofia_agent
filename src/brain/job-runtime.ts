@@ -393,6 +393,13 @@ class FileJobStateStore {
         const current = records[index]!;
         if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
+        // A matching token is not sufficient after its lease has expired: the old
+        // worker may have resumed after a long pause before another worker reclaimed it.
+        // Reject every write from that worker, including a late terminal result.
+        if (current.status === "running") {
+          const leaseExpiresAt = current.leaseExpiresAt ? Date.parse(current.leaseExpiresAt) : 0;
+          if (!Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= Date.now()) return false;
+        }
         records[index] = {
           ...record,
           ...(record.status === "running" && current.status === "running"
@@ -664,7 +671,14 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = result.completed ? "completed" : "failed";
       }
       record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
+      const committed = await this.state.save(record);
+      if (!committed) {
+        // Do not report completion from a worker whose lease was lost while it
+        // was executing. Refresh from durable state; recovery owns the next step.
+        const latest = await this.state.get(record.id);
+        if (latest) Object.assign(record, latest);
+        controller.abort(new Error("Job execution lease was lost before completion could be committed"));
+      }
     } catch (error) {
       if (record.status !== "cancelled") {
         record.error = error instanceof Error ? error.message : String(error);
