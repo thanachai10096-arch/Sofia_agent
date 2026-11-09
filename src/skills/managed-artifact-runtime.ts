@@ -71,7 +71,7 @@ export function registerActiveSkillArtifacts(
           'const input = JSON.parse(await fs.readFile(process.argv[2], "utf8"));',
           'const result = await entry.run(input, { runId: process.argv[3], principalId: process.argv[4] });',
           'process.stdout.write(JSON.stringify({ result }) + "\\n");',
-        ].join("\\n");
+        ].join("\n");
         const result = await sandbox.run("node", [
           "--input-type=module",
           "--eval",
