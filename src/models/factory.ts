@@ -199,7 +199,6 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           advancedSkillRegistry,
           skillLifecycle.activePackages(),
           new ContainerSandbox({ image: skillSandboxImage }),
-          path.join(workspace, ".sofia", "skill-runs"),
         );
       } catch {
         // Fail closed: a mount/configuration error leaves managed artifacts unavailable
