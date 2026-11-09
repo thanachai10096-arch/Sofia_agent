@@ -32,7 +32,7 @@ import { DurableJobRuntime } from "../brain/job-runtime.js";
 import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
 import { EvolutionEngine } from "../brain/evolution.js";
-import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
+import { VersionedSkillLifecycle, type SkillEvaluationCheck } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import { createAdvancedSkillRegistry } from "../skills/advanced-skill-registry.js";
@@ -57,7 +57,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
   const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
-    const checks = [
+    const checks: SkillEvaluationCheck[] = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
       { name: "procedure", passed: candidate.skill.procedure.length >= 2 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
       { name: "verification-requirements", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },

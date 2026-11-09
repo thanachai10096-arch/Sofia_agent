@@ -133,7 +133,8 @@ function anthropicMessages(messages: ChatMessage[], brainStructuredOutput: boole
 
 function normalizeAnthropicResponse(value: unknown): ChatResponse {
   const raw = asRecord(value) as AnthropicResponse | undefined;
-  if (!raw || !Array.isArray(raw.content)) throw new Error("Anthropic Messages API returned an invalid response.");
+  if (!raw) throw new Error("provider_invalid_anthropic_envelope");
+  if (!Array.isArray(raw.content)) throw new Error("provider_invalid_anthropic_content_shape");
   const textParts: string[] = [];
   const toolCalls: Array<{ id?: string; function?: { name?: string; arguments?: string } }> = [];
   const hasThinkingBlock = raw.content.some((block) => block?.type === "thinking" || block?.type === "redacted_thinking");
@@ -143,7 +144,7 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
     } else if (block?.type === "tool_use") {
       const name = typeof block.name === "string" ? block.name : "";
       const id = typeof block.id === "string" ? block.id : "";
-      if (!name || !id) throw new Error("Anthropic Messages API returned an invalid tool-use block.");
+      if (!name || !id) throw new Error("provider_invalid_anthropic_tool_use");
       toolCalls.push({
         id,
         function: { name, arguments: JSON.stringify(block.input ?? {}) },
@@ -496,6 +497,13 @@ export class SofiaModelGateway implements ModelProvider {
         }
       } else if (error instanceof Error && error.message === "provider_thinking_only_output") {
         return failResponse("provider_thinking_only_output");
+      } else if (protocol === "anthropic-messages" && error instanceof SyntaxError) {
+        // Keep diagnostics machine-readable without logging provider bodies,
+        // which may contain prompts, account data, or other sensitive content.
+        return failResponse("provider_invalid_anthropic_json");
+      } else if (protocol === "anthropic-messages" && error instanceof Error &&
+          /^provider_invalid_anthropic_(?:envelope|content_shape|tool_use)$/.test(error.message)) {
+        return failResponse(error.message);
       } else {
         return failResponse("Model gateway returned invalid JSON or an unsupported provider response.");
       }

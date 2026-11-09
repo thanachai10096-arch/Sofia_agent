@@ -103,6 +103,8 @@ function safeProviderFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   const finishReason = message.match(/finish_reason=([a-z_]{1,32})/)?.[1];
   if (/provider_thinking_only_output|thinking[-_ ]only|only thinking blocks/i.test(message)) return "provider_thinking_only_output";
+  const anthropicShape = message.match(/provider_invalid_anthropic_(envelope|content_shape|tool_use|json)/)?.[0];
+  if (anthropicShape) return anthropicShape;
   if (/Model gateway returned a refusal response/i.test(message)) return "provider_refusal";
   if (/Provider did not return token usage/i.test(message)) return "provider_missing_usage";
   if (/temporarily unavailable|recovery probe already in progress/i.test(message)) return "provider_circuit_open";
@@ -456,7 +458,9 @@ export class TokenAwareGateway {
         // another already-approved route. Auth, billing, budget, timeout,
         // cancellation, and policy failures stop immediately.
         const recoverable = failure.code === "model_call_failed" &&
-          ["provider_invalid_response", "provider_empty_content", "provider_thinking_only_output"].includes(failure.reason ?? "");
+          ["provider_invalid_response", "provider_empty_content", "provider_thinking_only_output",
+            "provider_invalid_anthropic_envelope", "provider_invalid_anthropic_content_shape",
+            "provider_invalid_anthropic_tool_use", "provider_invalid_anthropic_json"].includes(failure.reason ?? "");
         if (!recoverable) throw failure;
       }
     }
