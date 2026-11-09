@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
-  chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync,
+  chmodSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -103,12 +103,20 @@ export class FileDesktopCommandJournal implements DesktopCommandJournal {
 
   private writeNew(commandId: string, entry: DesktopCommandJournalEntry): void {
     const target = this.filename(commandId);
+    let descriptor: number | undefined;
     try {
       // O_EXCL semantics prevent two local Companion processes from both
       // acquiring the same command and performing the native side effect.
-      writeFileSync(target, JSON.stringify(entry), { encoding: "utf8", mode: 0o600, flag: "wx" });
+      descriptor = openSync(target, "wx", 0o600);
+      writeFileSync(descriptor, JSON.stringify(entry), { encoding: "utf8" });
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = undefined;
       try { chmodSync(target, 0o600); } catch { /* best effort */ }
     } catch (error) {
+      if (descriptor !== undefined) {
+        try { closeSync(descriptor); } catch { /* already closed */ }
+      }
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
         throw new Error("Desktop command journal entry already exists.");
       }
@@ -119,11 +127,19 @@ export class FileDesktopCommandJournal implements DesktopCommandJournal {
   private write(commandId: string, entry: DesktopCommandJournalEntry): void {
     const target = this.filename(commandId);
     const temporary = target + "." + process.pid + "." + randomBytes(8).toString("hex") + ".tmp";
+    let descriptor: number | undefined;
     try {
-      writeFileSync(temporary, JSON.stringify(entry), { encoding: "utf8", mode: 0o600, flag: "wx" });
+      descriptor = openSync(temporary, "wx", 0o600);
+      writeFileSync(descriptor, JSON.stringify(entry), { encoding: "utf8" });
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = undefined;
       try { chmodSync(temporary, 0o600); } catch { /* best effort */ }
       renameSync(temporary, target);
     } catch {
+      if (descriptor !== undefined) {
+        try { closeSync(descriptor); } catch { /* already closed */ }
+      }
       try { unlinkSync(temporary); } catch { /* absent */ }
       throw new Error("Desktop command journal persistence failed.");
     }
