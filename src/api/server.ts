@@ -527,7 +527,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (resultSize > 5_500_000) return json(res, 413, { error: "desktop_result_too_large" }, origin, config);
         try {
-          const completed = await desktopBroker.complete(token, completeMatch[1]!, input.result ?? null, input.error as string | undefined);
+          const completed = await desktopBroker.complete(token, completeMatch[1]!, input.result ?? null, input.error as string | undefined, input.leaseToken as string | undefined);
           return completed
             ? json(res, 200, { completed: true }, origin, config)
             : json(res, 404, { error: "desktop_command_not_found" }, origin, config);
