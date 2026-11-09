@@ -14,6 +14,8 @@ export interface SofiaTool {
   inputSchema: Record<string, unknown>;
   /** Explicit security effects for policy/approval; inferred from name when omitted. */
   effects?: readonly ToolEffect[];
+  /** Explicit tool-level approval requirement; cannot be weakened by risk thresholds. */
+  requiresApproval?: boolean;
   execute(input: Record<string, unknown>, context: ToolContext): Promise<unknown>;
 }
 export interface ToolRegistry { get(name: string): SofiaTool | undefined; list(): SofiaTool[]; }
