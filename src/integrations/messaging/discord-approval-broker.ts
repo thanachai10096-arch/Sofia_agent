@@ -8,7 +8,7 @@ export interface DiscordApprovalReply {
 }
 
 type Decision = "approved" | "denied";
-type ReplyResult = Decision | "not_found" | "unauthorized" | "action_mismatch" | "invalid";
+type ReplyResult = Decision | "not_found" | "not_ready" | "unauthorized" | "action_mismatch" | "invalid";
 
 interface PendingApproval {
   request: ApprovalRequest;
@@ -16,6 +16,7 @@ interface PendingApproval {
   timer: ReturnType<typeof setTimeout>;
   resolve(decision: boolean): void;
   settled: boolean;
+  delivered: boolean;
   abort?: () => void;
 }
 
@@ -90,6 +91,7 @@ export function createDiscordApprovalBroker(options: {
       timer: setTimeout(() => settle(request.requestId, item, false), timeoutMs),
       resolve: resolveDecision,
       settled: false,
+      delivered: false,
     };
     item.timer.unref?.();
     pending.set(request.requestId, item);
@@ -101,8 +103,11 @@ export function createDiscordApprovalBroker(options: {
     }
 
     try {
+      const delivery = options.sendMessage(channelId, prompt).then(() => {
+        item.delivered = true;
+      });
       await Promise.race([
-        options.sendMessage(channelId, prompt),
+        delivery,
         decision.then(() => undefined),
       ]);
     } catch {
@@ -126,6 +131,7 @@ export function createDiscordApprovalBroker(options: {
         settle(id, item, false);
         return "not_found";
       }
+      if (!item.delivered) return "not_ready";
       if (item.request.notificationChannelId !== reply.channelId ||
           item.request.principalId !== "discord:" + reply.authorId) return "unauthorized";
       if (item.request.actionHash.toLowerCase() !== actionHash) return "action_mismatch";
