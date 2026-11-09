@@ -16,6 +16,7 @@ interface PendingApproval {
   timer: ReturnType<typeof setTimeout>;
   resolve(decision: boolean): void;
   settled: boolean;
+  abort?: () => void;
 }
 
 export interface DiscordApprovalBroker {
@@ -49,11 +50,10 @@ export function createDiscordApprovalBroker(options: {
     if (item.settled) return;
     item.settled = true;
     clearTimeout(item.timer);
-    item.request.signal?.removeEventListener("abort", onAbort);
+    if (item.abort) item.request.signal?.removeEventListener("abort", item.abort);
     pending.delete(id);
     item.resolve(decision);
   };
-  const onAbort = (): void => undefined;
 
   const handle: ApprovalHandler = async (request) => {
     const channelId = request.notificationChannelId;
@@ -93,10 +93,10 @@ export function createDiscordApprovalBroker(options: {
     };
     item.timer.unref?.();
     pending.set(request.requestId, item);
-    const abort = () => settle(request.requestId, item, false);
-    request.signal?.addEventListener("abort", abort, { once: true });
+    item.abort = () => settle(request.requestId, item, false);
+    request.signal?.addEventListener("abort", item.abort, { once: true });
     if (request.signal?.aborted) {
-      abort();
+      item.abort();
       return false;
     }
 
