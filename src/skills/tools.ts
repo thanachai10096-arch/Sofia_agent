@@ -84,6 +84,7 @@ export function createAdvancedSkillTools(
       : definition.risk === "may-write"
         ? ["write"]
         : ["read"],
+    requiresApproval: definition.requiresApproval || definition.risk === "privileged",
     inputSchema: {
       type: "object",
       properties: {},
