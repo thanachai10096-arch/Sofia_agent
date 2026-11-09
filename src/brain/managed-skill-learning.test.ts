@@ -108,7 +108,7 @@ test("managed skill learning normalizes human-readable names into valid stable I
       ...candidate,
       name: "Repair Type Error",
       category: "runtime_error" as const,
-      verification: ["test"] as const,
+      verification: ["test"],
     };
     assert.equal(await handler(humanReadable, "run-readable", "operator-1"), true);
     assert.equal(f.platform.get("learned:Repair-Type-Error:runtime_error")?.source, "learned");
