@@ -25,10 +25,12 @@ const runStoreDirectory = path.resolve(
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 let discordApprovalNotifier: ((record: ApprovalRecord, channelId: string) => Promise<void>) | undefined;
+let telegramApprovalNotifier: ((record: ApprovalRecord) => Promise<void>) | undefined;
 const approvalQueue = await SqliteApprovalQueue.open(path.join(workspace, ".sofia", "approvals.sqlite"));
 const approvalHandler = createQueuedApprovalHandler(approvalQueue, {
   onCreated: async (record, request) => {
     if (request.notificationChannelId) await discordApprovalNotifier?.(record, request.notificationChannelId);
+    await telegramApprovalNotifier?.(record);
   },
   onNotificationError: () => console.error("Approval notification delivery failed."),
 });
@@ -37,6 +39,14 @@ deps.approvalQueue = approvalQueue;
 deps.jobRuntime?.setApprovalRecoveryStore?.(approvalQueue);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
+telegramApprovalNotifier = telegramRuntime
+  ? async (record) => {
+      await telegramRuntime.notifyApproval(
+        record.ownerId,
+        "Sofia has an action waiting for your approval. Use /approvals in this private chat to review the exact action.",
+      );
+    }
+  : undefined;
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
