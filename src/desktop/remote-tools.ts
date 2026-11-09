@@ -1,9 +1,9 @@
 import type { SofiaTool, ToolContext } from "../tools/types.js";
 import type { DesktopCapability, DesktopAction } from "./types.js";
-import type { DesktopCommandBroker } from "./remote-command-broker.js";
+import type { DesktopCommandBrokerPort } from "./remote-command-broker.js";
 
 export function createRemoteDesktopTools(options: {
-  broker: DesktopCommandBroker;
+  broker: DesktopCommandBrokerPort;
   ownerKeyId: string;
   capabilities: readonly DesktopCapability[];
 }): SofiaTool[] {
