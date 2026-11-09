@@ -280,6 +280,8 @@ export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options:
   /** Called after durable creation; delivery failure must never auto-approve or cancel the request. */
   onCreated?: (record: ApprovalRecord, request: ApprovalRequest) => void | Promise<void>;
   onNotificationError?: () => void;
+  /** Reports durable cancellation failures without changing the fail-closed execution result. */
+  onCancellationError?: (error: unknown) => void;
 } = {}): ApprovalHandler {
   const ttlMs = options.ttlMs ?? 10 * 60_000;
   const pollMs = options.pollMs ?? 500;
@@ -295,12 +297,16 @@ export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options:
       }
     }
     if (request.signal?.aborted) {
-      try { queue.cancelPending(record.id, record.ownerId); } catch { /* cancellation still denies execution */ }
+      try { queue.cancelPending(record.id, record.ownerId); } catch (error) {
+        try { options.onCancellationError?.(error); } catch { /* diagnostics must not affect the fail-closed result */ }
+      }
       return false;
     }
     while (Date.now() < record.expiresAt) {
       if (request.signal?.aborted) {
-        try { queue.cancelPending(record.id, record.ownerId); } catch { /* cancellation still denies execution */ }
+        try { queue.cancelPending(record.id, record.ownerId); } catch (error) {
+        try { options.onCancellationError?.(error); } catch { /* diagnostics must not affect the fail-closed result */ }
+      }
         return false;
       }
       const current = queue.get(record.id, record.ownerId);
@@ -313,7 +319,9 @@ export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options:
       );
       if (!continued) {
         if (request.signal?.aborted) {
-          try { queue.cancelPending(record.id, record.ownerId); } catch { /* cancellation still denies execution */ }
+          try { queue.cancelPending(record.id, record.ownerId); } catch (error) {
+        try { options.onCancellationError?.(error); } catch { /* diagnostics must not affect the fail-closed result */ }
+      }
         }
         return false;
       }
