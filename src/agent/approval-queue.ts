@@ -166,6 +166,39 @@ export class SqliteApprovalQueue {
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
 
+  /**
+   * Expire pending approvals for one interrupted run without deleting their audit history.
+   * Approved/rejected decisions are immutable and are never rewritten by recovery.
+   */
+  expirePendingForRun(runId: string, ownerId: string): number {
+    if (!runId || runId.length > 256 || !ownerId || ownerId.length > 256) return 0;
+    const now = Date.now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const pending = this.db.prepare(
+        "SELECT id,action_hash FROM approvals WHERE run_id=? AND owner_id=? AND status='pending'",
+      ).all(runId, ownerId) as Array<{ id: string; action_hash: string }>;
+      const update = this.db.prepare(
+        "UPDATE approvals SET status='expired',decided_at=?,decided_by='system:run-interrupted' WHERE id=? AND owner_id=? AND status='pending'",
+      );
+      const audit = this.db.prepare(
+        "INSERT INTO approval_audit(id,approval_id,owner_id,decision,decided_by,action_hash,created_at) VALUES(?,?,?,?,?,?,?)",
+      );
+      let expired = 0;
+      for (const record of pending) {
+        if (Number(update.run(now, record.id, ownerId).changes) !== 1) continue;
+        audit.run(randomUUID(), record.id, ownerId, "interrupted", "system:run-interrupted", record.action_hash, now);
+        expired += 1;
+      }
+      this.db.exec("COMMIT");
+      if (expired > 0) privateFile(this.filePath);
+      return expired;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   get(id: string, ownerId: string): ApprovalRecord | undefined {
     const row = this.db.prepare("SELECT * FROM approvals WHERE id=? AND owner_id=?").get(id, ownerId) as Record<string, unknown> | undefined;
     return row ? parseRecord(row) : undefined;
