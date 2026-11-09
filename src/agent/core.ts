@@ -7,6 +7,40 @@ import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionP
 import { actionHash, assessAction } from "../security/guard.js";
 import { validateToolInput } from "../tools/types.js";
 
+function abortable<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(signal.reason ?? new Error("Aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve()
+      .then(() => {
+        signal.throwIfAborted();
+        return operation();
+      })
+      .then(
+        (value) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(value);
+        },
+        (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(error);
+        },
+      );
+  });
+}
+
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
 
@@ -321,7 +355,7 @@ export class SofiaAgent {
             });
 
             if (requiresApproval && this.deps.approval) {
-              const approved = await this.deps.approval({
+              const approvalRequest = {
                 requestId: randomUUID(),
                 runId,
                 principalId: request.principalId,
@@ -331,7 +365,10 @@ export class SofiaAgent {
                 actionHash: actionHash(runId, call.name, actionInput, request.principalId),
                 risk,
                 signal: request.signal,
-              });
+              };
+              const approved = request.signal
+                ? await abortable(request.signal, () => this.deps.approval!(approvalRequest))
+                : await this.deps.approval(approvalRequest);
 
               if (!approved) {
                 emit({
