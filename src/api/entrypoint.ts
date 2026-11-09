@@ -34,6 +34,7 @@ const approvalHandler = createQueuedApprovalHandler(approvalQueue, {
 });
 const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalHandler);
 deps.approvalQueue = approvalQueue;
+deps.jobRuntime?.setApprovalRecoveryStore?.(approvalQueue);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
