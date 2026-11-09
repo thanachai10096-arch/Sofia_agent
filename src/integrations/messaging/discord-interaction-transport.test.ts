@@ -94,3 +94,63 @@ test("Discord transport accepts additional allowlisted slash command names and f
   await transport.stop();
 });
 
+
+test("Discord signed slash approval commands forward request ID and action hash", async () => {
+  const transport = createDiscordInteractionTransport({
+    publicKeyHex,
+    botToken,
+    additionalCommandNames: ["approve", "deny"],
+    fetchImpl: async () => response({ id: "987654321" }),
+  });
+  const received: string[] = [];
+  await transport.start(new AbortController().signal, async (event) => { received.push(event.content); });
+  const body = Buffer.from(JSON.stringify({
+    type: 2,
+    id: "222222222224",
+    application_id: "111111111111",
+    token: "interaction-token-abc",
+    channel_id: "123456789",
+    member: { user: { id: "333333333333", username: "tester" } },
+    data: {
+      name: "approve",
+      options: [
+        { name: "job_id", type: 3, value: "123e4567-e89b-42d3-a456-426614174000" },
+        { name: "action_hash", type: 3, value: "a".repeat(64) },
+      ],
+    },
+  }));
+  assert.deepEqual(await transport.handleRequest(signed(body)), { status: 200, body: { type: 5 } });
+  for (let attempt = 0; attempt < 20 && !received.length; attempt++) await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(received, ["/approve 123e4567-e89b-42d3-a456-426614174000 " + "a".repeat(64)]);
+  await transport.stop();
+});
+
+test("Discord signed slash approval rejects malformed action hash before dispatch", async () => {
+  const transport = createDiscordInteractionTransport({
+    publicKeyHex,
+    botToken,
+    additionalCommandNames: ["approve"],
+  });
+  let dispatched = false;
+  await transport.start(new AbortController().signal, async () => { dispatched = true; });
+  const body = Buffer.from(JSON.stringify({
+    type: 2,
+    id: "222222222225",
+    application_id: "111111111111",
+    token: "interaction-token-abc",
+    channel_id: "123456789",
+    member: { user: { id: "333333333333", username: "tester" } },
+    data: {
+      name: "approve",
+      options: [
+        { name: "job_id", type: 3, value: "123e4567-e89b-42d3-a456-426614174000" },
+        { name: "action_hash", type: 3, value: "bad" },
+      ],
+    },
+  }));
+  const result = await transport.handleRequest(signed(body));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.type, 4);
+  assert.equal(dispatched, false);
+  await transport.stop();
+});
