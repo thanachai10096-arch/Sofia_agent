@@ -75,3 +75,16 @@ The code outline above is not a claim that the repository's API server is alread
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+
+## Discord privileged-action approvals
+
+The standalone Discord runtime accepts `/approve` and `/deny` as additional signed slash commands. Register each with two required string options: `request_id` and `action_hash`. The same commands can also be sent as ordinary Discord messages when the Gateway message intake is enabled:
+
+```text
+/approve <request-id> <action-hash>
+/deny <request-id> <action-hash>
+```
+
+Approval prompts are delivered only to the originating allowlisted channel. A decision is accepted only from the same allowlisted Discord user and channel that started the job, and only when the full action hash matches. Requests are single-use, expire after two minutes, and fail closed on timeout, cancellation, delivery failure, process restart, or mismatch. The broker is in-memory and intentionally does not restore pending approvals after restart. Telegram/API-key-originated requests are not approved by this Discord-only broker and remain fail-closed until a trusted Telegram approval transport is implemented.
+
