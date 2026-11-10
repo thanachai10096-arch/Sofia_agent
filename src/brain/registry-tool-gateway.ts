@@ -73,7 +73,7 @@ export class RegistryToolGateway implements ToolGateway {
     else if(effects.includes("network")&&!this.policy.allowNetwork){status="blocked";reason="Network access is disabled by execution policy.";}
     else if(permission.allow===false){status="blocked";reason="Disabled by execution policy: "+tool.name;}
     else if(effects.includes("network")&&this.policy.allowedHosts.length===0){status="blocked";reason="Network tool has no configured allowed-host list.";}
-    else if(permission.requireApproval===true||effects.some(effect=>effect==="write"||effect==="shell"||effect==="destructive"||effect==="browser")){
+    else if(tool.requiresApproval===true||permission.requireApproval===true||effects.some(effect=>effect==="write"||effect==="shell"||effect==="destructive"||effect==="browser")){
       status="approval_required";
       reason=this.approval?"Approval is required before execution.":"Approval is required but no approval handler is configured.";
       if(!this.approval)status="blocked";
