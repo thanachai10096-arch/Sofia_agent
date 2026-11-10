@@ -24,7 +24,7 @@ export class EncryptedFileAudit implements SecurityAuditSink {
    const plaintext=Buffer.from(JSON.stringify(event));
    const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
    const tag=cipher.getAuthTag();
-   await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\\n","utf8");
+   await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
   });
   // A failed append must reject its caller, but must not poison the queue for
   // later independent audit events.
@@ -45,7 +45,7 @@ export class EncryptedFileAudit implements SecurityAuditSink {
    throw error;
   }
   const events:SecurityAuditEvent[]=[];
-  for (const [index,line] of contents.split("\\n").entries()) {
+  for (const [index,line] of contents.split("\n").entries()) {
    if (!line) continue;
    const payload=Buffer.from(line,"base64");
    if (payload.length < 29) throw new Error(`Invalid encrypted audit record at line ${index+1}`);
