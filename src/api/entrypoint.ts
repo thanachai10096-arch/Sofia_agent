@@ -247,7 +247,8 @@ if (discordConfigured) {
     if (!deps.jobRuntime || !discordTransport || discordAbort.signal.aborted) return;
     const recoveredJobs = await deps.jobRuntime.list();
     for (const job of recoveredJobs) {
-      if (!isDiscordRecoveryDestinationAllowed(job.ownerKeyId, job.notificationChannelId, discordUserIds, discordChannelIds) ||
+      if (!job.notificationChannelId ||
+          !isDiscordRecoveryDestinationAllowed(job.ownerKeyId, job.notificationChannelId, discordUserIds, discordChannelIds) ||
           job.notificationDelivered || job.status === "queued" || job.status === "running" ||
           Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
       notificationInFlight.add(job.id);
