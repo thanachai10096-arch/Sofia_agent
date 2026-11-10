@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { SecurityAuditEvent } from "../src/security/audit.js";
 import { EncryptedFileAudit } from "../src/security/persistent-audit.js";
+import { ExecutionRecoveryManager } from "../src/security/recovery-manager.js";
 
 function makeEvent(id: string, input: unknown = { path: "src/app.ts" }): SecurityAuditEvent {
   return {
@@ -114,6 +115,59 @@ describe("encrypted persistent audit", () => {
       assert.equal(incomplete[0]?.started.decision, "execution_started");
       assert.equal(incomplete[1]?.operationId, "operation-3");
       assert.equal(incomplete[1]?.latest?.decision, "failed", "failed tools may have partial side effects and require reconciliation");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("requires explicit operator reconciliation and never replays an incomplete operation", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "sofia-recovery-manager-"));
+    const file = path.join(directory, "events.log");
+    try {
+      const audit = new EncryptedFileAudit(file, "recovery-manager-secret");
+      const started = {
+        ...makeEvent("recovery-start"),
+        decision: "execution_started" as const,
+        operationId: "operation-manual-review",
+      };
+      await audit.record(started);
+      const manager = new ExecutionRecoveryManager(audit);
+      const pending = await manager.inspect();
+      assert.equal(pending.length, 1);
+      assert.equal(pending[0]?.operationId, "operation-manual-review");
+
+      await assert.rejects(
+        () => manager.reconcile({
+          operationId: "operation-manual-review",
+          outcome: "confirmed_completed",
+          reconciledBy: "",
+          note: "Checked external system",
+        }),
+        /reconciledBy/i,
+      );
+      await assert.rejects(
+        () => manager.reconcile({
+          operationId: "unknown-operation",
+          outcome: "confirmed_not_applied",
+          reconciledBy: "operator:test",
+          note: "No external change found",
+        }),
+        /not awaiting reconciliation/i,
+      );
+
+      const resolution = await manager.reconcile({
+        operationId: "operation-manual-review",
+        outcome: "confirmed_not_applied",
+        reconciledBy: "operator:test",
+        note: "Verified target system contains no resulting change",
+      });
+      assert.equal(resolution.decision, "reconciled");
+      assert.equal(resolution.reconciliation?.outcome, "confirmed_not_applied");
+      assert.equal((await manager.inspect()).length, 0);
+      const persisted = await new EncryptedFileAudit(file, "recovery-manager-secret").list();
+      assert.equal(persisted.at(-1)?.decision, "reconciled");
+      assert.equal(persisted.at(-1)?.reconciliation?.reconciledBy, "operator:test");
+      // The manager has no tool executor and does not retry/replay the operation.
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
