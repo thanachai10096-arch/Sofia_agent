@@ -378,3 +378,40 @@ test("Anthropic max_tokens stop reason is normalized to length", async () => {
     assert.equal(result.finishReason, "length");
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test("DeepSeek ordinary chat stays on the configured Anthropic Messages protocol", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input);
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      content: [{ type: "text", text: "Hello from DeepSeek" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 8, output_tokens: 4 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      fast: {
+        baseUrl: "https://api.deepseek.com/anthropic",
+        apiKey: "deepseek-test-key",
+        model: "deepseek-flash",
+        protocol: "anthropic-messages",
+      },
+    });
+    const result = await gateway.generate(
+      { task: "Say hello", kind: "general", step: 1 },
+      { ...route, id: "fast", providerId: "fast", capabilities: ["fast"] },
+    );
+
+    assert.equal(requestedUrl, "https://api.deepseek.com/anthropic/messages");
+    assert.equal(requestedBody.response_format, undefined);
+    assert.equal(result.text, "Hello from DeepSeek");
+    assert.equal(result.finishReason, "complete");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
