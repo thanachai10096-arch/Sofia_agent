@@ -9,7 +9,7 @@ import { createDiscordGatewayTransport } from "../integrations/messaging/discord
 import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.js";
 import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
-import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
+import { isDiscordRecoveryDestinationAllowed, parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime, parseTelegramChatAllowlist } from "../integrations/messaging/telegram-runtime.js";
 import { createDiscordApprovalBroker } from "../integrations/messaging/discord-approval-broker.js";
 
