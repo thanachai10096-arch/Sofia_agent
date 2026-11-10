@@ -814,3 +814,42 @@ test("tool gateway revalidates durable job lease after approval and blocks side 
   assert.equal(executed, false, "tool side effect must not start after lease loss");
   assert.equal(leaseChecks, 2, "lease must be checked after approval and again immediately before dispatch");
 });
+
+
+test("explicit read-only skill approval is enforced and receives a single-use action receipt", async () => {
+  const rt = runtime();
+  let approvalRequest: import("../agent/approval.js").ApprovalRequest | undefined;
+  let received: unknown;
+  const registry = new MapToolRegistry([{
+    name: "skill.test.read-only-approval",
+    description: "Read-only skill requiring explicit approval",
+    effects: ["read"] as const,
+    requiresApproval: true,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    async execute(_input, context) { received = context.approval; return { executed: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    defaultPolicy,
+    async (request) => { approvalRequest = request; return true; },
+  );
+  const result = await gateway.execute(
+    { tool: "skill.test.read-only-approval", input: {} },
+    {
+      runId: "skill-approval-receipt",
+      principalId: "principal-1",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.ok(approvalRequest?.requestId);
+  assert.deepEqual(received, {
+    requestId: approvalRequest.requestId,
+    runId: "skill-approval-receipt",
+    principalId: "principal-1",
+    toolName: "skill.test.read-only-approval",
+    actionHash: approvalRequest.actionHash,
+  });
+});
