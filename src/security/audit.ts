@@ -9,7 +9,9 @@ export type SecurityAuditEvent = {
   toolName: string;
   actionHash: string;
   risk: RiskLevel;
-  decision: "allow" | "deny" | "approval_required" | "approval_denied" | "completed" | "failed";
+  decision: "allow" | "deny" | "approval_required" | "approval_denied" | "execution_started" | "completed" | "failed";
+  /** Correlates the durable start record with its terminal outcome. */
+  operationId?: string;
   reason?: string;
   input?: unknown;
   result?: unknown;

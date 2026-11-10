@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { SecurityAuditEvent, SecurityAuditSink } from "./audit.js";
 
@@ -19,6 +19,13 @@ function enqueue<T>(file: string, operation: () => Promise<T>): Promise<T> {
  return pending;
 }
 
+export type IncompleteAuditExecution = {
+ operationId: string;
+ started: SecurityAuditEvent;
+ /** Latest event, when a tool reported failure after it began. Partial side effects remain possible. */
+ latest?: SecurityAuditEvent;
+};
+
 export class EncryptedFileAudit implements SecurityAuditSink {
  constructor(private readonly file:string,private readonly secret:string){}
  private key():Buffer {
@@ -33,8 +40,28 @@ export class EncryptedFileAudit implements SecurityAuditSink {
    const plaintext=Buffer.from(JSON.stringify(event));
    const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
    const tag=cipher.getAuthTag();
-   await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
+   const handle=await open(this.file,"a",0o600);
+   try {
+    await handle.writeFile(Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
+    // Flush the journal record before allowing the caller to continue to a tool side effect.
+    await handle.sync();
+   } finally {
+    await handle.close();
+   }
   });
+ }
+ async listIncompleteExecutions():Promise<IncompleteAuditExecution[]>{
+  const events=await this.list();
+  const completed=new Set(events
+   .filter(event=>event.decision==="completed"&&event.operationId)
+   .map(event=>event.operationId!));
+  return events
+   .filter(event=>event.decision==="execution_started"&&event.operationId&&!completed.has(event.operationId))
+   .map(started=>({
+    operationId:started.operationId!,
+    started,
+    latest:events.filter(event=>event.operationId===started.operationId).at(-1),
+   }));
  }
  list():Promise<SecurityAuditEvent[]>{
   return enqueue(this.file,async()=>{

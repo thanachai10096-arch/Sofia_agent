@@ -493,3 +493,76 @@ test("audit completion failure does not turn a successful side effect into a ret
   assert.ok(result.evidenceId.length > 0);
   assert.equal(executions, 1, "an audit sink failure after execution must not invite a duplicate tool call");
 });
+
+
+test("tool execution is durably journaled before the side effect and terminal event is correlated", async () => {
+  const events: SecurityAuditEvent[] = [];
+  let executions = 0;
+  const audit: SecurityAuditSink = { record(event) { events.push(event); } };
+  const registry = new MapToolRegistry([{
+    name: "custom.read",
+    description: "Verify execution journal ordering",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() {
+      assert.equal(events.at(-1)?.decision, "execution_started");
+      executions += 1;
+      return { value: "done" };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    undefined,
+    undefined,
+    undefined,
+    audit,
+  );
+
+  const result = await gateway.execute(
+    { tool: "custom.read", input: {} },
+    { runId: "execution-journal-test", principalId: "test-user", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+
+  const started = events.find(event => event.decision === "execution_started");
+  const completed = events.find(event => event.decision === "completed");
+  assert.equal(result.ok, true);
+  assert.equal(executions, 1);
+  assert.ok(started?.operationId);
+  assert.equal(completed?.operationId, started?.operationId);
+});
+
+test("tool execution does not start when the durable start journal cannot be written", async () => {
+  let executions = 0;
+  const events: SecurityAuditEvent[] = [];
+  const audit: SecurityAuditSink = {
+    record(event) {
+      if (event.decision === "execution_started") throw new Error("journal unavailable");
+      events.push(event);
+    },
+  };
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Must not run without durable start journal",
+    inputSchema: { type: "object" },
+    effects: ["write"] as const,
+    async execute() { executions += 1; return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async () => true,
+    undefined,
+    undefined,
+    audit,
+  );
+
+  const result = await gateway.execute(
+    { tool: "custom.write", input: {} },
+    { runId: "execution-journal-failure-test", principalId: "test-user", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(executions, 0);
+  assert.equal(events.some(event => event.decision === "completed"), false);
+});

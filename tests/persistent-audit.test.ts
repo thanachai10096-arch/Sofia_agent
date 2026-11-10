@@ -67,6 +67,28 @@ describe("encrypted persistent audit", () => {
     }
   });
 
+  it("reports started executions without terminal outcomes for crash reconciliation", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "sofia-audit-recovery-"));
+    const file = path.join(directory, "events.log");
+    try {
+      const audit = new EncryptedFileAudit(file, "recovery-audit-secret");
+      const started = makeEvent("start-1");
+      await audit.record({ ...started, id: "event-start-1", decision: "execution_started", operationId: "operation-1" });
+      await audit.record({ ...started, id: "event-start-2", decision: "execution_started", operationId: "operation-2" });
+      await audit.record({ ...started, id: "event-complete-2", decision: "completed", operationId: "operation-2" });
+      await audit.record({ ...started, id: "event-start-3", decision: "execution_started", operationId: "operation-3" });
+      await audit.record({ ...started, id: "event-failed-3", decision: "failed", operationId: "operation-3", reason: "partial write possible" });
+      const incomplete = await audit.listIncompleteExecutions();
+      assert.equal(incomplete.length, 2);
+      assert.equal(incomplete[0]?.operationId, "operation-1");
+      assert.equal(incomplete[0]?.started.decision, "execution_started");
+      assert.equal(incomplete[1]?.operationId, "operation-3");
+      assert.equal(incomplete[1]?.latest?.decision, "failed", "failed tools may have partial side effects and require reconciliation");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects wrong keys and tampered ciphertext", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "sofia-audit-"));
     const file = path.join(directory, "events.log");
