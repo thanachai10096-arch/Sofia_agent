@@ -81,6 +81,7 @@ export class RegistryToolGateway implements ToolGateway {
         }
       }finally{context.notifyApproval(false);}
     }
+    const operationId=randomUUID();
     try{
       this.security.assertRunning();
       context.signal.throwIfAborted();
@@ -90,6 +91,10 @@ export class RegistryToolGateway implements ToolGateway {
       if(!capabilitySecret && (process.env.NODE_ENV==="production"||process.env.SOFIA_ENV==="production")) {
         return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Production tool execution requires a capability secret."}};
       }
+      // Persist an execution-start marker before any tool side effect. If this
+      // append fails, execution is not started. An unmatched marker after a
+      // crash is ambiguous and must be reconciled, never replayed automatically.
+      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"execution_started",operationId,input:redactSecrets(input)});
       const boundSignal=this.security.bindSignal(context.signal);
       let data:unknown;
       try {
@@ -101,7 +106,7 @@ export class RegistryToolGateway implements ToolGateway {
       // The side effect has already happened. A failure to append the completion
       // audit record must never turn a successful action into a retryable tool error.
       try {
-        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
+        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",operationId,input:redactSecrets(input),result:safeData});
       } catch {
         // The pre-execution decision record remains the audit trail; preserve
         // the actual tool outcome to prevent duplicate side effects.
@@ -110,7 +115,7 @@ export class RegistryToolGateway implements ToolGateway {
     }catch(error){
       const message=String(redactSecrets(error instanceof Error?error.message:String(error)));
       try {
-        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:redactSecrets(input)});
+        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",operationId,reason:message,input:redactSecrets(input)});
       } catch {
         // Preserve the original execution failure if audit persistence is unavailable.
       }
