@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { SecurityAuditEvent, SecurityAuditSink } from "./audit.js";
 
@@ -40,7 +40,14 @@ export class EncryptedFileAudit implements SecurityAuditSink {
    const plaintext=Buffer.from(JSON.stringify(event));
    const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
    const tag=cipher.getAuthTag();
-   await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
+   const handle=await open(this.file,"a",0o600);
+   try {
+    await handle.writeFile(Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\\n","utf8");
+    // Flush the journal record before allowing the caller to continue to a tool side effect.
+    await handle.sync();
+   } finally {
+    await handle.close();
+   }
   });
  }
  async listIncompleteExecutions():Promise<IncompleteAuditExecution[]>{
