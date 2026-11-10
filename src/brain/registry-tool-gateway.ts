@@ -7,7 +7,7 @@ import { assessAction, redactSecrets, type RiskLevel } from "../security/guard.j
 import { issueCapability, verifyCapability } from "../security/capability.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { ApprovalHandler } from "../agent/approval.js";
-import type { SecurityAuditSink } from "../security/audit.js";
+import type { SecurityAuditSink, SecurityEvidenceReader } from "../security/audit.js";
 import { SecurityController } from "../security/controller.js";
 import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, WorkspaceCheckpoint, ToolCall } from "./types.js";
 import { RuntimeCheckpointManager, type CheckpointManager } from "./checkpoint.js";
@@ -94,7 +94,7 @@ export class RegistryToolGateway implements ToolGateway {
       // Persist an execution-start marker before any tool side effect. If this
       // append fails, execution is not started. An unmatched marker after a
       // crash is ambiguous and must be reconciled, never replayed automatically.
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"execution_started",operationId,input:redactSecrets(input)});
+      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"execution_started",operationId,evidenceId,input:redactSecrets(input)});
       const boundSignal=this.security.bindSignal(context.signal);
       let data:unknown;
       try {
@@ -105,13 +105,24 @@ export class RegistryToolGateway implements ToolGateway {
       const safeData = redactSecrets(data);
       // The side effect has already happened. A failure to append the completion
       // audit record must never turn a successful action into a retryable tool error.
+      let durableEvidenceId = "";
       try {
-        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",operationId,input:redactSecrets(input),result:safeData});
+        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",operationId,evidenceId,input:redactSecrets(input),result:safeData});
+        // A correlation UUID is not evidence by itself. Return it only after a
+        // durable reader can retrieve the completed record that contains it.
+        if (this.audit && "getEvidence" in this.audit && typeof this.audit.getEvidence === "function") {
+          const stored = await (this.audit as SecurityAuditSink & SecurityEvidenceReader).getEvidence(evidenceId);
+          if (stored?.decision === "completed" && stored.runId === context.runId &&
+              stored.operationId === operationId && stored.toolName === call.tool &&
+              stored.evidenceId === evidenceId) {
+            durableEvidenceId = evidenceId;
+          }
+        }
       } catch {
-        // The pre-execution decision record remains the audit trail; preserve
-        // the actual tool outcome to prevent duplicate side effects.
+        // The side effect already happened. Preserve success but expose no
+        // evidence ID, so Brain must stop rather than retry the operation.
       }
-      return{ok:true,data:safeData,evidenceId};
+      return{ok:true,data:safeData,evidenceId:durableEvidenceId};
     }catch(error){
       const message=String(redactSecrets(error instanceof Error?error.message:String(error)));
       try {

@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { SecurityAuditEvent, SecurityAuditSink } from "./audit.js";
+import type { SecurityAuditEvent, SecurityAuditSink, SecurityEvidenceReader } from "./audit.js";
 
 // All instances in this process that target the same resolved file share one
 // queue for both appends and reads.
@@ -26,7 +26,7 @@ export type IncompleteAuditExecution = {
  latest?: SecurityAuditEvent;
 };
 
-export class EncryptedFileAudit implements SecurityAuditSink {
+export class EncryptedFileAudit implements SecurityAuditSink, SecurityEvidenceReader {
  constructor(private readonly file:string,private readonly secret:string){}
  private key():Buffer {
   if (!this.secret) throw new Error("Audit encryption secret is required");
@@ -49,6 +49,11 @@ export class EncryptedFileAudit implements SecurityAuditSink {
     await handle.close();
    }
   });
+ }
+ async getEvidence(evidenceId: string): Promise<SecurityAuditEvent | undefined> {
+  if (typeof evidenceId !== "string" || !evidenceId.trim()) return undefined;
+  const events = await this.list();
+  return events.find(event => event.decision === "completed" && event.evidenceId === evidenceId);
  }
  async listIncompleteExecutions():Promise<IncompleteAuditExecution[]>{
   const events=await this.list();

@@ -12,13 +12,35 @@ export type SecurityAuditEvent = {
   decision: "allow" | "deny" | "approval_required" | "approval_denied" | "execution_started" | "completed" | "failed";
   /** Correlates the durable start record with its terminal outcome. */
   operationId?: string;
+  /** Stable identifier for the durable, completed tool evidence record. */
+  evidenceId?: string;
   reason?: string;
   input?: unknown;
   result?: unknown;
 };
 
 export interface SecurityAuditSink { record(event: SecurityAuditEvent): void | Promise<void>; }
-export class CompositeSecurityAudit implements SecurityAuditSink { constructor(private readonly sinks:SecurityAuditSink[]){} async record(event:SecurityAuditEvent){ for(const sink of this.sinks) await sink.record(event); } }
+
+export interface SecurityEvidenceReader {
+  /** Returns only a completed evidence record that was durably persisted. */
+  getEvidence(evidenceId: string): Promise<SecurityAuditEvent | undefined>;
+}
+
+export class CompositeSecurityAudit implements SecurityAuditSink, SecurityEvidenceReader {
+  constructor(private readonly sinks: SecurityAuditSink[]) {}
+  async record(event: SecurityAuditEvent) {
+    for (const sink of this.sinks) await sink.record(event);
+  }
+  async getEvidence(evidenceId: string): Promise<SecurityAuditEvent | undefined> {
+    for (const sink of this.sinks) {
+      if ("getEvidence" in sink && typeof sink.getEvidence === "function") {
+        const evidence = await (sink as SecurityAuditSink & SecurityEvidenceReader).getEvidence(evidenceId);
+        if (evidence) return evidence;
+      }
+    }
+    return undefined;
+  }
+}
 
 export class MemorySecurityAudit implements SecurityAuditSink {
   private readonly events: SecurityAuditEvent[] = [];
