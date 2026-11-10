@@ -128,7 +128,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const approvalHandler: AgentDependencies["approval"] = dependencies.approval
       ? async (request) => {
           const approved = await dependencies.approval!(request);
-          if (approved && request.toolName.startsWith("skill.")) {
+          if (approved && request.requestId && request.toolName.startsWith("skill.")) {
             const skill = advancedSkillRegistry.list().find((item) =>
               `skill.${item.id}` === request.toolName &&
               (item.requiresApproval || item.risk === "privileged"),
