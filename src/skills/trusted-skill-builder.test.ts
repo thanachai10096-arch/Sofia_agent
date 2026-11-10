@@ -13,7 +13,7 @@ const base: LearnedSkillCandidate = {
   evidenceIds: ["evidence-1"],
 };
 
-test("trusted builder compiles a valid declarative plan deterministically", () => {
+test("trusted builder compiles a valid declarative plan deterministically", async () => {
   const candidate = {
     ...base,
     dsl: { version: 1, operation: "project-fields", fields: ["name", "status"] },
