@@ -34,9 +34,10 @@ Sofia exposes an opt-in MCP client that adapts remote MCP tools into Sofia's exi
 ## Environment bootstrap
 
 The API composition root supports opt-in startup configuration through
-`SOFIA_MCP_SERVERS`, a JSON array of server definitions. Set
-`SOFIA_ALLOW_TOOLS=true` and `SOFIA_ALLOW_NETWORK=true` before enabling
-MCP. HTTP endpoints must be HTTPS and their hostname must be present in
+`SOFIA_MCP_SERVERS`, a JSON array of server definitions. All transports require
+`SOFIA_ALLOW_TOOLS=true`. Stdio launches a local process and additionally requires
+`SOFIA_ALLOW_SHELL=true`. HTTP additionally requires `SOFIA_ALLOW_NETWORK=true`;
+its endpoint must be HTTPS and its hostname must be present in
 `SOFIA_ALLOWED_HOSTS` (exact host or explicit `*.example.com` wildcard).
 
 HTTP example:
@@ -48,7 +49,8 @@ HTTP example:
     "transport": "http",
     "endpoint": "https://mcp.example.com/mcp",
     "headers": { "Authorization": "Bearer <secret>" },
-    "allowedTools": ["search", "fetch"]
+    "allowedTools": ["search", "fetch"],
+    "readOnlyTools": ["search", "fetch"]
   }
 ]
 ```
@@ -63,7 +65,8 @@ Stdio example:
     "command": "node",
     "args": ["./mcp-server.js"],
     "cwd": "/opt/sofia/mcp-docs",
-    "allowedTools": ["search"]
+    "allowedTools": ["search"],
+    "readOnlyTools": ["search"]
   }
 ]
 ```
@@ -77,6 +80,8 @@ per-server variables. Treat all server definitions, commands, credentials,
 headers, and allowlisted tool names as trusted operator configuration; never
 derive them from chat input or model output.
 
-Every configured server exposes only its explicitly allowlisted tools. MCP
-metadata and results remain untrusted, and every tool still passes through
-Sofia's existing ToolGateway policy and approval controls.
+Every configured server exposes only its explicitly allowlisted tools. Remote
+MCP annotations are advisory and cannot downgrade privilege. Only an operator
+may list a tool in `readOnlyTools`; every other MCP tool is treated as critical
+and requires approval. MCP metadata and results remain untrusted, and every
+tool still passes through Sofia's existing ToolGateway policy and approval controls.
