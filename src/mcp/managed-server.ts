@@ -37,7 +37,7 @@ export async function connectManagedMcpServer(
     allowed.add(name);
   }
 
-  const client = new McpClient(transport, options.client);
+  const readOnly = new Set(options.readOnlyTools ?? []);\n  for (const name of readOnly) {\n    if (!allowed.has(name)) throw new Error("Read-only MCP tool must also be allowlisted: " + name);\n  }\n\n  const client = new McpClient(transport, options.client);
   try {
     await client.initialize();
     const advertised = await client.listTools();
@@ -60,7 +60,7 @@ export async function connectManagedMcpServer(
         // The transport connection is established by the operator at startup. Do not
         // classify each MCP invocation as a fresh network request: that would make
         // the URL guard reject legitimate tool calls with no URL argument.
-        effects: readOnly ? ["read"] : ["destructive"],
+        effects: operatorReadOnly ? ["read"] : ["destructive"],
         execute: async (input, context) => {
           context.signal?.throwIfAborted();
           return client.callTool(name, input, context.signal);
