@@ -31,6 +31,11 @@ import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-
 import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
+import { ContainerSandbox } from "../sandbox.js";
+import { createIsolatedSkillVerifier } from "../skills/isolated-verifier.js";
+import { loadTrustedSkillTestSuite } from "../skills/trusted-test-suites.js";
+import { createAdvancedSkillRegistry } from "../skills/advanced-skill-registry.js";
+import { createAdvancedSkillTools } from "../skills/tools.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
@@ -54,12 +59,71 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
   const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
-    const checks = [
+    const checks: Array<{ name: string; passed: boolean; detail?: string }> = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
-      { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
-      { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
+      { name: "procedure", passed: candidate.skill.procedure.length >= 2 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
+      { name: "verification-requirements", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
     ];
-    return { passed: checks.every((check) => check.passed), checks };
+    const image = process.env.SOFIA_SKILL_SANDBOX_IMAGE;
+    if (!candidate.artifact || !image) {
+      checks.push({
+        name: "runtime-verification",
+        passed: false,
+        detail: !candidate.artifact
+          ? "Candidate has no executable SkillArtifact; prose metadata is not executable evidence."
+          : "SOFIA_SKILL_SANDBOX_IMAGE is not configured with a pinned container image.",
+      });
+      return { passed: false, checks };
+    }
+    try {
+      const verify = createIsolatedSkillVerifier({
+        sandbox: new ContainerSandbox({ image }),
+        getTrustedTestSuite: (skillCandidate) => loadTrustedSkillTestSuite(skillCandidate),
+      });
+      const evidence = await verify(candidate);
+      const failedChecks = evidence.executedChecks
+        .filter((check) => !check.passed)
+        .map((check) => `${check.name} (exit ${check.exitCode})`);
+      const unsupportedRequirements = candidate.skill.verification
+        .filter((required) => !evidence.executedChecks.some((check) => check.name === required && check.passed));
+      const requirementsSatisfied = unsupportedRequirements.length === 0;
+      const runtimeVerificationPassed = evidence.passed && requirementsSatisfied;
+      checks.push({
+        name: "runtime-verification",
+        passed: runtimeVerificationPassed,
+        detail: runtimeVerificationPassed
+          ? "Executable artifact passed isolated syntax and trusted tests with networking disabled, satisfying every declared verification requirement."
+          : [
+              failedChecks.length > 0 ? `Failed checks: ${failedChecks.join(", ")}.` : undefined,
+              unsupportedRequirements.length > 0
+                ? `Required checks not proven by this runner: ${unsupportedRequirements.join(", ")}.`
+                : undefined,
+              "No promotion is allowed until every required check has passing isolated evidence.",
+            ].filter(Boolean).join(" "),
+      });
+      return {
+        passed: runtimeVerificationPassed && checks.every((check) => check.passed),
+        checks,
+        runtimeVerification: {
+          candidateDigest: evidence.candidateDigest,
+          runnerId: evidence.runnerId,
+          isolatedWorkspaceId: evidence.isolatedWorkspaceId,
+          isolated: true as const,
+          executedChecks: evidence.executedChecks.map(({ name, passed }) => ({ name, passed })),
+          completedAt: evidence.completedAt,
+          testSuiteId: evidence.testSuiteId,
+          testSuiteVersion: evidence.testSuiteVersion,
+          testSuiteDigest: evidence.testSuiteDigest,
+        },
+      };
+    } catch (error) {
+      checks.push({
+        name: "runtime-verification",
+        passed: false,
+        detail: error instanceof Error ? error.message : "Isolated skill verification failed.",
+      });
+      return { passed: false, checks };
+    }
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,assertExecutionLease,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
@@ -102,12 +166,54 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
         })
       : [];
+    // Advanced skills are scoped to this Brain run. A privileged skill receives
+    // one-use approval evidence only after the existing owner-bound approval flow
+    // approves the exact immutable action hash.
+    const skillApprovalEvidence = new Map<string, {
+      runId: string; principalId: string; toolName: string; actionHash: string;
+    }>();
+    const advancedSkillRegistry = createAdvancedSkillRegistry({
+      projectMemoryStore: projectMemory,
+      securityController: dependencies.security,
+      verifyApproval: (request) => {
+        const evidence = skillApprovalEvidence.get(request.requestId);
+        if (!evidence) return false;
+        skillApprovalEvidence.delete(request.requestId);
+        return evidence.runId === request.runId &&
+          evidence.principalId === request.principalId &&
+          evidence.toolName === request.toolName &&
+          evidence.toolName === `skill.${request.skillId}` &&
+          evidence.actionHash === request.actionHash;
+      },
+    });
+    const runSkillTools = createAdvancedSkillTools(advancedSkillRegistry, principalId ?? "anonymous");
+    const approvalHandler: AgentDependencies["approval"] = dependencies.approval
+      ? async (request) => {
+          const approved = await dependencies.approval!(request);
+          if (approved && request.toolName.startsWith("skill.")) {
+            const skill = advancedSkillRegistry.list().find((item) =>
+              `skill.${item.id}` === request.toolName &&
+              (item.requiresApproval || item.risk === "privileged"),
+            );
+            if (skill && request.requestId) {
+              skillApprovalEvidence.set(request.requestId, {
+                runId: request.runId,
+                principalId: request.principalId ?? "anonymous",
+                toolName: request.toolName,
+                actionHash: request.actionHash,
+              });
+            }
+          }
+          return approved;
+        }
+      : undefined;
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...runBrowserTools,
       ...runDesktopTools,
+      ...runSkillTools,
     ]);
-    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
+    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,approvalHandler,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
       maxConcurrency:intEnv("SOFIA_SUBAGENT_MAX_CONCURRENCY",3,1),
