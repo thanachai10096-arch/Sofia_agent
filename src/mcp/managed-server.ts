@@ -37,7 +37,7 @@ export async function connectManagedMcpServer(
     allowed.add(name);
   }
 
-  const readOnly = new Set(options.readOnlyTools ?? []);\n  for (const name of readOnly) {\n    if (!allowed.has(name)) throw new Error("Read-only MCP tool must also be allowlisted: " + name);\n  }\n\n  const client = new McpClient(transport, options.client);
+  const readOnly = new Set(options.readOnlyTools ?? []);\n  for (const name of readOnly) {\n    if (!allowed.has(name)) throw new Error("Read-only MCP tool must also be allowlisted: " + name);\n  }\n\n  const readOnlyNames = new Set(options.readOnlyTools ?? []);\n  for (const name of readOnlyNames) {\n    if (!allowed.has(name)) throw new Error("Read-only MCP tool must also be allowlisted: " + name);\n  }\n\n  const client = new McpClient(transport, options.client);
   try {
     await client.initialize();
     const advertised = await client.listTools();
