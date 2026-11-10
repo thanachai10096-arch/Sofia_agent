@@ -87,11 +87,13 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         .map((check) => `${check.name} (exit ${check.exitCode})`);
       const unsupportedRequirements = candidate.skill.verification
         .filter((required) => !evidence.executedChecks.some((check) => check.name === required && check.passed));
+      const requirementsSatisfied = unsupportedRequirements.length === 0;
+      const runtimeVerificationPassed = evidence.passed && requirementsSatisfied;
       checks.push({
         name: "runtime-verification",
-        passed: evidence.passed,
-        detail: evidence.passed
-          ? "Executable artifact passed isolated syntax and trusted tests with networking disabled."
+        passed: runtimeVerificationPassed,
+        detail: runtimeVerificationPassed
+          ? "Executable artifact passed isolated syntax and trusted tests with networking disabled, satisfying every declared verification requirement."
           : [
               failedChecks.length > 0 ? `Failed checks: ${failedChecks.join(", ")}.` : undefined,
               unsupportedRequirements.length > 0
@@ -101,7 +103,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
             ].filter(Boolean).join(" "),
       });
       return {
-        passed: evidence.passed && checks.every((check) => check.passed),
+        passed: runtimeVerificationPassed && checks.every((check) => check.passed),
         checks,
         runtimeVerification: {
           candidateDigest: evidence.candidateDigest,
