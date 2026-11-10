@@ -25,7 +25,7 @@ Sofia exposes an opt-in MCP client that adapts remote MCP tools into Sofia's exi
 ## Security and limitations
 
 - Server-provided names, descriptions, schemas, annotations, tool results, and resource contents are untrusted.
-- Remote MCP tools are marked network-capable. Non-read-only tools are additionally marked destructive, so default policy may deny them until an operator configures appropriate permissions.
+- MCP transport connectivity is established from operator configuration at startup; each tool call remains behind Sofia's ToolGateway. Only operator-declared `readOnlyTools` are treated as reads. Other tools are writes and require per-action approval. Remote annotations cannot lower privilege.
 - Keep credentials out of source control and logs. Do not pass the master Sofia API key to an MCP server.
 - The HTTP transport handles request/response JSON and SSE responses, not long-lived server-initiated notifications or subscription streaming.
 - This is a client foundation; it does not implement an MCP server endpoint, marketplace, or automatic installation of servers.
