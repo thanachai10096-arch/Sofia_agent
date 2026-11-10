@@ -27,12 +27,18 @@ function hasValidRuntimeEvidence(candidate: SkillPackage, evidence: SkillRuntime
   if (!candidate.artifact) return true;
   if (!evidence || evidence.isolated !== true ||
       evidence.candidateDigest !== createHash("sha256").update(JSON.stringify(candidate)).digest("hex") ||
+      typeof evidence.testSuiteId !== "string" || !/^[A-Za-z0-9._:-]{1,120}$/.test(evidence.testSuiteId) ||
+      typeof evidence.testSuiteVersion !== "string" || !evidence.testSuiteVersion.trim() ||
+      typeof evidence.testSuiteDigest !== "string" || !/^[a-f0-9]{64}$/.test(evidence.testSuiteDigest) ||
       typeof evidence.runnerId !== "string" || !evidence.runnerId.trim() ||
       typeof evidence.isolatedWorkspaceId !== "string" || !evidence.isolatedWorkspaceId.trim() ||
       typeof evidence.completedAt !== "string" || !Number.isFinite(Date.parse(evidence.completedAt)) ||
-      !Array.isArray(evidence.executedChecks)) return false;
-  return candidate.skill.verification.every((required) =>
-    evidence.executedChecks.some((item) => item.name === required && item.passed === true));
+      !Array.isArray(evidence.executedChecks) ||
+      !evidence.executedChecks.every((item) => item && typeof item.name === "string" && typeof item.passed === "boolean")) return false;
+  const names = evidence.executedChecks.map((item) => item.name);
+  return new Set(names).size === names.length &&
+    candidate.skill.verification.every((required) =>
+      evidence.executedChecks.some((item) => item.name === required && item.passed === true));
 }
 export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; }
 export interface SkillLifecycleRecord {
