@@ -771,23 +771,26 @@ export class SofiaBrain {
         }),
       );
 
-      if (!result.evidenceId) {
-        throw new Stop(`Verification probe returned no evidence: ${criterion.id}`);
+      const evidenceId = typeof result.evidenceId === "string" ? result.evidenceId.trim() : "";
+      // A successful verification must be correlated to evidence. A failed probe
+      // without evidence is still a real failure and must remain recoverable.
+      if (result.ok && evidenceId.length === 0) {
+        throw new Stop(`Verification probe succeeded without evidence: ${criterion.id}`);
       }
 
-      const evaluated = criterion.evaluate(result.data);
+      const evaluated = result.ok
+        ? criterion.evaluate(result.data)
+        : { passed: false, detail: result.error?.message ?? "Verification probe failed" };
 
       results.push({
         criterionId: criterion.id,
-        passed: evaluated.passed && result.ok,
-        detail: result.ok
-          ? evaluated.detail
-          : result.error?.message ?? "Verification probe failed",
-        evidenceIds: [result.evidenceId],
+        passed: result.ok && evidenceId.length > 0 && evaluated.passed,
+        detail: evaluated.detail,
+        evidenceIds: evidenceId ? [evidenceId] : [],
         workspaceRevision: snapshot.revision,
       });
 
-      if (!(evaluated.passed && result.ok)) {
+      if (!(result.ok && evidenceId.length > 0 && evaluated.passed)) {
         this.emit({
           type: "brain.verification.completed",
           passed: false,
