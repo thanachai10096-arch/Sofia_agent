@@ -67,7 +67,8 @@ export async function connectManagedMcpServer(
         inputSchema: schema,
         // The transport connection is established by the operator at startup.
         // MCP invocation itself is not a fresh URL-bearing network tool action.
-        effects: operatorReadOnly ? ["read"] : ["destructive"],
+        effects: operatorReadOnly ? ["read"] : ["write"],
+        requiresApproval: !operatorReadOnly,
         execute: async (input, context) => {
           context.signal?.throwIfAborted();
           return client.callTool(name, input, context.signal);
