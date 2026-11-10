@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
+import { redactSecrets } from "./guard.js";
 import type { SecurityAuditEvent, SecurityAuditSink, SecurityEvidenceReader } from "./audit.js";
 
 // All instances in this process that target the same resolved file share one
@@ -58,7 +59,7 @@ export class EncryptedFileAudit implements SecurityAuditSink, SecurityEvidenceRe
  async listIncompleteExecutions():Promise<IncompleteAuditExecution[]>{
   const events=await this.list();
   const completed=new Set(events
-   .filter(event=>event.decision==="completed"&&event.operationId)
+   .filter(event=>(event.decision==="completed"||event.decision==="reconciled")&&event.operationId)
    .map(event=>event.operationId!));
   return events
    .filter(event=>event.decision==="execution_started"&&event.operationId&&!completed.has(event.operationId))
