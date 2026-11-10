@@ -70,22 +70,41 @@ export function createDiscordSharedChatHandler(options: DiscordSharedChatHandler
       commandPrefix: options.commandPrefix ?? "/run",
       naturalLanguageEnabled: true,
       onAccepted: ({ runId }) => {
+        const deliver = async (jobId: string, response: string): Promise<void> => {
+          const runtime = options.runtime;
+          // All completion notices share the durable token-fenced protocol used by
+          // recovery and /resume. Older/custom runtimes fail closed rather than send
+          // an uncoordinated message that can race another worker.
+          if (!runtime.claimNotificationDelivery || !runtime.markNotificationDelivered || !runtime.releaseNotificationDelivery) return;
+          let deliveryToken: string | undefined;
+          try {
+            deliveryToken = await runtime.claimNotificationDelivery(jobId);
+            if (!deliveryToken) return;
+            await options.sender.sendMessage(channelId, response);
+            await runtime.markNotificationDelivered(jobId, deliveryToken);
+            deliveryToken = undefined;
+          } catch {
+            options.onError?.("completion_delivery_failed");
+          } finally {
+            if (deliveryToken) {
+              try {
+                await runtime.releaseNotificationDelivery(jobId, deliveryToken);
+              } catch {
+                // The bounded lease expires and permits a later retry.
+              }
+            }
+          }
+        };
         void waitForDiscordTask({ id: runId, runtime: options.runtime }, { signal: options.signal, pollIntervalMs: options.pollIntervalMs })
           .then(async (result) => {
             const label = result.status === "completed"
               ? "Sofia completed the task."
               : "Sofia job " + result.status + ".";
             const response = label + "\nJob ID: " + result.id + "\n" + result.summary;
-            await options.sender.sendMessage(channelId, response.length > 1_700 ? response.slice(0, 1_690) + "… (truncated)" : response);
-            await options.runtime.markNotificationDelivered?.(result.id);
-          })
-          .catch(async () => {
+            await deliver(result.id, response.length > 1_700 ? response.slice(0, 1_690) + "… (truncated)" : response);
+          }, async () => {
             options.onError?.("completion_wait_failed");
-            try {
-              await options.sender.sendMessage(channelId, "Sofia could not report the final result for job " + runId + ". Check the job status.");
-            } catch {
-              options.onError?.("completion_delivery_failed");
-            }
+            await deliver(runId, "Sofia could not report the final result for job " + runId + ". Check the job status.");
           });
       },
     });
