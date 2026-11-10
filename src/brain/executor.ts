@@ -704,8 +704,8 @@ export class SofiaBrain {
       throw new RecoverableFailure(failureCategory(error), errorMessage(error));
     }
 
-    // A successful tool response must carry durable evidence. If it does not,
-    // stop rather than retry: the tool may already have performed a side effect.
+    // A successful tool response must carry a non-empty evidence identifier.
+    // If it does not, stop rather than retry: the tool may already have performed a side effect.
     if (typeof result.evidenceId !== "string" || result.evidenceId.trim().length === 0) {
       throw new Stop(`Tool returned no evidence ID: ${step.call.tool}`);
     }
