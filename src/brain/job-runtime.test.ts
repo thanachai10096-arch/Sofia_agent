@@ -1129,35 +1129,31 @@ test("DurableJobRuntime propagates authenticated owner and approval notification
 });
 
 
-test("DurableJobRuntime supplies a lease assertion that rejects expired ownership", async () => {
-  const previousRoot = process.env.SOFIA_STATE_DIR;
-  const root = path.join(os.tmpdir(), "sofia-job-lease-assert-" + randomUUID());
-  process.env.SOFIA_STATE_DIR = root;
+test("DurableJobRuntime supplies a lease assertion that rejects cancelled ownership", async () => {
   const namespace = "job-runtime-lease-assert-" + randomUUID();
   let assertLease: (() => Promise<void>) | undefined;
-  try {
-    const runtime = new DurableJobRuntime((options) => {
-      assertLease = options.assertExecutionLease;
-      return {
-        run: () => new Promise(() => undefined),
-      } as unknown as SofiaBrain;
-    }, undefined, namespace);
-    const submitted = await runtime.submit({ task: "check lease before tool dispatch" });
-    for (let attempt = 0; attempt < 100 && !assertLease; attempt += 1) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 5));
-    }
-    assert.ok(assertLease, "runtime must pass a lease assertion to the brain factory");
-    const stateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
-    const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
-    const record = records.find((item) => item.id === submitted.id);
-    assert.ok(record);
-    record.leaseExpiresAt = new Date(0).toISOString();
-    await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
-    await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
-    await assert.rejects(assertLease!(), /lease was lost/i);
-  } finally {
-    if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
-    else process.env.SOFIA_STATE_DIR = previousRoot;
-    await rm(root, { recursive: true, force: true });
+  let workerSignal: AbortSignal | undefined;
+  const runtime = new DurableJobRuntime((options) => {
+    assertLease = options.assertExecutionLease;
+    workerSignal = options.signal;
+    return {
+      run: async () => new Promise((resolve) => {
+        if (workerSignal?.aborted) {
+          resolve({ completed: false, state: "cancelled" });
+          return;
+        }
+        workerSignal?.addEventListener("abort", () => {
+          resolve({ completed: false, state: "cancelled" });
+        }, { once: true });
+      }),
+    } as unknown as SofiaBrain;
+  }, undefined, namespace);
+  const submitted = await runtime.submit({ task: "check lease before tool dispatch" });
+  for (let attempt = 0; attempt < 100 && !assertLease; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
   }
+  assert.ok(assertLease, "runtime must pass a lease assertion to the brain factory");
+  await assert.doesNotReject(assertLease!());
+  await runtime.cancel(submitted.id);
+  await assert.rejects(assertLease!(), /lease was lost/i);
 });
