@@ -147,7 +147,7 @@ export class SqliteApprovalQueue {
     const now = Date.now();
     const safeInput = redactSecrets(structuredClone(request.input)) as Record<string, unknown>;
     const requestId = request.requestId ?? randomUUID();
-    if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Invalid approval request ID.");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) throw new Error("Invalid approval request ID.");
     const record: ApprovalRecord = {
       id: requestId, ownerId, runId: request.runId, toolName: request.toolName,
       input: safeInput, actionHash: request.actionHash, risk: request.risk,
