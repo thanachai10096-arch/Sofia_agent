@@ -49,6 +49,24 @@ describe("encrypted persistent audit", () => {
     }
   });
 
+  it("serializes appends from multiple sink instances targeting the same file", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "sofia-audit-multi-instance-"));
+    const file = path.join(directory, "events.log");
+    try {
+      const first = new EncryptedFileAudit(file, "shared-audit-secret");
+      const second = new EncryptedFileAudit(file, "shared-audit-secret");
+      const ids = Array.from({ length: 64 }, (_, index) => `instance-event-${index}`);
+      await Promise.all(ids.map((id, index) =>
+        (index % 2 === 0 ? first : second).record(makeEvent(id)),
+      ));
+      const events = await first.list();
+      assert.equal(events.length, ids.length);
+      assert.deepEqual(new Set(events.map((event) => event.id)), new Set(ids));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects wrong keys and tampered ciphertext", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "sofia-audit-"));
     const file = path.join(directory, "events.log");
