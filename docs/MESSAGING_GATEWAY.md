@@ -88,3 +88,20 @@ The standalone Discord runtime accepts `/approve` and `/deny` as additional sign
 
 Approval prompts are delivered only to the originating allowlisted channel. A decision is accepted only from the same allowlisted Discord user and channel that started the job, and only when the full action hash matches. Requests are single-use, expire after two minutes, and fail closed on timeout, cancellation, delivery failure, process restart, or mismatch. The broker is in-memory and intentionally does not restore pending approvals after restart. Telegram/API-key-originated requests are not approved by this Discord-only broker and remain fail-closed until a trusted Telegram approval transport is implemented.
 
+
+
+## Operator-managed MCP server bootstrap
+
+Set `SOFIA_MCP_SERVERS` to a bounded JSON array of explicitly configured servers. Every server must provide a unique lowercase `id` and a non-empty `allowedTools` list; only those exact advertised tools are exposed under the `mcp.<id>.<tool>` namespace. Unknown fields, duplicate IDs/tools, oversized configs, and unlisted tools are rejected.
+
+- All MCP configurations require `SOFIA_ALLOW_TOOLS=true`.
+- `stdio` starts a local child process and additionally requires `SOFIA_ALLOW_SHELL=true`. Its environment is isolated to a small inherited allowlist plus explicitly supplied values.
+- `http` requires HTTPS, `SOFIA_ALLOW_NETWORK=true`, and a matching hostname in `SOFIA_ALLOWED_HOSTS`. Redirects are rejected; endpoint credentials/query/fragments are not accepted.
+- Read-only annotated tools are treated as read actions. Tools without a trustworthy read-only annotation remain critical/destructive and require approval under Sofia's normal policy.
+- MCP tool invocation does not itself bypass Sofia's normal policy, approval, or workspace controls. Server metadata is untrusted and cannot expand the operator allowlist.
+
+Example (keep bearer credentials in a server-side secret, not source control):
+
+```json
+[{"id":"docs","transport":"http","endpoint":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer <secret>"},"allowedTools":["search"]}]
+```
