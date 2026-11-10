@@ -1,7 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
-import { redactSecrets } from "./guard.js";
 import type { SecurityAuditEvent, SecurityAuditSink, SecurityEvidenceReader } from "./audit.js";
 
 // All instances in this process that target the same resolved file share one
@@ -33,22 +32,64 @@ export class EncryptedFileAudit implements SecurityAuditSink, SecurityEvidenceRe
   if (!this.secret) throw new Error("Audit encryption secret is required");
   return createHash("sha256").update(this.secret).digest();
  }
- record(event:SecurityAuditEvent):Promise<void>{
-  return enqueue(this.file,async()=>{
-   const key=this.key();
-   await mkdir(path.dirname(this.file),{recursive:true});
-   const iv=randomBytes(12); const cipher=createCipheriv("aes-256-gcm",key,iv);
-   const plaintext=Buffer.from(JSON.stringify(event));
-   const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
-   const tag=cipher.getAuthTag();
-   const handle=await open(this.file,"a",0o600);
-   try {
-    await handle.writeFile(Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
-    // Flush the journal record before allowing the caller to continue to a tool side effect.
-    await handle.sync();
-   } finally {
-    await handle.close();
+ private async appendEvent(event: SecurityAuditEvent): Promise<void> {
+  const key=this.key();
+  await mkdir(path.dirname(this.file),{recursive:true});
+  const iv=randomBytes(12); const cipher=createCipheriv("aes-256-gcm",key,iv);
+  const plaintext=Buffer.from(JSON.stringify(event));
+  const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
+  const tag=cipher.getAuthTag();
+  const handle=await open(this.file,"a",0o600);
+  try {
+   await handle.writeFile(Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
+   // Flush each journal record before allowing the caller to continue.
+   await handle.sync();
+  } finally {
+   await handle.close();
+  }
+ }
+ private async readEvents(): Promise<SecurityAuditEvent[]> {
+  const key=this.key();
+  let contents:string;
+  try { contents=await readFile(this.file,"utf8"); }
+  catch(error) {
+   if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return [];
+   throw error;
+  }
+  const events:SecurityAuditEvent[]=[];
+  for (const [index,line] of contents.split("\n").entries()) {
+   if (!line) continue;
+   const payload=Buffer.from(line,"base64");
+   if (payload.length < 29) throw new Error(`Invalid encrypted audit record at line ${index+1}`);
+   const decipher=createDecipheriv("aes-256-gcm",key,payload.subarray(0,12));
+   decipher.setAuthTag(payload.subarray(12,28));
+   const plaintext=Buffer.concat([decipher.update(payload.subarray(28)),decipher.final()]);
+   const event=JSON.parse(plaintext.toString("utf8")) as SecurityAuditEvent;
+   if (!event || typeof event.id !== "string" || typeof event.runId !== "string" || typeof event.toolName !== "string") {
+    throw new Error(`Invalid audit event at line ${index+1}`);
    }
+   events.push(event);
+  }
+  return events;
+ }
+ record(event:SecurityAuditEvent):Promise<void>{
+  return enqueue(this.file,()=>this.appendEvent(event));
+ }
+ /**
+  * Atomically checks that the operation is still incomplete and appends its
+  * manual reconciliation under the same per-file queue used by all readers/writers.
+  */
+ recordReconciliation(event: SecurityAuditEvent): Promise<void> {
+  if (event.decision !== "reconciled" || !event.operationId) {
+   return Promise.reject(new Error("A reconciled event with an operationId is required."));
+  }
+  return enqueue(this.file,async()=>{
+   const events=await this.readEvents();
+   const terminal=events.some(item=>item.operationId===event.operationId &&
+    (item.decision==="completed"||item.decision==="reconciled"));
+   const started=events.some(item=>item.operationId===event.operationId && item.decision==="execution_started");
+   if (!started || terminal) throw new Error("Operation is not awaiting reconciliation.");
+   await this.appendEvent(event);
   });
  }
  async getEvidence(evidenceId: string): Promise<SecurityAuditEvent | undefined> {
@@ -58,11 +99,11 @@ export class EncryptedFileAudit implements SecurityAuditSink, SecurityEvidenceRe
  }
  async listIncompleteExecutions():Promise<IncompleteAuditExecution[]>{
   const events=await this.list();
-  const completed=new Set(events
+  const terminal=new Set(events
    .filter(event=>(event.decision==="completed"||event.decision==="reconciled")&&event.operationId)
    .map(event=>event.operationId!));
   return events
-   .filter(event=>event.decision==="execution_started"&&event.operationId&&!completed.has(event.operationId))
+   .filter(event=>event.decision==="execution_started"&&event.operationId&&!terminal.has(event.operationId))
    .map(started=>({
     operationId:started.operationId!,
     started,
@@ -70,29 +111,6 @@ export class EncryptedFileAudit implements SecurityAuditSink, SecurityEvidenceRe
    }));
  }
  list():Promise<SecurityAuditEvent[]>{
-  return enqueue(this.file,async()=>{
-   const key=this.key();
-   let contents:string;
-   try { contents=await readFile(this.file,"utf8"); }
-   catch(error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return [];
-    throw error;
-   }
-   const events:SecurityAuditEvent[]=[];
-   for (const [index,line] of contents.split("\n").entries()) {
-    if (!line) continue;
-    const payload=Buffer.from(line,"base64");
-    if (payload.length < 29) throw new Error(`Invalid encrypted audit record at line ${index+1}`);
-    const decipher=createDecipheriv("aes-256-gcm",key,payload.subarray(0,12));
-    decipher.setAuthTag(payload.subarray(12,28));
-    const plaintext=Buffer.concat([decipher.update(payload.subarray(28)),decipher.final()]);
-    const event=JSON.parse(plaintext.toString("utf8")) as SecurityAuditEvent;
-    if (!event || typeof event.id !== "string" || typeof event.runId !== "string" || typeof event.toolName !== "string") {
-     throw new Error(`Invalid audit event at line ${index+1}`);
-    }
-    events.push(event);
-   }
-   return events;
-  });
+  return enqueue(this.file,()=>this.readEvents());
  }
 }
