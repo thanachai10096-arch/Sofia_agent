@@ -32,6 +32,8 @@ import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
+import { createAdvancedSkillRegistry } from "../skills/advanced-skill-registry.js";
+import { createAdvancedSkillTools } from "../skills/tools.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -102,12 +104,54 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
         })
       : [];
+    // Mount only verified skill handlers into the existing Brain tool gateway.
+    // Approval evidence is run/principal/action-bound and consumed once by the
+    // skill verifier; the normal gateway remains responsible for policy + audit.
+    const skillApprovalEvidence = new Map<string, {
+      runId: string; principalId: string; toolName: string; actionHash: string;
+    }>();
+    const advancedSkillRegistry = createAdvancedSkillRegistry({
+      projectMemoryStore: projectMemory,
+      securityController: dependencies.security,
+      verifyApproval: (request) => {
+        const evidence = skillApprovalEvidence.get(request.requestId);
+        if (!evidence) return false;
+        skillApprovalEvidence.delete(request.requestId);
+        return evidence.runId === request.runId &&
+          evidence.principalId === request.principalId &&
+          evidence.toolName === request.toolName &&
+          evidence.toolName === `skill.${request.skillId}` &&
+          evidence.actionHash === request.actionHash;
+      },
+    });
+    const runSkillTools = createAdvancedSkillTools(advancedSkillRegistry, principalId ?? "anonymous");
+    const approvalHandler: AgentDependencies["approval"] = dependencies.approval
+      ? async (request) => {
+          const approved = await dependencies.approval!(request);
+          if (approved && request.toolName.startsWith("skill.")) {
+            const skill = advancedSkillRegistry.list().find((item) =>
+              `skill.${item.id}` === request.toolName &&
+              (item.requiresApproval || item.risk === "privileged"),
+            );
+            if (skill) {
+              skillApprovalEvidence.set(request.requestId, {
+                runId: request.runId,
+                principalId: request.principalId ?? "anonymous",
+                toolName: request.toolName,
+                actionHash: request.actionHash,
+              });
+            }
+          }
+          return approved;
+        }
+      : undefined;
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...runBrowserTools,
       ...runDesktopTools,
+      ...runSkillTools,
     ]);
-    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
+    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,approvalHandler,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
       maxConcurrency:intEnv("SOFIA_SUBAGENT_MAX_CONCURRENCY",3,1),
