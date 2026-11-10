@@ -7,6 +7,7 @@ import { SqliteApprovalQueue, createQueuedApprovalHandler } from "./approval-que
 import type { ApprovalRequest } from "./approval.js";
 
 const request = (overrides: Partial<ApprovalRequest> = {}): ApprovalRequest => ({
+  requestId: "request-1",
   runId: "run-1",
   principalId: "owner-a",
   toolName: "skill.lifecycle.promote",
