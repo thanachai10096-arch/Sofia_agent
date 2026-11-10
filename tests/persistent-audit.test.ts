@@ -173,6 +173,39 @@ describe("encrypted persistent audit", () => {
     }
   });
 
+  it("allows only one concurrent reconciliation across audit instances", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "sofia-recovery-race-"));
+    const file = path.join(directory, "events.log");
+    try {
+      const firstAudit = new EncryptedFileAudit(file, "recovery-race-secret");
+      const secondAudit = new EncryptedFileAudit(file, "recovery-race-secret");
+      await firstAudit.record({
+        ...makeEvent("race-start"),
+        decision: "execution_started",
+        operationId: "operation-race",
+      });
+      const first = new ExecutionRecoveryManager(firstAudit);
+      const second = new ExecutionRecoveryManager(secondAudit);
+      const request = {
+        operationId: "operation-race",
+        outcome: "confirmed_completed" as const,
+        reconciledBy: "operator:one",
+        note: "Checked the external system",
+      };
+      const outcomes = await Promise.allSettled([
+        first.reconcile(request),
+        second.reconcile({ ...request, reconciledBy: "operator:two" }),
+      ]);
+      assert.equal(outcomes.filter(item => item.status === "fulfilled").length, 1);
+      assert.equal(outcomes.filter(item => item.status === "rejected").length, 1);
+      const records = await firstAudit.list();
+      assert.equal(records.filter(item => item.decision === "reconciled").length, 1);
+      assert.equal((await first.inspect()).length, 0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects wrong keys and tampered ciphertext", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "sofia-audit-"));
     const file = path.join(directory, "events.log");
