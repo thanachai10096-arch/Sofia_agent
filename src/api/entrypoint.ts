@@ -139,8 +139,24 @@ if (discordConfigured) {
           void deps.jobRuntime.resume(job.id).then(async (resumed) => {
             const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
-            await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
-            await deps.jobRuntime?.markNotificationDelivered?.(resumed.id);
+            // Use the same durable, token-fenced notification protocol as recovery.
+            // If the runtime cannot claim delivery, do not send an uncoordinated notice.
+            let deliveryToken: string | undefined;
+            try {
+              deliveryToken = await deps.jobRuntime?.claimNotificationDelivery?.(resumed.id);
+              if (!deliveryToken) return;
+              await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
+              await deps.jobRuntime?.markNotificationDelivered?.(resumed.id, deliveryToken);
+              deliveryToken = undefined;
+            } finally {
+              if (deliveryToken && deps.jobRuntime?.releaseNotificationDelivery) {
+                try {
+                  await deps.jobRuntime.releaseNotificationDelivery(resumed.id, deliveryToken);
+                } catch {
+                  // The bounded lease expires and permits a later retry.
+                }
+              }
+            }
           }).catch(async () => {
             try {
               await discordTransport?.sendMessage(message.channelId, "Sofia could not resume job " + job.id + ". Check the job status and server logs.");
