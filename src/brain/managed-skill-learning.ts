@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { actionHash } from "../security/guard.js";
 import type { ApprovalHandler } from "../agent/approval.js";
 import type { LearnedSkillCandidate } from "./learning.js";
@@ -50,6 +51,7 @@ export function createManagedSkillLearningHandler(
             confidence: record.provenance.confidence,
           };
           return approval({
+            requestId: randomUUID(),
             runId,
             ...(principalId ? { principalId } : {}),
             toolName,
