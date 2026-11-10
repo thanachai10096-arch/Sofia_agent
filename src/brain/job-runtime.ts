@@ -447,6 +447,7 @@ export class DurableJobRuntime implements JobRuntime {
   constructor(
     private readonly brainFactory: (options: {
       signal?: AbortSignal;
+      assertExecutionLease?: () => Promise<void>;
       maxSteps?: number;
       principalId?: string;
       notificationChannelId?: string;
