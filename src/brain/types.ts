@@ -78,6 +78,8 @@ export interface ToolExecutionContext {
   principalId?: string | undefined;
   notificationChannelId?: string | undefined;
   signal: AbortSignal;
+  /** Revalidate the durable job lease immediately before external side effects. */
+  assertExecutionLease?: () => Promise<void>;
   requireApproval: boolean;
   notifyApproval(waiting: boolean): void;
 }
