@@ -160,9 +160,26 @@ if (discordConfigured) {
               }
             }
           }).catch(async () => {
+            const runtime = deps.jobRuntime;
+            if (!runtime?.claimNotificationDelivery || !runtime.markNotificationDelivered || !runtime.releaseNotificationDelivery) return;
+            let deliveryToken: string | undefined;
             try {
+              deliveryToken = await runtime.claimNotificationDelivery(job.id);
+              if (!deliveryToken) return;
               await discordTransport?.sendMessage(message.channelId, "Sofia could not resume job " + job.id + ". Check the job status and server logs.");
-            } catch { /* durable state remains available for /status */ }
+              await runtime.markNotificationDelivered(job.id, deliveryToken);
+              deliveryToken = undefined;
+            } catch {
+              // Leave the durable job available for /status; release below permits retry.
+            } finally {
+              if (deliveryToken) {
+                try {
+                  await runtime.releaseNotificationDelivery(job.id, deliveryToken);
+                } catch {
+                  // The bounded lease expires and permits a later recovery attempt.
+                }
+              }
+            }
           });
           return;
         }
