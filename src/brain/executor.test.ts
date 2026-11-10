@@ -1041,3 +1041,55 @@ test("Brain fails closed when a successful tool result has no evidence ID", asyn
   assert.match(report.summary, /no evidence ID/);
   assert.equal(executions, 1, "a side-effecting tool must not be retried when its evidence is missing");
 });
+
+
+test("Brain fails closed when a successful custom acceptance probe has no evidence", async () => {
+  let probeExecutions = 0;
+  const tools = makeTools();
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.list_files") {
+      probeExecutions += 1;
+      return { ok: true, data: ["hello.txt"], evidenceId: "   " };
+    }
+    return originalExecute(call, context);
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, false);
+  assert.match(report.summary, /Verification probe succeeded without evidence/);
+  assert.equal(probeExecutions, 1);
+});
