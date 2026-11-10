@@ -233,8 +233,12 @@ if (discordConfigured) {
       } catch {
         // Release the claim so a later retry can attempt delivery again.
       } finally {
-        if (deliveryToken) {
-          await deps.jobRuntime.releaseNotificationDelivery?.(job.id, deliveryToken).catch(() => undefined);
+        if (deliveryToken && deps.jobRuntime.releaseNotificationDelivery) {
+          try {
+            await deps.jobRuntime.releaseNotificationDelivery(job.id, deliveryToken);
+          } catch {
+            // The bounded lease expires and allows a later retry.
+          }
         }
         notificationInFlight.delete(job.id);
       }
