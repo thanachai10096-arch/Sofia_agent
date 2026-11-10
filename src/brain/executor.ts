@@ -704,22 +704,24 @@ export class SofiaBrain {
       throw new RecoverableFailure(failureCategory(error), errorMessage(error));
     }
 
-    // A successful tool response must carry a non-empty evidence identifier.
-    // If it does not, stop rather than retry: the tool may already have performed a side effect.
-    if (typeof result.evidenceId !== "string" || result.evidenceId.trim().length === 0) {
+    // A successful tool response must carry evidence: without it, a side effect
+    // may have happened but cannot be safely correlated, so never retry it.
+    // Failed results remain recoverable even when they have no evidence identifier.
+    const evidenceId = typeof result.evidenceId === "string" ? result.evidenceId.trim() : "";
+    if (result.ok && evidenceId.length === 0) {
       throw new Stop(`Tool returned no evidence ID: ${step.call.tool}`);
     }
 
     const p = preview(result.data);
     const fenced = fenceUntrustedOutput(step.call.tool, p.text);
     const observation: Observation = {
-      stepId: step.id, tool: step.call.tool, ok: result.ok, evidenceId: result.evidenceId,
+      stepId: step.id, tool: step.call.tool, ok: result.ok, evidenceId,
       preview: fenced.text, truncated: p.truncated,
       ...(fenced.suspicious ? { suspicious: true } : {}),
     };
 
     this.observations.push(observation);
-    this.evidenceIndex.push(result.evidenceId);
+    if (evidenceId) this.evidenceIndex.push(evidenceId);
 
     this.emit({
       type: result.ok ? "brain.tool.completed" : "brain.tool.failed",
