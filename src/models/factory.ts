@@ -38,6 +38,7 @@ import { createManagedSkillLearningHandler } from "../brain/managed-skill-learni
 import { createAdvancedSkillRegistry } from "../skills/advanced-skill-registry.js";
 import { createAdvancedSkillTools } from "../skills/tools.js";
 import { registerActiveSkillArtifacts } from "../skills/managed-artifact-runtime.js";
+import { buildTrustedSkillArtifact } from "../skills/trusted-skill-builder.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -124,7 +125,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       return { passed: false, checks };
     }
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
-  const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
+  const onSkillCandidate = createManagedSkillLearningHandler(
+    skillLifecycle,
+    dependencies.approval,
+    async (candidate) => buildTrustedSkillArtifact(candidate),
+  );
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
