@@ -173,6 +173,8 @@ export class RegistryToolGateway implements ToolGateway {
       }finally{context.notifyApproval(false);}
     }
     try{
+      // Approval can take arbitrarily long; never trust the lease state observed before waiting.
+      await context.assertExecutionLease?.();
       this.security.assertRunning();
       context.signal.throwIfAborted();
       if(capabilitySecret && (!capability || !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret))) {
@@ -184,6 +186,9 @@ export class RegistryToolGateway implements ToolGateway {
       const boundSignal=this.security.bindSignal(context.signal);
       let data:unknown;
       try {
+        // Revalidate at the last gateway boundary before dispatching the side effect.
+        await context.assertExecutionLease?.();
+        context.signal.throwIfAborted();
         data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
       } finally {
         boundSignal.dispose();
