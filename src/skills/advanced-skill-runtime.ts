@@ -4,7 +4,7 @@ import type { SecurityController } from "../security/controller.js";
 export interface AdvancedSkillExecutionContext {
   readonly principalId: string;
   readonly signal: AbortSignal;
-  readonly approval?: { readonly requestId: string };
+  readonly approval?: { readonly requestId: string; readonly runId: string; readonly principalId: string; readonly toolName: string; readonly actionHash: string };
   readonly emitTrace?: (event: AdvancedSkillTraceEvent) => void;
 }
 
@@ -38,6 +38,9 @@ export interface AdvancedSkillApprovalRequest {
   readonly skillId: string;
   readonly principalId: string;
   readonly requestId: string;
+  readonly runId: string;
+  readonly toolName: string;
+  readonly actionHash: string;
 }
 
 export type AdvancedSkillApprovalVerifier = (request: AdvancedSkillApprovalRequest) => boolean | Promise<boolean>;
@@ -116,12 +119,20 @@ export class AdvancedSkillRegistry {
     if (definition.requiresApproval || definition.risk === "privileged") {
       const approval = context.approval;
       let approved = false;
-      if (approval && context.principalId.trim()) {
+      if (
+        approval &&
+        context.principalId.trim() &&
+        approval.principalId === context.principalId &&
+        approval.toolName === `skill.${id}`
+      ) {
         try {
           approved = await this.verifyApproval({
             skillId: id,
             principalId: context.principalId,
             requestId: approval.requestId,
+            runId: approval.runId,
+            toolName: approval.toolName,
+            actionHash: approval.actionHash,
           });
         } catch {
           // Approval infrastructure errors must fail closed.
