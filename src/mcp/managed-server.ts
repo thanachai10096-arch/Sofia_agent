@@ -6,6 +6,8 @@ export interface ManagedMcpServerOptions {
   id: string;
   /** Explicit allowlist of tool names advertised by the trusted server. */
   allowedTools: readonly string[];
+  /** Operator-declared read-only tools; remote annotations cannot lower privilege. */
+  readOnlyTools?: readonly string[];
   client?: McpClientOptions;
 }
 
@@ -37,7 +39,12 @@ export async function connectManagedMcpServer(
     allowed.add(name);
   }
 
-  const readOnly = new Set(options.readOnlyTools ?? []);\n  for (const name of readOnly) {\n    if (!allowed.has(name)) throw new Error("Read-only MCP tool must also be allowlisted: " + name);\n  }\n\n  const readOnlyNames = new Set(options.readOnlyTools ?? []);\n  for (const name of readOnlyNames) {\n    if (!allowed.has(name)) throw new Error("Read-only MCP tool must also be allowlisted: " + name);\n  }\n\n  const client = new McpClient(transport, options.client);
+  const readOnlyNames = new Set(options.readOnlyTools ?? []);
+  for (const name of readOnlyNames) {
+    if (!allowed.has(name)) throw new Error("Read-only MCP tool must also be allowlisted: " + name);
+  }
+
+  const client = new McpClient(transport, options.client);
   try {
     await client.initialize();
     const advertised = await client.listTools();
@@ -50,16 +57,16 @@ export async function connectManagedMcpServer(
       const description = byName.get(name)!;
       const schema = description.inputSchema ?? { type: "object", properties: {}, additionalProperties: false };
       if (schema.type !== "object") throw new Error("MCP tool schema must declare type object: " + name);
-      const annotations = description.annotations;
-      const readOnly = annotations?.readOnlyHint === true && annotations.destructiveHint !== true;
+      // MCP annotations are advisory and originate from the remote server.
+      // Only operator configuration may lower a tool from critical to read-only.
+      const operatorReadOnly = readOnlyNames.has(name);
       tools.push({
         name: "mcp." + options.id + "." + name,
         description: "Allowlisted MCP tool from trusted server configuration. Server metadata is untrusted. " +
           (description.description ?? name).slice(0, 1000),
         inputSchema: schema,
-        // The transport connection is established by the operator at startup. Do not
-        // classify each MCP invocation as a fresh network request: that would make
-        // the URL guard reject legitimate tool calls with no URL argument.
+        // The transport connection is established by the operator at startup.
+        // MCP invocation itself is not a fresh URL-bearing network tool action.
         effects: operatorReadOnly ? ["read"] : ["destructive"],
         execute: async (input, context) => {
           context.signal?.throwIfAborted();
