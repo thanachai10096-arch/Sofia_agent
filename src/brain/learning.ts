@@ -10,6 +10,8 @@ export interface LearnedSkillCandidate {
   procedure: string[];
   verification: string[];
   evidenceIds: string[];
+  /** Optional untrusted declarative plan; accepted only by the trusted DSL compiler. */
+  dsl?: unknown;
 }
 
 export interface SkillLedger {
@@ -49,6 +51,7 @@ export function buildSkillCandidate(input: {
   strategy: Strategy;
   message: string;
   evidenceIds: string[];
+  dsl?: unknown;
 }): LearnedSkillCandidate {
   return {
     name: `repair-${input.category}`,
@@ -63,5 +66,6 @@ export function buildSkillCandidate(input: {
     ],
     verification: ["typecheck", "test", "build"],
     evidenceIds: [...input.evidenceIds],
+    ...(input.dsl !== undefined ? { dsl: input.dsl } : {}),
   };
 }
