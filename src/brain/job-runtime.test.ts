@@ -850,10 +850,13 @@ test("DurableJobRuntime redacts credential-shaped values from persisted and relo
     const persisted = await readFile(file, "utf8");
     assert.ok(!persisted.includes(secret), "persisted job file must not contain credential-shaped values");
 
-    const restarted = new DurableJobRuntime(() => brain, undefined, namespace);
+    const restarted = new DurableJobRuntime(() => brain, runStore, namespace);
     const loaded = await restarted.get(submitted.id);
     assert.ok(loaded);
     assert.ok(!JSON.stringify(loaded).includes(secret), "reloaded job data must remain redacted");
+    assert.notEqual(loaded.snapshot?.task, "stale external run-store snapshot", "restart recovery must prefer the canonical job snapshot over a stale RunStore mirror");
+    const reloadedList = await restarted.list();
+    assert.notEqual(reloadedList.find((job) => job.id === submitted.id)?.snapshot?.task, "stale external run-store snapshot", "job listing after restart must also ignore stale RunStore mirrors");
   } finally {
     if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
     else process.env.SOFIA_STATE_DIR = previousRoot;
