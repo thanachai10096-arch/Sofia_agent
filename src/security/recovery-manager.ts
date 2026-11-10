@@ -55,10 +55,10 @@ export class ExecutionRecoveryManager {
       risk: execution.started.risk,
       decision: "reconciled",
       operationId,
-      reason: "Manually reconciled by " + reconciledBy,
+      reason: "Manual execution reconciliation",
       reconciliation: {
         outcome: request.outcome,
-        reconciledBy,
+        reconciledBy: String(redactSecrets(reconciledBy)),
         note: String(redactSecrets(note)),
       },
     };
