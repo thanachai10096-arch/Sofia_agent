@@ -490,10 +490,47 @@ test("audit completion failure does not turn a successful side effect into a ret
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.data, { value: "completed" });
-  assert.ok(result.evidenceId.length > 0);
+  assert.equal(result.evidenceId, "", "an unpersisted completion must not be advertised as durable evidence");
   assert.equal(executions, 1, "an audit sink failure after execution must not invite a duplicate tool call");
 });
 
+
+test("gateway returns an evidence ID only after a durable reader retrieves the completion", async () => {
+  let stored: SecurityAuditEvent | undefined;
+  let executions = 0;
+  const audit: SecurityAuditSink & { getEvidence(id: string): Promise<SecurityAuditEvent | undefined> } = {
+    record(event) {
+      if (event.decision === "completed") stored = event;
+    },
+    async getEvidence(id) {
+      return stored?.evidenceId === id ? stored : undefined;
+    },
+  };
+  const registry = new MapToolRegistry([{
+    name: "custom.read",
+    description: "Persist and retrieve evidence",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() { executions += 1; return { answer: "grounded" }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    undefined,
+    undefined,
+    undefined,
+    audit,
+  );
+  const result = await gateway.execute(
+    { tool: "custom.read", input: {} },
+    { runId: "durable-evidence-test", principalId: "test-user", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(result.ok, true);
+  assert.ok(result.evidenceId.length > 0);
+  assert.equal(stored?.evidenceId, result.evidenceId);
+  assert.equal(stored?.operationId !== undefined, true);
+  assert.equal(executions, 1);
+});
 
 test("tool execution is durably journaled before the side effect and terminal event is correlated", async () => {
   const events: SecurityAuditEvent[] = [];
