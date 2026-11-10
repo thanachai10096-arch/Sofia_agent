@@ -806,11 +806,11 @@ test("tool gateway revalidates durable job lease after approval and blocks side 
       notifyApproval() {},
       assertExecutionLease: async () => {
         leaseChecks += 1;
-        if (leaseChecks === 1) throw new Error("Job execution lease was lost");
+        if (leaseChecks === 2) throw new Error("Job execution lease was lost");
       },
     },
   );
   assert.equal(result.ok, false);
   assert.equal(executed, false, "tool side effect must not start after lease loss");
-  assert.equal(leaseChecks, 1, "lease must be checked immediately after approval");
+  assert.equal(leaseChecks, 2, "lease must be checked after approval and again immediately before dispatch");
 });
