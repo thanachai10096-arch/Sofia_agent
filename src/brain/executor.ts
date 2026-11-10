@@ -324,11 +324,18 @@ export class SofiaBrain {
   private async saveRunSnapshot(snapshot: BrainRunSnapshot): Promise<void> {
     this.latestRunSnapshot = snapshot;
     this.emit({ type: "brain.run.checkpointed" });
+    // Persist the lease-fenced canonical job snapshot independently of the
+    // optional RunStore mirror. A mirror failure must never skip the checkpoint
+    // used by DurableJobRuntime for restart recovery.
     try {
-      await this.dependencies.runStore?.save(snapshot);
       await this.dependencies.onRunSnapshot?.(snapshot);
     } catch {
-      // Persistence must never alter execution semantics.
+      // Job checkpoint persistence is best-effort at the brain boundary.
+    }
+    try {
+      await this.dependencies.runStore?.save(snapshot);
+    } catch {
+      // The RunStore is a best-effort mirror; it must not block execution.
     }
   }
 
