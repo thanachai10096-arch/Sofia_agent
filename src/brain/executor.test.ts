@@ -1371,3 +1371,56 @@ test("Thai why-questions remain conversational and are not forced into tool exec
   assert.equal(report.completed, true, report.summary);
   assert.deepEqual(phases, ["understand"]);
 });
+
+
+test("Brain persists the canonical job checkpoint even when the RunStore mirror fails", async () => {
+  let canonicalCheckpoints = 0;
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: makeTools(),
+      allowShell: false,
+      allowNetwork: false,
+      onRunSnapshot() {
+        canonicalCheckpoints += 1;
+      },
+      runStore: {
+        async save() {
+          throw new Error("simulated RunStore outage");
+        },
+        async load() {
+          return undefined;
+        },
+        async delete() {},
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, true, report.summary);
+  assert.ok(canonicalCheckpoints > 0, "RunStore failure must not suppress canonical job checkpoints");
+});
