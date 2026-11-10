@@ -9,7 +9,8 @@ test("MCP environment config accepts explicit stdio and HTTPS servers", () => {
   ]));
   assert.equal(servers.length, 2);
   assert.equal(servers[0]?.transport, "stdio");
-  assert.equal(servers[1]?.transport, "http");\n  assert.deepEqual(servers[1]?.readOnlyTools, ["search"]);
+  assert.equal(servers[1]?.transport, "http");
+  assert.deepEqual(servers[1]?.readOnlyTools, ["search"]);
 });
 
 test("MCP environment config rejects duplicate ids and empty tool allowlists", () => {
