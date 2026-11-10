@@ -119,14 +119,18 @@ export class AdvancedSkillRegistry {
     if (definition.requiresApproval || definition.risk === "privileged") {
       const approval = context.approval;
       let approved = false;
-      if (approval && context.principalId.trim()) {
+      if (
+        approval &&
+        context.principalId.trim() &&
+        approval.principalId === context.principalId &&
+        approval.toolName === `skill.${id}`
+      ) {
         try {
           approved = await this.verifyApproval({
             skillId: id,
             principalId: context.principalId,
             requestId: approval.requestId,
             runId: approval.runId,
-            principalId: approval.principalId,
             toolName: approval.toolName,
             actionHash: approval.actionHash,
           });
