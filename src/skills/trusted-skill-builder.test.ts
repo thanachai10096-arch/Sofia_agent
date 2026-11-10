@@ -24,6 +24,11 @@ test("trusted builder compiles a valid declarative plan deterministically", asyn
   assert.equal(first?.entrypoint, "index.mjs");
   assert.match(first?.files["index.mjs"] ?? "", /export function run/);
   assert.match(first?.files["index.mjs"] ?? "", /Object\.hasOwn/);
+  const source = first?.files["index.mjs"];
+  assert.ok(source);
+  const loaded = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64")) as { run(input: unknown): unknown };
+  assert.deepEqual(loaded.run({ name: "Sofia", status: "ready", secret: "omit" }), { name: "Sofia", status: "ready" });
+  assert.throws(() => loaded.run(["not", "an", "object"]), /expects a JSON object/);
   assert.doesNotMatch(first?.files["index.mjs"] ?? "", /eval\s*\(/);
 });
 
@@ -44,5 +49,13 @@ test("trusted builder rejects prose-only, unknown, and malformed plans", () => {
   assert.equal(buildTrustedSkillArtifact({
     ...base,
     dsl: { version: 1, operation: "project-fields", fields: ["x"], extra: true },
+  assert.equal(buildTrustedSkillArtifact({
+    ...base,
+    dsl: { version: 1, operation: "project-fields", fields: Array.from({ length: 33 }, (_, i) => "f" + i) },
+  }), undefined);
+  assert.equal(buildTrustedSkillArtifact({
+    ...base,
+    dsl: { version: 1, operation: "project-fields", fields: ["x".repeat(129)] },
+  }), undefined);
   }), undefined);
 });
