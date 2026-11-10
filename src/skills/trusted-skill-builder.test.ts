@@ -49,6 +49,7 @@ test("trusted builder rejects prose-only, unknown, and malformed plans", () => {
   assert.equal(buildTrustedSkillArtifact({
     ...base,
     dsl: { version: 1, operation: "project-fields", fields: ["x"], extra: true },
+  }), undefined);
   assert.equal(buildTrustedSkillArtifact({
     ...base,
     dsl: { version: 1, operation: "project-fields", fields: Array.from({ length: 33 }, (_, i) => "f" + i) },
@@ -56,6 +57,5 @@ test("trusted builder rejects prose-only, unknown, and malformed plans", () => {
   assert.equal(buildTrustedSkillArtifact({
     ...base,
     dsl: { version: 1, operation: "project-fields", fields: ["x".repeat(129)] },
-  }), undefined);
   }), undefined);
 });
