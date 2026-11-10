@@ -9,11 +9,16 @@ export type SecurityAuditEvent = {
   toolName: string;
   actionHash: string;
   risk: RiskLevel;
-  decision: "allow" | "deny" | "approval_required" | "approval_denied" | "execution_started" | "completed" | "failed";
+  decision: "allow" | "deny" | "approval_required" | "approval_denied" | "execution_started" | "completed" | "failed" | "reconciled";
   /** Correlates the durable start record with its terminal outcome. */
   operationId?: string;
   /** Stable identifier for the durable, completed tool evidence record. */
   evidenceId?: string;
+  reconciliation?: {
+    outcome: "confirmed_completed" | "confirmed_not_applied";
+    reconciledBy: string;
+    note: string;
+  };
   reason?: string;
   input?: unknown;
   result?: unknown;
