@@ -1373,7 +1373,14 @@ export class SofiaBrain {
             mayActivate = false;
           }
         }
-        if (mayActivate) this.dependencies.skillLedger.record(learnedCandidate);
+        if (mayActivate) {
+          this.dependencies.skillLedger.record(learnedCandidate);
+  
+        } else {
+          // Do not report a learning success when compilation, verification,
+          // or explicit promotion approval declined the candidate.
+          this.emit({ type: "brain.learning.skipped" });
+        }
         if (this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
