@@ -57,8 +57,8 @@ function isJobCancelled(record: JobRecord): boolean { return record.status === "
 function redactJobRecord(record: JobRecord): JobRecord {
   return {
     ...record,
-    // Preserve leaseOwnerToken and lease timestamps in storage: these are runtime
-    // fencing metadata, not user content, and redacting them would break worker claims.
+    // Preserve execution and notification lease tokens/timestamps in storage: these are
+    // runtime fencing metadata, not user content, and redacting them breaks claims.
     task: String(redactSecrets(record.task)),
     ...(record.sessionTask ? { sessionTask: String(redactSecrets(record.sessionTask)) } : {}),
     ...(record.snapshot ? { snapshot: redactSecrets(record.snapshot) as BrainRunSnapshot } : {}),
@@ -72,6 +72,8 @@ function publicJobRecord(record: JobRecord): JobRecord {
   // Lease ownership is an internal concurrency capability and must never be returned
   // to API/Discord clients, even though it remains in the durable store.
   delete safe.leaseOwnerToken;
+  delete safe.notificationLeaseToken;
+  delete safe.notificationLeaseExpiresAt;
   return safe;
 }
 
