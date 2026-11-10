@@ -1022,6 +1022,7 @@ test("DurableJobRuntime atomically grants one notification delivery lease across
   const tokens = claims.filter((token): token is string => Boolean(token));
   assert.equal(tokens.length, 1, "only one worker may own the delivery lease");
   assert.ok(tokens[0]);
+  assert.equal((await first.get(submitted.id))?.notificationLeaseToken, undefined, "notification lease tokens must not be exposed to callers");
 
   const winner = claims[0] ? first : second;
   const token = tokens[0]!;
