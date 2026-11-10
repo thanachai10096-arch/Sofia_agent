@@ -7,6 +7,7 @@ export type ExecutionReconciliationOutcome = "confirmed_completed" | "confirmed_
 
 export interface ExecutionRecoveryStore extends SecurityAuditSink {
   listIncompleteExecutions(): Promise<IncompleteAuditExecution[]>;
+  recordReconciliation(event: SecurityAuditEvent): Promise<void>;
 }
 
 export type ExecutionReconciliationRequest = {
@@ -61,7 +62,7 @@ export class ExecutionRecoveryManager {
         note: String(redactSecrets(note)),
       },
     };
-    await this.store.record(event);
+    await this.store.recordReconciliation(event);
     return event;
   }
 }
