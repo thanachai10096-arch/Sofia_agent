@@ -1135,16 +1135,11 @@ test("DurableJobRuntime supplies a lease assertion that rejects expired ownershi
   process.env.SOFIA_STATE_DIR = root;
   const namespace = "job-runtime-lease-assert-" + randomUUID();
   let assertLease: (() => Promise<void>) | undefined;
-  let release!: () => void;
-  const pending = new Promise<void>((resolve) => { release = resolve; });
   try {
     const runtime = new DurableJobRuntime((options) => {
       assertLease = options.assertExecutionLease;
       return {
-        run: async () => {
-          await pending;
-          return { completed: true, state: "completed" };
-        },
+        run: () => new Promise(() => undefined),
       } as unknown as SofiaBrain;
     }, undefined, namespace);
     const submitted = await runtime.submit({ task: "check lease before tool dispatch" });
@@ -1161,7 +1156,6 @@ test("DurableJobRuntime supplies a lease assertion that rejects expired ownershi
     await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
     await assert.rejects(assertLease!(), /lease was lost/i);
   } finally {
-    release();
     if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
     else process.env.SOFIA_STATE_DIR = previousRoot;
     await rm(root, { recursive: true, force: true });
