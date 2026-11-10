@@ -303,6 +303,8 @@ function waitForApprovalPoll(ms: number, signal?: AbortSignal): Promise<boolean>
     const onAbort = () => finish(false);
     const timer = setTimeout(() => finish(true), ms);
     signal.addEventListener("abort", onAbort, { once: true });
+    // Close the race where abort fires after the initial check but before listener registration.
+    if (signal.aborted) onAbort();
   });
 }
 
