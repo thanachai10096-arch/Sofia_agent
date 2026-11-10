@@ -97,7 +97,7 @@ Set `SOFIA_MCP_SERVERS` to a bounded JSON array of explicitly configured servers
 - All MCP configurations require `SOFIA_ALLOW_TOOLS=true`.
 - `stdio` starts a local child process and additionally requires `SOFIA_ALLOW_SHELL=true`. Its environment is isolated to a small inherited allowlist plus explicitly supplied values.
 - `http` requires HTTPS, `SOFIA_ALLOW_NETWORK=true`, and a matching hostname in `SOFIA_ALLOWED_HOSTS`. Redirects are rejected; endpoint credentials/query/fragments are not accepted.
-- Read-only annotated tools are treated as read actions. Tools without a trustworthy read-only annotation remain critical/destructive and require approval under Sofia's normal policy.
+- Remote read-only annotations are advisory and cannot lower privilege. Only tools explicitly listed by the operator in `readOnlyTools` are treated as read actions; all other MCP tools remain critical/destructive and require approval under Sofia's normal policy.
 - MCP tool invocation does not itself bypass Sofia's normal policy, approval, or workspace controls. Server metadata is untrusted and cannot expand the operator allowlist.
 
 Example (keep bearer credentials in a server-side secret, not source control):
