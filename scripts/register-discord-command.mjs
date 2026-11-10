@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Register Sofia /run, /status, /cancel, and /resume commands in one Discord guild.
+ * Register Sofia /run, /status, /cancel, /resume, /approve, and /deny commands in one Discord guild.
  * Required environment variables: DISCORD_APPLICATION_ID, DISCORD_GUILD_ID,
  * DISCORD_BOT_TOKEN. This deliberately uses the single-command endpoint (POST),
  * never the bulk-overwrite endpoint, so other guild commands are preserved.
@@ -69,6 +69,28 @@ const commands = [
       max_length: 64,
     }],
   },
+  ...["approve", "deny"].map((name) => ({
+    name,
+    description: name === "approve"
+      ? "Approve the exact pending Sofia action"
+      : "Deny the exact pending Sofia action",
+    options: [
+      {
+        name: "request_id",
+        description: "Approval request ID shown by Sofia",
+        type: 3,
+        required: true,
+        max_length: 36,
+      },
+      {
+        name: "action_hash",
+        description: "Full action hash shown by Sofia",
+        type: 3,
+        required: true,
+        max_length: 64,
+      },
+    ],
+  })),
 ];
 
 for (const command of commands) {

@@ -74,6 +74,20 @@ test("inspection tools are available without write approval", async () => {
 });
 
 
+test("medium-risk workspace writes run without interactive approval by default", async () => {
+  const rt = runtime();
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: createToolRegistry(createBuiltinTools()) },
+    defaultPolicy,
+  );
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/automatic.txt", content: "safe change" } },
+    { runId: "flexible-approval-test", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(await rt.readFile("src/automatic.txt"), "safe change");
+});
+
 test("security kill switch aborts an active tool execution", async () => {
   const rt = runtime();
   const security = new SecurityController();
@@ -448,4 +462,165 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
   for (const secret of ["sk-live-secret-value", "sk-input-secret-value", "sk-error-secret-value", "hunter2", "private material"]) {
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
+});
+
+
+test("explicit skill approval requirement is enforced even for read-only risk", async () => {
+  const rt = runtime();
+  let approvalCalls = 0;
+  let receivedEvidence: unknown;
+  const registry = new MapToolRegistry([{
+    name: "skill.test.read-only-approval",
+    description: "Read-only skill that explicitly requires approval",
+    effects: ["read"] as const,
+    requiresApproval: true,
+    inputSchema: { type: "object", properties: {} },
+    async execute(_input, context) {
+      receivedEvidence = context.approval;
+      return { executed: true };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    defaultPolicy,
+    async () => { approvalCalls += 1; return true; },
+  );
+  const result = await gateway.execute(
+    { tool: "skill.test.read-only-approval", input: {} },
+    {
+      runId: "read-only-explicit-approval-test",
+      principalId: "principal-1",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+  assert.equal(approvalCalls, 1, "explicit skill approval must not be bypassed by the low-risk threshold");
+  assert.equal(result.ok, true);
+  assert.ok(receivedEvidence, "the tool must receive action-bound approval evidence");
+});
+
+
+test("gateway forwards a single-use approval receipt bound to the approved action", async () => {
+  const rt = runtime();
+  let received: unknown;
+  const registry = new MapToolRegistry([{
+    name: "skill.test.privileged",
+    description: "Privileged skill test tool",
+    effects: ["destructive"] as const,
+    inputSchema: { type: "object", properties: { operation: { type: "string" } }, required: ["operation"] },
+    async execute(_input, context) {
+      received = context.approval;
+      return { executed: true };
+    },
+  }]);
+  let approvedRequest: Record<string, unknown> | undefined;
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    { ...defaultPolicy, allowDestructive: true, maxRisk: "critical" },
+    async (request) => {
+      approvedRequest = request as unknown as Record<string, unknown>;
+      return true;
+    },
+  );
+
+  const result = await gateway.execute(
+    { tool: "skill.test.privileged", input: { operation: "rotate-key" } },
+    {
+      runId: "approval-receipt-test",
+      principalId: "principal-1",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.ok(approvedRequest);
+  assert.deepEqual(received, {
+    requestId: approvedRequest.requestId,
+    runId: "approval-receipt-test",
+    principalId: "principal-1",
+    toolName: "skill.test.privileged",
+    actionHash: approvedRequest.actionHash,
+  });
+});
+
+
+test("approval preserves trusted messaging destination and cancellation signal", async () => {
+  const controller = new AbortController();
+  let received: import("../agent/approval.js").ApprovalRequest | undefined;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Controlled write tool for approval context propagation",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" }, content: { type: "string" } },
+    },
+    async execute() { return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async (request) => {
+      received = request;
+      return true;
+    },
+  );
+
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/approved.txt", content: "approved" } },
+    {
+      runId: "approval-context-test",
+      principalId: "principal-1",
+      notificationChannelId: "telegram:trusted-chat",
+      signal: controller.signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.ok(received?.requestId);
+  assert.equal(received?.notificationChannelId, "telegram:trusted-chat");
+  assert.equal(received?.signal, controller.signal);
+});
+
+
+test("caller cancellation interrupts a pending approval wait", async () => {
+  const controller = new AbortController();
+  let approvalSignal: AbortSignal | undefined;
+  let announceApproval!: () => void;
+  const approvalReached = new Promise<void>((resolve) => { announceApproval = resolve; });
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Controlled write tool for caller cancellation test",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute() { throw new Error("Tool must not execute after cancellation"); },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async (request) => {
+      approvalSignal = request.signal;
+      announceApproval();
+      return new Promise<boolean>(() => {});
+    },
+  );
+
+  const execution = gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/cancelled.txt", content: "must not write" } },
+    {
+      runId: "caller-cancel-approval-test",
+      signal: controller.signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  await approvalReached;
+  controller.abort(new Error("caller cancelled"));
+  await assert.rejects(execution, /caller cancelled/);
+  assert.equal(approvalSignal, controller.signal);
+  assert.equal(approvalSignal?.aborted, true);
 });

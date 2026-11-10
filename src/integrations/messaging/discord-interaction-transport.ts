@@ -166,21 +166,32 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
       }
       const allowedUsers = options.allowedUserIds;
       const allowedChannels = options.allowedChannelIds;
-      if ((allowedUsers && (!allowedUsers.length || !allowedUsers.includes(author.id))) ||
-          (allowedChannels && (!allowedChannels.length || !allowedChannels.includes(interaction.channel_id)))) {
+      // Missing or empty allowlists deny all access. Never interpret omitted
+      // security configuration as permission for every Discord user/channel.
+      if (!allowedUsers?.length || !allowedChannels?.length ||
+          !allowedUsers.includes(author.id) || !allowedChannels.includes(interaction.channel_id)) {
         return { status: 200, body: { type: 4, data: { content: "You are not authorized to use Sofia in this channel.", flags: 64 } } };
       }
-      const optionName = incomingCommand === commandName ? taskOptionName : "job_id";
-      const optionValue = interaction.data?.options?.find((option) => option.name === optionName)?.value;
+      const optionsList = interaction.data?.options ?? [];
+      const approvalCommand = incomingCommand === "approve" || incomingCommand === "deny";
+      const optionName = incomingCommand === commandName ? taskOptionName : approvalCommand ? "request_id" : "job_id";
+      const optionValue = optionsList.find((option) => option.name === optionName)?.value;
       const argument = typeof optionValue === "string" ? optionValue : "";
+      const approvalHash = optionsList.find((option) => option.name === "action_hash")?.value;
+      if (approvalCommand && (!/^[0-9a-f-]{36}$/i.test(argument) ||
+          typeof approvalHash !== "string" || !/^[0-9a-f]{64}$/i.test(approvalHash))) {
+        return { status: 200, body: { type: 4, data: { content: "Provide a valid request_id and action_hash.", flags: 64 } } };
+      }
       const event: VerifiedDiscordMessage = {
         signatureVerified: true,
         id: interaction.id,
         channelId: interaction.channel_id,
         author: { id: author.id, ...(author.username ? { username: author.username } : {}), bot: false },
-        content: incomingCommand === commandName
-          ? (argument ? `${commandPrefix} ${argument}` : commandPrefix)
-          : (argument ? `/${incomingCommand} ${argument}` : `/${incomingCommand}`),
+        content: approvalCommand
+          ? `/${incomingCommand} ${argument} ${String(approvalHash)}`
+          : incomingCommand === commandName
+            ? (argument ? `${commandPrefix} ${argument}` : commandPrefix)
+            : (argument ? `/${incomingCommand} ${argument}` : `/${incomingCommand}`),
         createdAt: now,
         attachments: [],
       };

@@ -2,6 +2,11 @@ import { promises as fs, readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
+export interface SkillOutcomeMetrics {
+  durationMs?: number;
+  toolCalls?: number;
+}
+
 export interface SkillPerformance {
   id: string;
   attempts: number;
@@ -10,11 +15,15 @@ export interface SkillPerformance {
   confidence: number;
   avgSteps: number;
   avgRecoveryRounds: number;
+  avgDurationMs: number;
+  avgToolCalls: number;
+  durationSamples: number;
+  toolCallSamples: number;
   lastSuccessAt?: string;
   lastFailureAt?: string;
   lastFailure?: string;
-  successHistory: Array<{ at: string; steps: number; recoveryRounds: number }>;
-  failureHistory: Array<{ at: string; message: string }>;
+  successHistory: Array<{ at: string; steps: number; recoveryRounds: number; durationMs?: number; toolCalls?: number }>;
+  failureHistory: Array<{ at: string; message: string; durationMs?: number; toolCalls?: number }>;
   taskTypes: Record<string, { attempts: number; successes: number; failures: number }>;
 }
 
@@ -38,6 +47,9 @@ export interface SkillRanking {
   confidence: number;
   successRate: number;
   attempts: number;
+  avgDurationMs: number;
+  avgToolCalls: number;
+  efficiencyPenalty: number;
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -80,6 +92,10 @@ export class EvolutionEngine {
           skills: Object.fromEntries(Object.entries(skills).map(([id, skill]) => [id, {
             ...skill,
             id: skill.id ?? id,
+            avgDurationMs: Number.isFinite(skill.avgDurationMs) ? skill.avgDurationMs : 0,
+            avgToolCalls: Number.isFinite(skill.avgToolCalls) ? skill.avgToolCalls : 0,
+            durationSamples: Number.isSafeInteger(skill.durationSamples) ? skill.durationSamples : 0,
+            toolCallSamples: Number.isSafeInteger(skill.toolCallSamples) ? skill.toolCallSamples : 0,
             taskTypes: skill.taskTypes ?? {},
             successHistory: skill.successHistory ?? [],
             failureHistory: skill.failureHistory ?? [],
@@ -98,6 +114,7 @@ export class EvolutionEngine {
     const created: SkillPerformance = {
       id, attempts: 0, successes: 0, failures: 0,
       confidence: 0.5, avgSteps: 0, avgRecoveryRounds: 0,
+      avgDurationMs: 0, avgToolCalls: 0, durationSamples: 0, toolCallSamples: 0,
       successHistory: [], failureHistory: [], taskTypes: {},
     };
     setOwnValue(this.snapshot.skills, id, created);
@@ -106,8 +123,20 @@ export class EvolutionEngine {
 
   rank(ids: readonly string[], taskType = "general"): SkillRanking[] {
     const key = normalizeTaskType(taskType);
-    return ids.map(id => {
-      const s = this.get(id);
+    const candidates = ids.map(id => ({ id, skill: this.get(id) }));
+    const median = (values: number[]): number => {
+      if (values.length === 0) return 0;
+      const sorted = [...values].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+    };
+    const durationBaseline = median(candidates
+      .filter(item => item.skill.durationSamples > 0 && item.skill.avgDurationMs > 0)
+      .map(item => item.skill.avgDurationMs));
+    const callsBaseline = median(candidates
+      .filter(item => item.skill.toolCallSamples > 0 && item.skill.avgToolCalls > 0)
+      .map(item => item.skill.avgToolCalls));
+    return candidates.map(({ id, skill: s }) => {
       // Use a Beta(1, 1) prior so one lucky outcome does not make a
       // barely-tested skill appear perfectly reliable. As evidence grows,
       // the smoothed estimate converges toward the observed success rate.
@@ -119,8 +148,24 @@ export class EvolutionEngine {
         : globalRate;
       const rate = globalRate * (1 - localEvidence) + localRate * localEvidence;
       const evidence = 1 - Math.exp(-s.attempts / 5);
-      const score = rate * 70 + s.confidence * 20 + evidence * 10 - Math.min(10, s.avgRecoveryRounds * 2);
-      return { id, score, confidence: s.confidence, successRate: rate, attempts: local?.attempts ?? s.attempts };
+      // Compare execution cost only among the current candidates and only when
+      // real samples exist. Missing/legacy metrics never count as zero-cost wins.
+      const durationPenalty = durationBaseline > 0 && s.durationSamples > 0 && s.avgDurationMs > 0
+        ? clamp((s.avgDurationMs / durationBaseline - 1) * 4, 0, 8)
+        : 0;
+      const callsPenalty = callsBaseline > 0 && s.toolCallSamples > 0 && s.avgToolCalls > 0
+        ? clamp((s.avgToolCalls / callsBaseline - 1) * 2, 0, 4)
+        : 0;
+      const efficiencyPenalty = durationPenalty + callsPenalty;
+      const score = rate * 70 + s.confidence * 20 + evidence * 10
+        - Math.min(10, s.avgRecoveryRounds * 2) - efficiencyPenalty;
+      return {
+        id, score, confidence: s.confidence, successRate: rate,
+        attempts: local?.attempts ?? s.attempts,
+        avgDurationMs: s.avgDurationMs,
+        avgToolCalls: s.avgToolCalls,
+        efficiencyPenalty,
+      };
     }).sort((a,b) => b.score-a.score);
   }
 
@@ -128,7 +173,7 @@ export class EvolutionEngine {
     return this.rank(ids, taskType)[0]?.id;
   }
 
-  recordSuccess(id: string, steps: number, recoveryRounds = 0, taskType = "general"): void {
+  recordSuccess(id: string, steps: number, recoveryRounds = 0, taskType = "general", metrics: SkillOutcomeMetrics = {}): void {
     const s = this.get(id);
     s.attempts++;
     s.successes++;
@@ -143,13 +188,27 @@ export class EvolutionEngine {
     s.confidence = clamp(s.confidence * 0.8 + 0.2, 0, 1);
     s.avgSteps = s.attempts === 1 ? steps : ((s.avgSteps * (s.attempts - 1)) + steps) / s.attempts;
     s.avgRecoveryRounds = s.attempts === 1 ? recoveryRounds : ((s.avgRecoveryRounds * (s.attempts - 1)) + recoveryRounds) / s.attempts;
+    const durationMs = Number.isFinite(metrics.durationMs) ? Math.max(0, metrics.durationMs!) : undefined;
+    const toolCalls = Number.isFinite(metrics.toolCalls) ? Math.max(0, metrics.toolCalls!) : undefined;
+    if (durationMs !== undefined) {
+      s.durationSamples++;
+      s.avgDurationMs += (durationMs - s.avgDurationMs) / s.durationSamples;
+    }
+    if (toolCalls !== undefined) {
+      s.toolCallSamples++;
+      s.avgToolCalls += (toolCalls - s.avgToolCalls) / s.toolCallSamples;
+    }
     s.lastSuccessAt = new Date().toISOString();
-    s.successHistory.push({ at: s.lastSuccessAt, steps, recoveryRounds });
+    s.successHistory.push({
+      at: s.lastSuccessAt, steps, recoveryRounds,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(toolCalls !== undefined ? { toolCalls } : {}),
+    });
     s.successHistory = s.successHistory.slice(-20);
     void this.persist();
   }
 
-  recordFailure(id: string, message: string, taskType = "general"): void {
+  recordFailure(id: string, message: string, taskType = "general", metrics: SkillOutcomeMetrics = {}): void {
     const s = this.get(id);
     s.attempts++;
     s.failures++;
@@ -164,7 +223,21 @@ export class EvolutionEngine {
     s.confidence = clamp(s.confidence * 0.75 - 0.05, 0.05, 0.95);
     s.lastFailureAt = new Date().toISOString();
     s.lastFailure = message.slice(0, 500);
-    s.failureHistory.push({ at: s.lastFailureAt, message: s.lastFailure });
+    const durationMs = Number.isFinite(metrics.durationMs) ? Math.max(0, metrics.durationMs!) : undefined;
+    const toolCalls = Number.isFinite(metrics.toolCalls) ? Math.max(0, metrics.toolCalls!) : undefined;
+    if (durationMs !== undefined) {
+      s.durationSamples++;
+      s.avgDurationMs += (durationMs - s.avgDurationMs) / s.durationSamples;
+    }
+    if (toolCalls !== undefined) {
+      s.toolCallSamples++;
+      s.avgToolCalls += (toolCalls - s.avgToolCalls) / s.toolCallSamples;
+    }
+    s.failureHistory.push({
+      at: s.lastFailureAt, message: s.lastFailure,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(toolCalls !== undefined ? { toolCalls } : {}),
+    });
     s.failureHistory = s.failureHistory.slice(-20);
     void this.persist();
   }

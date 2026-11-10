@@ -13,6 +13,9 @@ import { loadModelConfigFromEnv } from "./config.js";
 import type { AgentDependencies } from "../agent/types.js";
 import { Reviewer } from "../review/reviewer.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
+import { ContainerSandbox } from "../sandbox.js";
+import { createIsolatedSkillVerifier } from "../skills/isolated-verifier.js";
+import { loadTrustedSkillTestSuite } from "../skills/trusted-test-suites.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
@@ -32,6 +35,8 @@ import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
+import { createAdvancedSkillRegistry } from "../skills/advanced-skill-registry.js";
+import { createAdvancedSkillTools } from "../skills/tools.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -40,6 +45,8 @@ import { CompositeSecurityAudit } from "../security/audit.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import type { SofiaTool } from "../tools/types.js";
+import { connectMcpFromEnv } from "../mcp/env.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
@@ -52,12 +59,72 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
   const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
-    const checks = [
+    const checks: Array<{ name: string; passed: boolean; detail?: string }> = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
-      { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
-      { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
+      { name: "procedure", passed: candidate.skill.procedure.length >= 2 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
+      { name: "verification-requirements", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
     ];
-    return { passed: checks.every((check) => check.passed), checks };
+    const image = process.env.SOFIA_SKILL_SANDBOX_IMAGE;
+    if (!candidate.artifact || !image) {
+      checks.push({
+        name: "runtime-verification",
+        passed: false,
+        detail: !candidate.artifact
+          ? "Candidate has no executable SkillArtifact; prose metadata is not executable evidence."
+          : "SOFIA_SKILL_SANDBOX_IMAGE is not configured with a pinned container image.",
+      });
+      return { passed: false, checks };
+    }
+    try {
+      const verify = createIsolatedSkillVerifier({
+        sandbox: new ContainerSandbox({ image }),
+        // Only operator-supplied deployment configuration can authorize trusted tests.
+        getTrustedTestSuite: (skillCandidate) => loadTrustedSkillTestSuite(skillCandidate),
+      });
+      const evidence = await verify(candidate);
+      const failedChecks = evidence.executedChecks
+        .filter((check) => !check.passed)
+        .map((check) => `${check.name} (exit ${check.exitCode})`);
+      const unsupportedRequirements = candidate.skill.verification
+        .filter((required) => !evidence.executedChecks.some((check) => check.name === required && check.passed));
+      const requirementsSatisfied = unsupportedRequirements.length === 0;
+      const runtimeVerificationPassed = evidence.passed && requirementsSatisfied;
+      checks.push({
+        name: "runtime-verification",
+        passed: runtimeVerificationPassed,
+        detail: runtimeVerificationPassed
+          ? "Executable artifact passed isolated syntax and trusted tests with networking disabled, satisfying every declared verification requirement."
+          : [
+              failedChecks.length > 0 ? `Failed checks: ${failedChecks.join(", ")}.` : undefined,
+              unsupportedRequirements.length > 0
+                ? `Required checks not proven by this runner: ${unsupportedRequirements.join(", ")}.`
+                : undefined,
+              "No promotion is allowed until every required check has passing isolated evidence.",
+            ].filter(Boolean).join(" "),
+      });
+      return {
+        passed: runtimeVerificationPassed && checks.every((check) => check.passed),
+        checks,
+        runtimeVerification: {
+          candidateDigest: evidence.candidateDigest,
+          runnerId: evidence.runnerId,
+          isolatedWorkspaceId: evidence.isolatedWorkspaceId,
+          isolated: true as const,
+          executedChecks: evidence.executedChecks.map(({ name, passed }) => ({ name, passed })),
+          completedAt: evidence.completedAt,
+          testSuiteId: evidence.testSuiteId,
+          testSuiteVersion: evidence.testSuiteVersion,
+          testSuiteDigest: evidence.testSuiteDigest,
+        },
+      };
+    } catch (error) {
+      checks.push({
+        name: "runtime-verification",
+        passed: false,
+        detail: error instanceof Error ? error.message : "Isolated skill verification failed.",
+      });
+      return { passed: false, checks };
+    }
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
@@ -100,12 +167,59 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
         })
       : [];
+    // The advanced catalog/handlers were previously exported but never mounted
+    // into the live Brain tool registry. Build a run-scoped, guarded registry and
+    // expose only verified handlers through the same policy-enforced gateway.
+    // Approval evidence is scoped to this Brain run and consumed once by the
+    // privileged skill verifier. It is created only after the existing approval
+    // handler approves the exact immutable gateway action.
+    const skillApprovalEvidence = new Map<string, {
+      runId: string; principalId: string; toolName: string; actionHash: string;
+    }>();
+    const advancedSkillRegistry = createAdvancedSkillRegistry({
+      projectMemoryStore: projectMemory,
+      securityController: dependencies.security,
+      verifyApproval: (request) => {
+        const evidence = skillApprovalEvidence.get(request.requestId);
+        if (!evidence) return false;
+        // Consume on first verification attempt, including mismatches, so an
+        // approval token can never be replayed against a modified action.
+        skillApprovalEvidence.delete(request.requestId);
+        return evidence.runId === request.runId &&
+          evidence.principalId === request.principalId &&
+          evidence.toolName === request.toolName &&
+          evidence.toolName === `skill.${request.skillId}` &&
+          evidence.actionHash === request.actionHash;
+      },
+    });
+    const runSkillTools = createAdvancedSkillTools(advancedSkillRegistry, principalId ?? "anonymous");
+    const approvalHandler: AgentDependencies["approval"] = dependencies.approval
+      ? async (request) => {
+          const approved = await dependencies.approval!(request);
+          if (approved && request.toolName.startsWith("skill.")) {
+            const skill = advancedSkillRegistry.list().find((item) =>
+              `skill.${item.id}` === request.toolName &&
+              (item.requiresApproval || item.risk === "privileged"),
+            );
+            if (skill) {
+              skillApprovalEvidence.set(request.requestId, {
+                runId: request.runId,
+                principalId: request.principalId ?? "anonymous",
+                toolName: request.toolName,
+                actionHash: request.actionHash,
+              });
+            }
+          }
+          return approved;
+        }
+      : undefined;
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...runBrowserTools,
       ...runDesktopTools,
+      ...runSkillTools,
     ]);
-    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
+    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,approvalHandler,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
       maxConcurrency:intEnv("SOFIA_SUBAGENT_MAX_CONCURRENCY",3,1),
@@ -118,11 +232,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   };
 }
 
-export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
+export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"],additionalTools:readonly SofiaTool[]=[]):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
-  const tools=createToolRegistry(createBuiltinTools());
+  const tools=createToolRegistry([...createBuiltinTools(),...additionalTools]);
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
@@ -135,13 +249,28 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
 }
 
-/** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
+/** Create dependencies with opt-in durable SQLite transcripts and MCP tools; close both stores on shutdown. */
 export async function createSofiaAgentDependenciesWithSessions(
   workspace = process.cwd(),
   approval?: AgentDependencies["approval"],
   databasePath?: string,
-): Promise<AgentDependencies & { closeSessionStore: () => void }> {
-  const dependencies = createSofiaAgentDependencies(workspace, approval);
-  const sessionStore = await SqliteSessionStore.open(databasePath);
-  return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+): Promise<AgentDependencies & { closeSessionStore: () => void; closeMcpRegistry: () => Promise<void> }> {
+  const policy = loadExecutionPolicyFromEnv();
+  const mcpRegistry = await connectMcpFromEnv(policy);
+  let dependencies: AgentDependencies | undefined;
+  let sessionStore: SqliteSessionStore | undefined;
+  try {
+    dependencies = createSofiaAgentDependencies(workspace, approval, mcpRegistry?.tools.list() ?? []);
+    sessionStore = await SqliteSessionStore.open(databasePath);
+    return {
+      ...dependencies,
+      sessionStore,
+      closeSessionStore: () => sessionStore!.close(),
+      closeMcpRegistry: () => mcpRegistry?.close() ?? Promise.resolve(),
+    };
+  } catch (error) {
+    try { sessionStore?.close(); } catch { /* preserve startup error */ }
+    try { await mcpRegistry?.close(); } catch { /* preserve startup error */ }
+    throw error;
+  }
 }

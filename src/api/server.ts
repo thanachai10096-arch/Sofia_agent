@@ -140,6 +140,19 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try { usage.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
+  const notificationChannelAllowlistByKey = config.notificationChannelAllowlistByKey ?? {};
+  for (const [keyId, destinations] of Object.entries(notificationChannelAllowlistByKey)) {
+    if (!/^[a-f0-9]{32}$/.test(keyId) || !Array.isArray(destinations) ||
+        destinations.some((value) => typeof value !== "string" || !value.trim() || value.length > 256 || /[\\r\\n\\0]/.test(value)) ||
+        new Set(destinations).size !== destinations.length) {
+      throw new Error("Invalid Sofia API configuration: notificationChannelAllowlistByKey must map hashed API key IDs to unique destination strings.");
+    }
+  }
+  const isNotificationChannelAllowed = (keyId: string, destination: unknown): boolean => {
+    if (destination === undefined) return true;
+    if (typeof destination !== "string") return false;
+    return notificationChannelAllowlistByKey[keyId]?.includes(destination) === true;
+  };
   const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
@@ -218,6 +231,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
           ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
           ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
           ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
@@ -466,6 +480,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (req.method === "POST" && req.url === "/v1/agent/runs/stream") {
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
+        if (!isNotificationChannelAllowed(auth.keyId, parsed.input.notificationChannelId)) {
+          return json(res, 403, { error: "notification_channel_forbidden" }, origin, config);
+        }
         const input = parsed.input;
         const selectionError = modelSelectionError(input);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
@@ -497,6 +514,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
@@ -531,6 +549,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (req.method === "POST" && req.url === "/v1/agent/runs") {
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
+        if (!isNotificationChannelAllowed(auth.keyId, parsed.input.notificationChannelId)) {
+          return json(res, 403, { error: "notification_channel_forbidden" }, origin, config);
+        }
         const input = parsed.input;
         const selectionError = modelSelectionError(input);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
@@ -551,6 +572,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             : undefined;
           const requestFingerprint = idempotencyFingerprint({
             task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
             ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
             ...(input.context !== undefined ? { context: input.context } : {}),
             ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
@@ -620,6 +642,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
             ...(input.context !== undefined ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) } : {}),
@@ -655,6 +678,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const raw = await body(req, maxBytes);
           if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_cron_schedule" }, origin, config);
           const input = raw as Record<string, unknown>;
+          if (input.notificationChannelId !== undefined &&
+              !isNotificationChannelAllowed(auth.keyId, input.notificationChannelId)) {
+            return json(res, 403, { error: "notification_channel_forbidden" }, origin, config);
+          }
           if (typeof input.name !== "string" || input.name.length > 200 ||
               typeof input.task !== "string" || input.task.length > 20_000 ||
               typeof input.timeZone !== "string" || input.timeZone.length > 100) {
@@ -675,7 +702,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 400, { error: "invalid_cron_schedule", message: "enabled must be a boolean" }, origin, config);
           }
           const scheduleInput: CronScheduleInput = {
-            name: input.name, task: input.task, timeZone: input.timeZone, ownerKeyId: auth.keyId,
+            name: input.name, task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}), timeZone: input.timeZone, ownerKeyId: auth.keyId,
             ...(typeof input.cron === "string" ? { cron: input.cron } : {}),
             ...(typeof input.runAt === "string" ? { runAt: input.runAt } : {}),
             ...(typeof input.enabled === "boolean" ? { enabled: input.enabled } : {}),
@@ -759,6 +787,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
+        if (!isNotificationChannelAllowed(auth.keyId, parsed.input.notificationChannelId)) {
+          return json(res, 403, { error: "notification_channel_forbidden" }, origin, config);
+        }
         const input = parsed.input;
         const selectionError = modelSelectionError(input);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
@@ -767,6 +798,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           const job = await deps.jobRuntime.submit({
             task: input.task,
+          ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),

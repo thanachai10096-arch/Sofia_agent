@@ -3,10 +3,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { VersionedSkillLifecycle } from "./skill-lifecycle.js";
+import { VersionedSkillLifecycle, getSkillCandidateDigest } from "./skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "./managed-skill-learning.js";
 import type { LearnedSkillCandidate } from "./learning.js";
+
+const artifact = {
+  format: "sofia-node-skill-v1" as const,
+  runtime: "node" as const,
+  entrypoint: "index.mjs",
+  files: { "index.mjs": "export function run() { return 42; }" },
+};
 
 const candidate: LearnedSkillCandidate = {
   name: "repair-type_error",
@@ -22,8 +29,23 @@ function fixture() {
   const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-managed-skill-"));
   const platform = new InMemorySkillsPlatform();
   const lifecycle = new VersionedSkillLifecycle(platform, async (skill) => ({
-    passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length),
-    checks: [{ name: "metadata-and-verification", passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length) }],
+    passed: true,
+    checks: [{ name: "metadata-and-verification", passed: true }],
+    runtimeVerification: {
+      candidateDigest: getSkillCandidateDigest(skill),
+      runnerId: "isolated-test-runner",
+      isolatedWorkspaceId: "managed-skill-test-workspace",
+      isolated: true as const,
+      // The production v1 runner proves only syntax and trusted test execution.
+      executedChecks: [
+        { name: "syntax", passed: true },
+        { name: "test", passed: true },
+      ],
+      completedAt: new Date().toISOString(),
+      testSuiteId: "trusted-test-fixture",
+      testSuiteVersion: "1",
+      testSuiteDigest: "a".repeat(64),
+    },
   }), { file: path.join(directory, "lifecycle.json") });
   return { directory, platform, lifecycle };
 }
@@ -35,8 +57,8 @@ test("managed skill learning activates only after explicit approval", async () =
     const handler = createManagedSkillLearningHandler(f.lifecycle, async (request) => {
       approvalCalls.push({ toolName: request.toolName, risk: request.risk });
       return true;
-    });
-    assert.equal(await handler(candidate, "run-1", "operator-1"), true);
+    }, async () => artifact);
+    assert.equal(await handler({ ...candidate, verification: ["test"] }, "run-1", "operator-1"), true);
     assert.equal(approvalCalls.length, 1);
     assert.equal(approvalCalls[0]?.toolName, "skill.lifecycle.promote");
     assert.equal(approvalCalls[0]?.risk, "high");
@@ -49,10 +71,28 @@ test("managed skill learning activates only after explicit approval", async () =
 test("managed skill learning fails closed when approval is absent or declined", async () => {
   const f = fixture();
   try {
-    const noApproval = createManagedSkillLearningHandler(f.lifecycle);
-    assert.equal(await noApproval(candidate, "run-2"), false);
-    const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false);
+    const noArtifactCompiler = createManagedSkillLearningHandler(f.lifecycle, async () => true);
+    assert.equal(await noArtifactCompiler(candidate, "run-2"), false);
+    const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false, async () => artifact);
     assert.equal(await declined(candidate, "run-3"), false);
+    assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
+  } finally {
+    rmSync(f.directory, { recursive: true, force: true });
+  }
+});
+
+test("managed skill learning does not discard unsupported requested verification", async () => {
+  const f = fixture();
+  try {
+    const handler = createManagedSkillLearningHandler(
+      f.lifecycle,
+      async () => true,
+      async () => artifact,
+    );
+    // The original candidate requires typecheck + test + build. The v1
+    // runner proves only syntax + test, so silently narrowing requirements
+    // must never make this candidate eligible for promotion.
+    assert.equal(await handler(candidate, "run-unsupported"), false);
     assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
   } finally {
     rmSync(f.directory, { recursive: true, force: true });

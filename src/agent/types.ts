@@ -16,6 +16,8 @@ export interface AgentRequest {
   modelRouteId?: string;
   sessionId?: string;
   principalId?: string;
+  /** Trusted messaging destination for approval prompts; supplied by the authenticated host. */
+  notificationChannelId?: string;
   /** Desktop capabilities are derived by the trusted host from authenticated scopes. */
   desktopCapabilities?: DesktopCapability[];
   maxSteps?: number;

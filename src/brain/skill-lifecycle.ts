@@ -1,13 +1,67 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { SkillPackage, SkillsPlatform } from "../skills/platform.js";
 import { redactSecrets } from "../security/guard.js";
+import {
+  SkillBenchmarkEngine,
+  type SkillBenchmarkReport,
+  type SkillBenchmarkComparison,
+} from "../skills/skill-benchmark.js";
 
 export type SkillLifecycleStatus = "candidate" | "verified" | "rejected" | "active" | "superseded" | "rolled_back";
 export interface SkillEvaluationCheck { name: string; passed: boolean; detail?: string; }
-export interface SkillEvaluationResult { passed: boolean; checks: SkillEvaluationCheck[]; evaluatedAt?: string; }
-export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; }
+export interface SkillRuntimeVerificationEvidence {
+  candidateDigest: string;
+  runnerId: string;
+  isolatedWorkspaceId: string;
+  isolated: true;
+  executedChecks: Array<{ name: string; passed: boolean }>;
+  completedAt: string;
+  testSuiteId?: string;
+  testSuiteVersion?: string;
+  testSuiteDigest?: string;
+}
+export interface SkillEvaluationResult {
+  passed: boolean;
+  checks: SkillEvaluationCheck[];
+  runtimeVerification?: SkillRuntimeVerificationEvidence;
+  benchmark?: {
+    report: SkillBenchmarkReport;
+    comparison: SkillBenchmarkComparison;
+    baselineReport?: SkillBenchmarkReport;
+  };
+  evaluatedAt?: string;
+  benchmarkReport?: SkillBenchmarkReport;
+}
+export function getSkillCandidateDigest(candidate: SkillPackage): string {
+  return createHash("sha256").update(JSON.stringify(candidate)).digest("hex");
+}
+function hasValidRuntimeEvidence(candidate: SkillPackage, evidence: SkillRuntimeVerificationEvidence | undefined): evidence is SkillRuntimeVerificationEvidence {
+  if (!evidence || evidence.isolated !== true || evidence.candidateDigest !== getSkillCandidateDigest(candidate) ||
+      (candidate.artifact !== undefined && (
+        typeof evidence.testSuiteId !== "string" || !/^[A-Za-z0-9._:-]{1,120}$/.test(evidence.testSuiteId) ||
+        typeof evidence.testSuiteVersion !== "string" || !evidence.testSuiteVersion.trim() ||
+        typeof evidence.testSuiteDigest !== "string" || !/^[a-f0-9]{64}$/.test(evidence.testSuiteDigest)
+      )) ||
+      typeof evidence.runnerId !== "string" || !evidence.runnerId.trim() ||
+      typeof evidence.isolatedWorkspaceId !== "string" || !evidence.isolatedWorkspaceId.trim() ||
+      typeof evidence.completedAt !== "string" || !Number.isFinite(Date.parse(evidence.completedAt)) ||
+      !Array.isArray(evidence.executedChecks) ||
+      !evidence.executedChecks.every((item) => isRecord(item) && typeof item.name === "string" && typeof item.passed === "boolean")) return false;
+  const names = evidence.executedChecks.map((item) => item.name);
+  return new Set(names).size === names.length &&
+    candidate.skill.verification.every((required) =>
+      evidence.executedChecks.some((item) => item.name === required && item.passed === true));
+}
+export interface SkillResearchProvenance { url: string; contentHash: string; }
+export interface SkillProvenance {
+  source: string;
+  evidenceIds: string[];
+  confidence: number;
+  /** Bounded source references supporting research-assisted candidates; no raw excerpts are persisted. */
+  researchSources?: SkillResearchProvenance[];
+}
 export interface SkillLifecycleRecord {
   id: string;
   skillId: string;
@@ -18,12 +72,95 @@ export interface SkillLifecycleRecord {
   updatedAt: string;
   evaluation?: SkillEvaluationResult;
 }
-export interface SkillLifecycleOptions { file: string; minimumConfidence?: number; }
+export interface SkillLifecycleOptions {
+  file: string;
+  minimumConfidence?: number;
+  /** When set, candidates must pass a same-version, same-fixture benchmark comparison. */
+  benchmarkEngine?: SkillBenchmarkEngine;
+}
 export type SkillCandidateEvaluator = (candidate: SkillPackage) => Promise<SkillEvaluationResult>;
 interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[]; activeBySkill: Record<string, string>; }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
+function isAllowedSystemPathAlias(candidate: string): boolean {
+  // macOS exposes these conventional paths as symlinks into /private.
+  // Permit only the exact OS-owned aliases; arbitrary symlink ancestors remain forbidden.
+  if (process.platform !== "darwin" || (candidate !== "/var" && candidate !== "/tmp")) return false;
+  try {
+    const canonical = realpathSync(candidate);
+    return canonical === path.join("/private", path.basename(candidate));
+  } catch {
+    return false;
+  }
+}
+
+function assertNoSymlinkAncestors(target: string): void {
+  const resolved = path.resolve(target);
+  const root = path.parse(resolved).root;
+  let current = path.dirname(resolved);
+  while (current !== root) {
+    try {
+      if (lstatSync(current).isSymbolicLink() && !isAllowedSystemPathAlias(current)) {
+        throw new Error("Skill lifecycle path must not contain symbolic links");
+      }
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+}
+
+function resolveLifecycleFilePath(target: string): string {
+  const resolved = path.resolve(target);
+  const parent = path.dirname(resolved);
+  assertNoSymlinkAncestors(resolved);
+  try {
+    if (lstatSync(resolved).isSymbolicLink()) {
+      throw new Error("Skill lifecycle file must not be a symbolic link");
+    }
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+  }
+
+  let ancestor = parent;
+  const missing: string[] = [];
+  while (true) {
+    try {
+      if (lstatSync(ancestor).isSymbolicLink()) {
+        throw new Error("Skill lifecycle parent directory must not be a symbolic link");
+      }
+      break;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      const next = path.dirname(ancestor);
+      if (next === ancestor) throw error;
+      missing.unshift(path.basename(ancestor));
+      ancestor = next;
+    }
+  }
+  // Canonicalize existing OS path aliases (for example macOS /var -> /private/var)
+  // before storing the path, so later checks do not reject legitimate system paths.
+  return path.join(realpathSync(ancestor), ...missing, path.basename(resolved));
+}
+function assertNoSymlinkPath(target: string): void {
+  const resolved = path.resolve(target);
+  const root = path.parse(resolved).root;
+  let current = root;
+  for (const part of resolved.slice(root.length).split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        throw new Error("Skill lifecycle path must not contain symbolic links");
+      }
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") break;
+      throw error;
+    }
+  }
+}
 function validatePackage(value: SkillPackage): SkillPackage {
   if (!isRecord(value) || !isRecord(value.skill) || typeof value.skill.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value.skill.id)) {
     throw new Error("Invalid skill package or skill id");
@@ -53,6 +190,7 @@ export class VersionedSkillLifecycle {
   private snapshot: LifecycleSnapshot = { schemaVersion: 1, records: [], activeBySkill: {} };
   private readonly file: string;
   private readonly minimumConfidence: number;
+  private readonly benchmarkEngine?: SkillBenchmarkEngine;
 
   constructor(
     private readonly platform: SkillsPlatform,
@@ -60,8 +198,9 @@ export class VersionedSkillLifecycle {
     options: SkillLifecycleOptions,
   ) {
     if (!path.isAbsolute(options.file)) throw new Error("Skill lifecycle path must be absolute");
-    this.file = options.file;
+    this.file = resolveLifecycleFilePath(options.file);
     this.minimumConfidence = options.minimumConfidence ?? 0.7;
+    this.benchmarkEngine = options.benchmarkEngine;
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
     this.load();
     const activeRecords: Array<{ skillId: string; record: SkillLifecycleRecord }> = [];
@@ -75,14 +214,36 @@ export class VersionedSkillLifecycle {
       activeRecords.push({ skillId, record });
     }
     // Validate the entire restore set before mutating the supplied platform.
-    for (const { record } of activeRecords) this.platform.register(clone(record.package));
+    // If a platform adapter fails partway through registration, compensate so
+    // construction cannot leave a partially restored active-skill set behind.
+    const registeredDuringRestore: string[] = [];
+    try {
+      for (const { skillId, record } of activeRecords) {
+        if (this.platform.get(skillId)) continue;
+        this.platform.register(clone(record.package));
+        registeredDuringRestore.push(skillId);
+      }
+    } catch (error) {
+      for (const skillId of registeredDuringRestore.reverse()) {
+        try { this.platform.remove(skillId); }
+        catch { /* Preserve the original restore failure. */ }
+      }
+      throw error;
+    }
   }
 
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
     const safePackage = validatePackage(skillPackage);
     if (!isRecord(provenance) || typeof provenance.source !== "string" || !provenance.source.trim() ||
-        !Array.isArray(provenance.evidenceIds) || !provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
-        !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1) {
+        !Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length === 0 ||
+        !provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
+        new Set(provenance.evidenceIds).size !== provenance.evidenceIds.length ||
+        !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1 ||
+        (provenance.researchSources !== undefined &&
+          (!Array.isArray(provenance.researchSources) || provenance.researchSources.length > 32 ||
+           !provenance.researchSources.every((item) => isRecord(item) &&
+             typeof item.url === "string" && item.url.startsWith("https://") && item.url.length <= 2048 &&
+             typeof item.contentHash === "string" && /^[a-f0-9]{64}$/.test(item.contentHash))))) {
       throw new Error("Invalid skill provenance");
     }
     const now = new Date().toISOString();
@@ -114,15 +275,57 @@ export class VersionedSkillLifecycle {
         !result.checks.every((check) => isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
       result = { passed: false, checks: [{ name: "evaluation-result", passed: false, detail: "Evaluator returned malformed or empty evidence" }] };
     }
+    let benchmark: { report: SkillBenchmarkReport; comparison: SkillBenchmarkComparison } | undefined;
+    let benchmarkPassed = true;
+    if (this.benchmarkEngine) {
+      if (!result.benchmarkReport ||
+          result.benchmarkReport.skillId !== candidate.skillId ||
+          result.benchmarkReport.version !== candidate.package.version) {
+        benchmarkPassed = false;
+      } else {
+        try {
+          const comparison = this.benchmarkEngine.compare(result.benchmarkReport);
+          const baselineReport = this.benchmarkEngine.getBaseline(candidate.skillId, candidate.package.version);
+          benchmark = {
+            report: clone(result.benchmarkReport),
+            comparison: clone(comparison),
+            ...(baselineReport ? { baselineReport: clone(baselineReport) } : {}),
+          };
+          benchmarkPassed = comparison.verdict === "stable" || comparison.verdict === "improved";
+        } catch {
+          benchmarkPassed = false;
+        }
+      }
+    }
+    const runtimeEvidenceValid = hasValidRuntimeEvidence(candidate.package, result.runtimeVerification);
     const before = clone(this.snapshot);
     const record = this.requireRecord(candidateId);
     record.evaluation = {
-      passed: result.passed === true && result.checks.every((check) => check.passed === true),
-      checks: result.checks.map((check) => ({
-        name: check.name.slice(0, 200),
-        passed: check.passed,
-        ...(typeof check.detail === "string" ? { detail: String(redactSecrets(check.detail)).slice(0, 1000) } : {}),
-      })),
+      passed: result.passed === true &&
+        result.checks.every((check) => check.passed === true) &&
+        runtimeEvidenceValid &&
+        benchmarkPassed,
+      ...(runtimeEvidenceValid
+        ? { runtimeVerification: clone(result.runtimeVerification) }
+        : {}),
+      ...(benchmark ? { benchmark } : {}),
+      checks: [
+        ...result.checks.map((check) => ({
+          name: check.name.slice(0, 200),
+          passed: check.passed,
+          ...(typeof check.detail === "string" ? { detail: String(redactSecrets(check.detail)).slice(0, 1000) } : {}),
+        })),
+        {
+          name: "runtime-verification",
+          passed: runtimeEvidenceValid,
+          ...(!runtimeEvidenceValid ? {
+            detail: "Runtime evidence is missing, does not match the candidate, or does not satisfy every declared verification requirement.",
+          } : {}),
+        },
+        ...(this.benchmarkEngine && !benchmarkPassed
+          ? [{ name: "benchmark-regression", passed: false, detail: benchmark?.comparison.reasons.join("; ") ?? "Missing, mismatched, or invalid benchmark evidence" }]
+          : []),
+      ],
       evaluatedAt: new Date().toISOString(),
     };
     record.status = record.evaluation.passed ? "verified" : "rejected";
@@ -134,7 +337,11 @@ export class VersionedSkillLifecycle {
 
   promote(candidateId: string): SkillLifecycleRecord {
     const candidate = this.requireRecord(candidateId);
-    if (candidate.status !== "verified" || candidate.evaluation?.passed !== true) throw new Error("Only successfully evaluated candidates can be promoted");
+    if (candidate.status !== "verified" || candidate.evaluation?.passed !== true ||
+        !hasValidRuntimeEvidence(candidate.package, candidate.evaluation.runtimeVerification) ||
+        !this.hasValidBenchmarkEvidence(candidate.package, candidate.evaluation)) {
+      throw new Error("Only candidates with valid isolated runtime verification can be promoted");
+    }
     if (candidate.provenance.confidence < this.minimumConfidence) throw new Error("Skill candidate confidence is below the promotion threshold");
     const before = clone(this.snapshot);
     const previousPackage = this.platform.get(candidate.skillId);
@@ -189,8 +396,10 @@ export class VersionedSkillLifecycle {
       this.persist();
     } catch (error) {
       this.snapshot = before;
-      try { if (platformCurrent) this.platform.register(platformCurrent); }
-      catch { /* Keep original failure; operator must inspect platform consistency. */ }
+      try {
+        if (platformCurrent) this.platform.register(platformCurrent);
+        else this.platform.remove(skillId);
+      } catch { /* Keep original failure; operator must inspect platform consistency. */ }
       throw error;
     }
     return clone(previous);
@@ -208,29 +417,67 @@ export class VersionedSkillLifecycle {
     return id ? this.get(id) : undefined;
   }
 
+  private hasValidBenchmarkEvidence(skillPackage: SkillPackage, evaluation: SkillEvaluationResult | undefined): boolean {
+    if (!this.benchmarkEngine) return true;
+    const report = evaluation?.benchmark?.report;
+    if (!report || report.skillId !== skillPackage.skill.id || report.version !== skillPackage.version) return false;
+    try {
+      const comparison = this.benchmarkEngine.compare(report);
+      return comparison.verdict === "stable" || comparison.verdict === "improved";
+    } catch {
+      return false;
+    }
+  }
+
   private requireRecord(id: string): SkillLifecycleRecord {
     const item = this.snapshot.records.find((record) => record.id === id);
     if (!item) throw new Error("Unknown skill lifecycle record: " + id);
     return item;
   }
   private load(): void {
+    // Validate the complete path before reading; checking only the leaf file
+    // still follows a symlinked parent directory.
+    assertNoSymlinkPath(this.file);
     if (!existsSync(this.file)) return;
-    if (lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
     const parsed: unknown = JSON.parse(readFileSync(this.file, "utf8"));
     if (!isRecord(parsed) || parsed.schemaVersion !== 1 || !Array.isArray(parsed.records) || !isRecord(parsed.activeBySkill)) {
       throw new Error("Unsupported or corrupt skill lifecycle store");
     }
+    const legacyUnverifiedIds = new Set<string>();
+    // Restore only validated, safety-clean baselines captured alongside a
+    // lifecycle evaluation. This keeps active skills verifiable after restart.
+    if (this.benchmarkEngine) {
+      for (const item of parsed.records) {
+        if (!isRecord(item) || !isRecord(item.evaluation) || !isRecord(item.evaluation.benchmark)) continue;
+        const benchmark = item.evaluation.benchmark;
+        if (!isRecord(benchmark.baselineReport) ||
+            typeof benchmark.baselineReport.skillId !== "string" ||
+            typeof benchmark.baselineReport.version !== "string") continue;
+        if (this.benchmarkEngine.getBaseline(benchmark.baselineReport.skillId, benchmark.baselineReport.version)) continue;
+        try {
+          this.benchmarkEngine.setBaseline(benchmark.baselineReport as unknown as SkillBenchmarkReport);
+        } catch {
+          // Invalid persisted baselines are ignored; active records then fail closed.
+        }
+      }
+    }
+    const seenRecordIds = new Set<string>();
     const records: SkillLifecycleRecord[] = parsed.records.map((item) => {
       if (!isRecord(item) || typeof item.id !== "string" || !item.id.trim() || item.id.length > 200 ||
-          typeof item.skillId !== "string" || !item.skillId.trim() ||
+          seenRecordIds.has(item.id) ||
+          typeof item.skillId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(item.skillId) ||
           !["candidate", "verified", "rejected", "active", "superseded", "rolled_back"].includes(String(item.status)) ||
           !isRecord(item.provenance) || typeof item.provenance.source !== "string" || !item.provenance.source.trim() ||
-          !Array.isArray(item.provenance.evidenceIds) || !item.provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
+          !Array.isArray(item.provenance.evidenceIds) || item.provenance.evidenceIds.length === 0 ||
+          !item.provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
+          new Set(item.provenance.evidenceIds).size !== item.provenance.evidenceIds.length ||
           typeof item.provenance.confidence !== "number" || !Number.isFinite(item.provenance.confidence) ||
           item.provenance.confidence < 0 || item.provenance.confidence > 1 ||
-          typeof item.createdAt !== "string" || typeof item.updatedAt !== "string") {
+          typeof item.createdAt !== "string" || !Number.isFinite(Date.parse(item.createdAt)) ||
+          typeof item.updatedAt !== "string" || !Number.isFinite(Date.parse(item.updatedAt))) {
         throw new Error("Invalid skill lifecycle record");
       }
+      seenRecordIds.add(item.id);
       const safePackage = validatePackage(item.package as SkillPackage);
       if (safePackage.skill.id !== item.skillId) throw new Error("Skill lifecycle package id does not match record");
       if (item.evaluation !== undefined) {
@@ -240,20 +487,37 @@ export class VersionedSkillLifecycle {
           throw new Error("Invalid skill lifecycle evaluation");
         }
       }
+      const restored = { ...(clone(item) as unknown as SkillLifecycleRecord), package: safePackage };
       if (item.status === "active" &&
           (!isRecord(item.evaluation) || item.evaluation.passed !== true ||
            !Array.isArray(item.evaluation.checks) || item.evaluation.checks.length === 0 ||
            !item.evaluation.checks.every((check) => isRecord(check) && check.passed === true) ||
+           !hasValidRuntimeEvidence(safePackage, item.evaluation.runtimeVerification as SkillRuntimeVerificationEvidence | undefined) ||
+           !this.hasValidBenchmarkEvidence(safePackage, restored.evaluation) ||
            item.provenance.confidence < this.minimumConfidence)) {
-        throw new Error("Active skill lifecycle record lacks valid evaluation or confidence");
+        // Schema-v1 records created before package-bound runtime evidence existed
+        // must not keep executing, but must not make the whole agent fail to boot.
+        restored.status = "rejected";
+        restored.evaluation = {
+          passed: false,
+          checks: [
+            ...(restored.evaluation?.checks ?? []),
+            { name: "legacy-runtime-evidence", passed: false, detail: "Deactivated during migration: no package-bound isolated runtime evidence." },
+          ],
+          evaluatedAt: new Date().toISOString(),
+        };
+        restored.updatedAt = new Date().toISOString();
+        legacyUnverifiedIds.add(restored.id);
       }
-      return { ...(clone(item) as unknown as SkillLifecycleRecord), package: safePackage };
+      return restored;
     });
     const activeBySkill: Record<string, string> = {};
     for (const [skillId, recordId] of Object.entries(parsed.activeBySkill)) {
       if (typeof recordId !== "string" || !recordId.trim()) throw new Error("Invalid skill lifecycle active pointer");
-      const record = records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
+      const record = records.find((item) => item.id === recordId && item.skillId === skillId);
       if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
+      if (legacyUnverifiedIds.has(recordId)) continue;
+      if (record.status !== "active") throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
       if (Object.prototype.hasOwnProperty.call(activeBySkill, skillId)) throw new Error("Duplicate skill lifecycle active pointer");
       activeBySkill[skillId] = recordId;
     }
@@ -263,11 +527,15 @@ export class VersionedSkillLifecycle {
       }
     }
     this.snapshot = { schemaVersion: 1, records, activeBySkill };
+    if (legacyUnverifiedIds.size > 0) this.persist();
   }
   private persist(): void {
     const directory = path.dirname(this.file);
+    // Check before and after mkdir: recursive creation follows existing symlink
+    // ancestors, so checking only the final file does not protect its location.
+    assertNoSymlinkPath(this.file);
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    if (existsSync(this.file) && lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
+    assertNoSymlinkPath(this.file);
     const temporary = this.file + "." + process.pid + "." + randomUUID() + ".tmp";
     try {
       writeFileSync(temporary, JSON.stringify(this.snapshot, null, 2) + "\n", { encoding: "utf8", flag: "wx", mode: 0o600 });

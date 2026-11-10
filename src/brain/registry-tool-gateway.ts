@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { ExecutionPolicy } from "../security/policy.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import { validateToolInput, type ToolRegistry } from "../tools/types.js";
-import { effectiveToolEffects, toolPermission, riskRank } from "../security/policy.js";
+import { effectiveToolEffects, toolPermission, riskRank, shouldRequireApproval } from "../security/policy.js";
 import { assessAction, redactSecrets, type RiskLevel } from "../security/guard.js";
 import { issueCapability, verifyCapability } from "../security/capability.js";
 import type { AgentDependencies } from "../agent/types.js";
@@ -11,6 +11,41 @@ import type { SecurityAuditSink } from "../security/audit.js";
 import { SecurityController } from "../security/controller.js";
 import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, WorkspaceCheckpoint, ToolCall } from "./types.js";
 import { RuntimeCheckpointManager, type CheckpointManager } from "./checkpoint.js";
+
+function abortable<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(signal.reason ?? new Error("Aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve()
+      .then(() => {
+        signal.throwIfAborted();
+        return operation();
+      })
+      .then(
+        (value) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (signal.aborted) reject(signal.reason ?? new Error("Aborted"));
+          else resolve(value);
+        },
+        (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(error);
+        },
+      );
+  });
+}
 
 function digest(value:string){return createHash("sha256").update(value).digest("hex");}
 function deepFreeze<T>(value:T):T {
@@ -65,20 +100,25 @@ export class RegistryToolGateway implements ToolGateway {
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:"Risk exceeds policy maximum.",input:redactSecrets(input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Action risk exceeds Sofia security policy."}};
     }
-    const requiresApproval=permission.requireApproval===true||assessment.requireApproval||descriptor.effects.some(x=>x==="write"||x==="shell"||x==="destructive"||x==="browser");
+    // Skill metadata can require approval even when the underlying action is read-only.
+    // This explicit requirement is additive and cannot be weakened by risk thresholds.
+    const requiresApproval=registeredTool.requiresApproval===true||shouldRequireApproval(this.policy,permission,assessment.risk);
     const capabilitySecret=this.policy.capabilitySecret;
     const capability=capabilitySecret?issueCapability({principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret):undefined;
     if(capabilitySecret && capability && !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret)) return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability verification failed."}};
     await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:requiresApproval?"approval_required":"allow",input:redactSecrets(input)});
+    let approvalEvidence: {requestId:string;runId:string;principalId:string;toolName:string;actionHash:string}|undefined;
     if(requiresApproval){
       if(!this.approval)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is required for this tool."}};
       context.notifyApproval(true);
       try{
-        const approved=await this.approval({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk});
+        const requestId=randomUUID();
+        const approved=await abortable(context.signal,()=>this.approval!({requestId,runId:context.runId,principalId:context.principalId,notificationChannelId:context.notificationChannelId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk,signal:context.signal}));
         if(!approved){
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
         }
+        approvalEvidence={requestId,runId:context.runId,principalId:context.principalId??"anonymous",toolName:call.tool,actionHash:assessment.actionHash};
       }finally{context.notifyApproval(false);}
     }
     try{
@@ -93,7 +133,7 @@ export class RegistryToolGateway implements ToolGateway {
       const boundSignal=this.security.bindSignal(context.signal);
       let data:unknown;
       try {
-        data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
+        data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal,approval:approvalEvidence});
       } finally {
         boundSignal.dispose();
       }

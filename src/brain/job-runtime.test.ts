@@ -997,3 +997,61 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime atomically grants one notification delivery lease across workers", async () => {
+  const namespace = "job-runtime-notification-lease-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: false, state: "failed" }),
+  } as unknown as SofiaBrain;
+  const first = new DurableJobRuntime(() => brain, undefined, namespace);
+  const second = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await first.submit({ task: "notification lease" });
+
+  let current = await first.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await first.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+
+  const claims = await Promise.all([
+    first.claimNotificationDelivery(submitted.id),
+    second.claimNotificationDelivery(submitted.id),
+  ]);
+  const tokens = claims.filter((token): token is string => Boolean(token));
+  assert.equal(tokens.length, 1, "only one worker may own the delivery lease");
+  assert.ok(tokens[0]);
+  assert.equal((await first.get(submitted.id))?.notificationLeaseToken, undefined, "notification lease tokens must not be exposed to callers");
+
+  const winner = claims[0] ? first : second;
+  const token = tokens[0]!;
+  await winner.markNotificationDelivered(submitted.id, token);
+
+  assert.equal(await first.claimNotificationDelivery(submitted.id), undefined);
+  assert.equal((await second.get(submitted.id))?.notificationDelivered, true);
+});
+
+test("DurableJobRuntime releases a failed notification delivery lease for retry", async () => {
+  const namespace = "job-runtime-notification-release-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: false, state: "failed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({ task: "notification retry" });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+
+  const firstToken = await runtime.claimNotificationDelivery(submitted.id);
+  assert.ok(firstToken);
+  await runtime.releaseNotificationDelivery(submitted.id, firstToken);
+  const retryToken = await runtime.claimNotificationDelivery(submitted.id);
+  assert.ok(retryToken);
+  assert.notEqual(retryToken, firstToken);
+  await runtime.markNotificationDelivered(submitted.id, retryToken);
+  assert.equal((await runtime.get(submitted.id))?.notificationDelivered, true);
+});

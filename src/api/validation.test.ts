@@ -59,3 +59,14 @@ test("API run validation rejects malformed model route selectors", () => {
   });
   assert.equal(validateAgentRunInput({ task: "inspect", modelRouteId: 123 }).valid, false);
 });
+
+
+test("validates optional trusted notification channel IDs", () => {
+  assert.equal(validateAgentRunInput({ task: "hello", notificationChannelId: "telegram:12345" }).valid, true);
+  assert.deepEqual(validateAgentRunInput({ task: "hello", notificationChannelId: "  " }), {
+    valid: false, error: "invalid_notification_channel_id",
+  });
+  assert.deepEqual(validateAgentRunInput({ task: "hello", notificationChannelId: "telegram:123\\nspoof" }), {
+    valid: false, error: "invalid_notification_channel_id",
+  });
+});
