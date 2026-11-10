@@ -848,14 +848,14 @@ test("Brain saves reusable workflow memory only after verified completion and ex
 });
 
 
-test("Brain rejects unknown delegated tools and falls back to the primary planner", async () => {
+test("Brain recovers from failed tool results without evidence and rejects unknown delegated tools", async () => {
   let writes = 0;
   const tools = makeTools();
   const originalExecute = tools.execute.bind(tools);
   tools.execute = async (call, context) => {
     if (call.tool === "workspace.write_file") {
       writes += 1;
-      if (writes === 1) return { ok: false, data: null, evidenceId: "failure-unknown-delegate", error: { category: "tool_error", message: "initial write failed" } };
+      if (writes === 1) return { ok: false, data: null, evidenceId: "", error: { category: "tool_error", message: "initial write failed" } };
     }
     return originalExecute(call, context);
   };
