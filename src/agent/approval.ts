@@ -1,5 +1,7 @@
 import type { RiskLevel } from "../security/guard.js";
 export interface ApprovalRequest {
+  /** Gateway-generated correlation ID, reused as the durable queue record ID. */
+  requestId?: string;
   runId:string;
   principalId?:string;
   /** Trusted reply destination, carried from the authenticated messaging job. */

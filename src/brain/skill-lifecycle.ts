@@ -1,12 +1,45 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { SkillPackage, SkillsPlatform } from "../skills/platform.js";
 import { redactSecrets } from "../security/guard.js";
 
 export type SkillLifecycleStatus = "candidate" | "verified" | "rejected" | "active" | "superseded" | "rolled_back";
 export interface SkillEvaluationCheck { name: string; passed: boolean; detail?: string; }
-export interface SkillEvaluationResult { passed: boolean; checks: SkillEvaluationCheck[]; evaluatedAt?: string; }
+export interface SkillRuntimeVerificationEvidence {
+  candidateDigest: string;
+  runnerId: string;
+  isolatedWorkspaceId: string;
+  isolated: true;
+  executedChecks: Array<{ name: string; passed: boolean }>;
+  completedAt: string;
+  testSuiteId?: string;
+  testSuiteVersion?: string;
+  testSuiteDigest?: string;
+}
+export interface SkillEvaluationResult {
+  passed: boolean;
+  checks: SkillEvaluationCheck[];
+  runtimeVerification?: SkillRuntimeVerificationEvidence;
+  evaluatedAt?: string;
+}
+function hasValidRuntimeEvidence(candidate: SkillPackage, evidence: SkillRuntimeVerificationEvidence | undefined): boolean {
+  if (!candidate.artifact) return true;
+  if (!evidence || evidence.isolated !== true ||
+      evidence.candidateDigest !== createHash("sha256").update(JSON.stringify(candidate)).digest("hex") ||
+      typeof evidence.testSuiteId !== "string" || !/^[A-Za-z0-9._:-]{1,120}$/.test(evidence.testSuiteId) ||
+      typeof evidence.testSuiteVersion !== "string" || !evidence.testSuiteVersion.trim() ||
+      typeof evidence.testSuiteDigest !== "string" || !/^[a-f0-9]{64}$/.test(evidence.testSuiteDigest) ||
+      typeof evidence.runnerId !== "string" || !evidence.runnerId.trim() ||
+      typeof evidence.isolatedWorkspaceId !== "string" || !evidence.isolatedWorkspaceId.trim() ||
+      typeof evidence.completedAt !== "string" || !Number.isFinite(Date.parse(evidence.completedAt)) ||
+      !Array.isArray(evidence.executedChecks) ||
+      !evidence.executedChecks.every((item) => item && typeof item.name === "string" && typeof item.passed === "boolean")) return false;
+  const names = evidence.executedChecks.map((item) => item.name);
+  return new Set(names).size === names.length &&
+    candidate.skill.verification.every((required) =>
+      evidence.executedChecks.some((item) => item.name === required && item.passed === true));
+}
 export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; }
 export interface SkillLifecycleRecord {
   id: string;
@@ -116,13 +149,24 @@ export class VersionedSkillLifecycle {
     }
     const before = clone(this.snapshot);
     const record = this.requireRecord(candidateId);
+    const runtimeEvidenceValid = hasValidRuntimeEvidence(candidate.package, result.runtimeVerification);
     record.evaluation = {
-      passed: result.passed === true && result.checks.every((check) => check.passed === true),
-      checks: result.checks.map((check) => ({
-        name: check.name.slice(0, 200),
-        passed: check.passed,
-        ...(typeof check.detail === "string" ? { detail: String(redactSecrets(check.detail)).slice(0, 1000) } : {}),
-      })),
+      passed: result.passed === true && result.checks.every((check) => check.passed === true) && runtimeEvidenceValid,
+      ...(candidate.package.artifact && runtimeEvidenceValid && result.runtimeVerification
+        ? { runtimeVerification: clone(result.runtimeVerification) }
+        : {}),
+      checks: [
+        ...result.checks.map((check) => ({
+          name: check.name.slice(0, 200),
+          passed: check.passed,
+          ...(typeof check.detail === "string" ? { detail: String(redactSecrets(check.detail)).slice(0, 1000) } : {}),
+        })),
+        ...(candidate.package.artifact ? [{
+          name: "runtime-verification",
+          passed: runtimeEvidenceValid,
+          ...(!runtimeEvidenceValid ? { detail: "Runtime evidence is missing, does not match the candidate, or does not satisfy every declared verification requirement." } : {}),
+        }] : []),
+      ],
       evaluatedAt: new Date().toISOString(),
     };
     record.status = record.evaluation.passed ? "verified" : "rejected";

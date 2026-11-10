@@ -143,3 +143,38 @@ test("skill lifecycle validates all persisted active skills before mutating the 
     assert.equal(conflictingPlatform.get("second-skill")?.version, "0.9.0");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("executable skill artifacts cannot be promoted without matching isolated trusted-suite evidence", async () => {
+  const root = dir();
+  try {
+    const platform = new InMemorySkillsPlatform();
+    const candidatePackage: SkillPackage = {
+      ...pkg("2.0.0"),
+      artifact: {
+        format: "sofia-node-skill-v1",
+        runtime: "node",
+        entrypoint: "index.mjs",
+        files: { "index.mjs": "export const run = () => 'ok';" },
+      },
+    };
+    const lifecycle = new VersionedSkillLifecycle(
+      platform,
+      passing,
+      { file: path.join(root, "artifact-lifecycle.json") },
+    );
+    const candidate = lifecycle.propose(candidatePackage, {
+      source: "repair",
+      evidenceIds: ["artifact-test"],
+      confidence: 0.99,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.equal(evaluated.evaluation?.checks.some((check) => check.name === "runtime-verification" && !check.passed), true);
+    assert.throws(() => lifecycle.promote(candidate.id), /evaluated/);
+    assert.equal(platform.get("repair-skill"), undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

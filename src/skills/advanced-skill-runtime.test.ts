@@ -13,7 +13,13 @@ function definition(overrides: Partial<AdvancedSkillDefinition> = {}): AdvancedS
 function context(approved = false, signal = new AbortController().signal, trace: string[] = []) {
   return {
     principalId: "test-user",
-    ...(approved ? { approval: { requestId: "approval-123" } } : {}),
+    ...(approved ? { approval: {
+      requestId: "approval-123",
+      runId: "test-run",
+      principalId: "test-user",
+      toolName: "skill.test.skill",
+      actionHash: "test-action-hash",
+    } } : {}),
     signal,
     emitTrace: (event: { type: string }) => trace.push(event.type),
   };
