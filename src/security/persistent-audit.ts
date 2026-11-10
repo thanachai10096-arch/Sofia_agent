@@ -42,7 +42,7 @@ export class EncryptedFileAudit implements SecurityAuditSink {
    const tag=cipher.getAuthTag();
    const handle=await open(this.file,"a",0o600);
    try {
-    await handle.writeFile(Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\\n","utf8");
+    await handle.writeFile(Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
     // Flush the journal record before allowing the caller to continue to a tool side effect.
     await handle.sync();
    } finally {
