@@ -19,6 +19,11 @@ function enqueue<T>(file: string, operation: () => Promise<T>): Promise<T> {
  return pending;
 }
 
+export type IncompleteAuditExecution = {
+ operationId: string;
+ started: SecurityAuditEvent;
+};
+
 export class EncryptedFileAudit implements SecurityAuditSink {
  constructor(private readonly file:string,private readonly secret:string){}
  private key():Buffer {
@@ -35,6 +40,15 @@ export class EncryptedFileAudit implements SecurityAuditSink {
    const tag=cipher.getAuthTag();
    await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
   });
+ }
+ async listIncompleteExecutions():Promise<IncompleteAuditExecution[]>{
+  const events=await this.list();
+  const terminal=new Set(events
+   .filter(event=>(event.decision==="completed"||event.decision==="failed")&&event.operationId)
+   .map(event=>event.operationId!));
+  return events
+   .filter(event=>event.decision==="execution_started"&&event.operationId&&!terminal.has(event.operationId))
+   .map(started=>({operationId:started.operationId!,started}));
  }
  list():Promise<SecurityAuditEvent[]>{
   return enqueue(this.file,async()=>{
