@@ -4,21 +4,31 @@ import path from "node:path";
 import type { SecurityAuditEvent, SecurityAuditSink } from "./audit.js";
 
 export class EncryptedFileAudit implements SecurityAuditSink {
+ private writeChain:Promise<void>=Promise.resolve();
  constructor(private readonly file:string,private readonly secret:string){}
  private key():Buffer {
   if (!this.secret) throw new Error("Audit encryption secret is required");
   return createHash("sha256").update(this.secret).digest();
  }
- async record(event:SecurityAuditEvent):Promise<void>{
-  const key=this.key();
-  await mkdir(path.dirname(this.file),{recursive:true});
-  const iv=randomBytes(12); const cipher=createCipheriv("aes-256-gcm",key,iv);
-  const plaintext=Buffer.from(JSON.stringify(event));
-  const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
-  const tag=cipher.getAuthTag();
-  await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
+ record(event:SecurityAuditEvent):Promise<void>{
+  // Serialize appends from concurrent runs so one process cannot interleave
+  // encrypted records in the shared append-only log.
+  const write=this.writeChain.then(async()=>{
+   const key=this.key();
+   await mkdir(path.dirname(this.file),{recursive:true});
+   const iv=randomBytes(12); const cipher=createCipheriv("aes-256-gcm",key,iv);
+   const plaintext=Buffer.from(JSON.stringify(event));
+   const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
+   const tag=cipher.getAuthTag();
+   await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
+  });
+  // A failed append must reject its caller, but must not poison the queue for
+  // later independent audit events.
+  this.writeChain=write.catch(()=>undefined);
+  return write;
  }
  async list():Promise<SecurityAuditEvent[]>{
+  await this.writeChain;
   const key=this.key();
   let contents:string;
   try { contents=await readFile(this.file,"utf8"); }
