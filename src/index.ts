@@ -64,6 +64,10 @@ export type * from "./tools/types.js";
 
 export { SecurityController } from "./security/controller.js";
 export { MemorySecurityAudit } from "./security/audit.js";
+export { ExecutionRecoveryManager } from "./security/recovery-manager.js";
+export type { ExecutionRecoveryStore, ExecutionReconciliationRequest, ExecutionReconciliationOutcome } from "./security/recovery-manager.js";
+export { EncryptedFileAudit } from "./security/persistent-audit.js";
+export type { IncompleteAuditExecution } from "./security/persistent-audit.js";
 export { assessAction, containsPromptInjection, redactSecrets, riskFor } from "./security/guard.js";
 export type { SecurityAction, SecurityDecision, RiskLevel } from "./security/guard.js";
 export type { SecurityAuditEvent, SecurityAuditSink } from "./security/audit.js";
