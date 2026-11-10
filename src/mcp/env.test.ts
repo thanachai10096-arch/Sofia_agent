@@ -104,3 +104,23 @@ test("MCP HTTP transport sends the server-negotiated protocol version after init
     { method: "tools/list", protocolVersion: "2025-03-26" },
   ]);
 });
+
+
+test("MCP initialization notification is bounded by the configured request timeout", async () => {
+  let notificationSignal: AbortSignal | undefined;
+  const client = new McpClient({
+    async request(method) {
+      assert.equal(method, "initialize");
+      return { protocolVersion: "2025-03-26", serverInfo: { name: "slow-server", version: "1" } };
+    },
+    notify(_method, _params, signal) {
+      notificationSignal = signal;
+      return new Promise<void>(() => undefined);
+    },
+    async close() {},
+  }, { requestTimeoutMs: 100 });
+
+  await assert.rejects(client.initialize(), /MCP notification timed out/);
+  assert.equal(notificationSignal?.aborted, true);
+  await client.close();
+});
