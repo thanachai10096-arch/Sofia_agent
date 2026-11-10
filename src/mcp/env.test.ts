@@ -31,3 +31,12 @@ test("MCP environment config rejects unknown fields, malformed transports, and o
   ])), /transport/);
   assert.throws(() => parseMcpServersConfig("x".repeat(32_769)), /32 KiB/);
 });
+
+test("MCP stdio config permits an explicitly empty args list", () => {
+  const servers = parseMcpServersConfig(JSON.stringify([
+    { id: "local-tools", transport: "stdio", command: "mcp-server", args: [], inheritEnv: [], allowedTools: ["lookup"] },
+  ]));
+  assert.deepEqual(servers[0], {
+    id: "local-tools", transport: "stdio", command: "mcp-server", args: [], inheritEnv: [], allowedTools: ["lookup"],
+  });
+});
