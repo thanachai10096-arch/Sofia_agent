@@ -5,11 +5,11 @@ import { parseMcpServersConfig } from "./env.js";
 test("MCP environment config accepts explicit stdio and HTTPS servers", () => {
   const servers = parseMcpServersConfig(JSON.stringify([
     { id: "local-tools", transport: "stdio", command: "node", args: ["server.js"], allowedTools: ["read_file"] },
-    { id: "remote-docs", transport: "http", endpoint: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer test-secret" }, allowedTools: ["search"] },
+    { id: "remote-docs", transport: "http", endpoint: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer test-secret" }, allowedTools: ["search"], readOnlyTools: ["search"] },
   ]));
   assert.equal(servers.length, 2);
   assert.equal(servers[0]?.transport, "stdio");
-  assert.equal(servers[1]?.transport, "http");
+  assert.equal(servers[1]?.transport, "http");\n  assert.deepEqual(servers[1]?.readOnlyTools, ["search"]);
 });
 
 test("MCP environment config rejects duplicate ids and empty tool allowlists", () => {
@@ -20,6 +20,12 @@ test("MCP environment config rejects duplicate ids and empty tool allowlists", (
   assert.throws(() => parseMcpServersConfig(JSON.stringify([
     { id: "docs", transport: "stdio", command: "node", allowedTools: [] },
   ])), /allowedTools/);
+});
+
+test("MCP environment config rejects read-only tools outside the explicit allowlist", () => {
+  assert.throws(() => parseMcpServersConfig(JSON.stringify([
+    { id: "docs", transport: "http", endpoint: "https://mcp.example.com", allowedTools: ["search"], readOnlyTools: ["delete"] },
+  ])), /unique subset of allowedTools/);
 });
 
 test("MCP environment config rejects unknown fields, malformed transports, and oversized config", () => {
