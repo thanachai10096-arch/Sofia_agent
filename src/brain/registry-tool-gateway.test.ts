@@ -817,6 +817,7 @@ test("tool gateway revalidates durable job lease after approval and blocks side 
 
 test("explicit skill approval requirement is enforced even for read-only risk and forwards approval evidence", async () => {
   let approvalCalls = 0;
+  let approvedRequest: import("../agent/approval.js").ApprovalRequest | undefined;
   let receivedEvidence: unknown;
   const registry = new MapToolRegistry([{
     name: "skill.test.read-only-approval",
@@ -832,8 +833,10 @@ test("explicit skill approval requirement is enforced even for read-only risk an
   const gateway = new RegistryToolGateway(
     { runtime: runtime(), tools: registry },
     defaultPolicy,
-    async () => { approvalCalls += 1; return true; },
+    async (request) => { approvalCalls += 1; approvedRequest = request; return true; },
   );
+  const capability = gateway.listTools().find((tool) => tool.name === "skill.test.read-only-approval");
+  assert.equal(capability?.policy?.status, "approval_required");
   const result = await gateway.execute(
     { tool: "skill.test.read-only-approval", input: {} },
     {
@@ -846,12 +849,13 @@ test("explicit skill approval requirement is enforced even for read-only risk an
   );
   assert.equal(approvalCalls, 1);
   assert.equal(result.ok, true);
+  assert.ok(approvedRequest?.requestId);
   assert.deepEqual(receivedEvidence, {
-    requestId: (receivedEvidence as { requestId: string }).requestId,
+    requestId: approvedRequest.requestId,
     runId: "read-only-explicit-approval-test",
     principalId: "principal-1",
     toolName: "skill.test.read-only-approval",
-    actionHash: (receivedEvidence as { actionHash: string }).actionHash,
+    actionHash: approvedRequest.actionHash,
   });
 });
 
