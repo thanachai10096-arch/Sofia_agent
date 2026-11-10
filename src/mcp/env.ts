@@ -59,9 +59,9 @@ function parseServer(value: unknown): ServerConfig {
 
   if (item.transport === "stdio") {
     const command = stringField(item.command, id + ".command", 512);
-    const args = item.args === undefined ? undefined : stringArray(item.args, id + ".args", 64);
+    const args = item.args === undefined ? undefined : (Array.isArray(item.args) && item.args.length === 0 ? [] : stringArray(item.args, id + ".args", 64));
     const cwd = item.cwd === undefined ? undefined : stringField(item.cwd, id + ".cwd", 2048);
-    const inheritEnv = item.inheritEnv === undefined ? undefined : stringArray(item.inheritEnv, id + ".inheritEnv", 64);
+    const inheritEnv = item.inheritEnv === undefined ? undefined : (Array.isArray(item.inheritEnv) && item.inheritEnv.length === 0 ? [] : stringArray(item.inheritEnv, id + ".inheritEnv", 64));
     const env = item.env === undefined ? undefined : asObject(item.env, id + ".env");
     if (env && Object.entries(env).some(([key, val]) => !SAFE_ENV_KEY.test(key) || typeof val !== "string" || val.length > 4096)) {
       throw new Error("Invalid SOFIA_MCP_SERVERS: invalid environment entry in " + id);
