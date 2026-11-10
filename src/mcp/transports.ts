@@ -77,8 +77,8 @@ export class McpStdioTransport implements McpTransport {
       }
     });
   }
-  async notify(method: string, params?: unknown): Promise<void> {
-    this.assertOpen();
+  async notify(method: string, params?: unknown, signal?: AbortSignal): Promise<void> {
+    this.assertOpen(); signal?.throwIfAborted();
     this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) }) + "\n");
   }
   async close(): Promise<void> {
@@ -129,9 +129,9 @@ export class McpHttpTransport implements McpTransport {
     if (!parsed || parsed.id !== id) throw new Error("MCP HTTP response id did not match the request");
     return responseValue(parsed);
   }
-  async notify(method: string, params?: unknown): Promise<void> {
-    this.assertOpen();
-    const response = await this.fetchImpl(this.endpoint, { method: "POST", headers: this.headers(), body: JSON.stringify({ jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) }), redirect: "error" });
+  async notify(method: string, params?: unknown, signal?: AbortSignal): Promise<void> {
+    this.assertOpen(); signal?.throwIfAborted();
+    const response = await this.fetchImpl(this.endpoint, { method: "POST", headers: this.headers(), body: JSON.stringify({ jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) }), signal, redirect: "error" });
     this.captureSession(response);
     if (!response.ok && response.status !== 202) throw new Error("MCP HTTP notification failed with status " + response.status);
     if (response.status !== 202) await response.body?.cancel();
