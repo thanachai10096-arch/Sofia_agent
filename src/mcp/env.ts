@@ -53,7 +53,7 @@ function parseServer(value: unknown): ServerConfig {
   const id = stringField(item.id, "server id", 48);
   if (!SAFE_ID.test(id)) throw new Error("Invalid SOFIA_MCP_SERVERS: server id must be a lowercase slug");
   const allowedTools = stringArray(item.allowedTools, id + ".allowedTools", MAX_TOOLS_PER_SERVER);
-  if (allowedTools.some((name) => !SAFE_TOOL.test(name)) || new Set(allowedTools).size !== allowedTools.length) {
+  const readOnlyTools = item.readOnlyTools === undefined ? undefined : stringArray(item.readOnlyTools, id + ".readOnlyTools", MAX_TOOLS_PER_SERVER);\n  if (allowedTools.some((name) => !SAFE_TOOL.test(name)) || new Set(allowedTools).size !== allowedTools.length) {
     throw new Error("Invalid SOFIA_MCP_SERVERS: invalid or duplicate tool name in " + id);
   }
 
@@ -66,9 +66,9 @@ function parseServer(value: unknown): ServerConfig {
     if (env && Object.entries(env).some(([key, val]) => !SAFE_ENV_KEY.test(key) || typeof val !== "string" || val.length > 4096)) {
       throw new Error("Invalid SOFIA_MCP_SERVERS: invalid environment entry in " + id);
     }
-    const allowed = new Set(["id", "transport", "command", "args", "cwd", "inheritEnv", "env", "allowedTools"]);
+    const allowed = new Set(["id", "transport", "command", "args", "cwd", "inheritEnv", "env", "allowedTools", "readOnlyTools"]);
     if (Object.keys(item).some((key) => !allowed.has(key))) throw new Error("Invalid SOFIA_MCP_SERVERS: unknown field in " + id);
-    return { id, transport: "stdio", command, allowedTools, ...(args ? { args } : {}), ...(cwd ? { cwd } : {}), ...(inheritEnv ? { inheritEnv } : {}), ...(env ? { env: env as Record<string, string> } : {}) };
+    return { id, transport: "stdio", command, allowedTools, ...(args ? { args } : {}), ...(cwd ? { cwd } : {}), ...(inheritEnv ? { inheritEnv } : {}), ...(env ? { env: env as Record<string, string> } : {}), ...(readOnlyTools ? { readOnlyTools } : {}) };
   }
 
   if (item.transport === "http") {
@@ -80,9 +80,9 @@ function parseServer(value: unknown): ServerConfig {
       typeof val !== "string" || val.length > 4096 || /[\r\n]/.test(val))) {
       throw new Error("Invalid SOFIA_MCP_SERVERS: invalid HTTP header in " + id);
     }
-    const allowed = new Set(["id", "transport", "endpoint", "headers", "allowedTools"]);
+    const allowed = new Set(["id", "transport", "endpoint", "headers", "allowedTools", "readOnlyTools"]);
     if (Object.keys(item).some((key) => !allowed.has(key))) throw new Error("Invalid SOFIA_MCP_SERVERS: unknown field in " + id);
-    return { id, transport: "http", endpoint, allowedTools, ...(headers ? { headers: headers as Record<string, string> } : {}) };
+    return { id, transport: "http", endpoint, allowedTools, ...(headers ? { headers: headers as Record<string, string> } : {}), ...(readOnlyTools ? { readOnlyTools } : {}) };
   }
 
   throw new Error("Invalid SOFIA_MCP_SERVERS: transport must be stdio or http for " + id);
@@ -118,7 +118,7 @@ export async function connectMcpFromEnv(policy: ExecutionPolicy) {
     if (server.transport === "stdio") {
       return {
         transport: new McpStdioTransport(server),
-        options: { id: server.id, allowedTools: server.allowedTools },
+        options: { id: server.id, allowedTools: server.allowedTools, ...(server.readOnlyTools ? { readOnlyTools: server.readOnlyTools } : {}) },
       };
     }
 
