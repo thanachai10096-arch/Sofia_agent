@@ -4,9 +4,20 @@ import path from "node:path";
 import type { SecurityAuditEvent, SecurityAuditSink } from "./audit.js";
 
 // All instances in this process that target the same resolved file share one
-// append queue. This prevents independently-created agent dependencies from
-// racing writes to the same audit log.
+// queue for both appends and reads.
 const writeChains = new Map<string, Promise<void>>();
+
+function enqueue<T>(file: string, operation: () => Promise<T>): Promise<T> {
+ const queueKey=path.resolve(file);
+ const previous=writeChains.get(queueKey) ?? Promise.resolve();
+ const pending=previous.then(operation);
+ const settled=pending.then(()=>undefined,()=>undefined);
+ writeChains.set(queueKey,settled);
+ void settled.then(()=>{
+  if(writeChains.get(queueKey)===settled) writeChains.delete(queueKey);
+ });
+ return pending;
+}
 
 export class EncryptedFileAudit implements SecurityAuditSink {
  constructor(private readonly file:string,private readonly secret:string){}
@@ -15,9 +26,7 @@ export class EncryptedFileAudit implements SecurityAuditSink {
   return createHash("sha256").update(this.secret).digest();
  }
  record(event:SecurityAuditEvent):Promise<void>{
-  const queueKey=path.resolve(this.file);
-  const previous=writeChains.get(queueKey) ?? Promise.resolve();
-  const write=previous.then(async()=>{
+  return enqueue(this.file,async()=>{
    const key=this.key();
    await mkdir(path.dirname(this.file),{recursive:true});
    const iv=randomBytes(12); const cipher=createCipheriv("aes-256-gcm",key,iv);
@@ -26,38 +35,31 @@ export class EncryptedFileAudit implements SecurityAuditSink {
    const tag=cipher.getAuthTag();
    await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
   });
-  // A failed append must reject its caller, but must not poison the queue for
-  // later independent audit events.
-  const settled=write.catch(()=>undefined);
-  writeChains.set(queueKey,settled);
-  void settled.then(()=>{
-   if(writeChains.get(queueKey)===settled) writeChains.delete(queueKey);
-  });
-  return write;
  }
- async list():Promise<SecurityAuditEvent[]>{
-  await (writeChains.get(path.resolve(this.file)) ?? Promise.resolve());
-  const key=this.key();
-  let contents:string;
-  try { contents=await readFile(this.file,"utf8"); }
-  catch(error) {
-   if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return [];
-   throw error;
-  }
-  const events:SecurityAuditEvent[]=[];
-  for (const [index,line] of contents.split("\n").entries()) {
-   if (!line) continue;
-   const payload=Buffer.from(line,"base64");
-   if (payload.length < 29) throw new Error(`Invalid encrypted audit record at line ${index+1}`);
-   const decipher=createDecipheriv("aes-256-gcm",key,payload.subarray(0,12));
-   decipher.setAuthTag(payload.subarray(12,28));
-   const plaintext=Buffer.concat([decipher.update(payload.subarray(28)),decipher.final()]);
-   const event=JSON.parse(plaintext.toString("utf8")) as SecurityAuditEvent;
-   if (!event || typeof event.id !== "string" || typeof event.runId !== "string" || typeof event.toolName !== "string") {
-    throw new Error(`Invalid audit event at line ${index+1}`);
+ list():Promise<SecurityAuditEvent[]>{
+  return enqueue(this.file,async()=>{
+   const key=this.key();
+   let contents:string;
+   try { contents=await readFile(this.file,"utf8"); }
+   catch(error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return [];
+    throw error;
    }
-   events.push(event);
-  }
-  return events;
+   const events:SecurityAuditEvent[]=[];
+   for (const [index,line] of contents.split("\n").entries()) {
+    if (!line) continue;
+    const payload=Buffer.from(line,"base64");
+    if (payload.length < 29) throw new Error(`Invalid encrypted audit record at line ${index+1}`);
+    const decipher=createDecipheriv("aes-256-gcm",key,payload.subarray(0,12));
+    decipher.setAuthTag(payload.subarray(12,28));
+    const plaintext=Buffer.concat([decipher.update(payload.subarray(28)),decipher.final()]);
+    const event=JSON.parse(plaintext.toString("utf8")) as SecurityAuditEvent;
+    if (!event || typeof event.id !== "string" || typeof event.runId !== "string" || typeof event.toolName !== "string") {
+     throw new Error(`Invalid audit event at line ${index+1}`);
+    }
+    events.push(event);
+   }
+   return events;
+  });
  }
 }
