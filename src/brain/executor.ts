@@ -95,6 +95,7 @@ interface Dependencies {
   repositoryMapLoader?: (task: string) => Promise<RepositoryMap>;
   subagents?: SubagentRuntime;
   onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
+  assertExecutionLease?: () => Promise<void>;
   runStore?: RunStore;
   projectMemory?: ProjectMemoryStore;
   evolution?: EvolutionEngine;
@@ -704,6 +705,7 @@ export class SofiaBrain {
           ...(principalId ? { principalId } : {}),
           ...(notificationChannelId ? { notificationChannelId } : {}),
           signal: this.signal,
+          ...(this.dependencies.assertExecutionLease ? { assertExecutionLease: this.dependencies.assertExecutionLease } : {}),
           requireApproval:
             descriptor.effects.includes("destructive") ||
             descriptor.effects.includes("write") ||
