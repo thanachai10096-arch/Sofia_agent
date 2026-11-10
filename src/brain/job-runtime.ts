@@ -325,6 +325,17 @@ class FileJobStateStore {
     });
   }
 
+  async assertLease(id: string, ownerToken: string): Promise<void> {
+    const valid = await this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.status !== "running" || record.leaseOwnerToken !== ownerToken) return false;
+      const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
+      return Number.isFinite(expires) && expires > Date.now();
+    });
+    if (!valid) throw new Error("Job execution lease was lost before tool execution");
+  }
+
   async heartbeat(id: string, ownerToken: string, leaseMs: number): Promise<boolean> {
     return this.withFileLock(async () => {
       const records = await this.read();
@@ -652,7 +663,7 @@ export class DurableJobRuntime implements JobRuntime {
         return;
       }
 
-      const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot, ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}), ...(record.notificationChannelId ? { notificationChannelId: record.notificationChannelId } : {}), ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}) });
+      const brain = this.brainFactory({ signal: controller.signal, assertExecutionLease: () => this.state.assertLease(record.id, leaseToken), onRunSnapshot: onSnapshot, ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}), ...(record.notificationChannelId ? { notificationChannelId: record.notificationChannelId } : {}), ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}) });
       const result = await brain.run({
         ...input,
         ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
