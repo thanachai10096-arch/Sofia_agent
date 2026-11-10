@@ -141,17 +141,19 @@ if (discordConfigured) {
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
             // Use the same durable, token-fenced notification protocol as recovery.
             // If the runtime cannot claim delivery, do not send an uncoordinated notice.
+            const runtime = deps.jobRuntime;
+            if (!runtime?.claimNotificationDelivery || !runtime.markNotificationDelivered || !runtime.releaseNotificationDelivery) return;
             let deliveryToken: string | undefined;
             try {
-              deliveryToken = await deps.jobRuntime?.claimNotificationDelivery?.(resumed.id);
+              deliveryToken = await runtime.claimNotificationDelivery(resumed.id);
               if (!deliveryToken) return;
               await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
-              await deps.jobRuntime?.markNotificationDelivered?.(resumed.id, deliveryToken);
+              await runtime.markNotificationDelivered(resumed.id, deliveryToken);
               deliveryToken = undefined;
             } finally {
-              if (deliveryToken && deps.jobRuntime?.releaseNotificationDelivery) {
+              if (deliveryToken) {
                 try {
-                  await deps.jobRuntime.releaseNotificationDelivery(resumed.id, deliveryToken);
+                  await runtime.releaseNotificationDelivery(resumed.id, deliveryToken);
                 } catch {
                   // The bounded lease expires and permits a later retry.
                 }
