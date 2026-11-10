@@ -4,7 +4,7 @@ import path from "node:path";
 import type { ApprovalHandler, ApprovalRequest } from "./approval.js";
 import { redactSecrets } from "../security/guard.js";
 
-type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
+type ApprovalStatus = "pending" | "approved" | "rejected" | "expired" | "cancelled";
 export interface ApprovalRecord {
   id: string;
   ownerId: string;
@@ -78,7 +78,7 @@ export class SqliteApprovalQueue {
           input_json TEXT NOT NULL,
           action_hash TEXT NOT NULL,
           risk TEXT NOT NULL,
-          status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','expired')),
+          status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','expired','cancelled')),
           created_at INTEGER NOT NULL,
           expires_at INTEGER NOT NULL,
           decided_at INTEGER,
@@ -95,6 +95,43 @@ export class SqliteApprovalQueue {
           created_at INTEGER NOT NULL
         );
       `);
+      // Existing databases may have been created before cancellation became a
+      // terminal approval state. Rebuild only this table transactionally so
+      // pending/decided rows and their audit history survive the migration.
+      const approvalSchema = db.prepare(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='approvals'",
+      ).get() as { sql?: string } | undefined;
+      if (!approvalSchema?.sql?.includes("'cancelled'")) {
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          db.exec(`
+            ALTER TABLE approvals RENAME TO approvals_before_cancelled_migration;
+            CREATE TABLE approvals (
+              id TEXT PRIMARY KEY NOT NULL,
+              owner_id TEXT NOT NULL,
+              run_id TEXT NOT NULL,
+              tool_name TEXT NOT NULL,
+              input_json TEXT NOT NULL,
+              action_hash TEXT NOT NULL,
+              risk TEXT NOT NULL,
+              status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','expired','cancelled')),
+              created_at INTEGER NOT NULL,
+              expires_at INTEGER NOT NULL,
+              decided_at INTEGER,
+              decided_by TEXT
+            );
+            INSERT INTO approvals(id,owner_id,run_id,tool_name,input_json,action_hash,risk,status,created_at,expires_at,decided_at,decided_by)
+            SELECT id,owner_id,run_id,tool_name,input_json,action_hash,risk,status,created_at,expires_at,decided_at,decided_by
+            FROM approvals_before_cancelled_migration;
+            DROP TABLE approvals_before_cancelled_migration;
+            CREATE INDEX approvals_owner_status_idx ON approvals(owner_id,status,created_at);
+          `);
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      }
       privateFile(absolute);
       return new SqliteApprovalQueue(db, absolute);
     } catch (error) { db.close(); throw error; }
@@ -164,6 +201,33 @@ export class SqliteApprovalQueue {
       privateFile(this.filePath);
       return { ...record, status, decidedAt: now, decidedBy: input.decidedBy };
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  /** Atomically abandon a still-pending approval when its owning run is cancelled. */
+  cancelPending(id: string, ownerId: string): ApprovalRecord | undefined {
+    if (!id || !ownerId || ownerId.length > 256) return undefined;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db.prepare(
+        "SELECT * FROM approvals WHERE id=? AND owner_id=? AND status='pending'",
+      ).get(id, ownerId) as Record<string, unknown> | undefined;
+      if (!row) { this.db.exec("COMMIT"); return undefined; }
+      const record = parseRecord(row);
+      const now = Date.now();
+      const updated = this.db.prepare(
+        "UPDATE approvals SET status='cancelled',decided_at=?,decided_by='system:run-cancelled' WHERE id=? AND owner_id=? AND status='pending'",
+      ).run(now, id, ownerId);
+      if (Number(updated.changes) !== 1) { this.db.exec("ROLLBACK"); return undefined; }
+      this.db.prepare(
+        "INSERT INTO approval_audit(id,approval_id,owner_id,decision,decided_by,action_hash,created_at) VALUES(?,?,?,?,?,?,?)",
+      ).run(randomUUID(), id, ownerId, "cancelled", "system:run-cancelled", record.actionHash, now);
+      this.db.exec("COMMIT");
+      privateFile(this.filePath);
+      return { ...record, status: "cancelled", decidedAt: now, decidedBy: "system:run-cancelled" };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   /**
@@ -249,6 +313,8 @@ export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options:
   /** Called after durable creation; delivery failure must never auto-approve or cancel the request. */
   onCreated?: (record: ApprovalRecord, request: ApprovalRequest) => void | Promise<void>;
   onNotificationError?: () => void;
+  /** Reports durable cancellation failures without changing the fail-closed execution result. */
+  onCancellationError?: (error: unknown) => void;
 } = {}): ApprovalHandler {
   const ttlMs = options.ttlMs ?? 10 * 60_000;
   const pollMs = options.pollMs ?? 500;
@@ -263,8 +329,19 @@ export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options:
         try { options.onNotificationError?.(); } catch { /* notification diagnostics must not affect approval state */ }
       }
     }
+    if (request.signal?.aborted) {
+      try { queue.cancelPending(record.id, record.ownerId); } catch (error) {
+        try { options.onCancellationError?.(error); } catch { /* diagnostics must not affect the fail-closed result */ }
+      }
+      return false;
+    }
     while (Date.now() < record.expiresAt) {
-      if (request.signal?.aborted) return false;
+      if (request.signal?.aborted) {
+        try { queue.cancelPending(record.id, record.ownerId); } catch (error) {
+          try { options.onCancellationError?.(error); } catch { /* diagnostics must not affect the fail-closed result */ }
+        }
+        return false;
+      }
       const current = queue.get(record.id, record.ownerId);
       if (!current) return false;
       if (current.status === "approved") return sameHash(current.actionHash, request.actionHash);
@@ -273,7 +350,14 @@ export function createQueuedApprovalHandler(queue: SqliteApprovalQueue, options:
         Math.min(pollMs, Math.max(1, record.expiresAt - Date.now())),
         request.signal,
       );
-      if (!continued) return false;
+      if (!continued) {
+        if (request.signal?.aborted) {
+          try { queue.cancelPending(record.id, record.ownerId); } catch (error) {
+            try { options.onCancellationError?.(error); } catch { /* diagnostics must not affect the fail-closed result */ }
+          }
+        }
+        return false;
+      }
     }
     return false;
   };
