@@ -172,6 +172,14 @@ test("queued approval handler notifies the trusted originating channel after dur
     assert.equal(f.queue.get(notified.id, "discord:12345")?.status, "pending");
     controller.abort();
     assert.equal(await pending, false);
+    const cancelled = f.queue.get(notified.id, "discord:12345");
+    assert.equal(cancelled?.status, "cancelled");
+    assert.equal(cancelled?.decidedBy, "system:run-cancelled");
+    assert.equal(f.queue.list("discord:12345").length, 0);
+    assert.equal(f.queue.decide({
+      id: notified.id, ownerId: "discord:12345", decidedBy: "discord:12345",
+      actionHash: "a".repeat(64), approved: true,
+    }), undefined);
   } finally { await f.cleanup(); }
 });
 
@@ -194,4 +202,80 @@ test("approval notification delivery failure does not approve or crash the waiti
     controller.abort();
     assert.equal(await pending, false);
   } finally { await f.cleanup(); }
+});
+
+test("cancellation persistence failures are reported while execution remains denied", async () => {
+  const f = await fixture();
+  const controller = new AbortController();
+  const reported: unknown[] = [];
+  try {
+    f.queue.cancelPending = () => { throw new Error("sqlite unavailable"); };
+    const handler = createQueuedApprovalHandler(f.queue, {
+      onCreated: () => controller.abort(),
+      onCancellationError: (error) => reported.push(error),
+    });
+    assert.equal(await handler(request({ signal: controller.signal })), false);
+    assert.equal(reported.length, 1);
+    assert.match(String(reported[0]), /sqlite unavailable/);
+    // Persistence failed, so the record remains pending and the diagnostic is essential.
+    assert.equal(f.queue.list("owner-a").length, 1);
+  } finally { await f.cleanup(); }
+});
+
+test("legacy approval databases migrate transactionally and preserve pending records", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "sofia-approval-legacy-"));
+  const file = path.join(directory, "approvals.sqlite");
+  const { DatabaseSync } = await import("node:sqlite");
+  const legacy = new DatabaseSync(file);
+  legacy.exec(`
+    CREATE TABLE approvals (
+      id TEXT PRIMARY KEY NOT NULL,
+      owner_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      input_json TEXT NOT NULL,
+      action_hash TEXT NOT NULL,
+      risk TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','expired')),
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      decided_at INTEGER,
+      decided_by TEXT
+    );
+    CREATE INDEX approvals_owner_status_idx ON approvals(owner_id,status,created_at);
+    CREATE TABLE approval_audit (
+      id TEXT PRIMARY KEY NOT NULL,
+      approval_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      decided_by TEXT NOT NULL,
+      action_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    INSERT INTO approvals(id,owner_id,run_id,tool_name,input_json,action_hash,risk,status,created_at,expires_at)
+    VALUES('legacy-1','owner-a','run-legacy','skill.promote','{}','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','high','pending',1,9999999999999);
+    INSERT INTO approval_audit(id,approval_id,owner_id,decision,decided_by,action_hash,created_at)
+    VALUES('legacy-audit-1','legacy-1','owner-a','created','system:create','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1);
+  `);
+  legacy.close();
+  try {
+    const queue = await SqliteApprovalQueue.open(file);
+    try {
+      assert.equal(queue.get("legacy-1", "owner-a")?.status, "pending");
+      const cancelled = queue.cancelPending("legacy-1", "owner-a");
+      assert.equal(cancelled?.status, "cancelled");
+      assert.equal(queue.get("legacy-1", "owner-a")?.status, "cancelled");
+      assert.equal(queue.decide({
+        id: "legacy-1", ownerId: "owner-a", decidedBy: "owner-a",
+        actionHash: "a".repeat(64), approved: true,
+      }), undefined);
+    } finally { queue.close(); }
+    const inspect = new DatabaseSync(file);
+    try {
+      const audit = inspect.prepare(
+        "SELECT decision FROM approval_audit WHERE approval_id=? ORDER BY created_at,decision",
+      ).all("legacy-1") as Array<{ decision: string }>;
+      assert.deepEqual(audit.map((item) => item.decision), ["created", "cancelled"]);
+    } finally { inspect.close(); }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
