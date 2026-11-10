@@ -31,8 +31,8 @@ export function isDiscordRecoveryDestinationAllowed(
 ): boolean {
   if (!ownerKeyId?.startsWith("discord:") || !notificationChannelId) return false;
   const userId = ownerKeyId.slice("discord:".length);
-  return /^\\d{1,24}$/.test(userId) &&
+  return /^\d{1,24}$/.test(userId) &&
     allowedUserIds.includes(userId) &&
-    /^\\d{1,24}$/.test(notificationChannelId) &&
+    /^\d{1,24}$/.test(notificationChannelId) &&
     allowedChannelIds.includes(notificationChannelId);
 }
