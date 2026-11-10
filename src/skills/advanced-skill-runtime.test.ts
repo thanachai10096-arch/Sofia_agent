@@ -13,7 +13,13 @@ function definition(overrides: Partial<AdvancedSkillDefinition> = {}): AdvancedS
 function context(approved = false, signal = new AbortController().signal, trace: string[] = []) {
   return {
     principalId: "test-user",
-    ...(approved ? { approval: { requestId: "approval-123" } } : {}),
+    ...(approved ? { approval: {
+      requestId: "approval-123",
+      runId: "run-123",
+      principalId: "test-user",
+      toolName: "skill.test.skill",
+      actionHash: "sha256:approved-action",
+    } } : {}),
     signal,
     emitTrace: (event: { type: string }) => trace.push(event.type),
   };
@@ -65,8 +71,13 @@ test("registry requires approval for privileged skills", async () => {
 });
 
 test("approval-required skills fail closed unless trusted verifier confirms approval", async () => {
-  const registry = new AdvancedSkillRegistry(({ requestId, principalId, skillId }) =>
-    requestId === "approval-123" && principalId === "test-user" && skillId === "test.skill");
+  const registry = new AdvancedSkillRegistry(({ requestId, principalId, skillId, runId, toolName, actionHash }) =>
+    requestId === "approval-123" &&
+    principalId === "test-user" &&
+    skillId === "test.skill" &&
+    runId === "run-123" &&
+    toolName === "skill.test.skill" &&
+    actionHash === "sha256:approved-action");
   registry.register(definition({ risk: "privileged", requiresApproval: true }), () => "approved");
   assert.equal(await registry.execute("test.skill", null, context(true)), "approved");
 });
