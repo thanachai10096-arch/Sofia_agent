@@ -279,3 +279,18 @@ test("legacy approval databases migrate transactionally and preserve pending rec
     } finally { inspect.close(); }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+
+test("durable approval queue reuses the gateway request ID as its receipt ID", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "sofia-approval-request-id-"));
+  const file = path.join(directory, "approvals.sqlite");
+  const requestId = "8b1d2b8a-4e8a-4f9e-9b8a-9b5d7c6e1234";
+  try {
+    const queue = await SqliteApprovalQueue.open(file);
+    try {
+      const record = queue.create(request({ requestId }));
+      assert.equal(record.id, requestId);
+      assert.equal(queue.get(requestId, "owner-a")?.id, requestId);
+    } finally { queue.close(); }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
