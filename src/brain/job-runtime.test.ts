@@ -1000,7 +1000,7 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
   const runStore = {
     save: async (snapshot: import("./run-state.js").BrainRunSnapshot) => { savedSnapshot = snapshot; },
     // Simulate a legacy RunStore file written before snapshot redaction existed.
-    load: async () => snapshot,
+    load: async () => ({ ...snapshot, task: "stale external run-store snapshot" }),
     delete: async () => undefined,
   };
   const snapshot = {
@@ -1039,6 +1039,7 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
     assert.ok(savedSnapshot);
     assert.ok(!JSON.stringify(savedSnapshot).includes(secret), "separate checkpoint store must receive redacted data");
     assert.ok(!JSON.stringify(record.snapshot).includes(secret), "job record must not retain the unredacted checkpoint");
+    assert.notEqual(record.snapshot?.task, "stale external run-store snapshot", "stale mirror data must not override the canonical fenced job snapshot");
     const listed = await runtime.list();
     assert.ok(!JSON.stringify(listed).includes(secret), "job listings must redact credential-shaped content");
     assert.ok(listed.every((job) => job.leaseOwnerToken === undefined), "job listings must not expose lease ownership");
