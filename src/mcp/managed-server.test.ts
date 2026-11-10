@@ -40,7 +40,8 @@ test("managed MCP bridge exposes only allowlisted namespaced tools", async () =>
 test("remote MCP read-only annotations cannot lower risk without operator declaration", async () => {
   const transport = fakeTransport();
   const connected = await connectManagedMcpServer(transport, { id: "docs", allowedTools: ["lookup"] });
-  assert.deepEqual(connected.tools[0]?.effects, ["destructive"]);
+  assert.deepEqual(connected.tools[0]?.effects, ["write"]);
+  assert.equal(connected.tools[0]?.requiresApproval, true);
   await connected.close();
 });
 
