@@ -24,6 +24,8 @@ export interface JobRecord {
   /** Original user task before historical session context is appended. */
   sessionTask?: string;
   notificationDelivered?: boolean;
+  notificationLeaseToken?: string;
+  notificationLeaseExpiresAt?: string;
   leaseOwnerToken?: string;
   leaseExpiresAt?: string;
   heartbeatAt?: string;
@@ -80,7 +82,9 @@ export interface JobRuntime {
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
-  markNotificationDelivered?(id: string): Promise<void>;
+  claimNotificationDelivery?(id: string, leaseMs?: number): Promise<string | undefined>;
+  markNotificationDelivered?(id: string, token?: string): Promise<void>;
+  releaseNotificationDelivery?(id: string, token: string): Promise<void>;
 }
 
 async function isExclusiveFileCollision(error: unknown, file: string): Promise<boolean> {
@@ -320,6 +324,47 @@ class FileJobStateStore {
     });
   }
 
+  async claimNotificationDelivery(id: string, token: string, leaseMs: number): Promise<boolean> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.notificationDelivered) return false;
+      const expires = record.notificationLeaseExpiresAt ? Date.parse(record.notificationLeaseExpiresAt) : 0;
+      if (record.notificationLeaseToken && Number.isFinite(expires) && expires > Date.now()) return false;
+      record.notificationLeaseToken = token;
+      record.notificationLeaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return true;
+    });
+  }
+
+  async completeNotificationDelivery(id: string, token: string): Promise<boolean> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.notificationDelivered || record.notificationLeaseToken !== token) return false;
+      record.notificationDelivered = true;
+      record.notificationLeaseToken = undefined;
+      record.notificationLeaseExpiresAt = undefined;
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+      return true;
+    });
+  }
+
+  async releaseNotificationDelivery(id: string, token: string): Promise<void> {
+    await this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.notificationLeaseToken !== token) return;
+      record.notificationLeaseToken = undefined;
+      record.notificationLeaseExpiresAt = undefined;
+      record.updatedAt = new Date().toISOString();
+      await this.write(records);
+    });
+  }
+
   async heartbeat(id: string, ownerToken: string, leaseMs: number): Promise<boolean> {
     return this.withFileLock(async () => {
       const records = await this.read();
@@ -482,13 +527,49 @@ export class DurableJobRuntime implements JobRuntime {
     return publicJobRecord(hydrated);
   }
 
-  async markNotificationDelivered(id: string): Promise<void> {
+  async claimNotificationDelivery(id: string, leaseMs = 30_000): Promise<string | undefined> {
+    const token = randomUUID();
+    const claimed = await this.state.claimNotificationDelivery(id, token, leaseMs);
+    if (!claimed) return undefined;
+    const record = this.jobs.get(id);
+    if (record) {
+      record.notificationLeaseToken = token;
+      record.notificationLeaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+    }
+    return token;
+  }
+
+  async markNotificationDelivered(id: string, token?: string): Promise<void> {
+    if (token) {
+      const completed = await this.state.completeNotificationDelivery(id, token);
+      if (completed) {
+        const record = this.jobs.get(id);
+        if (record) {
+          record.notificationDelivered = true;
+          record.notificationLeaseToken = undefined;
+          record.notificationLeaseExpiresAt = undefined;
+          record.updatedAt = new Date().toISOString();
+        }
+      }
+      return;
+    }
+    // Compatibility for existing single-process callers; recovery delivery uses
+    // the token-fenced claim/complete path above.
     const record = this.jobs.get(id) ?? await this.get(id);
     if (!record) return;
     const canonical = this.jobs.get(id) ?? record;
     canonical.notificationDelivered = true;
     canonical.updatedAt = new Date().toISOString();
     await this.state.save(canonical);
+  }
+
+  async releaseNotificationDelivery(id: string, token: string): Promise<void> {
+    await this.state.releaseNotificationDelivery(id, token);
+    const record = this.jobs.get(id);
+    if (record?.notificationLeaseToken === token) {
+      record.notificationLeaseToken = undefined;
+      record.notificationLeaseExpiresAt = undefined;
+    }
   }
 
   async list(): Promise<JobRecord[]> {
