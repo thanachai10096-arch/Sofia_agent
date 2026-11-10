@@ -151,8 +151,19 @@ export function createIsolatedSkillVerifier(options: IsolatedSkillVerificationOp
         allowNetwork: false,
         readOnlyWorkspace: true,
       };
+      const runtimeContractScript = [
+        'import path from "node:path";',
+        'import { pathToFileURL } from "node:url";',
+        'const entry = await import(pathToFileURL(path.resolve(process.argv[1])).href);',
+        'if (typeof entry.run !== "function") throw new Error("Skill entrypoint must export run(input, context)");',
+      ].join("\n");
       const checks = [
         { name: "syntax", command: "node", args: ["--check", artifact.entrypoint] },
+        {
+          name: "runtime-contract",
+          command: "node",
+          args: ["--input-type=module", "--eval", runtimeContractScript, artifact.entrypoint],
+        },
         { name: "test", command: "node", args: ["--test", ...suite.tests.map((name) => path.posix.join("__sofia_trusted_tests__", name))] },
       ];
       for (const check of checks) {

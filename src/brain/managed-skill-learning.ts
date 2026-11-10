@@ -10,6 +10,15 @@ import type { SkillExecutableArtifact, SkillPackage } from "../skills/platform.j
  * Connects verified Brain repair outcomes to the bounded self-improvement loop.
  * Approval is fail-closed: without a configured approval handler, no skill is activated.
  */
+function skillIdPart(value: string, fallback: string): string {
+  const normalized = value
+    .normalize("NFKD")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 56);
+  return normalized || fallback;
+}
+
 export function createManagedSkillLearningHandler(
   lifecycle: VersionedSkillLifecycle,
   approval?: ApprovalHandler,
@@ -32,7 +41,7 @@ export function createManagedSkillLearningHandler(
     const skillPackage: SkillPackage = {
       artifact,
       skill: {
-        id: `learned:${candidate.name}:${candidate.category}`,
+        id: `learned:${skillIdPart(candidate.name, "skill")}:${skillIdPart(candidate.category, "general")}`,
         name: candidate.name,
         description: "Executable skill artifact compiled from a repair with trusted verification evidence.",
         triggers: [candidate.trigger],

@@ -1373,7 +1373,14 @@ export class SofiaBrain {
             mayActivate = false;
           }
         }
-        if (mayActivate) this.dependencies.skillLedger.record(learnedCandidate);
+        if (mayActivate) {
+          this.dependencies.skillLedger.record(learnedCandidate);
+          this.emit({ type: "brain.learning.recorded" });
+        } else {
+          // Do not report a learning success when compilation, verification,
+          // or explicit promotion approval declined the candidate.
+          this.emit({ type: "brain.learning.skipped" });
+        }
         if (this.dependencies.projectMemory && this.projectContext) {
           const now = new Date().toISOString();
           const id = "repair:" + last.fingerprint;
@@ -1381,7 +1388,6 @@ export class SofiaBrain {
           await this.wait(() => this.dependencies.projectMemory!.save(entry));
           this.projectMemory = [...this.projectMemory.filter((item) => item.id !== id), entry];
         }
-        this.emit({ type: "brain.learning.recorded" });
       }
 
       return this.report(

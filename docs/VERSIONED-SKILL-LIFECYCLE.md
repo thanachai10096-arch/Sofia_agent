@@ -10,3 +10,21 @@ VersionedSkillLifecycle is an opt-in gate layered beside Sofia's existing skill 
 - Promotion changes only the supplied SkillsPlatform. The lifecycle manager does not execute skill procedures.
 - A local JSON store is single-process only. Use an appropriately transactional shared store for multi-process deployments.
 - If persistence fails during promotion/rollback, the manager attempts to restore the previous platform package and reports the original failure; inspect consistency before continuing.
+
+## Executable Node skill contract
+
+Executable artifacts using `sofia-node-skill-v1` must expose a named `run(input, context)` function from the declared `.mjs` entrypoint. The isolated verifier checks this export inside the container before running the operator-owned test suite. A trusted suite must import the entrypoint and exercise `run` with representative inputs and expected outputs; merely exporting the function is not behavioral proof.
+
+The current verifier reports syntax, runtime-contract, and trusted-test checks separately. It does not claim TypeScript typecheck or build evidence for this JavaScript artifact format. Candidate requirements for checks the runner cannot prove remain fail-closed.
+
+## Runtime mounting
+
+Only lifecycle-active learned packages are mounted into each Brain run's existing advanced-skill registry. Candidate and rejected packages are never exposed as tools. Each learned artifact is executed in a fresh container workspace with network disabled, a read-only workspace mount, bounded input/output, and a timeout. Learned artifacts are always classified as privileged and require a fresh approval bound to the current run, principal, tool name, and action hash. Tool output is marked untrusted.
+
+The lifecycle platform is rehydrated from validated active records when the host restarts. The runtime adapter does not turn natural-language procedures into code. Sofia still needs a trusted artifact builder and operator-owned test suite before newly learned prose can become an executable artifact; without those, learning remains fail-closed and metadata-only.
+
+## Declarative learned-skill builder
+
+Sofia accepts an optional untrusted `dsl` field on a learned candidate. The first supported operation is intentionally narrow: `{ "version": 1, "operation": "project-fields", "fields": ["name", "status"] }`. The trusted compiler validates an exact schema, rejects unknown keys, reserved property names, duplicate fields, and out-of-bound values, then emits a fixed interpreter. Candidate prose is never interpolated into executable source.
+
+A prose-only candidate or an unsupported DSL operation produces no artifact and remains metadata-only. This DSL currently supports deterministic JSON-object field projection only; it does not grant shell, filesystem, network, browser, or arbitrary tool access. An operator-owned trusted test suite is still mandatory, and existing verification requirements that cannot be proven by the current runner (including typecheck/build) continue to block promotion.

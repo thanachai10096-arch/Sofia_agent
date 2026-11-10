@@ -37,6 +37,8 @@ import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import { createAdvancedSkillRegistry } from "../skills/advanced-skill-registry.js";
 import { createAdvancedSkillTools } from "../skills/tools.js";
+import { registerActiveSkillArtifacts } from "../skills/managed-artifact-runtime.js";
+import { buildTrustedSkillArtifact } from "../skills/trusted-skill-builder.js";
 import path from "node:path";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -56,7 +58,8 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
-  const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
+  const skillPlatform = new InMemorySkillsPlatform();
+  const skillLifecycle=new VersionedSkillLifecycle(skillPlatform, async (candidate) => {
     const checks: SkillEvaluationCheck[] = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
       { name: "procedure", passed: candidate.skill.procedure.length >= 2 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
@@ -122,7 +125,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       return { passed: false, checks };
     }
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
-  const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
+  const onSkillCandidate = createManagedSkillLearningHandler(
+    skillLifecycle,
+    dependencies.approval,
+    async (candidate) => buildTrustedSkillArtifact(candidate),
+  );
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
@@ -188,7 +195,29 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           evidence.actionHash === request.actionHash;
       },
     });
-    const runSkillTools = createAdvancedSkillTools(advancedSkillRegistry, principalId ?? "anonymous");
+    // Lifecycle promotion is persisted across runs. Mount only active, package-bound
+    // artifacts into this run-scoped registry; never expose candidates or prose-only skills.
+    const skillSandboxImage = process.env.SOFIA_SKILL_SANDBOX_IMAGE;
+    let managedArtifactsUnavailable = !skillSandboxImage;
+    if (skillSandboxImage) {
+      try {
+        registerActiveSkillArtifacts(
+          advancedSkillRegistry,
+          skillLifecycle.activePackages(),
+          new ContainerSandbox({ image: skillSandboxImage }),
+        );
+        managedArtifactsUnavailable = false;
+      } catch {
+        // Fail closed: a mount/configuration error leaves managed artifacts unavailable
+        // without preventing ordinary Brain conversations or built-in tools.
+        managedArtifactsUnavailable = true;
+      }
+    }
+    const runSkillTools = createAdvancedSkillTools(
+      advancedSkillRegistry,
+      principalId ?? "anonymous",
+      { managedArtifactsUnavailable },
+    );
     const approvalHandler: AgentDependencies["approval"] = dependencies.approval
       ? async (request) => {
           const approved = await dependencies.approval!(request);

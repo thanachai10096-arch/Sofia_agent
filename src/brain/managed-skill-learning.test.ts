@@ -98,3 +98,21 @@ test("managed skill learning does not discard unsupported requested verification
     rmSync(f.directory, { recursive: true, force: true });
   }
 });
+
+
+test("managed skill learning normalizes human-readable names into valid stable IDs", async () => {
+  const f = fixture();
+  try {
+    const handler = createManagedSkillLearningHandler(f.lifecycle, async () => true, async () => artifact);
+    const humanReadable = {
+      ...candidate,
+      name: "Repair Type Error",
+      category: "runtime_error" as const,
+      verification: ["test"],
+    };
+    assert.equal(await handler(humanReadable, "run-readable", "operator-1"), true);
+    assert.equal(f.platform.get("learned:Repair-Type-Error:runtime_error")?.source, "learned");
+  } finally {
+    rmSync(f.directory, { recursive: true, force: true });
+  }
+});

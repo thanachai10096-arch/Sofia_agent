@@ -147,8 +147,11 @@ test("skill lifecycle preserves prior version and can roll back", async () => {
     assert.equal(platform.get("repair-skill")?.version, "2.0.0");
     lifecycle.rollback("repair-skill");
     assert.equal(platform.get("repair-skill")?.version, "1.0.0");
-    const reloaded = new VersionedSkillLifecycle(platform, passing, { file });
+    const restoredPlatform = new InMemorySkillsPlatform();
+    const reloaded = new VersionedSkillLifecycle(restoredPlatform, passing, { file });
     assert.equal(reloaded.active("repair-skill")?.package.version, "1.0.0");
+    assert.equal(reloaded.activePackages()[0]?.version, "1.0.0");
+    assert.equal(restoredPlatform.get("repair-skill")?.version, "1.0.0");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
