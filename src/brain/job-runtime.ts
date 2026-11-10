@@ -514,12 +514,10 @@ export class DurableJobRuntime implements JobRuntime {
 
     const stored = await this.state.get(id);
     if (!stored) return existing ? publicJobRecord(existing) : undefined;
-    const loadedSnapshot = stored.snapshot?.runId && this.runStore
-      ? await this.runStore.load(stored.snapshot.runId)
-      : undefined;
-    // Older versions may have persisted snapshots before job-level redaction was
-    // added. Sanitize on read too, before returning or resuming historical state.
-    const snapshot = loadedSnapshot ? redactSecrets(loadedSnapshot) as BrainRunSnapshot : undefined;
+    // The job record is the canonical, lease-fenced snapshot. The separate RunStore
+    // is a best-effort mirror; reading it here could let a late stale worker overwrite
+    // the newer snapshot already committed to the job record.
+    const snapshot = stored.snapshot ? redactSecrets(stored.snapshot) as BrainRunSnapshot : undefined;
     const hydrated = { ...stored, ...(snapshot ? { snapshot } : {}) };
     await this.recoverInterrupted(hydrated);
     this.jobs.set(id, hydrated);
@@ -539,11 +537,9 @@ export class DurableJobRuntime implements JobRuntime {
     const stored = await this.state.list();
     for (const persisted of stored) {
       if (this.controllers.has(persisted.id) || this.starting.has(persisted.id)) continue;
-      const loadedSnapshot = persisted.snapshot?.runId && this.runStore
-        ? await this.runStore.load(persisted.snapshot.runId)
-        : undefined;
-      // Keep legacy snapshots from bypassing redaction when listing persisted jobs.
-      const snapshot = loadedSnapshot ? redactSecrets(loadedSnapshot) as BrainRunSnapshot : undefined;
+      // Prefer the canonical snapshot committed with the fenced job record. The
+      // separate RunStore is only a mirror and must not replace newer durable state.
+      const snapshot = persisted.snapshot ? redactSecrets(persisted.snapshot) as BrainRunSnapshot : undefined;
       const hydrated = { ...persisted, ...(snapshot ? { snapshot } : {}) };
       await this.recoverInterrupted(hydrated);
       this.jobs.set(hydrated.id, hydrated);
