@@ -34,6 +34,21 @@ describe("encrypted persistent audit", () => {
     }
   });
 
+  it("serializes concurrent appends into independently readable encrypted records", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "sofia-audit-concurrent-"));
+    const file = path.join(directory, "events.log");
+    try {
+      const audit = new EncryptedFileAudit(file, "concurrent-audit-secret");
+      const ids = Array.from({ length: 64 }, (_, index) => `event-${index}`);
+      await Promise.all(ids.map((id) => audit.record(makeEvent(id))));
+      const events = await audit.list();
+      assert.equal(events.length, ids.length);
+      assert.deepEqual(new Set(events.map((event) => event.id)), new Set(ids));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects wrong keys and tampered ciphertext", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "sofia-audit-"));
     const file = path.join(directory, "events.log");
