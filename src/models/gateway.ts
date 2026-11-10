@@ -156,7 +156,7 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
   const usage = raw.usage;
   return {
     choices: [{
-      finish_reason: raw.stop_reason ?? null,
+      finish_reason: raw.stop_reason === "max_tokens" ? "length" : raw.stop_reason ?? null,
       message: {
         content: textParts.join("\n") || null,
         tool_calls: toolCalls,
@@ -304,7 +304,28 @@ export class SofiaModelGateway implements ModelProvider {
       }
     }
 
-    const protocol = config.protocol ?? "openai-compatible";
+    const configuredProtocol = config.protocol ?? "openai-compatible";
+    let protocol = configuredProtocol;
+    let providerBaseUrl = config.baseUrl;
+    // DeepSeek's Anthropic-compatible Messages API does not expose its JSON
+    // Output mode. Brain phases require machine-readable JSON, so use the
+    // same DeepSeek credential/model through its official OpenAI-compatible
+    // Chat Completions endpoint for structured Brain calls. Ordinary chat and
+    // tool conversations continue using the explicitly configured protocol.
+    if (brainStructuredOutput && configuredProtocol === "anthropic-messages") {
+      try {
+        const parsedBaseUrl = new URL(config.baseUrl);
+        if (
+          parsedBaseUrl.hostname === "api.deepseek.com" &&
+          parsedBaseUrl.pathname.replace(/\/+$/, "") === "/anthropic"
+        ) {
+          protocol = "openai-compatible";
+          providerBaseUrl = parsedBaseUrl.origin;
+        }
+      } catch {
+        // Invalid URLs are rejected by the request path below; do not infer a fallback.
+      }
+    }
     const outboundMessages: ChatMessage[] = brainStructuredOutput
       ? [
           {
@@ -319,7 +340,7 @@ export class SofiaModelGateway implements ModelProvider {
     let body: Record<string, unknown>;
     if (protocol === "anthropic-messages") {
       const converted = anthropicMessages(messages, brainStructuredOutput);
-      endpoint = config.baseUrl.replace(/\/+$/, "") + "/messages";
+      endpoint = providerBaseUrl.replace(/\/+$/, "") + "/messages";
       requestHeaders = {
         ...config.headers,
         "x-api-key": config.apiKey,
@@ -342,7 +363,7 @@ export class SofiaModelGateway implements ModelProvider {
         } : {}),
       };
     } else {
-      endpoint = config.baseUrl.replace(/\/+$/, "") + "/chat/completions";
+      endpoint = providerBaseUrl.replace(/\/+$/, "") + "/chat/completions";
       requestHeaders = {
         ...config.headers,
         authorization: "Bearer " + config.apiKey,
@@ -581,6 +602,7 @@ export class SofiaModelGateway implements ModelProvider {
         })),
       },
       ...(usage ? { usage } : {}),
+      finishReason: data.choices?.[0]?.finish_reason === "length" ? "length" : "complete",
     };
   }
 }
