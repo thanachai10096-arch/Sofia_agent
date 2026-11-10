@@ -33,6 +33,7 @@ const approvalHandler = createQueuedApprovalHandler(approvalQueue, {
     await telegramApprovalNotifier?.(record);
   },
   onNotificationError: () => console.error("Approval notification delivery failed."),
+  onCancellationError: () => console.error("Approval cancellation persistence failed."),
 });
 const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalHandler);
 deps.approvalQueue = approvalQueue;
