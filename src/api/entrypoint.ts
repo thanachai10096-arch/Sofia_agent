@@ -216,17 +216,26 @@ if (discordConfigured) {
           job.notificationDelivered || job.status === "queued" || job.status === "running" ||
           Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
       notificationInFlight.add(job.id);
+      let deliveryToken: string | undefined;
       try {
+        // The durable claim arbitrates across local Node.js workers. If the
+        // runtime cannot provide a claim, fail closed rather than risk duplicates.
+        deliveryToken = await deps.jobRuntime.claimNotificationDelivery?.(job.id);
+        if (!deliveryToken) continue;
         const message = job.status === "completed"
           ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
           : job.snapshot
             ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
             : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
         await discordTransport.sendMessage(job.notificationChannelId, message);
-        await deps.jobRuntime.markNotificationDelivered?.(job.id);
+        await deps.jobRuntime.markNotificationDelivered?.(job.id, deliveryToken);
+        deliveryToken = undefined;
       } catch {
-        // Keep the marker unset so the next retry can attempt delivery again.
+        // Release the claim so a later retry can attempt delivery again.
       } finally {
+        if (deliveryToken) {
+          await deps.jobRuntime.releaseNotificationDelivery?.(job.id, deliveryToken).catch(() => undefined);
+        }
         notificationInFlight.delete(job.id);
       }
     }
