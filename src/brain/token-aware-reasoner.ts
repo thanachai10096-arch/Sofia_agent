@@ -47,36 +47,13 @@ function phaseFromRequest(request: string): BrainPhase {
 }
 
 /**
- * Understanding labels describe task intent, while the gateway expects
- * provider-route capabilities. Require capabilities needed by each Brain
- * phase first, then merge task-derived requirements and leave unknown labels
- * intact so the gateway continues to fail closed for unsupported needs.
+ * TaskUnderstanding.requiredCapabilities describes task/tool capabilities
+ * (for example file-write or browser.open), not model-route capabilities.
+ * Mixing those domains rejects every provider route before the planner can
+ * choose registered tools. Route admission is therefore based only on the
+ * current Brain phase; task capabilities remain in the untrusted state passed
+ * to the planner and tool-discovery layer.
  */
-function routeCapabilities(values: unknown): string[] {
-  if (!Array.isArray(values)) return [];
-  const mapped = values
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => {
-      switch (value.trim().toLowerCase()) {
-        case "general":
-        case "conversation":
-          return undefined;
-        case "chat":
-        case "simple-chat":
-          return "fast";
-        case "analysis":
-        case "research":
-          return "reasoning";
-        case "code":
-          return "coding";
-        default:
-          return value.trim();
-      }
-    })
-    .filter((value): value is string => Boolean(value));
-  return [...new Set(mapped)].slice(0, 24);
-}
-
 /** Keep phase-critical work off cheap routes that cannot reliably satisfy its output contract. */
 function phaseCapabilities(phase: BrainPhase): string[] {
   switch (phase) {
@@ -101,11 +78,12 @@ function outputContractFor(phase: BrainPhase): string {
   if (phase === "understand") return [
     "Return this exact JSON object shape:",
     '{"mode":"conversation|action","response":"required when mode=conversation","objective":"non-empty string","constraints":["string"],"assumptions":["string"],"requiredCapabilities":["string"],"requiredTools":["string"],"risk":"low|medium|high","successCriteria":["string"],"ambiguities":["string"]}',
-    "All fields except mode and response are required. For mode=conversation, include the complete natural-language answer in response; this allows the Brain to answer in one provider call. For mode=action, omit response and describe the actual work required. mode must be conversation only when no external action/tool is needed; otherwise use action. Every list field must be a JSON array, even when empty. requiredCapabilities must use only fast, reasoning, coding, vision, long-context, or tool-use; use [] for ordinary conversation/general questions. risk must be exactly low, medium, or high.",
+    "All fields except mode and response are required. For mode=conversation, include the complete natural-language answer in response; this allows the Brain to answer in one provider call. For mode=action, omit response and describe the actual work required. mode must be conversation only when no external action/tool is needed; otherwise use action. Every list field must be a JSON array, even when empty. requiredCapabilities describes task and tool needs (for example file-write, workspace.read, browser.open, or network access), not model-route capabilities; use [] when no special task capability is needed. requiredTools must name tools from the supplied registry. risk must be exactly low, medium, or high.",
   ].join("\n");
   if (phase === "respond") return [
     "Return exactly one JSON object: {\"response\":\"the complete user-facing answer\"}.",
     "Answer the user's conversational request directly using only supplied context. Do not propose or claim tool execution, file changes, browsing, or external actions. If the request actually requires an external action or unavailable evidence, say what is missing rather than pretending it was done.",
+    "If supplied state or observations include web.search or web.search_news results, ground current factual claims in those sources and include source titles and URLs. Distinguish publication dates from fetch dates, report uncertainty or conflicting sources, and never invent citations.",
   ].join("\n");
   if (phase === "plan" || phase === "replan") return [
     "Return this exact JSON object shape:",
@@ -120,6 +98,7 @@ function outputContractFor(phase: BrainPhase): string {
   return [
     "Return one JSON object only.",
     "Do not invent a tool call, claim execution, or claim completion.",
+    "If supplied state or observations include web.search or web.search_news results, ground current factual claims in those sources and include source titles and URLs. Distinguish publication dates from fetch dates, report uncertainty or conflicting sources, and never invent citations.",
   ].join("\n");
 }
 
@@ -130,7 +109,7 @@ function outputContractFor(phase: BrainPhase): string {
  * large task context and left the executor's preflight estimate disconnected
  * from the prompt actually sent to providers.
  */
-function asInferenceRequest(request: string): InferenceRequest {
+function asInferenceRequest(request: string, preferredRouteId?: string): InferenceRequest {
   const parsed = JSON.parse(request) as {
     phase?: unknown;
     payload?: Record<string, unknown>;
@@ -145,6 +124,11 @@ function asInferenceRequest(request: string): InferenceRequest {
     phase,
     referenceContext: compactValue(payload.referenceContext),
     understanding: compactValue(payload.understanding),
+    taskCapabilities: compactValue(
+      Array.isArray(payload.requiredCapabilities)
+        ? payload.requiredCapabilities
+        : understanding.requiredCapabilities,
+    ),
     availableTools: compactValue(payload.availableTools),
     repository: compactValue(payload.repository),
     previousPlan: compactValue(payload.previousPlan),
@@ -167,14 +151,8 @@ function asInferenceRequest(request: string): InferenceRequest {
     minimumQualityTier: typeof payload.minimumQualityTier === "number"
       ? payload.minimumQualityTier
       : 1,
-    requiredCapabilities: [...new Set([
-      ...phaseCapabilities(phase),
-      ...(phase === "understand" ? [] : routeCapabilities(
-        Array.isArray(payload.requiredCapabilities)
-          ? payload.requiredCapabilities
-          : understanding.requiredCapabilities,
-      )),
-    ])],
+    requiredCapabilities: preferredRouteId ? [] : phaseCapabilities(phase),
+    ...(preferredRouteId ? { preferredRouteId } : {}),
     core: {
       instructions: [
         "Return only valid JSON. Do not use Markdown fences or surrounding prose.",
@@ -194,7 +172,10 @@ function asInferenceRequest(request: string): InferenceRequest {
 }
 
 export class TokenAwareBrainReasoner implements BrainReasoner {
-  constructor(private readonly gateway: TokenAwareGateway) {}
+  constructor(
+    private readonly gateway: TokenAwareGateway,
+    private readonly preferredRouteId?: string,
+  ) {}
 
   async prepare(
     request: string,
@@ -204,7 +185,7 @@ export class TokenAwareBrainReasoner implements BrainReasoner {
     },
   ): Promise<PreparedInference> {
     options.signal.throwIfAborted();
-    const input = asInferenceRequest(request);
+    const input = asInferenceRequest(request, this.preferredRouteId);
     // Match the route-admission estimate so executor preflight does not
     // reject Thai/CJK prompts merely because their UTF-8 representation is 3x.
     // This is an estimate, not a tokenizer guarantee; TokenBudget fails closed

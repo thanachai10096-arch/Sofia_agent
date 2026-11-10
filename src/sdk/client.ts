@@ -153,6 +153,27 @@ export class SofiaClient {
     }
   }
 
+  /** Lists pending approvals owned by this API key. */
+  async listApprovals(signal?: AbortSignal): Promise<{ approvals: Array<{
+    id: string; runId: string; toolName: string; input: Record<string, unknown>;
+    actionHash: string; risk: string; status: string; expiresAt: number;
+  }> }> {
+    return this.request("/v1/approvals", {
+      headers: { authorization: "Bearer " + this.options.apiKey },
+    }, signal);
+  }
+
+  /** Decides one exact pending action; the server verifies key ownership and hash. */
+  async decideApproval(id: string, actionHash: string, approved: boolean, signal?: AbortSignal): Promise<unknown> {
+    if (!/^[0-9a-f-]{36}$/i.test(id) || !/^[a-f0-9]{64}$/i.test(actionHash)) {
+      throw new Error("Invalid approval identifier or action hash.");
+    }
+    return this.request("/v1/approvals/" + encodeURIComponent(id) + "/decision", {
+      method: "POST", headers: this.headers(),
+      body: JSON.stringify({ actionHash, approved }),
+    }, signal);
+  }
+
   async listModels(signal?: AbortSignal): Promise<SofiaModelList> {
     return this.request<SofiaModelList>("/v1/models", {
       headers: { authorization: "Bearer " + this.options.apiKey },

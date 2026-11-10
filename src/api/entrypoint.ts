@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
+import { resolveApiScopes } from "./scopes.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
@@ -8,21 +9,45 @@ import { createDiscordGatewayTransport } from "../integrations/messaging/discord
 import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.js";
 import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
-import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { isDiscordMessageAllowed, parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
+import { SqliteApprovalQueue, createQueuedApprovalHandler, type ApprovalRecord } from "../agent/approval-queue.js";
+import { handleDiscordApprovalCommand } from "../integrations/messaging/discord-approvals.js";
+import { createTelegramMessagingRuntime, parseTelegramUserAllowlist, parseTelegramUserApiKeys } from "../integrations/messaging/telegram-runtime.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
-const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+// Approval access is opt-in; the default API key must not silently gain authority to approve actions.
+const scopes = resolveApiScopes(process.env.SOFIA_API_SCOPES);
 const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+let discordApprovalNotifier: ((record: ApprovalRecord, channelId: string) => Promise<void>) | undefined;
+let telegramApprovalNotifier: ((record: ApprovalRecord) => Promise<void>) | undefined;
+const approvalQueue = await SqliteApprovalQueue.open(path.join(workspace, ".sofia", "approvals.sqlite"));
+const approvalHandler = createQueuedApprovalHandler(approvalQueue, {
+  onCreated: async (record, request) => {
+    if (request.notificationChannelId) await discordApprovalNotifier?.(record, request.notificationChannelId);
+    await telegramApprovalNotifier?.(record);
+  },
+  onNotificationError: () => console.error("Approval notification delivery failed."),
+  onCancellationError: () => console.error("Approval cancellation persistence failed."),
+});
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalHandler);
+deps.approvalQueue = approvalQueue;
+deps.jobRuntime?.setApprovalRecoveryStore?.(approvalQueue);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
+telegramApprovalNotifier = telegramRuntime
+  ? async (record) => {
+      await telegramRuntime.notifyApproval(
+        record.ownerId,
+        "Sofia has an action waiting for your approval. Use /approvals in this private chat to review the exact action.",
+      );
+    }
+  : undefined;
 
 const discordPublicKey = process.env.DISCORD_PUBLIC_KEY?.trim();
 const discordBotToken = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -52,11 +77,18 @@ if (discordConfigured) {
     publicKeyHex: discordPublicKey,
     botToken: discordBotToken,
     commandName: process.env.DISCORD_COMMAND_NAME?.trim() || "run",
-    additionalCommandNames: ["status", "cancel", "resume"],
+    additionalCommandNames: ["status", "cancel", "resume", "approvals", "approve", "reject"],
     allowedUserIds: discordUserIds,
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
   });
+  discordApprovalNotifier = async (record, channelId) => {
+    const prefix = "discord:";
+    const userId = record.ownerId.startsWith(prefix) ? record.ownerId.slice(prefix.length) : "";
+    if (!userId || !isDiscordMessageAllowed({ userId, channelId }, discordUserIds, discordChannelIds)) return;
+    const notice = "Sofia has an action waiting for your approval. Use the private Discord /approvals slash command to review it.";
+    await discordTransport?.sendMessage(channelId, notice);
+  };
   const discordDeduplicator = new FileChatMessageDeduplicator(
     path.resolve(process.env.SOFIA_CHAT_DEDUPE_DIR ?? path.join(workspace, ".sofia", "chat-dedupe")),
   );
@@ -64,9 +96,30 @@ if (discordConfigured) {
     try {
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
+      // Enforce both allowlists before every command path, including Gateway
+      // messages. The interaction transport checks these too, but Gateway
+      // messages arrive through a separate transport and must fail closed here.
+      if (!isDiscordMessageAllowed({ userId: message.author.id, channelId: message.channelId }, discordUserIds, discordChannelIds)) {
+        await discordTransport?.sendMessage(
+          message.channelId,
+          "You are not authorized to use Sofia in this channel.",
+          undefined,
+          message.id,
+        );
+        return;
+      }
       const principalId = "discord:" + message.author.id;
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
       const argument = message.content.trim().slice(command.length).trim();
+      if (command === "/approvals" || command === "/approve" || command === "/reject") {
+        if (command === "/approvals" && message.source !== "interaction") {
+          await discordTransport?.sendMessage(message.channelId, "Use the private Discord /approvals slash command to review pending actions.", undefined, message.id);
+          return;
+        }
+        const reply = handleDiscordApprovalCommand(approvalQueue, principalId, command, argument);
+        await discordTransport?.sendMessage(message.channelId, reply, undefined, message.id);
+        return;
+      }
       if (command === "/status" || command === "/cancel" || command === "/resume") {
         if (!/^([0-9a-f]{8}-[0-9a-f-]{27,})$/i.test(argument)) {
           await discordTransport?.sendMessage(
@@ -125,6 +178,7 @@ if (discordConfigured) {
       }
       const handleDiscordChat = createDiscordSharedChatHandler({
         runtime: deps.jobRuntime,
+        userMemoryStore: deps.userMemoryStore,
         sender: discordTransport!,
         deduplicator: discordDeduplicator,
         allowedUserIds: new Set(discordUserIds),
@@ -204,8 +258,25 @@ if (discordConfigured) {
   discordRecoveryTimer.unref?.();
 }
 
+// Register per-sender Telegram API credentials with the same scope policy as the
+// primary server key. The Telegram runtime independently validates the mapping
+// against its explicit sender allowlist and refuses shared keys for multi-user bots.
+const apiKeys: Record<string, string[]> = { [apiKey]: scopes };
+const rawTelegramUsers = process.env.TELEGRAM_ALLOWED_USER_IDS?.trim();
+const rawTelegramUserApiKeys = process.env.TELEGRAM_USER_API_KEYS_JSON?.trim();
+if (rawTelegramUsers && rawTelegramUserApiKeys) {
+  try {
+    const telegramUsers = parseTelegramUserAllowlist(rawTelegramUsers);
+    const telegramKeys = parseTelegramUserApiKeys(rawTelegramUserApiKeys, telegramUsers, new Set([apiKey]));
+    for (const key of telegramKeys.values()) apiKeys[key] = scopes;
+  } catch {
+    // Telegram remains fail-closed in its runtime; do not log credential values.
+    console.error("Telegram per-user API credentials are invalid; Telegram integration will remain disabled.");
+  }
+}
+
 const server = createSofiaApi(deps, {
-  apiKeys: { [apiKey]: scopes },
+  apiKeys,
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
@@ -215,6 +286,8 @@ const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
   deps.closeSessionStore();
+  approvalQueue.close();
+  void deps.closeMcpRegistry().catch(() => console.error("MCP server shutdown failed."));
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
 server.listen(port, "0.0.0.0", () => {

@@ -105,3 +105,37 @@ test("gateway accepts a Thai context that only appeared oversized as UTF-8 bytes
   assert.equal((result as { objective: string }).objective, "ตอบแล้ว");
   assert.equal(providerCalls, 1);
 });
+
+
+test("internal route propagates provider length finish reason to token-aware gateway", async () => {
+  const modelRoute: ModelRoute = {
+    id: "test-route", capabilities: ["reasoning"], costWeight: 1, latencyWeight: 1, qualityWeight: 1, healthy: true,
+  };
+  const provider = {
+    async generate() {
+      return {
+        text: JSON.stringify({ objective: "partial", constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [], risk: "low", successCriteria: [], ambiguities: [] }),
+        usage: { inputTokens: 10, outputTokens: 20 },
+        finishReason: "length" as const,
+      };
+    },
+  } as unknown as ModelProvider;
+  const route = createInternalRoute({ modelProvider: provider, route: modelRoute });
+  const prepared = route.prepare({
+    core: {
+      instructions: "Return JSON.",
+      task: "test truncation",
+      acceptanceCriteria: [],
+      state: { phase: "understand" },
+      toolSchemas: [],
+    },
+    evidence: [],
+  });
+  const reply = await prepared.invoke({
+    signal: new AbortController().signal,
+    maxOutputTokens: 128,
+    requestId: "truncation-test",
+    maxAttempts: 1,
+  });
+  assert.equal(reply.finishReason, "length");
+});

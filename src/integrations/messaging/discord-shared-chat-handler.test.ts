@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { JobRuntime } from "../../brain/job-runtime.js";
 import type { ChatMessageDeduplicator } from "../chat-adapter.js";
+import type { UserMemoryStore } from "../../brain/user-memory.js";
 import type { VerifiedDiscordMessage } from "./discord.js";
 import { createDiscordSharedChatHandler } from "./discord-shared-chat-handler.js";
 
-function harness() {
+function harness(userMemoryStore?: UserMemoryStore) {
   const submissions: Array<Record<string, unknown>> = [];
   const sent: Array<{ channelId: string; text: string; interactionId?: string }> = [];
   const delivered: string[] = [];
@@ -36,6 +37,7 @@ function harness() {
   const controller = new AbortController();
   const create = () => createDiscordSharedChatHandler({
     runtime,
+    userMemoryStore,
     sender,
     deduplicator,
     allowedUserIds: new Set(["user-1", "user-2"]),
@@ -98,4 +100,38 @@ test("shared Discord handler accepts ordinary natural language and rechecks allo
   const denied = await handle(message("interaction-4", "outsider", "channel-1", "/run do something"));
   assert.equal(denied, "Access denied.");
   assert.equal(h.submissions.length, 1);
+});
+
+test("Discord injects only the authenticated user's relevant memory as untrusted context", async () => {
+  const lookups: string[] = [];
+  const memoryStore = {
+    async find(userId: string) {
+      lookups.push(userId);
+      return [{ id: "memory-1", kind: "preference" as const, content: userId + " prefers concise replies", createdAt: 1, updatedAt: 1 }];
+    },
+    async save() {}, async list() { return []; }, async delete() { return false; }, async clear() {},
+  } as unknown as UserMemoryStore;
+  const h = harness(memoryStore);
+  const handle = h.create();
+  await Promise.all([
+    handle(message("memory-a", "user-1", "channel-1", "Please explain this")),
+    handle(message("memory-b", "user-2", "channel-2", "Please explain this")),
+  ]);
+  assert.deepEqual(lookups.sort(), ["discord:user-1", "discord:user-2"]);
+  const contexts = h.submissions.map((item) => String(item.context ?? ""));
+  assert.ok(contexts.some((context) => context.includes("discord:user-1 prefers concise replies")));
+  assert.ok(contexts.some((context) => context.includes("discord:user-2 prefers concise replies")));
+  assert.ok(contexts.every((context) => context.includes("untrusted reference data")));
+});
+
+test("Discord tasks continue when the user memory store is unavailable", async () => {
+  const memoryStore = {
+    async find() { throw new Error("temporary memory failure"); },
+    async save() {}, async list() { return []; }, async delete() { return false; }, async clear() {},
+  } as unknown as UserMemoryStore;
+  const h = harness(memoryStore);
+  const reply = await h.create()(message("memory-failure", "user-1", "channel-1", "Continue without memory"));
+  assert.match(reply ?? "", /รับคำขอแล้วครับ กำลังเริ่มทำงาน/);
+  assert.equal(h.submissions.length, 1);
+  assert.equal(h.submissions[0]?.context, "Origin: discord chat integration. Conversation ID: channel-1.");
 });

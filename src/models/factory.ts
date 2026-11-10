@@ -40,6 +40,8 @@ import { CompositeSecurityAudit } from "../security/audit.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import type { SofiaTool } from "../tools/types.js";
+import { connectMcpFromEnv } from "../mcp/env.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
@@ -60,7 +62,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
-  return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
+  return ({signal,assertExecutionLease,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
     if (requestedRouteId && !requestedRoute) throw new Error("Unknown model route: " + requestedRouteId);
@@ -72,7 +74,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const models=config.routes.map(route=>({key:route.providerId??route.id,limit:{maxTokens:intEnv("SOFIA_BRAIN_MODEL_MAX_TOKENS",runLimit.maxTokens,1),maxCostNanoUsd:runLimit.maxCostNanoUsd,maxCalls:runLimit.maxCalls,maxInFlight:runLimit.maxInFlight},price:{inputNanoUsdPerToken:bigintEnv("SOFIA_"+route.id.toUpperCase()+"_INPUT_NANO_USD",0n),outputNanoUsdPerToken:bigintEnv("SOFIA_"+route.id.toUpperCase()+"_OUTPUT_NANO_USD",0n)}})).filter((m,i,a)=>a.findIndex(x=>x.key===m.key)===i);
     const budget=new TokenBudget(runLimit,models);
     const gateway=new TokenAwareGateway(budget,selectedRouteAdapters,intEnv("SOFIA_BRAIN_MODEL_TIMEOUT_MS",45000,1));
-    const reasoner=new TokenAwareBrainReasoner(gateway);
+    const reasoner=new TokenAwareBrainReasoner(gateway, requestedRouteId);
     // Browser tools own mutable page/session handles. Construct them per Brain run,
     // never on the process-wide dependency registry, so concurrent users/runs cannot
     // address each other's tabs or reuse each other's authenticated browser context.
@@ -114,15 +116,15 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       maxContextBytes:intEnv("SOFIA_SUBAGENT_MAX_CONTEXT_BYTES",32768,256),
     });
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
-    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
+    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot,assertExecutionLease,onEvent,onFinally:async()=>{await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
   };
 }
 
-export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
+export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"],additionalTools:readonly SofiaTool[]=[]):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
-  const tools=createToolRegistry(createBuiltinTools());
+  const tools=createToolRegistry([...createBuiltinTools(),...additionalTools]);
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
@@ -140,8 +142,23 @@ export async function createSofiaAgentDependenciesWithSessions(
   workspace = process.cwd(),
   approval?: AgentDependencies["approval"],
   databasePath?: string,
-): Promise<AgentDependencies & { closeSessionStore: () => void }> {
-  const dependencies = createSofiaAgentDependencies(workspace, approval);
-  const sessionStore = await SqliteSessionStore.open(databasePath);
-  return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+): Promise<AgentDependencies & { closeSessionStore: () => void; closeMcpRegistry: () => Promise<void> }> {
+  const policy = loadExecutionPolicyFromEnv();
+  const mcpRegistry = await connectMcpFromEnv(policy);
+  let dependencies: AgentDependencies | undefined;
+  let sessionStore: SqliteSessionStore | undefined;
+  try {
+    dependencies = createSofiaAgentDependencies(workspace, approval, mcpRegistry?.tools.list() ?? []);
+    sessionStore = await SqliteSessionStore.open(databasePath);
+    return {
+      ...dependencies,
+      sessionStore,
+      closeSessionStore: () => sessionStore!.close(),
+      closeMcpRegistry: () => mcpRegistry?.close() ?? Promise.resolve(),
+    };
+  } catch (error) {
+    try { sessionStore?.close(); } catch { /* preserve startup error */ }
+    try { await mcpRegistry?.close(); } catch { /* preserve startup error */ }
+    throw error;
+  }
 }

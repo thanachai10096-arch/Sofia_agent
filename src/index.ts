@@ -122,6 +122,7 @@ export { createSofiaAgentDependenciesWithSessions } from "./models/factory.js";
 export { CoordinatedSubagentRuntime } from "./brain/coordinated-subagent-runtime.js";
 export { connectManagedMcpServer } from "./mcp/managed-server.js";
 export { connectManagedMcpRegistry } from "./mcp/registry.js";
+export { connectMcpFromEnv } from "./mcp/env.js";
 export type { ManagedMcpToolRegistry, ManagedMcpServerConfig } from "./mcp/registry.js";
 export type { ManagedMcpServer, ManagedMcpServerOptions } from "./mcp/managed-server.js";
 export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHAT_DEDUPE_RELEASE_SCRIPT } from "./integrations/redis-chat-deduplicator.js";

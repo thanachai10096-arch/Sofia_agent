@@ -74,7 +74,12 @@ function publicJobRecord(record: JobRecord): JobRecord {
 }
 
 
+export interface ApprovalRecoveryStore {
+  expirePendingForRun(runId: string, ownerId: string): number;
+}
+
 export interface JobRuntime {
+  setApprovalRecoveryStore?(store: ApprovalRecoveryStore): void;
   submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
@@ -320,6 +325,17 @@ class FileJobStateStore {
     });
   }
 
+  async assertLease(id: string, ownerToken: string): Promise<void> {
+    const valid = await this.withFileLock(async () => {
+      const records = await this.read();
+      const record = records.find((item) => item.id === id);
+      if (!record || record.status !== "running" || record.leaseOwnerToken !== ownerToken) return false;
+      const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
+      return Number.isFinite(expires) && expires > Date.now();
+    });
+    if (!valid) throw new Error("Job execution lease was lost before tool execution");
+  }
+
   async heartbeat(id: string, ownerToken: string, leaseMs: number): Promise<boolean> {
     return this.withFileLock(async () => {
       const records = await this.read();
@@ -388,6 +404,13 @@ class FileJobStateStore {
         const current = records[index]!;
         if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
+        // A matching token is not sufficient after its lease has expired: the old
+        // worker may have resumed after a long pause before another worker reclaimed it.
+        // Reject every write from that worker, including a late terminal result.
+        if (current.status === "running") {
+          const leaseExpiresAt = current.leaseExpiresAt ? Date.parse(current.leaseExpiresAt) : 0;
+          if (!Number.isFinite(leaseExpiresAt) || leaseExpiresAt <= Date.now()) return false;
+        }
         records[index] = {
           ...record,
           ...(record.status === "running" && current.status === "running"
@@ -419,11 +442,15 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly resuming = new Set<string>();
   private readonly starting = new Set<string>();
   private readonly state: FileJobStateStore;
+  private approvalRecoveryStore?: ApprovalRecoveryStore;
 
   constructor(
     private readonly brainFactory: (options: {
       signal?: AbortSignal;
+      assertExecutionLease?: () => Promise<void>;
       maxSteps?: number;
+      principalId?: string;
+      notificationChannelId?: string;
       onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
       modelRouteId?: string;
     }) => SofiaBrain,
@@ -431,6 +458,10 @@ export class DurableJobRuntime implements JobRuntime {
     namespace = process.cwd(),
   ) {
     this.state = new FileJobStateStore(namespace);
+  }
+
+  setApprovalRecoveryStore(store: ApprovalRecoveryStore): void {
+    this.approvalRecoveryStore = store;
   }
 
   async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
@@ -452,11 +483,24 @@ export class DurableJobRuntime implements JobRuntime {
   }
 
   private async recoverInterrupted(record: JobRecord): Promise<JobRecord> {
-    if (record.status === "running" && !this.controllers.has(record.id)) {
+    if (this.controllers.has(record.id)) return record;
+    if (record.status === "running") {
       const expires = record.leaseExpiresAt ? Date.parse(record.leaseExpiresAt) : 0;
       if (!Number.isFinite(expires) || expires <= Date.now()) {
         const recovered = await this.state.markInterruptedIfExpired(record.id);
         if (recovered) Object.assign(record, recovered);
+      }
+    }
+    // Retry this idempotent cleanup on subsequent reads if the approval database
+    // was temporarily unavailable during the first recovery attempt.
+    if (record.status === "failed" && /Job lease expired/i.test(record.error ?? "")) {
+      const runId = record.snapshot?.runId;
+      const ownerId = record.ownerKeyId;
+      if (runId && ownerId) {
+        // Expire only pending approvals owned by this principal for this exact
+        // interrupted run. The queue keeps the decision audit trail; approved
+        // records are immutable and are never replayed during resume.
+        this.approvalRecoveryStore?.expirePendingForRun(runId, ownerId);
       }
     }
     return record;
@@ -470,12 +514,10 @@ export class DurableJobRuntime implements JobRuntime {
 
     const stored = await this.state.get(id);
     if (!stored) return existing ? publicJobRecord(existing) : undefined;
-    const loadedSnapshot = stored.snapshot?.runId && this.runStore
-      ? await this.runStore.load(stored.snapshot.runId)
-      : undefined;
-    // Older versions may have persisted snapshots before job-level redaction was
-    // added. Sanitize on read too, before returning or resuming historical state.
-    const snapshot = loadedSnapshot ? redactSecrets(loadedSnapshot) as BrainRunSnapshot : undefined;
+    // The job record is the canonical, lease-fenced snapshot. The separate RunStore
+    // is a best-effort mirror; reading it here could let a late stale worker overwrite
+    // the newer snapshot already committed to the job record.
+    const snapshot = stored.snapshot ? redactSecrets(stored.snapshot) as BrainRunSnapshot : undefined;
     const hydrated = { ...stored, ...(snapshot ? { snapshot } : {}) };
     await this.recoverInterrupted(hydrated);
     this.jobs.set(id, hydrated);
@@ -495,11 +537,9 @@ export class DurableJobRuntime implements JobRuntime {
     const stored = await this.state.list();
     for (const persisted of stored) {
       if (this.controllers.has(persisted.id) || this.starting.has(persisted.id)) continue;
-      const loadedSnapshot = persisted.snapshot?.runId && this.runStore
-        ? await this.runStore.load(persisted.snapshot.runId)
-        : undefined;
-      // Keep legacy snapshots from bypassing redaction when listing persisted jobs.
-      const snapshot = loadedSnapshot ? redactSecrets(loadedSnapshot) as BrainRunSnapshot : undefined;
+      // Prefer the canonical snapshot committed with the fenced job record. The
+      // separate RunStore is only a mirror and must not replace newer durable state.
+      const snapshot = persisted.snapshot ? redactSecrets(persisted.snapshot) as BrainRunSnapshot : undefined;
       const hydrated = { ...persisted, ...(snapshot ? { snapshot } : {}) };
       await this.recoverInterrupted(hydrated);
       this.jobs.set(hydrated.id, hydrated);
@@ -620,10 +660,11 @@ export class DurableJobRuntime implements JobRuntime {
         return;
       }
 
-      const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot, ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}) });
+      const brain = this.brainFactory({ signal: controller.signal, assertExecutionLease: () => this.state.assertLease(record.id, leaseToken), onRunSnapshot: onSnapshot, ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}), ...(record.notificationChannelId ? { notificationChannelId: record.notificationChannelId } : {}), ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}) });
       const result = await brain.run({
         ...input,
         ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
+        ...(record.notificationChannelId ? { notificationChannelId: record.notificationChannelId } : {}),
         signal: controller.signal,
         resume,
       });
@@ -638,7 +679,14 @@ export class DurableJobRuntime implements JobRuntime {
         record.status = result.completed ? "completed" : "failed";
       }
       record.updatedAt = new Date().toISOString();
-      await this.state.save(record);
+      const committed = await this.state.save(record);
+      if (!committed) {
+        // Do not report completion from a worker whose lease was lost while it
+        // was executing. Refresh from durable state; recovery owns the next step.
+        const latest = await this.state.get(record.id);
+        if (latest) Object.assign(record, latest);
+        controller.abort(new Error("Job execution lease was lost before completion could be committed"));
+      }
     } catch (error) {
       if (record.status !== "cancelled") {
         record.error = error instanceof Error ? error.message : String(error);

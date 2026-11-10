@@ -233,6 +233,35 @@ test("gateway fails closed when no route satisfies the requested capabilities", 
 });
 
 
+test("gateway honors an explicitly selected route across phases regardless of automatic capability and quality gates", async () => {
+  const budget = makeBudget();
+  let calls = 0;
+  const selected = {
+    ...route(async () => {
+      calls += 1;
+      return {
+        value: { selected: true },
+        usage: { inputTokens: 10, outputTokens: 5 },
+        finishReason: "complete" as const,
+      };
+    }),
+    id: "coding",
+    qualityTier: 1,
+    capabilities: ["coding", "tool-use", "reasoning"],
+  };
+  const gateway = new TokenAwareGateway(budget, [selected]);
+  const result = await gateway.generate({
+    ...request(),
+    phase: "understand",
+    minimumQualityTier: 3,
+    requiredCapabilities: ["fast"],
+    preferredRouteId: "coding",
+  });
+  assert.deepEqual(result, { selected: true });
+  assert.equal(calls, 1);
+  assert.equal(budget.snapshot().calls, 1);
+});
+
 test("gateway explains safe aggregate route rejection reasons", async () => {
   const budget = makeBudget();
   const incapable = route(async () => ({
