@@ -2,7 +2,7 @@ import type { SofiaTool } from "../tools/types.js";
 
 export interface McpTransport {
   request(method: string, params?: unknown, signal?: AbortSignal): Promise<unknown>;
-  notify(method: string, params?: unknown): Promise<void>;
+  notify(method: string, params?: unknown, signal?: AbortSignal): Promise<void>;
   /** Optional negotiated HTTP protocol version; stdio transports do not need it. */
   setProtocolVersion?(version: string): void;
   close(): Promise<void>;
@@ -50,7 +50,7 @@ export class McpClient {
     if (typeof response.protocolVersion !== "string" || !response.serverInfo) throw new Error("Invalid MCP initialize response: missing protocolVersion or serverInfo");
     if (response.protocolVersion !== this.clientInfo.protocolVersion) throw new Error("MCP server selected an unsupported protocol version");
     this.transport.setProtocolVersion?.(response.protocolVersion);
-    await this.transport.notify("notifications/initialized");
+    await this.notify("notifications/initialized");
     this.initialized = true;
     return response;
   }
@@ -128,6 +128,19 @@ export class McpClient {
     else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
     const timer = setTimeout(() => controller.abort(new Error("MCP request timed out: " + method)), this.timeoutMs);
     try { return await this.transport.request(method, params, controller.signal); }
+    finally {
+      clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    }
+  }
+  private async notify(method: string, params?: unknown, parentSignal?: AbortSignal): Promise<void> {
+    this.assertOpen();
+    const controller = new AbortController();
+    const abortFromParent = () => controller.abort(parentSignal?.reason);
+    if (parentSignal?.aborted) abortFromParent();
+    else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    const timer = setTimeout(() => controller.abort(new Error("MCP notification timed out: " + method)), this.timeoutMs);
+    try { await this.transport.notify(method, params, controller.signal); }
     finally {
       clearTimeout(timer);
       parentSignal?.removeEventListener("abort", abortFromParent);
