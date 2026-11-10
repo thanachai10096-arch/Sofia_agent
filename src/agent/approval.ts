@@ -8,6 +8,8 @@ export interface ApprovalRequest {
   input:Record<string,unknown>;
   actionHash:string;
   risk:RiskLevel;
+  /** Correlates the gateway's one-run approval receipt; optional for backward compatibility. */
+  requestId?:string;
   /** Caller cancellation signal; never persisted with the approval record. */
   signal?:AbortSignal;
 }

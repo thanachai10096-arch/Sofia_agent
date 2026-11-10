@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ExecutionPolicy } from "../security/policy.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
-import { validateToolInput, type ToolRegistry } from "../tools/types.js";
+import { validateToolInput, type ToolRegistry, type ToolApprovalEvidence } from "../tools/types.js";
 import { effectiveToolEffects, toolPermission, riskRank } from "../security/policy.js";
 import { assessAction, redactSecrets, type RiskLevel } from "../security/guard.js";
 import { issueCapability, verifyCapability } from "../security/capability.js";
@@ -43,7 +43,7 @@ export class RegistryToolGateway implements ToolGateway {
     else if(effects.includes("network")&&!this.policy.allowNetwork){status="blocked";reason="Network access is disabled by execution policy.";}
     else if(permission.allow===false){status="blocked";reason="Disabled by execution policy: "+tool.name;}
     else if(effects.includes("network")&&this.policy.allowedHosts.length===0){status="blocked";reason="Network tool has no configured allowed-host list.";}
-    else if(permission.requireApproval===true||effects.some(effect=>effect==="write"||effect==="shell"||effect==="destructive"||effect==="browser")){
+    else if(tool.requiresApproval===true||permission.requireApproval===true||effects.some(effect=>effect==="write"||effect==="shell"||effect==="destructive"||effect==="browser")){
       status="approval_required";
       reason=this.approval?"Approval is required before execution.":"Approval is required but no approval handler is configured.";
       if(!this.approval)status="blocked";
@@ -156,20 +156,23 @@ export class RegistryToolGateway implements ToolGateway {
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:"Risk exceeds policy maximum.",input:redactSecrets(input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Action risk exceeds Sofia security policy."}};
     }
-    const requiresApproval=permission.requireApproval===true||assessment.requireApproval||descriptor.effects.some(x=>x==="write"||x==="shell"||x==="destructive"||x==="browser");
+    const requiresApproval=registeredTool.requiresApproval===true||permission.requireApproval===true||assessment.requireApproval||descriptor.effects.some(x=>x==="write"||x==="shell"||x==="destructive"||x==="browser");
     const capabilitySecret=this.policy.capabilitySecret;
     const capability=capabilitySecret?issueCapability({principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret):undefined;
     if(capabilitySecret && capability && !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret)) return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability verification failed."}};
     await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:requiresApproval?"approval_required":"allow",input:redactSecrets(input)});
+    let approvalEvidence: ToolApprovalEvidence | undefined;
     if(requiresApproval){
       if(!this.approval)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is required for this tool."}};
       context.notifyApproval(true);
       try{
-        const approved=await this.approval({runId:context.runId,principalId:context.principalId,notificationChannelId:context.notificationChannelId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk,signal:context.signal});
+        const requestId=randomUUID();
+        const approved=await this.approval({requestId,runId:context.runId,principalId:context.principalId,notificationChannelId:context.notificationChannelId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk,signal:context.signal});
         if(!approved){
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
         }
+        approvalEvidence={requestId,runId:context.runId,principalId:context.principalId??"anonymous",toolName:call.tool,actionHash:assessment.actionHash};
       }finally{context.notifyApproval(false);}
     }
     try{
@@ -189,7 +192,7 @@ export class RegistryToolGateway implements ToolGateway {
         // Revalidate at the last gateway boundary before dispatching the side effect.
         await context.assertExecutionLease?.();
         context.signal.throwIfAborted();
-        data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
+        data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal,approval:approvalEvidence});
       } finally {
         boundSignal.dispose();
       }
