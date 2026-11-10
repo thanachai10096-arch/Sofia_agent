@@ -22,6 +22,8 @@ function enqueue<T>(file: string, operation: () => Promise<T>): Promise<T> {
 export type IncompleteAuditExecution = {
  operationId: string;
  started: SecurityAuditEvent;
+ /** Latest event, when a tool reported failure after it began. Partial side effects remain possible. */
+ latest?: SecurityAuditEvent;
 };
 
 export class EncryptedFileAudit implements SecurityAuditSink {
@@ -43,12 +45,16 @@ export class EncryptedFileAudit implements SecurityAuditSink {
  }
  async listIncompleteExecutions():Promise<IncompleteAuditExecution[]>{
   const events=await this.list();
-  const terminal=new Set(events
-   .filter(event=>(event.decision==="completed"||event.decision==="failed")&&event.operationId)
+  const completed=new Set(events
+   .filter(event=>event.decision==="completed"&&event.operationId)
    .map(event=>event.operationId!));
   return events
-   .filter(event=>event.decision==="execution_started"&&event.operationId&&!terminal.has(event.operationId))
-   .map(started=>({operationId:started.operationId!,started}));
+   .filter(event=>event.decision==="execution_started"&&event.operationId&&!completed.has(event.operationId))
+   .map(started=>({
+    operationId:started.operationId!,
+    started,
+    latest:events.filter(event=>event.operationId===started.operationId).at(-1),
+   }));
  }
  list():Promise<SecurityAuditEvent[]>{
   return enqueue(this.file,async()=>{
