@@ -82,6 +82,6 @@ derive them from chat input or model output.
 
 Every configured server exposes only its explicitly allowlisted tools. Remote
 MCP annotations are advisory and cannot downgrade privilege. Only an operator
-may list a tool in `readOnlyTools`; every other MCP tool is treated as critical
-and requires approval. MCP metadata and results remain untrusted, and every
+may list a tool in `readOnlyTools`; every other MCP tool is treated as a write
+and requires per-action approval. MCP metadata and results remain untrusted, and every
 tool still passes through Sofia's existing ToolGateway policy and approval controls.
