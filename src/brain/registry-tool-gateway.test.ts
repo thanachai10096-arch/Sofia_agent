@@ -744,18 +744,20 @@ test("runtime readiness never claims browser or terminal is ready without a real
 
 
 test("tool approval receives the authenticated principal and trusted notification destination", async () => {
-  let approval: { principalId?: string; notificationChannelId?: string; signal?: AbortSignal } | undefined;
+  let approval: { requestId?: string; principalId?: string; notificationChannelId?: string; signal?: AbortSignal } | undefined;
+  let toolApprovalEvidence: { requestId: string; runId: string; principalId: string; toolName: string; actionHash: string } | undefined;
   const registry = new MapToolRegistry([{
     name: "workspace.write_file",
     description: "Write a file after explicit approval",
     inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
-    async execute() { return { written: true }; },
+    async execute(_input, context) { toolApprovalEvidence = context.approval; return { written: true }; },
   }]);
   const gateway = new RegistryToolGateway(
     { runtime: runtime(), tools: registry },
     defaultPolicy,
     async (request) => {
       approval = {
+        requestId: request.requestId,
         principalId: request.principalId,
         notificationChannelId: request.notificationChannelId,
         signal: request.signal,
@@ -776,6 +778,12 @@ test("tool approval receives the authenticated principal and trusted notificatio
     },
   );
   assert.equal(result.ok, true);
+  assert.equal(approval?.requestId, toolApprovalEvidence?.requestId);
+  assert.ok(approval?.requestId);
+  assert.equal(toolApprovalEvidence?.runId, "approval-notification-context-test");
+  assert.equal(toolApprovalEvidence?.principalId, "discord:12345");
+  assert.equal(toolApprovalEvidence?.toolName, "workspace.write_file");
+  assert.match(toolApprovalEvidence?.actionHash ?? "", /^[a-f0-9]{64}$/);
   assert.equal(approval?.principalId, "discord:12345");
   assert.equal(approval?.notificationChannelId, "67890");
   assert.equal(approval?.signal, controller.signal);
