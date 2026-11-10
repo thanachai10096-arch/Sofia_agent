@@ -780,3 +780,37 @@ test("tool approval receives the authenticated principal and trusted notificatio
   assert.equal(approval?.notificationChannelId, "67890");
   assert.equal(approval?.signal, controller.signal);
 });
+
+
+test("tool gateway revalidates durable job lease after approval and blocks side effects on lease loss", async () => {
+  let executed = false;
+  let leaseChecks = 0;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Write a file after explicit approval",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+    async execute() { executed = true; return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async () => true,
+  );
+  const controller = new AbortController();
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/lease-expired.txt", content: "must not write" } },
+    {
+      runId: "lease-expired-after-approval",
+      signal: controller.signal,
+      requireApproval: true,
+      notifyApproval() {},
+      assertExecutionLease: async () => {
+        leaseChecks += 1;
+        if (leaseChecks === 1) throw new Error("Job execution lease was lost");
+      },
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(executed, false, "tool side effect must not start after lease loss");
+  assert.equal(leaseChecks, 1, "lease must be checked immediately after approval");
+});
