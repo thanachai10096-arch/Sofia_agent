@@ -22,7 +22,7 @@ type TelegramRequestFailureKind = "network" | "dns" | "tls" | "timeout" | "abort
 
 function classifyNetworkFailure(error: unknown): TelegramRequestFailureKind {
   let current: unknown = error;
-  let fallback: TelegramRequestFailureKind = "network";
+  const fallback: TelegramRequestFailureKind = "network";
   for (let depth = 0; depth < 5 && current && typeof current === "object"; depth += 1) {
     const item = current as { name?: unknown; message?: unknown; code?: unknown; cause?: unknown };
     const name = typeof item.name === "string" ? item.name : "";
