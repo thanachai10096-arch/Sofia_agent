@@ -40,6 +40,29 @@ describe("advanced security",()=>{
   assert.equal(verifyAgentMessage(m,"secret",120_000,"b",replay),false);
   assert.equal(verifyAgentMessage({...m,body:{task:"evil"}},"secret"),false);
  });
+ it("rejects malformed agent identity, timestamps, and signatures",()=>{
+  const base=signAgentMessage({messageId:"msg-1",sender:"agent-a",recipient:"agent-b",issuedAt:Date.now(),nonce:"nonce-1",body:{task:"x"}},"secret");
+  assert.equal(verifyAgentMessage({...base,signature:"zz".repeat(32)},"secret"),false);
+  assert.equal(verifyAgentMessage({...base,issuedAt:Number.NaN},"secret"),false);
+  assert.equal(verifyAgentMessage({...base,sender:""},"secret"),false);
+  assert.equal(verifyAgentMessage({...base,nonce:""},"secret"),false);
+  assert.equal(verifyAgentMessage(base,"secret",Number.POSITIVE_INFINITY),false);
+  assert.throws(()=>signAgentMessage({...base,messageId:""},"secret"),/identity/);
+ });
+ it("scopes replay protection by sender and recipient and bounds its cache",()=>{
+  const replay=new ReplayProtector(60_000,2);
+  const now=Date.now();
+  const a=signAgentMessage({messageId:"1",sender:"agent-a",recipient:"agent-b",issuedAt:now,nonce:"shared",body:{}}, "secret");
+  const b=signAgentMessage({messageId:"2",sender:"agent-c",recipient:"agent-b",issuedAt:now,nonce:"shared",body:{}}, "secret");
+  assert.equal(verifyAgentMessage(a,"secret",120_000,"agent-b",replay),true);
+  assert.equal(verifyAgentMessage(a,"secret",120_000,"agent-b",replay),false);
+  assert.equal(verifyAgentMessage(b,"secret",120_000,"agent-b",replay),true);
+  const c=signAgentMessage({messageId:"3",sender:"agent-a",recipient:"agent-b",issuedAt:now,nonce:"third",body:{}}, "secret");
+  assert.equal(verifyAgentMessage(c,"secret",120_000,"agent-b",replay),true);
+  assert.equal(replay.size(),2);
+  assert.throws(()=>new ReplayProtector(0),/TTL/);
+  assert.throws(()=>new ReplayProtector(120_000,0),/capacity/);
+ });
  it("never blanket-approves actions in production",async()=>{
   const oldNode=process.env.NODE_ENV; const oldSofia=process.env.SOFIA_ENV;
   process.env.SOFIA_ENV="production";
