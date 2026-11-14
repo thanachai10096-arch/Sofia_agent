@@ -6,7 +6,7 @@
 - Hermes Agent: https://github.com/NousResearch/hermes-agent
 - Hermes architecture: https://hermes-agent.nousresearch.com/docs/developer-guide/architecture
 - OpenClaw: https://github.com/openclaw/openclaw
-- OpenClaw architecture: https://docs.openclaw.ai/concepts/architecture (verify current upstream URL before implementation)
+- OpenClaw architecture: https://docs.openclaw.ai/architecture (verify current upstream URL before implementation)
 
 ## Decision
 
