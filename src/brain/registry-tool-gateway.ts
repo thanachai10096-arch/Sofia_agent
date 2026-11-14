@@ -37,6 +37,10 @@ export class RegistryToolGateway implements ToolGateway {
   describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:effectiveToolEffects(name,tool.effects)};}
 
   async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{
+    const production = process.env.NODE_ENV === "production" || process.env.SOFIA_ENV === "production";
+    if (production && (!context.principalId || context.principalId.trim() !== context.principalId || context.principalId.length > 512)) {
+      return {ok:false,data:null,evidenceId:randomUUID(),error:{category:"permission_error",message:"Production tool execution requires an authenticated principal."}};
+    }
     // Bind the approval hash and actual execution to one immutable input snapshot.
     // The caller and approval UI must not be able to swap the action while approval is pending.
     const input = deepFreeze(structuredClone(call.input));
