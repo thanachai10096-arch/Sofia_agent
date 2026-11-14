@@ -261,13 +261,17 @@ test("Telegram polling classifies safe network failure categories without exposi
       },
     });
     await transport.start(new AbortController().signal, async () => {});
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const actual = await Promise.race([
         event,
-        new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for " + item.label)), 1_000)),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error("Timed out waiting for " + item.label)), 1_000);
+        }),
       ]);
       assert.equal(actual, item.expected, item.label);
     } finally {
+      if (timeout) clearTimeout(timeout);
       await transport.stop();
     }
   }
