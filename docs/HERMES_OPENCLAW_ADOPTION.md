@@ -122,3 +122,10 @@ Next implementation slice:
 3. Configure Redis availability as a startup requirement only when Telegram polling is enabled; if Redis is unavailable, fail closed by leaving Telegram disabled.
 4. Add two-process integration coverage: one owner polls, a second cannot; after owner termination/TTL expiry, the second acquires and resumes.
 5. Run full CI and a real Telegram staging smoke test before enabling in Production.
+
+
+## Incremental implementation update — learning evidence gate
+
+The existing managed-skill lifecycle already supports candidate → evaluation → approval → promotion and rollback. This branch tightens its provenance boundary: skill candidates must now carry at least one non-blank, unique evidence identifier. Empty evidence, whitespace-only IDs, and duplicate IDs are rejected before a candidate is persisted. Tests cover all three rejected cases and a valid multi-evidence candidate.
+
+This validates evidence-reference shape, not the underlying evidence itself. Production evaluators must still resolve each identifier to trusted verification records and independently confirm the associated run completed successfully; a caller-provided ID alone is not proof.
