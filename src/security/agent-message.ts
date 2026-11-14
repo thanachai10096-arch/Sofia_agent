@@ -85,12 +85,9 @@ export class ReplayProtector {
     const key = JSON.stringify([scope, nonce]);
     if (this.seen.has(key)) return false;
 
-    // Bound memory under message floods; evict the oldest reservation.
-    while (this.seen.size >= this.maxEntries) {
-      const oldest = this.seen.keys().next().value;
-      if (oldest === undefined) break;
-      this.seen.delete(oldest);
-    }
+    // Never evict an unexpired nonce: doing so would reopen a replay window.
+    // Under capacity pressure, reject new messages until entries expire.
+    if (this.seen.size >= this.maxEntries) return false;
 
     const expires = now + this.ttlMs;
     if (!Number.isFinite(expires)) return false;
