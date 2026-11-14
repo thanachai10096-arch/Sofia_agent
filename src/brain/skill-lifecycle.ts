@@ -64,6 +64,24 @@ export class VersionedSkillLifecycle {
     this.minimumConfidence = options.minimumConfidence ?? 0.7;
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
     this.load();
+    // Older learned skills were promoted before audit evidence was resolved to a
+    // trusted record. Quarantine them instead of silently restoring them as active.
+    let quarantinedLegacySkills = false;
+    for (const [skillId, recordId] of Object.entries(this.snapshot.activeBySkill)) {
+      const record = this.snapshot.records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
+      if (record?.package.source === "learned" && record.provenance.source === "verified-brain-repair" && !record.provenance.runId) {
+        record.status = "rejected";
+        record.updatedAt = new Date().toISOString();
+        record.evaluation = {
+          passed: false,
+          evaluatedAt: record.updatedAt,
+          checks: [{ name: "legacy-evidence-quarantine", passed: false, detail: "Legacy learned skill has no run-bound trusted audit evidence; re-learn and verify before activation." }],
+        };
+        delete this.snapshot.activeBySkill[skillId];
+        quarantinedLegacySkills = true;
+      }
+    }
+    if (quarantinedLegacySkills) this.persist();
     const activeRecords: Array<{ skillId: string; record: SkillLifecycleRecord }> = [];
     for (const [skillId, recordId] of Object.entries(this.snapshot.activeBySkill)) {
       const record = this.snapshot.records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
@@ -84,6 +102,7 @@ export class VersionedSkillLifecycle {
         !Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length === 0 ||
         !provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
         new Set(provenance.evidenceIds).size !== provenance.evidenceIds.length ||
+        (provenance.runId !== undefined && (typeof provenance.runId !== "string" || !provenance.runId.trim() || provenance.runId.length > 500)) ||
         !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1) {
       throw new Error("Invalid skill provenance");
     }
