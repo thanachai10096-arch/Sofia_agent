@@ -194,6 +194,22 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
       assertSafeGitArgs(args);
       const cwd = await contained(options.cwd ?? ".");
       try {
+        if (process.env.SOFIA_SANDBOX_MODE === "docker") {
+          const image = process.env.SOFIA_SANDBOX_IMAGE;
+          if (!image) {
+            throw new Error("SOFIA_SANDBOX_IMAGE must name a preloaded SHA-256-pinned container image when SOFIA_SANDBOX_MODE=docker.");
+          }
+          const sandbox = new ContainerSandbox({ image });
+          return await sandbox.run("git", args, {
+            workspaceRoot: base,
+            cwd: path.relative(base, cwd),
+            timeoutMs: options.timeoutMs ?? 60_000,
+            maxOutputBytes: 8 * 1024 * 1024,
+            // Git network operations remain disabled unless a future policy-aware
+            // runtime contract can pass an explicit, audited egress decision.
+            allowNetwork: false,
+          });
+        }
         const result = await execFileAsync("git", args, {
           cwd,
           windowsHide: true,
