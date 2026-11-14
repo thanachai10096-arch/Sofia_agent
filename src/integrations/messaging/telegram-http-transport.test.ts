@@ -229,3 +229,50 @@ test("Telegram polling reports HTTP errors with status", async () => {
   await transport.stop();
   assert.deepEqual(events[0], { event: "poll_failed", status: 503, kind: "http" });
 });
+
+
+test("Telegram polling classifies safe network failure categories without exposing provider details", async () => {
+  const cases: Array<{ label: string; error: Error; expected: string }> = [
+    { label: "DNS lookup", error: Object.assign(new Error("private resolver details"), { code: "ENOTFOUND" }), expected: "dns" },
+    { label: "temporary DNS failure", error: Object.assign(new Error("private resolver details"), { code: "EAI_AGAIN" }), expected: "dns" },
+    { label: "noname DNS failure", error: Object.assign(new Error("private resolver details"), { code: "EAI_NONAME" }), expected: "dns" },
+    { label: "TLS certificate", error: Object.assign(new Error("private certificate details"), { code: "CERT_HAS_EXPIRED" }), expected: "tls" },
+    { label: "connection reset", error: Object.assign(new Error("private socket details"), { code: "ECONNRESET" }), expected: "connection" },
+    { label: "connection timeout", error: Object.assign(new Error("private timeout details"), { code: "ETIMEDOUT" }), expected: "timeout" },
+    { label: "aborted request", error: Object.assign(new Error("private abort details"), { name: "AbortError" }), expected: "aborted" },
+    { label: "nested Undici socket failure", error: Object.assign(new Error("fetch failed", { cause: Object.assign(new Error("private socket details"), { code: "UND_ERR_SOCKET" }) }), {}), expected: "connection" },
+    { label: "nested self-signed TLS certificate", error: Object.assign(new Error("fetch failed", { cause: Object.assign(new Error("private certificate details"), { code: "DEPTH_ZERO_SELF_SIGNED_CERT" }) }), {}), expected: "tls" },
+    { label: "leaf certificate verification failure", error: Object.assign(new Error("fetch failed", { cause: Object.assign(new Error("private certificate details"), { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" }) }), {}), expected: "tls" },
+    { label: "Undici connect timeout", error: Object.assign(new Error("fetch failed", { cause: Object.assign(new Error("private timeout details"), { code: "UND_ERR_CONNECT_TIMEOUT" }) }), {}), expected: "timeout" },
+  ];
+
+  for (const item of cases) {
+    let resolveEvent!: (kind: string | undefined) => void;
+    const event = new Promise<string | undefined>((resolve) => { resolveEvent = resolve; });
+    const fetchImpl: typeof fetch = async (input) => {
+      if (String(input).endsWith("/deleteWebhook")) return ok(true);
+      throw item.error;
+    };
+    const transport = createTelegramHttpTransport({
+      token,
+      fetchImpl,
+      onError(name, _status, kind) {
+        if (name === "poll_failed") resolveEvent(kind);
+      },
+    });
+    await transport.start(new AbortController().signal, async () => {});
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const actual = await Promise.race([
+        event,
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error("Timed out waiting for " + item.label)), 1_000);
+        }),
+      ]);
+      assert.equal(actual, item.expected, item.label);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      await transport.stop();
+    }
+  }
+});
