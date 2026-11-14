@@ -9,10 +9,13 @@ const execFileAsync = promisify(execFile);
 const SECRET_NAME = /^(?:\.env(?:\..*)?|id_(?:rsa|ed25519)|credentials(?:\.json)?|secrets?(?:\.json|\.ya?ml)?|.*\.(?:pem|key|p12|pfx))$/i;
 const IGNORED_DIRS = new Set([".git", "node_modules", "dist", ".next", "coverage"]);
 const BLOCKED_ENV = /(?:TOKEN|SECRET|PASSWORD|PRIVATE.?KEY|API.?KEY|AUTHORIZATION|AWS_ACCESS_KEY|AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN|COOKIE|CREDENTIAL)/i;
+// Runtime preload and language-loader variables can inject code into child processes.
+// Keep them blocked even when the parent service environment contains them.
+const BLOCKED_CHILD_ENV = /^(?:NODE_OPTIONS|NODE_PATH|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_.*|PYTHONPATH|PYTHONHOME|RUBYOPT|PERL5OPT)$/i;
 
 function safeEnv(): NodeJS.ProcessEnv {
   return Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !BLOCKED_ENV.test(key)),
+    Object.entries(process.env).filter(([key]) => !BLOCKED_ENV.test(key) && !BLOCKED_CHILD_ENV.test(key)),
   );
 }
 
