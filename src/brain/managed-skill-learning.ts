@@ -36,6 +36,7 @@ export function createManagedSkillLearningHandler(
         source: "verified-brain-repair",
         evidenceIds: [...candidate.evidenceIds],
         confidence: 0.8,
+        runId,
       },
       {
         approvePromotion: async (record) => {
