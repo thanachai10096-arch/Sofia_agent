@@ -41,6 +41,26 @@ test("workspace commands do not inherit runtime code-injection environment varia
   }
 });
 
+
+test("Docker sandbox mode never falls back to host Git when its pinned image is missing", async () => {
+  const f = await fixture();
+  const oldMode = process.env.SOFIA_SANDBOX_MODE;
+  const oldImage = process.env.SOFIA_SANDBOX_IMAGE;
+  process.env.SOFIA_SANDBOX_MODE = "docker";
+  delete process.env.SOFIA_SANDBOX_IMAGE;
+  try {
+    const result = await f.runtime.git(["status"]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /SOFIA_SANDBOX_IMAGE must name a preloaded SHA-256-pinned container image/);
+  } finally {
+    if (oldMode === undefined) delete process.env.SOFIA_SANDBOX_MODE;
+    else process.env.SOFIA_SANDBOX_MODE = oldMode;
+    if (oldImage === undefined) delete process.env.SOFIA_SANDBOX_IMAGE;
+    else process.env.SOFIA_SANDBOX_IMAGE = oldImage;
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});
+
 test("workspace runtime rejects lexical path traversal", async () => {
   const f = await fixture();
   try {
