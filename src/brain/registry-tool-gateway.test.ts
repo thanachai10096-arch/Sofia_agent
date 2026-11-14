@@ -500,3 +500,26 @@ test("failure audit storage errors do not mask the original tool failure", async
   assert.match(result.error?.message ?? "", /original tool failure/);
   assert.match(result.warnings?.[0] ?? "", /failure event could not persist/i);
 });
+
+
+test("production gateway rejects missing or malformed authenticated principals", async () => {
+  const previousNode = process.env.NODE_ENV;
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    const gateway = new RegistryToolGateway({ runtime: runtime(), tools: createToolRegistry(createBuiltinTools()) }, {
+      ...defaultPolicy,
+      capabilitySecret: "test-capability-secret",
+    });
+    const result = await gateway.execute(
+      { tool: "workspace.list_files", input: {} },
+      { runId: "production-principal-required", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.category, "permission_error");
+    assert.match(result.error?.message ?? "", /authenticated principal/i);
+  } finally {
+    if (previousNode === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNode;
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV; else process.env.SOFIA_ENV = previousSofia;
+  }
+});
