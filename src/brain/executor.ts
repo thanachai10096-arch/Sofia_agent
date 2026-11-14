@@ -710,6 +710,7 @@ export class SofiaBrain {
       stepId: step.id, tool: step.call.tool, ok: result.ok, evidenceId: result.evidenceId,
       preview: fenced.text, truncated: p.truncated,
       ...(fenced.suspicious ? { suspicious: true } : {}),
+      ...(result.warnings?.length ? { warnings: result.warnings } : {}),
     };
 
     this.observations.push(observation);
