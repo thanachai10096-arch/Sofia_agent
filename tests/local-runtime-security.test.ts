@@ -23,13 +23,13 @@ test("workspace commands do not inherit runtime code-injection environment varia
     process.env.PYTHONPATH = "/tmp/untrusted-python";
     const result = await f.runtime.run(process.execPath, [
       "-e",
-      "process.stdout.write(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS,nodePath:process.env.NODE_PATH,pythonPath:process.env.PYTHONPATH}))",
+      "process.stdout.write(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS ?? null,nodePath:process.env.NODE_PATH ?? null,pythonPath:process.env.PYTHONPATH ?? null}))",
     ]);
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), {
-      nodeOptions: undefined,
-      nodePath: undefined,
-      pythonPath: undefined,
+      nodeOptions: null,
+      nodePath: null,
+      pythonPath: null,
     });
   } finally {
     for (const name of names) {
