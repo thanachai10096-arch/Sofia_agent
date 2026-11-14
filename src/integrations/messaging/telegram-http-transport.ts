@@ -200,6 +200,11 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       }
       if (controller.signal.aborted) {
         signal.removeEventListener("abort", stopFromParent);
+        if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
+        leaseRenewalTimer = undefined;
+        const lease = pollLeaseHandle;
+        pollLeaseHandle = undefined;
+        if (lease) await lease.release().catch(() => undefined);
         return;
       }
       loop = poll(controller.signal, onUpdate).finally(async () => {
