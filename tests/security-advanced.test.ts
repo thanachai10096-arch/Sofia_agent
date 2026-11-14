@@ -21,13 +21,15 @@ describe("advanced security",()=>{
   assert.equal(security.isKilled(),false);
  });
  it("binds capabilities and rejects tampering",()=>{
-  const c=issueCapability({principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"medium",ttlMs:1000},"secret");
-  assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file"},"secret"),true);
-  assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"medium"},"secret"),true);
+  const c=issueCapability({principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"medium",actionHash:"sha256:approved-action",ttlMs:1000},"secret");
+  assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file",actionHash:"sha256:approved-action"},"secret"),true);
+  assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"medium",actionHash:"sha256:approved-action"},"secret"),true);
   assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file",effects:["read"],risk:"medium"},"secret"),false);
-  assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"high"},"secret"),false);
-  assert.equal(verifyCapability(c,{principalId:"attacker",runId:"r",tool:"workspace.write_file"},"secret"),false);
+  assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"high",actionHash:"sha256:approved-action"},"secret"),false);
+  assert.equal(verifyCapability(c,{principalId:"attacker",runId:"r",tool:"workspace.write_file",actionHash:"sha256:approved-action"},"secret"),false);
   assert.equal(verifyCapability({...c,signature:"00".repeat(32)},{principalId:"p",runId:"r",tool:"workspace.write_file"},"secret"),false);
+  assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file",actionHash:"sha256:different-action"},"secret"),false);
+  assert.equal(verifyCapability({...c,expiresAt:Number.NaN},{principalId:"p",runId:"r",tool:"workspace.write_file"},"secret"),false);
  });
  it("rejects tampered signed agent messages and replays",()=>{
   const replay=new ReplayProtector();
