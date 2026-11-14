@@ -71,6 +71,8 @@ export interface ToolResult {
   data: unknown;
   evidenceId: string;
   error?: { category: FailureCategory; message: string };
+  /** Non-fatal operational warnings; must not change the success/failure result. */
+  warnings?: string[];
 }
 
 export interface ToolExecutionContext {
@@ -151,6 +153,7 @@ export interface Observation {
   truncated: boolean;
   /** Heuristic signal: tool output contains instruction-like text. */
   suspicious?: boolean;
+  warnings?: string[];
 }
 
 export interface BrainLimits {
