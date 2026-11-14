@@ -174,3 +174,26 @@ test("skill lifecycle requires non-empty, non-blank, unique evidence identifiers
     assert.deepEqual(accepted.provenance.evidenceIds, ["verification-run-1", "test-report-1"]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("legacy learned skills without run-bound evidence are quarantined on reload", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "legacy.json");
+    const originalPlatform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(originalPlatform, passing, { file });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "verified-brain-repair",
+      evidenceIds: ["legacy-evidence"],
+      confidence: 0.95,
+    });
+    await lifecycle.evaluate(candidate.id);
+    lifecycle.promote(candidate.id);
+    assert.equal(originalPlatform.get("repair-skill")?.version, "1.0.0");
+
+    const restoredPlatform = new InMemorySkillsPlatform();
+    const restored = new VersionedSkillLifecycle(restoredPlatform, passing, { file });
+    assert.equal(restored.active("repair-skill"), undefined);
+    assert.equal(restoredPlatform.get("repair-skill"), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
