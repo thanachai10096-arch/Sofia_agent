@@ -449,3 +449,54 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
 });
+
+
+test("completion audit failure does not turn a successful side effect into a retryable tool failure", async () => {
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Successful side effect with a failing completion audit",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() { executions += 1; return { committed: true }; },
+  }]);
+  const audit: SecurityAuditSink = {
+    record(event) {
+      if (event.decision === "completed") throw new Error("audit storage unavailable");
+    },
+  };
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, defaultPolicy, undefined, undefined, undefined, audit);
+  const result = await gateway.execute(
+    { tool: "custom.write", input: {} },
+    { runId: "audit-completion-failure", principalId: "test-principal", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+
+  assert.equal(executions, 1);
+  assert.equal(result.ok, true, "the completed side effect must not be reported as failed");
+  assert.deepEqual(result.data, { committed: true });
+  assert.match(result.warnings?.[0] ?? "", /completion audit event could not be persisted/i);
+});
+
+test("failure audit storage errors do not mask the original tool failure", async () => {
+  const registry = new MapToolRegistry([{
+    name: "custom.fail",
+    description: "Failing operation with a failing failure audit",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() { throw new Error("original tool failure"); },
+  }]);
+  const audit: SecurityAuditSink = {
+    record(event) {
+      if (event.decision === "failed") throw new Error("audit storage unavailable");
+    },
+  };
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, defaultPolicy, undefined, undefined, undefined, audit);
+  const result = await gateway.execute(
+    { tool: "custom.fail", input: {} },
+    { runId: "audit-failure-storage-error", principalId: "test-principal", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /original tool failure/);
+  assert.match(result.warnings?.[0] ?? "", /failure event could not persist/i);
+});
