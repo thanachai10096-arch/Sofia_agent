@@ -235,12 +235,15 @@ test("Telegram polling classifies safe network failure categories without exposi
   const cases: Array<{ label: string; error: Error; expected: string }> = [
     { label: "DNS lookup", error: Object.assign(new Error("private resolver details"), { code: "ENOTFOUND" }), expected: "dns" },
     { label: "temporary DNS failure", error: Object.assign(new Error("private resolver details"), { code: "EAI_AGAIN" }), expected: "dns" },
+    { label: "noname DNS failure", error: Object.assign(new Error("private resolver details"), { code: "EAI_NONAME" }), expected: "dns" },
     { label: "TLS certificate", error: Object.assign(new Error("private certificate details"), { code: "CERT_HAS_EXPIRED" }), expected: "tls" },
     { label: "connection reset", error: Object.assign(new Error("private socket details"), { code: "ECONNRESET" }), expected: "connection" },
     { label: "connection timeout", error: Object.assign(new Error("private timeout details"), { code: "ETIMEDOUT" }), expected: "timeout" },
     { label: "aborted request", error: Object.assign(new Error("private abort details"), { name: "AbortError" }), expected: "aborted" },
     { label: "nested Undici socket failure", error: Object.assign(new Error("fetch failed", { cause: Object.assign(new Error("private socket details"), { code: "UND_ERR_SOCKET" }) }), {}), expected: "connection" },
     { label: "nested self-signed TLS certificate", error: Object.assign(new Error("fetch failed", { cause: Object.assign(new Error("private certificate details"), { code: "DEPTH_ZERO_SELF_SIGNED_CERT" }) }), {}), expected: "tls" },
+    { label: "leaf certificate verification failure", error: Object.assign(new Error("fetch failed", { cause: Object.assign(new Error("private certificate details"), { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" }) }), {}), expected: "tls" },
+    { label: "Undici connect timeout", error: Object.assign(new Error("fetch failed", { cause: Object.assign(new Error("private timeout details"), { code: "UND_ERR_CONNECT_TIMEOUT" }) }), {}), expected: "timeout" },
   ];
 
   for (const item of cases) {
