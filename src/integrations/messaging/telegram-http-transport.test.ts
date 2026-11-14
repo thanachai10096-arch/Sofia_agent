@@ -239,6 +239,8 @@ test("Telegram polling classifies safe network failure categories without exposi
     { label: "connection reset", error: Object.assign(new Error("private socket details"), { code: "ECONNRESET" }), expected: "connection" },
     { label: "connection timeout", error: Object.assign(new Error("private timeout details"), { code: "ETIMEDOUT" }), expected: "timeout" },
     { label: "aborted request", error: Object.assign(new Error("private abort details"), { name: "AbortError" }), expected: "aborted" },
+    { label: "nested Undici socket failure", error: Object.assign(new Error("fetch failed", { cause: Object.assign(new Error("private socket details"), { code: "UND_ERR_SOCKET" }) }), {}), expected: "connection" },
+    { label: "nested self-signed TLS certificate", error: Object.assign(new Error("fetch failed", { cause: Object.assign(new Error("private certificate details"), { code: "DEPTH_ZERO_SELF_SIGNED_CERT" }) }), {}), expected: "tls" },
   ];
 
   for (const item of cases) {
