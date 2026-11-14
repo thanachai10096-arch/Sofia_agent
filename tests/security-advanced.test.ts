@@ -30,6 +30,8 @@ describe("advanced security",()=>{
   assert.equal(verifyCapability({...c,signature:"00".repeat(32)},{principalId:"p",runId:"r",tool:"workspace.write_file"},"secret"),false);
   assert.equal(verifyCapability(c,{principalId:"p",runId:"r",tool:"workspace.write_file",actionHash:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"secret"),false);
   assert.equal(verifyCapability({...c,expiresAt:Number.NaN},{principalId:"p",runId:"r",tool:"workspace.write_file"},"secret"),false);
+  assert.equal(verifyCapability({...c,signature:"not-a-hex-signature"},{principalId:"p",runId:"r",tool:"workspace.write_file"},"secret"),false);
+  assert.throws(()=>issueCapability({principalId:"p",runId:"r",tool:"workspace.write_file",effects:["write"],risk:"medium",actionHash:"a".repeat(64),ttlMs:300_001},"secret"),/TTL/);
  });
  it("rejects tampered signed agent messages and replays",()=>{
   const replay=new ReplayProtector();
