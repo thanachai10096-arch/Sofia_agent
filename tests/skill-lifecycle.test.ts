@@ -143,3 +143,57 @@ test("skill lifecycle validates all persisted active skills before mutating the 
     assert.equal(conflictingPlatform.get("second-skill")?.version, "0.9.0");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("skill lifecycle requires non-empty, non-blank, unique evidence identifiers", () => {
+  const root = dir();
+  try {
+    const lifecycle = new VersionedSkillLifecycle(
+      new InMemorySkillsPlatform(),
+      passing,
+      { file: path.join(root, "evidence.json") },
+    );
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.0"), { source: "repair", evidenceIds: [], confidence: 0.9 }),
+      /Invalid skill provenance/,
+    );
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.0"), { source: "repair", evidenceIds: ["  "], confidence: 0.9 }),
+      /Invalid skill provenance/,
+    );
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.0"), { source: "repair", evidenceIds: ["e1", "e1"], confidence: 0.9 }),
+      /Invalid skill provenance/,
+    );
+    const accepted = lifecycle.propose(pkg("1.0.0"), {
+      source: "verified-repair",
+      evidenceIds: ["verification-run-1", "test-report-1"],
+      confidence: 0.9,
+    });
+    assert.equal(accepted.status, "candidate");
+    assert.deepEqual(accepted.provenance.evidenceIds, ["verification-run-1", "test-report-1"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("legacy learned skills without run-bound evidence are quarantined on reload", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "legacy.json");
+    const originalPlatform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(originalPlatform, passing, { file });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "verified-brain-repair",
+      evidenceIds: ["legacy-evidence"],
+      confidence: 0.95,
+    });
+    await lifecycle.evaluate(candidate.id);
+    lifecycle.promote(candidate.id);
+    assert.equal(originalPlatform.get("repair-skill")?.version, "1.0.0");
+
+    const restoredPlatform = new InMemorySkillsPlatform();
+    const restored = new VersionedSkillLifecycle(restoredPlatform, passing, { file });
+    assert.equal(restored.active("repair-skill"), undefined);
+    assert.equal(restoredPlatform.get("repair-skill"), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

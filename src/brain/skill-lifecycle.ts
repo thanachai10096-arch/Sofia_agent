@@ -7,7 +7,7 @@ import { redactSecrets } from "../security/guard.js";
 export type SkillLifecycleStatus = "candidate" | "verified" | "rejected" | "active" | "superseded" | "rolled_back";
 export interface SkillEvaluationCheck { name: string; passed: boolean; detail?: string; }
 export interface SkillEvaluationResult { passed: boolean; checks: SkillEvaluationCheck[]; evaluatedAt?: string; }
-export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; }
+export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; runId?: string; }
 export interface SkillLifecycleRecord {
   id: string;
   skillId: string;
@@ -19,7 +19,7 @@ export interface SkillLifecycleRecord {
   evaluation?: SkillEvaluationResult;
 }
 export interface SkillLifecycleOptions { file: string; minimumConfidence?: number; }
-export type SkillCandidateEvaluator = (candidate: SkillPackage) => Promise<SkillEvaluationResult>;
+export type SkillCandidateEvaluator = (candidate: SkillPackage, provenance: SkillProvenance) => Promise<SkillEvaluationResult>;
 interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[]; activeBySkill: Record<string, string>; }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
@@ -64,6 +64,24 @@ export class VersionedSkillLifecycle {
     this.minimumConfidence = options.minimumConfidence ?? 0.7;
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
     this.load();
+    // Older learned skills were promoted before audit evidence was resolved to a
+    // trusted record. Quarantine them instead of silently restoring them as active.
+    let quarantinedLegacySkills = false;
+    for (const [skillId, recordId] of Object.entries(this.snapshot.activeBySkill)) {
+      const record = this.snapshot.records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
+      if (record?.package.source === "learned" && record.provenance.source === "verified-brain-repair" && !record.provenance.runId) {
+        record.status = "rejected";
+        record.updatedAt = new Date().toISOString();
+        record.evaluation = {
+          passed: false,
+          evaluatedAt: record.updatedAt,
+          checks: [{ name: "legacy-evidence-quarantine", passed: false, detail: "Legacy learned skill has no run-bound trusted audit evidence; re-learn and verify before activation." }],
+        };
+        delete this.snapshot.activeBySkill[skillId];
+        quarantinedLegacySkills = true;
+      }
+    }
+    if (quarantinedLegacySkills) this.persist();
     const activeRecords: Array<{ skillId: string; record: SkillLifecycleRecord }> = [];
     for (const [skillId, recordId] of Object.entries(this.snapshot.activeBySkill)) {
       const record = this.snapshot.records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
@@ -81,7 +99,10 @@ export class VersionedSkillLifecycle {
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
     const safePackage = validatePackage(skillPackage);
     if (!isRecord(provenance) || typeof provenance.source !== "string" || !provenance.source.trim() ||
-        !Array.isArray(provenance.evidenceIds) || !provenance.evidenceIds.every((id) => typeof id === "string" && id.length <= 500) ||
+        !Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length === 0 ||
+        !provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
+        new Set(provenance.evidenceIds).size !== provenance.evidenceIds.length ||
+        (provenance.runId !== undefined && (typeof provenance.runId !== "string" || !provenance.runId.trim() || provenance.runId.length > 500)) ||
         !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1) {
       throw new Error("Invalid skill provenance");
     }
@@ -106,7 +127,7 @@ export class VersionedSkillLifecycle {
     if (candidate.status !== "candidate") throw new Error("Only candidate skills can be evaluated");
     let result: SkillEvaluationResult;
     try {
-      result = await this.evaluator(clone(candidate.package));
+      result = await this.evaluator(clone(candidate.package), clone(candidate.provenance));
     } catch (error) {
       result = { passed: false, checks: [{ name: "evaluator", passed: false, detail: error instanceof Error ? error.message : String(error) }] };
     }

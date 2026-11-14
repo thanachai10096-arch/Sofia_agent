@@ -1,4 +1,5 @@
 import type { TelegramTransport, TelegramUpdate } from "./telegram.js";
+import type { TelegramPollLease, TelegramPollLeaseHandle } from "./telegram-poll-lease.js";
 
 interface TelegramApiResponse<T> {
   ok: boolean;
@@ -10,7 +11,10 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed", status?: number, failureKind?: "network" | "invalid_json" | "http" | "unknown") => void;
+  /** When supplied, only the Redis lease owner is allowed to long-poll this bot. */
+  pollLease?: TelegramPollLease;
+  pollLeaseRenewIntervalMs?: number;
+  onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed" | "poll_lease_unavailable" | "poll_lease_lost", status?: number, failureKind?: "network" | "invalid_json" | "http" | "unknown") => void;
 }
 
 /**
@@ -41,6 +45,9 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
   let controller: AbortController | undefined;
   let loop: Promise<void> | undefined;
   let stopped = true;
+  let pollLeaseHandle: TelegramPollLeaseHandle | undefined;
+  let leaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
+  let leaseRenewalInFlight = false;
 
   async function request<T>(method: string, body: Record<string, unknown> | undefined, signal: AbortSignal): Promise<T> {
     let response: Response;
@@ -136,6 +143,48 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       if (!stopped) return;
       stopped = false;
       controller = new AbortController();
+      if (options.pollLease) {
+        try {
+          pollLeaseHandle = await options.pollLease.acquire();
+        } catch {
+          stopped = true;
+          controller.abort();
+          controller = undefined;
+          try { options.onError?.("poll_lease_unavailable"); } catch { /* diagnostics must not affect startup */ }
+          return;
+        }
+        if (!pollLeaseHandle) {
+          stopped = true;
+          controller.abort();
+          controller = undefined;
+          try { options.onError?.("poll_lease_unavailable"); } catch { /* diagnostics must not affect startup */ }
+          return;
+        }
+        const renewEvery = options.pollLeaseRenewIntervalMs ?? 10_000;
+        if (!Number.isSafeInteger(renewEvery) || renewEvery < 1_000 || renewEvery > 60_000) {
+          await pollLeaseHandle.release();
+          pollLeaseHandle = undefined;
+          stopped = true;
+          controller.abort();
+          controller = undefined;
+          throw new Error("Telegram poll lease renewal interval must be between 1 and 60 seconds.");
+        }
+        leaseRenewalTimer = setInterval(() => {
+          if (leaseRenewalInFlight || stopped || !pollLeaseHandle) return;
+          leaseRenewalInFlight = true;
+          void pollLeaseHandle.renew().then((renewed) => {
+            if (!renewed && !stopped) {
+              try { options.onError?.("poll_lease_lost"); } catch { /* diagnostics must not affect shutdown */ }
+              controller?.abort();
+            }
+          }).catch(() => {
+            if (!stopped) {
+              try { options.onError?.("poll_lease_lost"); } catch { /* diagnostics must not affect shutdown */ }
+              controller?.abort();
+            }
+          }).finally(() => { leaseRenewalInFlight = false; });
+        }, renewEvery);
+      }
       const stopFromParent = () => controller?.abort(signal.reason);
       signal.addEventListener("abort", stopFromParent, { once: true });
       if (signal.aborted) stopFromParent();
@@ -151,10 +200,20 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       }
       if (controller.signal.aborted) {
         signal.removeEventListener("abort", stopFromParent);
+        if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
+        leaseRenewalTimer = undefined;
+        const lease = pollLeaseHandle;
+        pollLeaseHandle = undefined;
+        if (lease) await lease.release().catch(() => undefined);
         return;
       }
-      loop = poll(controller.signal, onUpdate).finally(() => {
+      loop = poll(controller.signal, onUpdate).finally(async () => {
         signal.removeEventListener("abort", stopFromParent);
+        if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
+        leaseRenewalTimer = undefined;
+        const lease = pollLeaseHandle;
+        pollLeaseHandle = undefined;
+        if (lease) await lease.release().catch(() => undefined);
       });
       // Return after launching the loop; the polling promise is joined by stop().
     },
@@ -181,7 +240,12 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       if (stopped) return;
       stopped = true;
       controller?.abort();
+      if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
+      leaseRenewalTimer = undefined;
       await loop?.catch(() => undefined);
+      const lease = pollLeaseHandle;
+      pollLeaseHandle = undefined;
+      if (lease) await lease.release().catch(() => undefined);
       controller = undefined;
       loop = undefined;
     },
