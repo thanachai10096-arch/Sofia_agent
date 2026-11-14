@@ -7,7 +7,7 @@ import { redactSecrets } from "../security/guard.js";
 export type SkillLifecycleStatus = "candidate" | "verified" | "rejected" | "active" | "superseded" | "rolled_back";
 export interface SkillEvaluationCheck { name: string; passed: boolean; detail?: string; }
 export interface SkillEvaluationResult { passed: boolean; checks: SkillEvaluationCheck[]; evaluatedAt?: string; }
-export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; }
+export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; runId?: string; }
 export interface SkillLifecycleRecord {
   id: string;
   skillId: string;
@@ -19,7 +19,7 @@ export interface SkillLifecycleRecord {
   evaluation?: SkillEvaluationResult;
 }
 export interface SkillLifecycleOptions { file: string; minimumConfidence?: number; }
-export type SkillCandidateEvaluator = (candidate: SkillPackage) => Promise<SkillEvaluationResult>;
+export type SkillCandidateEvaluator = (candidate: SkillPackage, provenance: SkillProvenance) => Promise<SkillEvaluationResult>;
 interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[]; activeBySkill: Record<string, string>; }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
@@ -108,7 +108,7 @@ export class VersionedSkillLifecycle {
     if (candidate.status !== "candidate") throw new Error("Only candidate skills can be evaluated");
     let result: SkillEvaluationResult;
     try {
-      result = await this.evaluator(clone(candidate.package));
+      result = await this.evaluator(clone(candidate.package), clone(candidate.provenance));
     } catch (error) {
       result = { passed: false, checks: [{ name: "evaluator", passed: false, detail: error instanceof Error ? error.message : String(error) }] };
     }
