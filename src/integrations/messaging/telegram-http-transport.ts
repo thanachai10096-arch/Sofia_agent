@@ -31,8 +31,8 @@ function classifyNetworkFailure(error: unknown): TelegramRequestFailureKind {
     if (name === "AbortError" || code === "ABORT_ERR") return "aborted";
     if (name === "TimeoutError" || /timed?\s*out|timeout/i.test(message) || code === "ETIMEDOUT") return "timeout";
     if (["ENOTFOUND", "EAI_AGAIN", "ENODATA", "EAI_FAIL"].includes(code)) return "dns";
-    if (/^(CERT|ERR_TLS|ERR_SSL|SSL_)/.test(code) || /certificate|tls handshake|ssl routines/i.test(message)) return "tls";
-    if (["ECONNRESET", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "EPIPE"].includes(code)) return "connection";
+    if (/^(CERT|ERR_TLS|ERR_SSL|SSL_|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_)/.test(code) || /certificate|tls handshake|ssl routines/i.test(message)) return "tls";
+    if (["ECONNRESET", "ECONNREFUSED", "ECONNABORTED", "EHOSTUNREACH", "ENETUNREACH", "EPIPE", "UND_ERR_SOCKET", "UND_ERR_CONNECT"].includes(code)) return "connection";
     if (item.cause === undefined) break;
     current = item.cause;
   }
