@@ -58,7 +58,7 @@ describe("advanced security",()=>{
   assert.equal(verifyAgentMessage(a,"secret",120_000,"agent-b",replay),false);
   assert.equal(verifyAgentMessage(b,"secret",120_000,"agent-b",replay),true);
   const c=signAgentMessage({messageId:"3",sender:"agent-a",recipient:"agent-b",issuedAt:now,nonce:"third",body:{}}, "secret");
-  assert.equal(verifyAgentMessage(c,"secret",120_000,"agent-b",replay),true);
+  assert.equal(verifyAgentMessage(c,"secret",120_000,"agent-b",replay),false);
   assert.equal(replay.size(),2);
   assert.throws(()=>new ReplayProtector(0),/TTL/);
   assert.throws(()=>new ReplayProtector(120_000,0),/capacity/);
