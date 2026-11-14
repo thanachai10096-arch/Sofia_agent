@@ -10,7 +10,7 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed", status?: number, failureKind?: "network" | "invalid_json" | "http" | "unknown") => void;
+  onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed", status?: number, failureKind?: TelegramRequestFailureKind) => void;
 }
 
 /**
@@ -18,7 +18,26 @@ export interface TelegramHttpTransportOptions {
  * It never logs the bot token or provider response body. Configure a webhook
  * instead of long polling if the deployment requires inbound HTTP callbacks.
  */
-type TelegramRequestFailureKind = "network" | "invalid_json" | "http" | "unknown";
+type TelegramRequestFailureKind = "network" | "dns" | "tls" | "timeout" | "aborted" | "connection" | "invalid_json" | "http" | "unknown";
+
+function classifyNetworkFailure(error: unknown): TelegramRequestFailureKind {
+  let current: unknown = error;
+  let fallback: TelegramRequestFailureKind = "network";
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth += 1) {
+    const item = current as { name?: unknown; message?: unknown; code?: unknown; cause?: unknown };
+    const name = typeof item.name === "string" ? item.name : "";
+    const message = typeof item.message === "string" ? item.message : "";
+    const code = typeof item.code === "string" ? item.code.toUpperCase() : "";
+    if (name === "AbortError" || code === "ABORT_ERR") return "aborted";
+    if (name === "TimeoutError" || /timed?\s*out|timeout/i.test(message) || code === "ETIMEDOUT") return "timeout";
+    if (["ENOTFOUND", "EAI_AGAIN", "ENODATA", "EAI_FAIL"].includes(code)) return "dns";
+    if (/^(CERT|ERR_TLS|ERR_SSL|SSL_)/.test(code) || /certificate|tls handshake|ssl routines/i.test(message)) return "tls";
+    if (["ECONNRESET", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "EPIPE"].includes(code)) return "connection";
+    if (item.cause === undefined) break;
+    current = item.cause;
+  }
+  return fallback;
+}
 
 class TelegramRequestError extends Error {
   constructor(message: string, readonly failureKind: TelegramRequestFailureKind, readonly status?: number) {
@@ -51,8 +70,8 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         body: body ? JSON.stringify(body) : undefined,
         signal,
       });
-    } catch {
-      throw new TelegramRequestError("Telegram network request failed.", "network");
+    } catch (error) {
+      throw new TelegramRequestError("Telegram network request failed.", classifyNetworkFailure(error));
     }
     let data: TelegramApiResponse<T>;
     try {
