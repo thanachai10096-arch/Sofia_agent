@@ -81,6 +81,7 @@ export class RegistryToolGateway implements ToolGateway {
         }
       }finally{context.notifyApproval(false);}
     }
+    let data:unknown;
     try{
       this.security.assertRunning();
       context.signal.throwIfAborted();
@@ -91,20 +92,32 @@ export class RegistryToolGateway implements ToolGateway {
         return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Production tool execution requires a capability secret."}};
       }
       const boundSignal=this.security.bindSignal(context.signal);
-      let data:unknown;
       try {
         data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
       } finally {
         boundSignal.dispose();
       }
-      const safeData = redactSecrets(data);
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
-      return{ok:true,data:safeData,evidenceId};
     }catch(error){
       const message=String(redactSecrets(error instanceof Error?error.message:String(error)));
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:redactSecrets(input)});
-      return{ok:false,data:null,evidenceId,error:{category:descriptor.effects.includes("network")?"network_error":"tool_error",message}};
+      const warnings:string[]=[];
+      try {
+        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:redactSecrets(input)});
+      } catch {
+        warnings.push("Security audit could not persist the tool failure event.");
+      }
+      return{ok:false,data:null,evidenceId,error:{category:descriptor.effects.includes("network")?"network_error":"tool_error",message},...(warnings.length?{warnings}:{})};
     }
+
+    // Execution has already completed. A failure to persist its audit event must
+    // never turn a successful side effect into a retryable tool failure.
+    const safeData=redactSecrets(data);
+    const warnings:string[]=[];
+    try {
+      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
+    } catch {
+      warnings.push("Tool execution succeeded, but its completion audit event could not be persisted.");
+    }
+    return{ok:true,data:safeData,evidenceId,...(warnings.length?{warnings}:{})};
   }
 
   async snapshot(signal:AbortSignal):Promise<WorkspaceSnapshot>{
