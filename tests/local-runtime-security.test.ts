@@ -12,6 +12,35 @@ async function fixture() {
   return { parent, root, runtime: createNodeWorkspaceRuntime(root) };
 }
 
+
+test("workspace commands do not inherit runtime code-injection environment variables", async () => {
+  const f = await fixture();
+  const names = ["NODE_OPTIONS", "NODE_PATH", "PYTHONPATH"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    process.env.NODE_OPTIONS = "--trace-warnings";
+    process.env.NODE_PATH = "/tmp/untrusted-node-modules";
+    process.env.PYTHONPATH = "/tmp/untrusted-python";
+    const result = await f.runtime.run(process.execPath, [
+      "-e",
+      "process.stdout.write(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS,nodePath:process.env.NODE_PATH,pythonPath:process.env.PYTHONPATH}))",
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      nodeOptions: undefined,
+      nodePath: undefined,
+      pythonPath: undefined,
+    });
+  } finally {
+    for (const name of names) {
+      const value = previous[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});
+
 test("workspace runtime rejects lexical path traversal", async () => {
   const f = await fixture();
   try {
