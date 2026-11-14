@@ -101,3 +101,24 @@ Every implementation slice must include:
 - rollback path and compatibility check for persisted state.
 
 Benchmark Sofia before and after changes using the same versioned tasks, models, budgets, tools, and environment. Report independently checked success, regression/unsafe-action rate, recovery rate, latency, cost per successful task, and human interventions. Do not claim superiority over Hermes or OpenClaw without reproducible results.
+
+
+## Incremental implementation update — Telegram single-poller guard
+
+A first implementation slice has been added on the feature branch:
+
+- `RedisTelegramPollLease` uses Redis `SET NX PX` to elect one poller for a bot identity.
+- Renewal and release use Lua compare-and-act scripts, so a stale process cannot extend or delete a successor's lease.
+- Telegram HTTP transport accepts an optional lease. When configured, it refuses to call `deleteWebhook` or `getUpdates` without acquiring the lease, renews while polling, aborts if ownership is lost, and releases on shutdown/loop exit.
+- `createTelegramMessagingRuntime` accepts an optional injected `pollLease` dependency.
+
+**Important rollout limitation:** the standalone Railway entrypoint does not yet construct and inject a Redis client/lease. Therefore this feature is opt-in at the transport/runtime composition seam and does not by itself protect the currently deployed Railway service. Do not claim the live Telegram poll conflict is fixed until the Railway composition root injects a shared Redis lease and a two-instance staging test proves exclusivity and failover.
+
+Added deterministic tests cover Redis lease ownership, renewal/release, refusing to poll without a lease, and releasing the lease on shutdown. These tests have been authored but are not yet CI-verified on this branch.
+
+Next implementation slice:
+1. Wire a shared Redis client into the Railway composition root using server-only credentials.
+2. Inject `RedisTelegramPollLease` into the Telegram runtime.
+3. Configure Redis availability as a startup requirement only when Telegram polling is enabled; if Redis is unavailable, fail closed by leaving Telegram disabled.
+4. Add two-process integration coverage: one owner polls, a second cannot; after owner termination/TTL expiry, the second acquires and resumes.
+5. Run full CI and a real Telegram staging smoke test before enabling in Production.
