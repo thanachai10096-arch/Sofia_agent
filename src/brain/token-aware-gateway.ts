@@ -40,7 +40,7 @@ export interface PackedPrompt {
 export interface ProviderReply {
   value: unknown;
   usage: TokenUsage;
-  finishReason: "complete" | "length";
+  finishReason: "complete" | "length" | "incomplete";
 }
 
 export interface PreparedCall {
@@ -456,7 +456,7 @@ export class TokenAwareGateway {
         // another already-approved route. Auth, billing, budget, timeout,
         // cancellation, and policy failures stop immediately.
         const recoverable = failure.code === "model_call_failed" &&
-          ["provider_invalid_response", "provider_empty_content", "provider_thinking_only_output"].includes(failure.reason ?? "");
+          ["provider_invalid_response", "provider_empty_content", "provider_thinking_only_output", "gateway_incomplete_output"].includes(failure.reason ?? "");
         if (!recoverable) throw failure;
       }
     }
