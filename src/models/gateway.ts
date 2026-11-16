@@ -156,7 +156,7 @@ function normalizeAnthropicResponse(value: unknown): ChatResponse {
   const usage = raw.usage;
   return {
     choices: [{
-      finish_reason: raw.stop_reason === "max_tokens" ? "length" : raw.stop_reason ?? null,
+      finish_reason: raw.stop_reason === "max_tokens" ? "length" : raw.stop_reason === "end_turn" || raw.stop_reason === "stop_sequence" ? "stop" : raw.stop_reason ?? null,
       message: {
         content: textParts.join("\n") || null,
         tool_calls: toolCalls,
@@ -602,7 +602,7 @@ export class SofiaModelGateway implements ModelProvider {
         })),
       },
       ...(usage ? { usage } : {}),
-      finishReason: data.choices?.[0]?.finish_reason === "length" ? "length" : "complete",
+      finishReason: data.choices?.[0]?.finish_reason === "stop" || data.choices?.[0]?.finish_reason === "tool_calls" || data.choices?.[0]?.finish_reason === "function_call"\n        ? "complete"\n        : data.choices?.[0]?.finish_reason === "length" ? "length" : "incomplete",
     };
   }
 }
