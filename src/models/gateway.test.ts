@@ -96,7 +96,7 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
   globalThis.fetch = async (_input, init) => {
     requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify({
-      content: [{ type: "text", text: "{\"ok\":true}" }],
+    content: [{ type: "text", text: '{"partial":true}' }],
       stop_reason: "end_turn",
       usage: { input_tokens: 5, output_tokens: 3 },
     }), { status: 200, headers: { "content-type": "application/json" } });
@@ -136,7 +136,7 @@ test("DeepSeek structured Brain calls use OpenAI-compatible JSON Output even whe
     requestedHeaders = init?.headers as Record<string, string>;
     requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({ mode: "conversation", response: "Hello", objective: "Reply", constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [], risk: "low", successCriteria: [], ambiguities: [] }) }, finish_reason: "stop" }],
+    choices: [{ message: { content: '{"partial":true}' }, finish_reason: "content_filter" }],
       usage: { prompt_tokens: 25, completion_tokens: 30 },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
@@ -177,7 +177,7 @@ test("OpenAI-compatible structured Brain requests explicitly instruct JSON-only 
   let requestedBody: Record<string, unknown> = {};
   globalThis.fetch = async (_input, init) => {
     requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 5, completion_tokens: 3 } }), { status: 200 });
+    choices: [{ message: { content: '{"partial":true}' }, finish_reason: "content_filter" }],
   };
   try {
     const gateway = new SofiaModelGateway({
@@ -200,7 +200,7 @@ test("Anthropic thinking mode is explicitly controlled in the request body", asy
   let requestedBody: Record<string, unknown> = {};
   globalThis.fetch = async (_input, init) => {
     requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ ok: true }) }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } }), { status: 200 });
+    content: [{ type: "text", text: '{"partial":true}' }],
   };
   try {
     const gateway = new SofiaModelGateway({ coding: { baseUrl: "https://api.anthropic.com/v1", apiKey: "test", model: "deepseek-flash", protocol: "anthropic-messages", thinkingMode: "disabled" } });
@@ -228,8 +228,8 @@ for (const protocol of ["openai-compatible", "anthropic-messages"] as const) {
     globalThis.fetch = async (_input, init) => {
       requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return new Response(protocol === "anthropic-messages"
-        ? JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } })
-        : JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
+    content: [{ type: "text", text: '{"partial":true}' }],
+    choices: [{ message: { content: '{"partial":true}' }, finish_reason: "content_filter" }],
     };
     try {
       const gateway = new SofiaModelGateway({ coding: {
@@ -248,8 +248,8 @@ for (const protocol of ["openai-compatible", "anthropic-messages"] as const) {
     globalThis.fetch = async (_input, init) => {
       requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return new Response(protocol === "anthropic-messages"
-        ? JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } })
-        : JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
+    content: [{ type: "text", text: '{"partial":true}' }],
+    choices: [{ message: { content: '{"partial":true}' }, finish_reason: "content_filter" }],
     };
     try {
       const gateway = new SofiaModelGateway({ coding: {
@@ -267,8 +267,8 @@ for (const protocol of ["openai-compatible", "anthropic-messages"] as const) {
     globalThis.fetch = async (_input, init) => {
       requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return new Response(protocol === "anthropic-messages"
-        ? JSON.stringify({ content: [{ type: "text", text: "ok" }], usage: { input_tokens: 1, output_tokens: 1 } })
-        : JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
+    content: [{ type: "text", text: '{"partial":true}' }],
+    choices: [{ message: { content: '{"partial":true}' }, finish_reason: "content_filter" }],
     };
     try {
       const gateway = new SofiaModelGateway({ coding: {
@@ -289,7 +289,7 @@ test("Anthropic thinking-only recovery preserves explicitly disabled thinking mo
     requestedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
     const response = requestedBodies.length === 1
       ? { content: [{ type: "thinking", thinking: "private reasoning" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 20 } }
-      : { content: [{ type: "text", text: "final answer" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } };
+    content: [{ type: "text", text: '{"partial":true}' }],
     return new Response(JSON.stringify(response), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
@@ -320,7 +320,7 @@ test("Anthropic thinking-only recovery explicitly disables provider-default thin
     requestedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
     const response = requestedBodies.length === 1
       ? { content: [{ type: "thinking", thinking: "private reasoning" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 20 } }
-      : { content: [{ type: "text", text: JSON.stringify({ ok: true }) }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } };
+    content: [{ type: "text", text: '{"partial":true}' }],
     return new Response(JSON.stringify(response), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
@@ -348,7 +348,7 @@ test("Anthropic thinking-only recovery explicitly disables provider-default thin
 test("OpenAI-compatible gateway preserves length finish reason for non-empty output", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({
-    choices: [{ message: { content: "{\"partial\":true}" }, finish_reason: "length" }],
+    choices: [{ message: { content: '{"partial":true}' }, finish_reason: "content_filter" }],
     usage: { prompt_tokens: 10, completion_tokens: 20 },
   }), { status: 200, headers: { "content-type": "application/json" } });
   try {
@@ -364,7 +364,7 @@ test("OpenAI-compatible gateway preserves length finish reason for non-empty out
 test("Anthropic max_tokens stop reason is normalized to length", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({
-    content: [{ type: "text", text: "{\"partial\":true}" }],
+    content: [{ type: "text", text: '{"partial":true}' }],
     stop_reason: "max_tokens",
     usage: { input_tokens: 10, output_tokens: 20 },
   }), { status: 200, headers: { "content-type": "application/json" } });
@@ -387,7 +387,7 @@ test("DeepSeek ordinary chat stays on the configured Anthropic Messages protocol
     requestedUrl = String(input);
     requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify({
-      content: [{ type: "text", text: "Hello from DeepSeek" }],
+    content: [{ type: "text", text: '{"partial":true}' }],
       stop_reason: "end_turn",
       usage: { input_tokens: 8, output_tokens: 4 },
     }), { status: 200, headers: { "content-type": "application/json" } });
@@ -420,7 +420,7 @@ test("DeepSeek ordinary chat stays on the configured Anthropic Messages protocol
 test("OpenAI-compatible gateway marks filtered structured output as incomplete", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({
-    choices: [{ message: { content: "{\\"partial\\":true}" }, finish_reason: "content_filter" }],
+    choices: [{ message: { content: '{"partial":true}' }, finish_reason: "content_filter" }],
     usage: { prompt_tokens: 10, completion_tokens: 5 },
   }), { status: 200, headers: { "content-type": "application/json" } });
   try {
@@ -435,7 +435,7 @@ test("OpenAI-compatible gateway marks filtered structured output as incomplete",
 test("Anthropic unknown stop reasons are not treated as complete output", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({
-    content: [{ type: "text", text: "{\\"partial\\":true}" }],
+    content: [{ type: "text", text: '{"partial":true}' }],
     stop_reason: "pause_turn",
     usage: { input_tokens: 10, output_tokens: 5 },
   }), { status: 200, headers: { "content-type": "application/json" } });
