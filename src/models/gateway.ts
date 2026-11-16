@@ -602,7 +602,9 @@ export class SofiaModelGateway implements ModelProvider {
         })),
       },
       ...(usage ? { usage } : {}),
-      finishReason: data.choices?.[0]?.finish_reason === "stop" || data.choices?.[0]?.finish_reason === "tool_calls" || data.choices?.[0]?.finish_reason === "function_call"\n        ? "complete"\n        : data.choices?.[0]?.finish_reason === "length" ? "length" : "incomplete",
+      finishReason: data.choices?.[0]?.finish_reason === "stop" || data.choices?.[0]?.finish_reason === "tool_calls" || data.choices?.[0]?.finish_reason === "function_call"
+        ? "complete"
+        : data.choices?.[0]?.finish_reason === "length" ? "length" : "incomplete",
     };
   }
 }
