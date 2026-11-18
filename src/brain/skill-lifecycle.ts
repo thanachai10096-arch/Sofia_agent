@@ -66,38 +66,40 @@ export class VersionedSkillLifecycle {
     this.minimumConfidence = options.minimumConfidence ?? 0.7;
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
     this.load();
-    // Persisted learned skills in verified, active, or rollback-eligible superseded
-    // state must not be promoted/restored using a cached evaluation. Re-evaluation
-    // must resolve the durable audit evidence again after restart.
-    let quarantinedLearnedSkills = false;
-    for (const record of this.snapshot.records) {
-      if (record.package.source !== "learned" || (record.status !== "active" && record.status !== "verified" && record.status !== "superseded")) continue;
-      const wasActive = record.status === "active";
-      record.status = "rejected";
-      record.updatedAt = new Date().toISOString();
-      record.evaluation = {
-        passed: false,
-        evaluatedAt: record.updatedAt,
-        checks: [{ name: "startup-evidence-quarantine", passed: false, detail: "Persisted learned skills require fresh durable-evidence evaluation after restart; cached verification cannot be promoted." }],
-      };
-      if (wasActive && this.snapshot.activeBySkill[record.skillId] === record.id) {
-        delete this.snapshot.activeBySkill[record.skillId];
+    this.withPlatformMutationLock(() => {
+      // Persisted learned skills in verified, active, or rollback-eligible superseded
+      // state must not be promoted/restored using a cached evaluation. Re-evaluation
+      // must resolve the durable audit evidence again after restart.
+      let quarantinedLearnedSkills = false;
+      for (const record of this.snapshot.records) {
+        if (record.package.source !== "learned" || (record.status !== "active" && record.status !== "verified" && record.status !== "superseded")) continue;
+        const wasActive = record.status === "active";
+        record.status = "rejected";
+        record.updatedAt = new Date().toISOString();
+        record.evaluation = {
+          passed: false,
+          evaluatedAt: record.updatedAt,
+          checks: [{ name: "startup-evidence-quarantine", passed: false, detail: "Persisted learned skills require fresh durable-evidence evaluation after restart; cached verification cannot be promoted." }],
+        };
+        if (wasActive && this.snapshot.activeBySkill[record.skillId] === record.id) {
+          delete this.snapshot.activeBySkill[record.skillId];
+        }
+        quarantinedLearnedSkills = true;
       }
-      quarantinedLearnedSkills = true;
-    }
-    if (quarantinedLearnedSkills) this.persist();
-    const activeRecords: Array<{ skillId: string; record: SkillLifecycleRecord }> = [];
-    for (const [skillId, recordId] of Object.entries(this.snapshot.activeBySkill)) {
-      const record = this.snapshot.records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
-      if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
-      const existing = this.platform.get(skillId);
-      if (existing && JSON.stringify(existing) !== JSON.stringify(record.package)) {
-        throw new Error("Cannot restore active lifecycle skill over a different platform skill: " + skillId);
+      if (quarantinedLearnedSkills) this.persist();
+      const activeRecords: Array<{ skillId: string; record: SkillLifecycleRecord }> = [];
+      for (const [skillId, recordId] of Object.entries(this.snapshot.activeBySkill)) {
+        const record = this.snapshot.records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
+        if (!record) throw new Error("Skill lifecycle active pointer is inconsistent: " + skillId);
+        const existing = this.platform.get(skillId);
+        if (existing && JSON.stringify(existing) !== JSON.stringify(record.package)) {
+          throw new Error("Cannot restore active lifecycle skill over a different platform skill: " + skillId);
+        }
+        activeRecords.push({ skillId, record });
       }
-      activeRecords.push({ skillId, record });
-    }
-    // Validate the entire restore set before mutating the supplied platform.
-    for (const { record } of activeRecords) this.platform.register(clone(record.package));
+      // Validate the entire restore set before mutating the supplied platform.
+      for (const { record } of activeRecords) this.platform.register(clone(record.package));
+    });
   }
 
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
