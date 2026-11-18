@@ -89,3 +89,19 @@ trusted server configuration, pass authenticated principal identity and the
 kill-switch signal into `SofiaAutonomyRuntime`, heartbeat leases, and persist
 completion/failure. Never deserialize executable adapters or credentials from
 job payloads. Job payloads are data only and must be validated by the host.
+
+### PostgreSQL multi-worker backend
+
+`PostgresAutonomyJobStore` implements the same job-store contract for shared
+worker deployments. It uses a transactional claim query with
+`FOR UPDATE SKIP LOCKED`, tenant-scoped reads and updates, lease ownership
+checks, bounded attempts, idempotency uniqueness per principal, and expired
+lease recovery. Call `ensureSchema()` during a controlled server startup or
+managed migration; do not run schema DDL on every request.
+
+Supply a trusted server-side PostgreSQL pool (for example, a Railway PostgreSQL
+connection). The implementation intentionally accepts a small pool interface
+and does not add a database driver dependency. Configure TLS and credentials
+outside job payloads, use a least-privilege database role, and never expose the
+pool to model-generated code. This adapter is now available but has not yet
+been connected to Railway infrastructure or validated against a live database.
