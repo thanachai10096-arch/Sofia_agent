@@ -45,6 +45,13 @@ export function buildMigrationPlan({ workspace, stateDir, tempDir = os.tmpdir(),
     add(path.join(tempDir, "sofia-agents-" + name), path.join(destinationRoot, "sofia-agents-" + name), "legacy OS temporary store: " + name);
   }
 
+  if (env.SOFIA_LEGACY_STATE_DIR && path.isAbsolute(env.SOFIA_LEGACY_STATE_DIR)) {
+    const legacyRoot = path.resolve(env.SOFIA_LEGACY_STATE_DIR);
+    for (const name of STORE_NAMES) {
+      add(path.join(legacyRoot, "sofia-agents-" + name), path.join(destinationRoot, "sofia-agents-" + name), "previous configured state root: " + name);
+    }
+  }
+
   add(path.join(workspaceRoot, ".sofia", "api-runs"), path.join(destinationRoot, "sofia-agents-api-runs"), "legacy workspace API run records");
   add(path.join(workspaceRoot, ".sofia", "chat-dedupe"), path.join(destinationRoot, "sofia-agents-chat-dedupe"), "legacy workspace chat deduplication");
   add(path.join(workspaceRoot, ".sofia", "api-usage.json"), path.join(destinationRoot, "sofia-agents-api", "usage.json"), "legacy API usage file");
