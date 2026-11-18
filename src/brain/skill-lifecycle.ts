@@ -241,7 +241,13 @@ export class VersionedSkillLifecycle {
       try {
         if (previousPackage) this.platform.register(previousPackage);
         else this.platform.remove(candidate.skillId);
-      } catch { /* Keep original failure; operator must inspect platform consistency. */ }
+      } catch (compensationError) {
+        throw new AggregateError(
+          [error, compensationError],
+          "Skill promotion failed and platform compensation was incomplete; operator reconciliation is required",
+          { cause: error },
+        );
+      }
       throw error;
     }
     return clone(current);
@@ -281,7 +287,13 @@ export class VersionedSkillLifecycle {
       try {
         if (platformCurrent) this.platform.register(platformCurrent);
         else this.platform.remove(skillId);
-      } catch { /* Keep original failure; operator must inspect platform consistency. */ }
+      } catch (compensationError) {
+        throw new AggregateError(
+          [error, compensationError],
+          "Skill rollback failed and platform compensation was incomplete; operator reconciliation is required",
+          { cause: error },
+        );
+      }
       throw error;
     }
     return clone(previous);
