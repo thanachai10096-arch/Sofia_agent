@@ -123,3 +123,36 @@ test("research loop resumes after a persisted cycle without replaying earlier cy
   assert.deepEqual(keys, ["autonomy-job:job-123:2"]);
   assert.deepEqual(saved, [2, 3]);
 });
+
+test("checkpoint must contain exactly the completed cycle prefix", async () => {
+  await assert.rejects(() => runIndependentResearchLoop({
+    adapters: adapters(),
+    signal: new AbortController().signal,
+    principalId: "tenant-user-1",
+    sandboxAvailable: false,
+    budgetContext: () => ({}),
+    maxCycles: 2,
+    startCycle: 2,
+    previousCycles: [],
+  }), /checkpoint history/i);
+});
+
+test("cancellation after an adapter returns prevents subsequent research side effects", async () => {
+  const controller = new AbortController();
+  let gapDiscoveryCalls = 0;
+  await assert.rejects(() => runIndependentResearchLoop({
+    adapters: adapters({
+      observe: async () => {
+        controller.abort(new Error("host shutdown"));
+        return { signal: "x", sourceIds: [] };
+      },
+      identifyGaps: async () => { gapDiscoveryCalls += 1; return ["should not continue"]; },
+    }),
+    signal: controller.signal,
+    principalId: "tenant-user-1",
+    sandboxAvailable: false,
+    budgetContext: () => ({}),
+    maxCycles: 1,
+  }), /host shutdown/);
+  assert.equal(gapDiscoveryCalls, 0);
+});
