@@ -20,6 +20,7 @@ on:
       - "Dockerfile"
       - "compose.yaml"
       - ".dockerignore"
+      - ".env.example"
       - "scripts/sofia-*.sh"
       - "docs/SELF_HOSTED_*.md"
       - "src/**"
