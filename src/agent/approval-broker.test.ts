@@ -53,6 +53,7 @@ test("approval broker expires requests and denies late approvals", async () => {
   const [record] = await broker.listPending();
   assert.ok(record);
   now = record.expiresAt + 1;
+  assert.equal(await broker.approve(record.id, record.actionHash, "approver-1"), false, "approval after expiry must be rejected even before the waiter polls");
   assert.equal(await pending, false);
   assert.equal(await broker.approve(record.id, record.actionHash, "approver-1"), false);
   assert.equal((await store.get(record.id))?.status, "expired");
