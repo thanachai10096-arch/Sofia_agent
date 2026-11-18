@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 VOLUME_NAME="${SOFIA_DOCKER_VOLUME:-sofia-agent-data}"
+SERVICE="${SOFIA_COMPOSE_SERVICE:-sofia}"
 BACKUP_DIR="${SOFIA_BACKUP_DIR:-$ROOT_DIR/backups}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 ARCHIVE="$BACKUP_DIR/sofia-${STAMP}.tar.gz"
@@ -19,19 +20,19 @@ docker volume inspect "$VOLUME_NAME" >/dev/null 2>&1 || {
 
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
-if docker compose ps --status running --services 2>/dev/null | grep -qx sofia; then
+if docker compose ps --status running --services 2>/dev/null | grep -Fqx -- "$SERVICE"; then
   WAS_RUNNING=1
 fi
 
 restart_service() {
   if [ "$WAS_RUNNING" -eq 1 ]; then
-    docker compose start sofia >/dev/null
+    docker compose start "$SERVICE" >/dev/null
   fi
 }
 trap restart_service EXIT
 
 # Stop writes before archiving to avoid a partially-written state snapshot.
-docker compose stop -t 30 sofia >/dev/null
+docker compose stop -t 30 "$SERVICE" >/dev/null
 docker run --rm \
   -v "$VOLUME_NAME:/data:ro" \
   -v "$BACKUP_DIR:/backup" \
