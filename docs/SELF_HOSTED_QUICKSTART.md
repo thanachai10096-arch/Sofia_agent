@@ -61,7 +61,7 @@ Compose mounts the named volume `sofia-agent-data` at `/data` and configures:
 - `SOFIA_WORKSPACE=/data/workspace`
 - `SOFIA_STATE_DIR=/data/state`
 
-The API usage file is stored under the workspace's `.sofia` directory by the current entrypoint. Do not remove the volume when upgrading. The volume contains user data and should be backed up and protected as sensitive information.
+All durable file-backed stores resolve beneath this root, including API run records and usage quotas, background jobs, Brain run snapshots, checkpoints, project and user memory, SQLite sessions, skill/evolution data, security audit data, and chat deduplication. The workspace itself remains at `/data/workspace`; project files and workspace-local artifacts are persisted on the same named volume. `SOFIA_RUN_STORE_DIR` and `SOFIA_CHAT_DEDUPE_DIR` remain optional explicit path overrides; leave them unset for the unified default. Do not remove the volume when upgrading. The volume contains user data and should be backed up and protected as sensitive information.
 
 ## Upgrade
 
