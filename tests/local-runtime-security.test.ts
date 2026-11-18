@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { createNodeWorkspaceRuntime } from "../src/platform/local-runtime.js";
@@ -147,6 +148,68 @@ test("Docker sandbox mode fails closed without an explicitly pinned image", asyn
     else process.env.SOFIA_SANDBOX_MODE = oldMode;
     if (oldImage === undefined) delete process.env.SOFIA_SANDBOX_IMAGE;
     else process.env.SOFIA_SANDBOX_IMAGE = oldImage;
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});
+
+
+test("Git subprocess ignores inherited Git execution and repository override variables", async () => {
+  const f = await fixture();
+  const marker = path.join(f.parent, "hostile-helper-ran");
+  const helper = path.join(f.parent, "hostile-git-helper.sh");
+  const rogueGitDir = path.join(f.parent, "rogue.git");
+  const names = [
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_EXTERNAL_DIFF", "GIT_SSH_COMMAND", "GIT_SSH",
+    "GIT_SSH_VARIANT", "GIT_PROXY_COMMAND", "GIT_SSL_NO_VERIFY", "GIT_EXEC_PATH",
+    "GIT_CONFIG_PARAMETERS", "GIT_ASKPASS", "GIT_PAGER", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1",
+    "GIT_CONFIG_KEY_2", "GIT_CONFIG_VALUE_2",
+  ] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    execFileSync("git", ["init", "--quiet"], { cwd: f.root });
+    await writeFile(path.join(f.root, "visible.txt"), "visible");
+    execFileSync("git", ["init", "--bare", "--quiet", rogueGitDir], { cwd: f.parent });
+    await writeFile(helper, "#!/bin/sh\ntouch " + JSON.stringify(marker) + "\nexit 1\n");
+    await chmod(helper, 0o755);
+
+    process.env.GIT_DIR = rogueGitDir;
+    process.env.GIT_WORK_TREE = f.parent;
+    process.env.GIT_EXTERNAL_DIFF = helper;
+    process.env.GIT_SSH_COMMAND = helper;
+    process.env.GIT_SSH = helper;
+    process.env.GIT_SSH_VARIANT = "simple";
+    process.env.GIT_PROXY_COMMAND = helper;
+    process.env.GIT_SSL_NO_VERIFY = "1";
+    process.env.GIT_EXEC_PATH = f.parent;
+    process.env.GIT_CONFIG_PARAMETERS = "'diff.external=" + helper + "'";
+    process.env.GIT_ASKPASS = helper;
+    process.env.GIT_PAGER = helper;
+    process.env.GIT_CONFIG_COUNT = "3";
+    process.env.GIT_CONFIG_KEY_0 = "core.sshCommand";
+    process.env.GIT_CONFIG_VALUE_0 = helper;
+    process.env.GIT_CONFIG_KEY_1 = "diff.external";
+    process.env.GIT_CONFIG_VALUE_1 = helper;
+    process.env.GIT_CONFIG_KEY_2 = "core.hooksPath";
+    process.env.GIT_CONFIG_VALUE_2 = f.parent;
+
+    const status = await f.runtime.git(["status", "--short"]);
+    assert.equal(status.code, 0, status.stderr);
+    assert.match(status.stdout, /visible\.txt/, "Git must stay rooted in the configured workspace");
+
+    const nullFile = process.platform === "win32" ? "NUL" : "/dev/null";
+    await f.runtime.git(["diff", "--no-index", nullFile, "visible.txt"]);
+    await assert.rejects(
+      async () => import("node:fs/promises").then(({ access }) => access(marker)),
+      /ENOENT/,
+      "host-provided external diff helper must not execute",
+    );
+  } finally {
+    for (const name of names) {
+      const value = previous[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     await rm(f.parent, { recursive: true, force: true });
   }
 });
