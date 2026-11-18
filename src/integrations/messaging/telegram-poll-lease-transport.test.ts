@@ -88,3 +88,36 @@ test("local Telegram runtime remains opt-in compatible when a lease is not requi
   assert.ok(runtime);
   assert.deepEqual(warnings, []);
 });
+
+test("Telegram transport does not begin polling when stopped during webhook cleanup", async () => {
+  let notifyWebhookStarted!: () => void;
+  let finishWebhook!: (response: Response) => void;
+  const webhookStarted = new Promise<void>((resolve) => { notifyWebhookStarted = resolve; });
+  const webhookResponse = new Promise<Response>((resolve) => { finishWebhook = resolve; });
+  const calls: string[] = [];
+  let released = 0;
+  const transport = createTelegramHttpTransport({
+    token,
+    pollLease: {
+      async acquire() {
+        return { async renew() { return true; }, async release() { released++; } };
+      },
+    },
+    fetchImpl: async (input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/deleteWebhook")) {
+        notifyWebhookStarted();
+        return webhookResponse;
+      }
+      return ok([]);
+    },
+  });
+  const starting = transport.start(new AbortController().signal, async () => {});
+  await webhookStarted;
+  await transport.stop();
+  finishWebhook(ok(true));
+  await starting;
+  assert.equal(calls.filter((url) => url.endsWith("/getUpdates")).length, 0);
+  assert.equal(released, 1);
+});
