@@ -12,7 +12,7 @@ Client-supplied workspace paths are rejected by the API validation guard. Do not
 
 ## 1.1 Verified implementation inventory (repository audit)
 
-The following observations were verified against the current `main` implementation during this audit. They describe the present code, not the target architecture.
+The following observations were verified against this branch during the audit. They describe the present implementation, not the target architecture.
 
 | Component | Current implementation | Isolation consequence |
 |---|---|---|
@@ -40,9 +40,11 @@ The branch now contains `src/platform/tenant-workspace.ts` with `createTenantWor
 
 Regression coverage is in `src/platform/tenant-workspace.test.ts` for deterministic separation, invalid inputs, and symlink escapes.
 
-**This is only an allocation primitive.** It is intentionally not connected to `createBrainFactory` yet: the current Brain factory, durable job runtime, API run store, shared tool registry, checkpoint manager, evolution engine, and background jobs still capture process-wide dependencies. Wiring only the workspace path would leave other stores and lifecycle operations cross-tenant. The next implementation step must introduce a per-principal dependency bundle and ensure queued jobs retain an immutable tenant identity through execution and recovery.
+**The workspace allocator and tenant dependency factory are foundations, not a complete request-routing implementation.** `createSofiaAgentDependenciesForTenant` now builds workspace-rooted dependencies, but API authentication does not yet select and lifecycle-manage one dependency bundle per tenant for every request. Queued-job recovery, messaging adapters, and shared host resources still require tenant-aware routing and immutable tenant identity.
 
 ### Safe interim operating mode
+
+The API entrypoint is configured with one `SOFIA_API_KEY` and now uses a physically separate transcript database for that owner. Migration copies only session IDs beginning with the authenticated owner ID plus a colon, writes to the destination before deleting the legacy row, and is safe to retry after interruption. This does not yet provide a multi-key session-store router for arbitrary embedded `createSofiaApi` hosts, and it does not isolate the shared workspace, Brain stores, JobRuntime, or messaging adapters.
 
 Until a tenant-aware runtime factory and tenant-owned workspace roots exist:
 - treat the API deployment as a single trusted workspace/operator, even when API keys have separate run and user-memory records;
