@@ -142,31 +142,32 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
     async start(signal, onUpdate) {
       if (!stopped) return;
       stopped = false;
-      controller = new AbortController();
+      const activeController = new AbortController();
+      controller = activeController;
       if (options.pollLease) {
         try {
           pollLeaseHandle = await options.pollLease.acquire();
         } catch {
           stopped = true;
-          controller.abort();
-          controller = undefined;
+          activeController.abort();
+          if (controller === activeController) controller = undefined;
           try { options.onError?.("poll_lease_unavailable"); } catch { /* diagnostics must not affect startup */ }
-          return;
+          throw new Error("Telegram poll lease acquisition failed; refusing to poll without ownership.");
         }
         if (!pollLeaseHandle) {
           stopped = true;
           controller.abort();
           controller = undefined;
           try { options.onError?.("poll_lease_unavailable"); } catch { /* diagnostics must not affect startup */ }
-          return;
+          throw new Error("Telegram poll lease is owned by another worker; refusing to poll.");
         }
         const renewEvery = options.pollLeaseRenewIntervalMs ?? 10_000;
         if (!Number.isSafeInteger(renewEvery) || renewEvery < 1_000 || renewEvery > 60_000) {
           await pollLeaseHandle.release();
           pollLeaseHandle = undefined;
           stopped = true;
-          controller.abort();
-          controller = undefined;
+          activeController.abort();
+          if (controller === activeController) controller = undefined;
           throw new Error("Telegram poll lease renewal interval must be between 1 and 60 seconds.");
         }
         leaseRenewalTimer = setInterval(() => {
@@ -175,7 +176,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           void pollLeaseHandle.renew().then((renewed) => {
             if (!renewed && !stopped) {
               try { options.onError?.("poll_lease_lost"); } catch { /* diagnostics must not affect shutdown */ }
-              controller?.abort();
+              activeController.abort();
             }
           }).catch(() => {
             if (!stopped) {
@@ -185,20 +186,22 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           }).finally(() => { leaseRenewalInFlight = false; });
         }, renewEvery);
       }
-      const stopFromParent = () => controller?.abort(signal.reason);
+      const stopFromParent = () => activeController.abort(signal.reason);
       signal.addEventListener("abort", stopFromParent, { once: true });
       if (signal.aborted) stopFromParent();
       // This runtime uses long polling, so remove any stale Telegram webhook
       // configuration before getUpdates. Preserve queued updates.
-      if (!controller.signal.aborted) {
+      if (!activeController.signal.aborted) {
         try {
-          await request<boolean>("deleteWebhook", { drop_pending_updates: false }, controller.signal);
+          await request<boolean>("deleteWebhook", { drop_pending_updates: false }, activeController.signal);
         } catch {
           // Do not log token or provider response bodies. Polling will emit a
           // safe status-only diagnostic if Telegram still rejects getUpdates.
         }
       }
-      if (controller.signal.aborted) {
+      // stop() may run while deleteWebhook is in flight. Never launch a poll
+      // loop after the parent has stopped this transport or replaced its controller.
+      if (activeController.signal.aborted || stopped || controller !== activeController) {
         signal.removeEventListener("abort", stopFromParent);
         if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
         leaseRenewalTimer = undefined;
@@ -207,7 +210,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         if (lease) await lease.release().catch(() => undefined);
         return;
       }
-      loop = poll(controller.signal, onUpdate).finally(async () => {
+      loop = poll(activeController.signal, onUpdate).finally(async () => {
         signal.removeEventListener("abort", stopFromParent);
         if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
         leaseRenewalTimer = undefined;

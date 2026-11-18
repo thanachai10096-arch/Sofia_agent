@@ -27,10 +27,12 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_ALLOWED_USER_IDS` — comma-separated immutable Telegram user IDs.
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` — required together on Railway for the shared Telegram poll lease. Keep the standard write-capable token server-side only. `REDIS_REST_URL` and `REDIS_REST_TOKEN` are accepted as aliases.
+- `SOFIA_TELEGRAM_POLL_LEASE_REQUIRED` — set `true` to require the lease outside Railway too. Railway defaults to required; setting `false` opts out and is safe only for a deliberately single-poller deployment.
 
 Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Ordinary text messages are dispatched as natural-language tasks without requiring `/run`; `/run <task>` remains supported, while other slash commands are ignored. This behavior uses the shared handler default (`naturalLanguageEnabled: true`). The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
-For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
+On Railway, the Telegram runtime now requires a shared poll lease by default and fails closed when it is not configured. Set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` on the single environment that owns the bot. The runtime uses Redis `SET NX PX` and owner-checked Lua renew/release commands through the Upstash REST API; it does not add a Redis TCP dependency. `SOFIA_TELEGRAM_POLL_LEASE_REQUIRED=false` is an explicit escape hatch for a deliberately single-process deployment only and must not be used when more than one environment/deployment can poll the same bot. Use a separate Telegram bot token for isolated Staging tests; never enable the same token in Staging and Production concurrently. The file-based dedupe store remains local to the service filesystem; use a shared atomic deduplicator before multiple replicas or cross-deployment replay protection.
 
 ## Composition contract
 
@@ -43,7 +45,7 @@ The existing `createChatCommandHandler` remains the shared command dispatcher fo
 At the application composition root:
 1. Construct the existing Sofia SDK client with a server-side API key that has the required `agent:run` scope.
 2. Reuse the existing `ChatAccessPolicy` and atomic `ChatMessageDeduplicator`.
-3. Construct the Telegram adapter with `createTelegramAdapter(createTelegramHttpTransport({ token: process.env.TELEGRAM_BOT_TOKEN! }))`.
+3. Construct the Telegram adapter with `createTelegramAdapter(createTelegramHttpTransport({ token, pollLease }))`; on Railway, construct `pollLease` from the configured Upstash REST credentials and do not start polling if lease acquisition fails.
 4. Construct the Discord transport with `createDiscordInteractionTransport({ publicKeyHex, botToken: process.env.DISCORD_BOT_TOKEN! })`; wrap it with `createDiscordAdapter` and pass the transport to `createSofiaApi` as `discordInteractionRoute: { transport }` (default path `/v1/integrations/discord/interactions`). Expose that route only over HTTPS. For the standalone entrypoint, configure `DISCORD_ALLOWED_USER_IDS=123...,456...` and `DISCORD_ALLOWED_CHANNEL_IDS=789...`; both lists are mandatory and validated before the transport starts.
 5. Create the gateway with `enabled: process.env.SOFIA_MESSAGING_ENABLED === "true"`, `allowUser: createMessagingAccessCheck(policy)`, and `onMessage: createSofiaMessagingHandler({ client, accessPolicy: policy, deduplicator })`.
 6. Ensure the command prefix configured for the handler matches the prefix configured for Discord's interaction transport.
@@ -66,6 +68,7 @@ The code outline above is not a claim that the repository's API server is alread
 - [ ] API keys and bot tokens never appear in logs, client assets, test snapshots, or error messages.
 - [ ] Graceful shutdown stops polling and rejects new dispatches.
 - [ ] Enable `discordInteractionRoute` only when a Discord transport is configured; expose it over HTTPS and keep the raw-body size limit enabled.
+- [ ] Railway Telegram runtime has Upstash REST credentials, acquires exactly one poll lease per bot, renews it, and fails closed on missing/lost ownership.
 - [ ] Multi-instance production deployment configures Redis connectivity, injects `RedisMessagingRateLimiter`, and injects `RedisChatMessageDeduplicator` for cross-worker replay protection; verify behavior under concurrent requests and store outages.
 - [ ] Attachment downloading stays disabled until a separately reviewed SSRF-safe downloader exists.
 
