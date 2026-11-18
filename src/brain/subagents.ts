@@ -78,6 +78,8 @@ export interface SubagentResult {
   summary: string;
   output: unknown;
   proposedAction?: SubagentActionProposal;
+  /** Set only by the parent after validating the child response. */
+  childTaskId?: string;
 }
 
 export interface SubagentRuntime {
