@@ -218,6 +218,15 @@ export class SandboxSupervisor {
     }
   }
 
+  /** Host-only path accessor for staging a sanitized project snapshot into the run. */
+  getWorkspacePath(identity: SandboxRunIdentity, attestation: SandboxAttestation): string {
+    const run = this.runs.get(this.key(identity));
+    if (!run?.active || !this.verifyAttestation(identity, attestation)) {
+      throw new Error("A valid active sandbox attestation is required.");
+    }
+    return run.workspace;
+  }
+
   /** Returns trusted, live measurements for the autonomy policy adapter. */
   getAutonomyContext(identity: SandboxRunIdentity, attestation: SandboxAttestation): AutonomyContext {
     const run = this.runs.get(this.key(identity));
