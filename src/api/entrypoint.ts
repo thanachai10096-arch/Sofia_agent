@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
@@ -17,7 +18,7 @@ const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
 const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
 const runStoreDirectory = path.resolve(
-  process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
+  process.env.SOFIA_RUN_STORE_DIR ?? sofiaStateDirectory("api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 const deps = await createSofiaAgentDependenciesWithSessions(workspace);
@@ -58,7 +59,7 @@ if (discordConfigured) {
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
   });
   const discordDeduplicator = new FileChatMessageDeduplicator(
-    path.resolve(process.env.SOFIA_CHAT_DEDUPE_DIR ?? path.join(workspace, ".sofia", "chat-dedupe")),
+    path.resolve(process.env.SOFIA_CHAT_DEDUPE_DIR ?? sofiaStateDirectory("chat-dedupe")),
   );
   const handleDiscordMessage = async (message: VerifiedDiscordMessage): Promise<void> => {
     try {
@@ -208,7 +209,7 @@ const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
-  usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
+  usageStorePath: path.join(sofiaStateDirectory("api"), "usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
 const port = Number(process.env.PORT ?? 3000);
