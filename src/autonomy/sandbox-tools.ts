@@ -6,9 +6,10 @@ import type { SandboxAttestation, SandboxRunIdentity, SandboxSupervisor } from "
 
 const EXCLUDED = new Set([
   ".git", ".sofia", "node_modules", ".next", ".turbo", "dist", "build",
-  "coverage", ".venv", "venv", ".ssh", ".aws", ".config",
+  "coverage", ".venv", "venv", ".ssh", ".aws", ".config", ".docker", ".kube",
+  ".npmrc", ".pypirc", ".netrc", ".git-credentials", ".yarnrc.yml",
 ]);
-const SECRET_FILE = /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx|sqlite|db)|id_rsa|id_ed25519)$/i;
+const SECRET_FILE = /^(?:\.env(?:\..*)?|.*\.(?:pem|key|crt|p12|pfx|sqlite|db)|id_rsa|id_ed25519)$/i;
 const MAX_FILES = 10_000;
 const MAX_BYTES = 100 * 1024 * 1024;
 
