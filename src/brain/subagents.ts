@@ -84,6 +84,61 @@ export interface SubagentRuntime {
   run(request: SubagentRequest): Promise<SubagentResult>;
 }
 
+/**
+ * Treat every runtime result as untrusted, including in-process/custom runtimes.
+ * Reject role substitution and malformed/oversized action proposals before the
+ * parent considers a proposal for execution.
+ */
+export function validateSubagentResult(
+  value: unknown,
+  expectedRole: SubagentRole,
+): SubagentResult | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.role !== expectedRole) return undefined;
+  if (typeof candidate.summary !== "string" || !candidate.summary.trim() ||
+      candidate.summary.length > 6_000 || !("output" in candidate)) return undefined;
+
+  let output: unknown;
+  try {
+    const serialized = JSON.stringify(candidate.output);
+    if (serialized === undefined || serialized.length > 24_000) return undefined;
+    output = JSON.parse(serialized) as unknown;
+  } catch {
+    return undefined;
+  }
+
+  let proposedAction: SubagentActionProposal | undefined;
+  if (candidate.proposedAction !== undefined) {
+    if (!candidate.proposedAction || typeof candidate.proposedAction !== "object" ||
+        Array.isArray(candidate.proposedAction)) return undefined;
+    const action = candidate.proposedAction as Record<string, unknown>;
+    if (typeof action.tool !== "string" || !action.tool.trim() || action.tool.length > 128 ||
+        !action.input || typeof action.input !== "object" || Array.isArray(action.input) ||
+        typeof action.reason !== "string" || !action.reason.trim() || action.reason.length > 1_000) {
+      return undefined;
+    }
+    try {
+      const serializedInput = JSON.stringify(action.input);
+      if (serializedInput === undefined || serializedInput.length > 16_000) return undefined;
+      proposedAction = {
+        tool: action.tool,
+        input: JSON.parse(serializedInput) as Record<string, unknown>,
+        reason: action.reason.trim(),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  return {
+    role: expectedRole,
+    summary: candidate.summary.trim(),
+    output,
+    ...(proposedAction ? { proposedAction } : {}),
+  };
+}
+
 const ROLE_INSTRUCTIONS: Record<SubagentRole, string> = {
   explorer: "Inspect the available project evidence and identify relevant files, constraints, conventions, and unknowns. Do not modify files.",
   architect: "Design the smallest safe implementation strategy. Identify dependencies, interfaces, sequencing, and risks. Do not modify files.",
