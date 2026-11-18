@@ -64,9 +64,9 @@ export class VersionedSkillLifecycle {
     this.minimumConfidence = options.minimumConfidence ?? 0.7;
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
     this.load();
-    // Persisted learned skills in either verified or active state must not be
-    // promoted/restored using a cached evaluation. Re-evaluation must resolve the
-    // durable audit evidence again after restart.
+    // Persisted learned skills in verified, active, or rollback-eligible superseded
+    // state must not be promoted/restored using a cached evaluation. Re-evaluation
+    // must resolve the durable audit evidence again after restart.
     let quarantinedLearnedSkills = false;
     for (const record of this.snapshot.records) {
       if (record.package.source !== "learned" || (record.status !== "active" && record.status !== "verified" && record.status !== "superseded")) continue;
