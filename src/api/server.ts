@@ -144,12 +144,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   // Migrate each owner's records from the legacy shared file before serving cron
   // requests or recovering jobs; never accept a client-supplied namespace.
   const cronSchedulers = new Map<string, CronScheduler>();
-  const legacyCronStore = deps.jobRuntime ? new FileCronStore() : undefined;
+  const legacyCronStore = deps.jobRuntime ? new FileCronStore(undefined, config.cronStoreRoot) : undefined;
   const cronInitialization = (async () => {
     if (!deps.jobRuntime || !legacyCronStore) return;
     for (const token of Object.keys(config.apiKeys)) {
       const ownerKeyId = createHash("sha256").update(token).digest("hex").slice(0, 32);
-      const store = new FileCronStore(ownerKeyId);
+      const store = new FileCronStore(ownerKeyId, config.cronStoreRoot);
       await store.migrateOwnerFrom(legacyCronStore, ownerKeyId);
       cronSchedulers.set(ownerKeyId, new CronScheduler(deps.jobRuntime, { store, maxConcurrent: 1 }));
     }
