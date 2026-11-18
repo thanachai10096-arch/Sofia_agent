@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: sofia-agent:local
+    image: ${SOFIA_IMAGE:-sofia-agent:local}
     container_name: sofia-agent
     init: true
     restart: unless-stopped
