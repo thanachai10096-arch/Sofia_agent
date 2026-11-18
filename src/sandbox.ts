@@ -408,7 +408,7 @@ export class RemoteSandbox implements Sandbox {
     const maxOutputBytes = positiveFinite(limits.maxOutputBytes, "maxOutputBytes");
     if (signal?.aborted) throw new Error("Remote sandbox execution was aborted.");
 
-    const { lstat, readdir, open: openFile, realpath, stat, writeFile } = await import("node:fs/promises");
+    const { lstat, readdir, open: openFile, realpath, stat } = await import("node:fs/promises");
     const maxSnapshotBytes = this.maxSnapshotBytes;
     const root = await realpath(limits.workspaceRoot);
     if (!(await stat(root)).isDirectory()) throw new Error("Remote sandbox workspace must be a directory.");
