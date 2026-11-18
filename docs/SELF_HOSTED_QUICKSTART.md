@@ -119,7 +119,7 @@ After configuring `.env`, run the isolated Docker acceptance test:
 bash scripts/sofia-self-hosted-smoke.sh
 ```
 
-It builds a fresh image, starts an isolated Compose project with a disposable volume, waits for the health check, restarts the service, and verifies that a marker survives the restart. It removes only its own test project and volume. This does not replace an authenticated model-provider task test or a production backup/restore rehearsal.
+It builds a fresh image, starts an isolated Compose project with a disposable volume, waits for health, verifies that requests without a key and with an invalid key receive HTTP 401, verifies that the configured API key can read `/v1/jobs`, restarts the service, and checks that data survives. It removes only its own test project and volume. This does not replace a real model-provider task test or a production backup/restore rehearsal.
 
 ## Backup and restore
 
