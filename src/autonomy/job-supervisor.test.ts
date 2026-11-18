@@ -67,3 +67,50 @@ test("supervisor records bounded retryable failures", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("supervisor passes persisted checkpoint to the runtime after worker recovery", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-autonomy-resume-"));
+  try {
+    const store = new FileAutonomyJobStore("resume-test", root);
+    const job = await store.enqueue({ principalId: "tenant-1", kind: "research", payload: {} });
+    await store.claimNext("worker-old", 1_000);
+    const prior = [{
+      cycle: 1,
+      question: "prior",
+      finding: { summary: "prior finding", sourceIds: [], confidence: 0.9 },
+      hypothesis: { statement: "prior hypothesis", successMetric: "prior metric" },
+      status: "learned" as const,
+    }];
+    await store.saveCheckpoint("tenant-1", job.id, "worker-old", { nextCycle: 2, cycles: prior });
+    await store.recoverExpired(new Date(Date.now() + 2_000));
+    let resumedAt = 0;
+    let priorCount = 0;
+    const supervisor = new AutonomyJobSupervisor({
+      store,
+      executor: {
+        runResearch: async (request) => {
+          resumedAt = request.startCycle ?? 0;
+          priorCount = request.previousCycles?.length ?? 0;
+          return { completed: true, stoppedBy: "cycle-budget", cycles: request.previousCycles ?? [] };
+        },
+      },
+      resolveAdapters: async () => ({
+        observe: async () => ({ signal: "x", sourceIds: [] }),
+        identifyGaps: async () => [],
+        researchLocally: async () => ({ summary: "x", sourceIds: [], confidence: 1 }),
+        formulateHypothesis: async () => ({ statement: "x", successMetric: "x" }),
+        experiment: async () => ({ passed: true, summary: "x", benchmarkBefore: 0, benchmarkAfter: 1, safetyIncidents: 0, rollbackAvailable: true }),
+        recordLearning: async () => undefined,
+      }),
+      sandboxAvailable: async () => false,
+      budgetContext: () => ({}),
+      leaseMs: 3_000,
+    });
+    const result = await supervisor.runNext("worker-new", new AbortController().signal);
+    assert.equal(resumedAt, 2);
+    assert.equal(priorCount, 1);
+    assert.equal(result?.status, "completed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
