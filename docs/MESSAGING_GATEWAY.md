@@ -47,11 +47,11 @@ At the application composition root:
 2. Reuse the existing `ChatAccessPolicy` and atomic `ChatMessageDeduplicator`.
 3. Construct the Telegram adapter with `createTelegramAdapter(createTelegramHttpTransport({ token: process.env.TELEGRAM_BOT_TOKEN! }))`.
 4. Construct the Discord transport with `createDiscordInteractionTransport({ publicKeyHex, botToken: process.env.DISCORD_BOT_TOKEN! })`; wrap it with `createDiscordAdapter` and pass the transport to `createSofiaApi` as `discordInteractionRoute: { transport }` (default path `/v1/integrations/discord/interactions`). Expose that route only over HTTPS. For the standalone entrypoint, configure `DISCORD_ALLOWED_USER_IDS=123...,456...` and `DISCORD_ALLOWED_CHANNEL_IDS=789...`; both lists are mandatory and validated before the transport starts.
-5. Create the gateway with `enabled: process.env.SOFIA_MESSAGING_ENABLED === "true"`, `allowUser: createMessagingAccessCheck(policy)`, and `onMessage: createSofiaMessagingHandler({ client, accessPolicy: policy, deduplicator })`.
+5. For Telegram, use `clientForMessage` to resolve a distinct SDK client from the verified sender ID and the complete `TELEGRAM_USER_API_KEYS_JSON` map. Register those keys with `SOFIA_API_KEYS_JSON`. Keep the primary API key for trusted service callers only. Create the gateway with `enabled: process.env.SOFIA_MESSAGING_ENABLED === "true"`, `allowUser: createMessagingAccessCheck(policy)`, and the sender-scoped `createSofiaMessagingHandler`.
 6. Ensure the command prefix configured for the handler matches the prefix configured for Discord's interaction transport.
 7. Keep lifecycle ownership at the existing application composition root: call `start()` after server readiness and `stop()` during graceful shutdown. Do not instantiate a second Sofia runtime.
 
-The code outline above is not a claim that the repository's API server is already wired to these transports. Keep secrets out of checked-in config, client builds, test fixtures, and logs.
+The standalone API entrypoint supports `SOFIA_API_KEYS_JSON` as an additional key-to-scopes map. The Telegram runtime requires a distinct key for each allowlisted sender and fails closed if that map is incomplete. The code outline above is not a claim that the repository's API server is already wired to these transports. Keep secrets out of checked-in config, client builds, test fixtures, and logs.
 
 
 - The shared Sofia SDK supports an optional `idempotencyKey` for async runs. Reuse a key only for the same logical request; the API returns `409 idempotency_key_reused` if the same key is presented with a different request payload. This protection is currently process-local and is not persisted across server restarts.
