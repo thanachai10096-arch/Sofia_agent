@@ -82,7 +82,7 @@ test("Railway worker handles termination and closes its host-owned pool", async 
     const signals = new EventEmitter();
     let closed = false;
     const pool = {
-      query: async () => ({ rows: [{ "?column?": 1 }] }),
+      query: async <Row>() => ({ rows: [{ "?column?": 1 } as Row] }),
       connect: async () => { throw new Error("claim should not run after termination"); },
     };
     const pending = runRailwayAutonomyWorkerWithProcessSignals({
