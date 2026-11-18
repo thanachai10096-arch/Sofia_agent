@@ -51,11 +51,6 @@ export function compareSkillRegressionBenchmark(
 ): SkillRegressionBenchmarkResult {
   const baseline = indexChecks(input.baseline, "Baseline");
   const candidate = indexChecks(input.candidate, "Candidate");
-  const baselineFailures = [...baseline].filter(([, passed]) => !passed).map(([name]) => name);
-  if (baselineFailures.length > 0) {
-    throw new Error("Baseline benchmark must pass every check: " + baselineFailures.join(", "));
-  }
-
   const regressions: string[] = [];
   const improvements: string[] = [];
   const unchanged: string[] = [];
@@ -78,8 +73,9 @@ export function compareSkillRegressionBenchmark(
     if (!passed) regressions.push(name + ":new-check-failed");
   }
 
+  const candidateFullyPassing = [...candidate.values()].every((passed) => passed);
   return {
-    passed: regressions.length === 0,
+    passed: regressions.length === 0 && candidateFullyPassing,
     baselineCount: baseline.size,
     candidateCount: candidate.size,
     regressions,
