@@ -200,10 +200,15 @@ export function createTelegramMessagingRuntime(
     const allowedUsers = parseTelegramUserAllowlist(rawUsers);
     const allowedChats = parseTelegramChatAllowlist(rawChats);
     const userApiKeys = parseTelegramUserApiKeys(rawUserApiKeys, allowedUsers);
+    const clientsByUser = new Map<string, SofiaClient>();
     const clientForUser = (userId: string) => {
+      const existing = clientsByUser.get(userId);
+      if (existing) return existing;
       const apiKey = userApiKeys.get(userId);
       if (!apiKey) throw new Error("Telegram sender has no isolated Sofia API identity.");
-      return new SofiaClient({ apiKey, baseUrl });
+      const client = new SofiaClient({ apiKey, baseUrl });
+      clientsByUser.set(userId, client);
+      return client;
     };
     const accessPolicy = {
       isAllowed(input: { platform: "telegram" | "discord" | "slack"; senderId: string; conversationId: string }) {
