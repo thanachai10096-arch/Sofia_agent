@@ -144,3 +144,8 @@ Persisted learned records in both `verified` and `active` states are quarantined
 
 
 The verifier also recomputes the security action hash for both the candidate attestation and each `project.verify` audit event from the event's run ID, principal ID, tool name, and recorded input. A non-empty but forged action hash is rejected. On restart, learned records in `verified`, `active`, or `superseded` state are quarantined, so neither cached promotion nor rollback can reactivate an un-revalidated learned artifact.
+
+
+### Telegram poll lease renewal safety
+
+The Telegram HTTP transport requires a lease handle to expose its TTL and limits renewal cadence to at most one third of that TTL. Each renewal attempt is bounded by a deadline that aborts the active poll on timeout or unknown outcome. Invalid TTL/renewal combinations release the lease and fail startup closed. The transport remains opt-in: the Railway composition root must inject a shared Redis-backed lease and a multi-instance staging test must pass before enabling it in a deployed environment.
