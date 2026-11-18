@@ -29,6 +29,18 @@ The following observations were verified against the current `main` implementati
 
 **Important distinction:** creating per-principal copies of memory, snapshots, or checkpoint metadata would not make the filesystem safe to share. Checkpoint rollback, shell execution, Git, repository indexing, project context discovery, and generated artifacts all act on the runtime root. The runtime/workspace boundary must be isolated before user-controlled code execution is offered to multiple tenants.
 
+### Tenant workspace allocator (foundation added; not yet wired)
+
+The branch now contains `src/platform/tenant-workspace.ts` with `createTenantWorkspace(root, principalId)`. It:
+- requires an absolute operator-configured root and a non-empty authenticated principal ID;
+- hashes the principal ID with SHA-256 so raw IDs/tokens are not embedded in filesystem paths;
+- creates a deterministic `tenants/<hash>/workspace` directory with restrictive directory permissions;
+- rejects symlink redirection at the tenant directory, tenant root, and workspace directory.
+
+Regression coverage is in `src/platform/tenant-workspace.test.ts` for deterministic separation, invalid inputs, and symlink escapes.
+
+**This is only an allocation primitive.** It is intentionally not connected to `createBrainFactory` yet: the current Brain factory, durable job runtime, API run store, shared tool registry, checkpoint manager, evolution engine, and background jobs still capture process-wide dependencies. Wiring only the workspace path would leave other stores and lifecycle operations cross-tenant. The next implementation step must introduce a per-principal dependency bundle and ensure queued jobs retain an immutable tenant identity through execution and recovery.
+
 ### Safe interim operating mode
 
 Until a tenant-aware runtime factory and tenant-owned workspace roots exist:
