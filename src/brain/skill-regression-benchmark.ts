@@ -49,6 +49,9 @@ function indexChecks(checks: readonly SkillBenchmarkCheck[], label: string): Map
 export function compareSkillRegressionBenchmark(
   input: SkillRegressionBenchmarkInput,
 ): SkillRegressionBenchmarkResult {
+  if (!input || typeof input !== "object") {
+    throw new Error("Benchmark input must be an object");
+  }
   const baseline = indexChecks(input.baseline, "Baseline");
   const candidate = indexChecks(input.candidate, "Candidate");
   const regressions: string[] = [];
