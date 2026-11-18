@@ -8,6 +8,7 @@ cd "$ROOT_DIR"
 ARCHIVE="${1:-}"
 CONFIRM="${2:-}"
 VOLUME_NAME="${SOFIA_DOCKER_VOLUME:-sofia-agent-data}"
+SERVICE="${SOFIA_COMPOSE_SERVICE:-sofia}"
 
 if [ -z "$ARCHIVE" ] || [ "$CONFIRM" != "--yes" ]; then
   echo "Usage: $0 <backup.tar.gz> --yes" >&2
@@ -17,16 +18,11 @@ fi
 [ -f "$ARCHIVE" ] || { echo "Backup archive not found: $ARCHIVE" >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || { echo "Docker is required." >&2; exit 1; }
 
-if [ -f "$ARCHIVE.sha256" ]; then
-  (cd "$(dirname "$ARCHIVE")" && sha256sum -c "$(basename "$ARCHIVE").sha256")
-else
-  echo "Warning: no checksum file found; continuing with explicit --yes." >&2
-fi
+# Require an integrity checksum before any destructive action.
+[ -s "$ARCHIVE.sha256" ] || { echo "Required checksum file is missing: $ARCHIVE.sha256" >&2; exit 1; }
+(cd "$(dirname "$ARCHIVE")" && sha256sum --check "$(basename "$ARCHIVE").sha256")
 
-docker volume create "$VOLUME_NAME" >/dev/null
-docker compose stop -t 30 sofia >/dev/null
-
-# Validate archive paths before extracting to prevent absolute/path-traversal entries.
+# Validate archive paths before stopping the service or touching the volume.
 if tar -tzf "$ARCHIVE" | awk '
   /^\// { bad=1 }
   {
@@ -38,6 +34,10 @@ if tar -tzf "$ARCHIVE" | awk '
   echo "Unsafe archive path detected; refusing to restore." >&2
   exit 1
 fi
+
+# The archive is now checksum-verified and path-checked; only now begin the destructive restore.
+docker volume create "$VOLUME_NAME" >/dev/null
+docker compose stop -t 30 "$SERVICE" >/dev/null
 
 docker run --rm \
   -v "$VOLUME_NAME:/data" \
