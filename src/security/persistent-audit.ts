@@ -4,6 +4,7 @@ import path from "node:path";
 import type { SecurityAuditEvent, SecurityAuditSink } from "./audit.js";
 
 export class EncryptedFileAudit implements SecurityAuditSink {
+ readonly durable = true;
  constructor(private readonly file:string,private readonly secret:string){}
  private key():Buffer {
   if (!this.secret) throw new Error("Audit encryption secret is required");
@@ -17,6 +18,9 @@ export class EncryptedFileAudit implements SecurityAuditSink {
   const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
   const tag=cipher.getAuthTag();
   await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
+ }
+ async read(id:string):Promise<SecurityAuditEvent|undefined>{
+  return (await this.list()).find((event)=>event.id===id);
  }
  async list():Promise<SecurityAuditEvent[]>{
   const key=this.key();
