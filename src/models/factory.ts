@@ -161,8 +161,9 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
             if (action !== "run_experiment" || request.toolCall.tool !== "sandbox.exec") return {};
             const attestation = await getSandboxAttestation();
             // Each explicit sandbox execution consumes one autonomous experiment cycle.
+            const trustedContext = sandboxSupervisor.getAutonomyContext(sandboxIdentity, attestation);
             sandboxSupervisor.recordCycle(sandboxIdentity, attestation);
-            return sandboxSupervisor.getAutonomyContext(sandboxIdentity, attestation);
+            return trustedContext;
           },
         })
       : undefined;
