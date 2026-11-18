@@ -39,9 +39,8 @@ async function stageSanitizedWorkspace(source: string, destination: string): Pro
         continue;
       }
       count += 1;
-      bytes += info.size;
-      if (count > MAX_FILES || bytes > MAX_BYTES) {
-        throw new Error("Sandbox project snapshot exceeds the staging file or size limit.");
+      if (count > MAX_FILES) {
+        throw new Error("Sandbox project snapshot exceeds the staging file limit.");
       }
       await mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
       const sourceHandle = await open(sourcePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -51,6 +50,7 @@ async function stageSanitizedWorkspace(source: string, destination: string): Pro
         if (openedInfo.size > MAX_BYTES - bytes) throw new Error("Sandbox project snapshot exceeds the staging size limit.");
         const data = await sourceHandle.readFile();
         if (data.length > MAX_BYTES - bytes) throw new Error("Sandbox project snapshot exceeds the staging size limit.");
+        bytes += data.length;
         baseline.set(relativePath.split(path.sep).join("/"), createHash("sha256").update(data).digest("hex"));
         await writeFile(targetPath, data, { flag: "wx", mode: 0o600 });
       } finally {
