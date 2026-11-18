@@ -65,7 +65,7 @@ All durable file-backed stores resolve beneath this root, including API run reco
 
 ## Upgrade
 
-Pull the intended source revision, then rebuild and recreate:
+Back up the volume before upgrading. Pull the intended source revision, then rebuild:
 
 ```bash
 git pull --ff-only
@@ -73,20 +73,46 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-Review release notes and back up the volume before upgrading. This initial release does not include an automated schema migration or rollback manager.
+This initial release does not include an application schema migration or automatic rollback manager. The state migration tool only copies legacy files; it does not transform database schemas.
+
+## Migrate legacy state
+
+Run the migration from an environment that can still read the old workspace and legacy state directories. First inspect the inventory without changing files:
+
+```bash
+SOFIA_WORKSPACE=/absolute/path/to/old-workspace \
+SOFIA_STATE_DIR=/absolute/path/to/new-state \
+node scripts/sofia-migrate-state.mjs
+```
+
+Back up both the old sources and destination, review the source/target inventory, then explicitly apply:
+
+```bash
+SOFIA_WORKSPACE=/absolute/path/to/old-workspace \
+SOFIA_STATE_DIR=/absolute/path/to/new-state \
+node scripts/sofia-migrate-state.mjs --apply
+```
+
+The tool copies known legacy stores from the workspace `.sofia` directory, OS temporary directory, and platform user-data directory. It verifies copied content with SHA-256, treats identical files as already migrated, refuses symlinks and conflicting destination files, and never deletes source data. It does not automatically discover arbitrary custom paths; migrate those manually and keep the old data until the new installation has been verified.
+
+For a legacy Docker container, perform and verify migration while the old container and its writable filesystem still exist. Temporary files inside a removed container cannot be recovered by this tool.
 
 ## Backup and restore
 
-A simple offline backup can be made by stopping the service and archiving the named volume:
+Create a consistent offline volume backup:
 
 ```bash
-docker compose stop
-docker run --rm -v sofia-agent-data:/data:ro -v "$PWD:/backup" node:22-bookworm-slim \
-  tar -czf /backup/sofia-agent-data-$(date +%F-%H%M%S).tar.gz -C /data .
-docker compose start
+bash scripts/sofia-backup.sh
 ```
 
-Treat the archive as sensitive. Restore only into a verified backup of the destination volume and follow the Docker volume restore procedure appropriate to your host. Automated restore tooling and tested disaster-recovery procedures are not included yet.
+Restore only after taking a separate copy of the current volume:
+
+```bash
+bash scripts/sofia-restore.sh backups/sofia-YYYYMMDDTHHMMSSZ.tar.gz --yes
+docker compose up -d
+```
+
+See [Backup and Restore](SELF_HOSTED_BACKUP_RESTORE.md) for checksum handling and operational limits. Treat archives as sensitive data.
 
 ## Security and current limitations
 
