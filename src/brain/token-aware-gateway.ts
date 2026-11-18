@@ -455,9 +455,14 @@ export class TokenAwareGateway {
         // Only malformed/empty model output is safe to recover by selecting
         // another already-approved route. Auth, billing, budget, timeout,
         // cancellation, and policy failures stop immediately.
+        const reason = failure.reason ?? "";
         const recoverable = failure.code === "incomplete_output" ||
-          (failure.code === "model_call_failed" &&
-            ["provider_invalid_response", "provider_empty_content", "provider_thinking_only_output"].includes(failure.reason ?? ""));
+          (failure.code === "model_call_failed" && (
+            reason === "provider_invalid_response" ||
+            reason === "provider_empty_content" ||
+            reason.startsWith("provider_empty_content_finish_") ||
+            reason === "provider_thinking_only_output"
+          ));
         if (!recoverable) throw failure;
       }
     }
