@@ -6,11 +6,10 @@ import { sofiaStateDirectory } from "./state-directory.js";
 export function principalWorkspacePath(principalId: string | undefined, root?: string): string {
   const identity = principalId?.trim() || "local-instance";
   const namespace = createHash("sha256").update(identity).digest("hex");
-  const workspaceRoot = path.resolve(
-    root?.trim() || process.env.SOFIA_USER_WORKSPACES_DIR?.trim() || sofiaStateDirectory("user-workspaces"),
-  );
-  if (!path.isAbsolute(workspaceRoot)) {
+  const configuredRoot = root?.trim() || process.env.SOFIA_USER_WORKSPACES_DIR?.trim() || sofiaStateDirectory("user-workspaces");
+  if (!path.isAbsolute(configuredRoot)) {
     throw new Error("User workspace root must be an absolute path.");
   }
+  const workspaceRoot = path.resolve(configuredRoot);
   return path.join(workspaceRoot, namespace);
 }
