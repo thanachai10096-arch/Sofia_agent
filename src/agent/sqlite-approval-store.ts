@@ -86,33 +86,32 @@ export class SqliteApprovalDecisionStore implements ApprovalDecisionStore {
     return row ? fromRow(row) : undefined;
   }
 
-  async listPending(principalId?: string): Promise<ApprovalRecord[]> {
-    if (!principalId) return [];
+  async listPending(principalId: string): Promise<ApprovalRecord[]> {
+    if (!principalId.trim()) return [];
+    const now = Date.now();
+    this.db.prepare(`
+      UPDATE approval_requests
+      SET status = 'expired', resolved_at = ?, resolved_by = 'system:expiry'
+      WHERE status = 'pending' AND expires_at <= ?
+    `).run(now, now);
     const rows = this.db.prepare(
       "SELECT * FROM approval_requests WHERE status = 'pending' AND principal_id = ? ORDER BY created_at ASC, id ASC LIMIT 200",
     ).all(principalId) as ApprovalRow[];
+    restrictSqlitePermissions(this.filePath);
     return rows.map(fromRow);
   }
 
   async resolve(id: string, actionHash: string, decision: ApprovalDecision, resolvedBy: string, now: number): Promise<boolean> {
-    if (decision === "expired" || decision === "cancelled") {
-      const result = this.db.prepare(`
-        UPDATE approval_requests
-        SET status = ?, resolved_at = ?, resolved_by = ?
-        WHERE id = ? AND status = 'pending' AND action_hash = ? AND expires_at > ?
-      `).run(decision, now, resolvedBy, id, actionHash, now);
-      restrictSqlitePermissions(this.filePath);
-      return Number(result.changes) === 1;
-    }
-    const expired = this.db.prepare(`
+    const expire = this.db.prepare(`
       UPDATE approval_requests
       SET status = 'expired', resolved_at = ?, resolved_by = 'system:expiry'
       WHERE id = ? AND status = 'pending' AND action_hash = ? AND expires_at <= ?
     `).run(now, id, actionHash, now);
-    if (Number(expired.changes) > 0) {
+    if (Number(expire.changes) > 0) {
       restrictSqlitePermissions(this.filePath);
-      return false;
+      return decision === "expired";
     }
+    if (decision === "expired") return false;
     const result = this.db.prepare(`
       UPDATE approval_requests
       SET status = ?, resolved_at = ?, resolved_by = ?
@@ -145,11 +144,16 @@ function fromRow(row: ApprovalRow): ApprovalRecord {
 
 function restrictFilePermissions(filePath: string): void {
   if (process.platform === "win32" || filePath === ":memory:") return;
-  const stat = fs.lstatSync(filePath);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Approval storage paths must be regular files.");
-  const mode = stat.mode & 0o777;
-  const privateMode = mode & 0o600;
-  if (mode !== privateMode) fs.chmodSync(filePath, privateMode);
+  try {
+    const stat = fs.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Approval storage paths must be regular files.");
+    const mode = stat.mode & 0o777;
+    const privateMode = mode & 0o600;
+    if (mode !== privateMode) fs.chmodSync(filePath, privateMode);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
 }
 
 function restrictSqlitePermissions(filePath: string): void {
