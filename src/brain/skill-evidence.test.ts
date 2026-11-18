@@ -199,3 +199,30 @@ test("trusted evidence verifier rejects a verification record with a forged acti
   assert.equal(checks.find((check) => check.name === "evidence:evidence-typecheck")?.passed, false);
   assert.equal(checks.find((check) => check.name === "required-verification:typecheck")?.passed, false);
 });
+
+test("trusted evidence verifier rejects same-run evidence from a different principal", async () => {
+  const foreignPrincipalEvents = ["typecheck", "test", "build"].map((kind) => {
+    const input = { kind };
+    return event(kind, {
+      principalId: "different-principal",
+      actionHash: actionHash(runId, "project.verify", input, "different-principal"),
+    });
+  });
+  const verifier = new AuditSkillEvidenceVerifier(async () => [...foreignPrincipalEvents, attestation()]);
+  const checks = await verifier.verify(skill, provenance);
+  assert.equal(checks.find((check) => check.name === "required-verification:typecheck")?.passed, false);
+  assert.equal(checks.find((check) => check.name === "required-verification:test")?.passed, false);
+  assert.equal(checks.find((check) => check.name === "required-verification:build")?.passed, false);
+});
+
+test("trusted evidence verifier rejects replicated records that differ in security metadata", async () => {
+  const original = event("typecheck");
+  const conflictingCopy = { ...original, risk: "high" as const };
+  const verifier = new AuditSkillEvidenceVerifier(async () => [
+    original, event("test"), event("build"), conflictingCopy, attestation(),
+  ]);
+  const checks = await verifier.verify(skill, provenance);
+  assert.equal(checks.find((check) => check.name === "evidence:evidence-typecheck")?.passed, false);
+  assert.equal(checks.find((check) => check.name === "required-verification:typecheck")?.passed, false);
+});
+
