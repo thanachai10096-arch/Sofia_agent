@@ -235,26 +235,25 @@ export class SqliteSessionStore {
    * destination transcript always wins over an older legacy copy.
    */
   migrateOwnerTo(ownerPrefix: string, destination: SqliteSessionStore): number {
-    if (!ownerPrefix || ownerPrefix.length > 256 || /[\\x00-\\x1f\\x7f]/u.test(ownerPrefix)) {
+    if (!ownerPrefix || ownerPrefix.length > 256 || /[\x00-\x1f\x7f]/u.test(ownerPrefix)) {
       throw new Error("Invalid session owner prefix.");
     }
     if (destination === this) throw new Error("Session migration source and destination must differ.");
     const prefix = ownerPrefix.endsWith(":") ? ownerPrefix : ownerPrefix + ":";
+    const owned: Session[] = [];
+    for (let offset = 0;; offset += 500) {
+      const page = this.listSessions({ limit: 500, offset });
+      owned.push(...page.filter((session) => session.id.startsWith(prefix)));
+      if (page.length < 500) break;
+    }
     let migrated = 0;
-    // Read the complete legacy database in bounded pages. Delete each migrated
-    // row immediately so the next page cannot skip rows after offset shifts.
-    for (;;) {
-      const owned = this.listSessions({ limit: 500, offset: 0 })
-        .filter((session) => session.id.startsWith(prefix));
-      if (owned.length === 0) break;
-      for (const session of owned) {
-        const current = destination.get(session.id);
-        if (!current || session.updatedAt > current.updatedAt) {
-          destination.save({ id: session.id, messages: [...session.messages], updatedAt: session.updatedAt });
-        }
-        this.delete(session.id);
-        migrated += 1;
+    for (const session of owned) {
+      const current = destination.get(session.id);
+      if (!current || session.updatedAt > current.updatedAt) {
+        destination.save({ id: session.id, messages: [...session.messages], updatedAt: session.updatedAt });
       }
+      this.delete(session.id);
+      migrated += 1;
     }
     return migrated;
   }
