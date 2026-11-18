@@ -23,7 +23,7 @@ export function createTenantResourceResolver(tenantsRoot: string): TenantResourc
     throw new Error("Tenant resources root must be an absolute path.");
   }
 
-  const issued = new WeakSet<object>();
+  const issued = new WeakMap<object, TenantResourceContext>();
   const root = path.resolve(tenantsRoot);
 
   return Object.freeze({
@@ -35,20 +35,23 @@ export function createTenantResourceResolver(tenantsRoot: string): TenantResourc
         principalId,
         workspaceRoot,
       });
-      issued.add(context);
+      issued.set(context, context);
       return context;
     },
 
     assertContext(context: TenantResourceContext): void {
-      if (!context || typeof context !== "object" || !issued.has(context)) {
+      if (!context || typeof context !== "object" || issued.get(context) !== context) {
         throw new Error("Untrusted or foreign tenant context.");
       }
+      const expectedTenantId = createHash("sha256")
+        .update("sofia-tenant:v1:")
+        .update(context.principalId)
+        .digest("hex");
       if (
-        typeof context.tenantId !== "string" ||
         typeof context.principalId !== "string" ||
         typeof context.workspaceRoot !== "string" ||
         !path.isAbsolute(context.workspaceRoot) ||
-        !context.workspaceRoot.startsWith(path.join(root, "tenants") + path.sep)
+        context.tenantId !== expectedTenantId
       ) {
         throw new Error("Invalid tenant resource context.");
       }
