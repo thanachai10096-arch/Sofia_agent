@@ -89,8 +89,9 @@ export class InMemoryApprovalDecisionStore implements ApprovalDecisionStore {
       record.status = "expired";
       record.resolvedAt = now;
       record.resolvedBy = "system:expiry";
-      return false;
+      return decision === "expired";
     }
+    if (decision === "expired") return false;
     record.status = decision;
     record.resolvedAt = now;
     record.resolvedBy = resolvedBy;
@@ -179,7 +180,7 @@ export class ApprovalBroker {
   }
 
   private async resolve(id: string, actionHash: string, decision: ApprovalDecision, approverId: string): Promise<boolean> {
-    if (!id.trim() || !actionHash.trim() || !approverId.trim()) return false;
+    if (!id.trim() || !actionHash.trim() || !approverId.trim() || approverId.length > 256) return false;
     const record = await this.options.store.get(id);
     if (!record || record.principalId !== approverId) return false;
     return this.options.store.resolve(id, actionHash, decision, approverId, this.now());
