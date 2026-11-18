@@ -856,3 +856,37 @@ test("startup journal recovery rejects a lifecycle pointer matching neither tran
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("mutation lock exposes owner diagnostics without stealing or deleting the lock", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "lock-diagnostics.json");
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    assert.deepEqual(lifecycle.inspectMutationLock(), { locked: false });
+
+    const owner = {
+      schemaVersion: 1,
+      pid: 424242,
+      hostname: "worker-a",
+      startedAt: "2026-11-18T08:00:00.000Z",
+      nonce: "test-lock-owner",
+    };
+    writeFileSync(file + ".mutation.lock", JSON.stringify(owner), { flag: "wx", mode: 0o600 });
+    assert.deepEqual(lifecycle.inspectMutationLock(), {
+      locked: true,
+      owner: { pid: 424242, hostname: "worker-a", startedAt: owner.startedAt, nonce: owner.nonce },
+    });
+    assert.equal(existsSync(file + ".mutation.lock"), true, "inspection must never steal or remove a lock");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("mutation lock diagnostics report malformed lock metadata without deleting it", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "lock-malformed.json");
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    writeFileSync(file + ".mutation.lock", "{bad", { flag: "wx", mode: 0o600 });
+    assert.deepEqual(lifecycle.inspectMutationLock(), { locked: true, malformed: true });
+    assert.equal(existsSync(file + ".mutation.lock"), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
