@@ -1,0 +1,159 @@
+import { randomUUID } from "node:crypto";
+import { redactSecrets, type RiskLevel } from "../security/guard.js";
+
+export interface ApprovalRequest {
+  runId: string;
+  principalId?: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  actionHash: string;
+  risk: RiskLevel;
+  signal?: AbortSignal;
+}
+
+export type ApprovalDecision = "approved" | "denied" | "expired" | "cancelled";
+export interface ApprovalRecord {
+  id: string;
+  runId: string;
+  principalId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  actionHash: string;
+  risk: RiskLevel;
+  status: "pending" | ApprovalDecision;
+  createdAt: number;
+  expiresAt: number;
+  resolvedAt?: number;
+  resolvedBy?: string;
+}
+
+/**
+ * Implementations must make create() unique by id and resolve() an atomic
+ * compare-and-set from pending, checking the supplied actionHash.
+ * Production deployments should use a shared transactional database store.
+ */
+export interface ApprovalDecisionStore {
+  create(record: ApprovalRecord): Promise<void>;
+  get(id: string): Promise<ApprovalRecord | undefined>;
+  listPending(principalId?: string): Promise<ApprovalRecord[]>;
+  resolve(id: string, actionHash: string, decision: ApprovalDecision, resolvedBy: string, now: number): Promise<boolean>;
+}
+
+export type ApprovalHandler = (request: ApprovalRequest) => Promise<boolean>;
+
+function copy(record: ApprovalRecord): ApprovalRecord {
+  return structuredClone(record);
+}
+
+export class InMemoryApprovalDecisionStore implements ApprovalDecisionStore {
+  private readonly records = new Map<string, ApprovalRecord>();
+
+  async create(record: ApprovalRecord): Promise<void> {
+    if (this.records.has(record.id)) throw new Error("Approval request already exists.");
+    this.records.set(record.id, copy(record));
+  }
+
+  async get(id: string): Promise<ApprovalRecord | undefined> {
+    const record = this.records.get(id);
+    return record ? copy(record) : undefined;
+  }
+
+  async listPending(principalId?: string): Promise<ApprovalRecord[]> {
+    return [...this.records.values()]
+      .filter((record) => record.status === "pending" && (!principalId || record.principalId === principalId))
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map(copy);
+  }
+
+  async resolve(id: string, actionHash: string, decision: ApprovalDecision, resolvedBy: string, now: number): Promise<boolean> {
+    const record = this.records.get(id);
+    if (!record || record.status !== "pending" || record.actionHash !== actionHash) return false;
+    record.status = decision;
+    record.resolvedAt = now;
+    record.resolvedBy = resolvedBy;
+    return true;
+  }
+}
+
+export interface ApprovalBrokerOptions {
+  store: ApprovalDecisionStore;
+  ttlMs?: number;
+  pollIntervalMs?: number;
+  now?: () => number;
+}
+
+export class ApprovalBroker {
+  private readonly ttlMs: number;
+  private readonly pollIntervalMs: number;
+  private readonly now: () => number;
+
+  constructor(private readonly options: ApprovalBrokerOptions) {
+    this.ttlMs = options.ttlMs ?? 5 * 60_000;
+    this.pollIntervalMs = options.pollIntervalMs ?? 500;
+    this.now = options.now ?? Date.now;
+    if (!Number.isSafeInteger(this.ttlMs) || this.ttlMs < 1_000 || this.ttlMs > 24 * 60 * 60_000) {
+      throw new Error("Approval TTL must be between 1000ms and 24 hours.");
+    }
+    if (!Number.isSafeInteger(this.pollIntervalMs) || this.pollIntervalMs < 25 || this.pollIntervalMs > 10_000) {
+      throw new Error("Approval poll interval must be between 25ms and 10000ms.");
+    }
+  }
+
+  /** Compatible with AgentDependencies.approval; callers can bind this method. */
+  readonly handle: ApprovalHandler = async (request) => {
+    const principalId = request.principalId?.trim();
+    if (!principalId || !request.runId.trim() || !request.toolName.trim() || !request.actionHash.trim()) return false;
+    if (request.signal?.aborted) return false;
+
+    const createdAt = this.now();
+    const record: ApprovalRecord = {
+      id: randomUUID(),
+      runId: request.runId,
+      principalId,
+      toolName: request.toolName,
+      input: redactSecrets(structuredClone(request.input)) as Record<string, unknown>,
+      actionHash: request.actionHash,
+      risk: request.risk,
+      status: "pending",
+      createdAt,
+      expiresAt: createdAt + this.ttlMs,
+    };
+    await this.options.store.create(record);
+
+    while (!request.signal?.aborted) {
+      const current = await this.options.store.get(record.id);
+      if (!current) return false;
+      if (current.status === "approved") return current.actionHash === request.actionHash;
+      if (current.status !== "pending") return false;
+      if (this.now() >= current.expiresAt) {
+        await this.options.store.resolve(current.id, current.actionHash, "expired", "system:expiry", this.now());
+        return false;
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, Math.min(this.pollIntervalMs, Math.max(1, current.expiresAt - this.now())));
+        timer.unref?.();
+      });
+    }
+
+    await this.options.store.resolve(record.id, record.actionHash, "cancelled", "system:abort", this.now());
+    return false;
+  };
+
+  listPending(principalId?: string): Promise<ApprovalRecord[]> {
+    return this.options.store.listPending(principalId);
+  }
+
+  /** Resolve exactly the action hash shown to the approver; replay is rejected. */
+  approve(id: string, actionHash: string, approverId: string): Promise<boolean> {
+    return this.resolve(id, actionHash, "approved", approverId);
+  }
+
+  deny(id: string, actionHash: string, approverId: string): Promise<boolean> {
+    return this.resolve(id, actionHash, "denied", approverId);
+  }
+
+  private resolve(id: string, actionHash: string, decision: ApprovalDecision, approverId: string): Promise<boolean> {
+    if (!id.trim() || !actionHash.trim() || !approverId.trim()) return Promise.resolve(false);
+    return this.options.store.resolve(id, actionHash, decision, approverId, this.now());
+  }
+}
