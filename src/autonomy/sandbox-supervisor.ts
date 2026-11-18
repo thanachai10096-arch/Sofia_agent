@@ -163,8 +163,9 @@ export class SandboxSupervisor {
     if (!run?.active || !this.verifyAttestation(identity, attestation)) {
       throw new Error("A valid active sandbox attestation is required.");
     }
-    if (!validPositiveInteger(request.timeoutMs) || request.timeoutMs > this.options.budget.maxExperimentSeconds * 1000) {
-      throw new Error("Sandbox command timeout exceeds the autonomy budget.");
+    const remainingExperimentMs = Math.max(0, this.options.budget.maxExperimentSeconds - run.experimentSeconds) * 1000;
+    if (!validPositiveInteger(request.timeoutMs) || request.timeoutMs > remainingExperimentMs) {
+      throw new Error("Sandbox command timeout exceeds the remaining autonomy experiment-time budget.");
     }
     if (run.steps >= this.options.budget.maxSteps || run.toolCalls >= this.options.budget.maxToolCallsPerStep) {
       throw new Error("Sandbox step or tool-call budget exhausted.");
