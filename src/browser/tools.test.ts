@@ -259,3 +259,55 @@ test("browser.login keeps the authenticated session available across Brain runs"
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("concurrent browser profile acquisition shares one owner-scoped session", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-browser-profile-singleflight-"));
+  try {
+    const store = new BrowserProfileStore(root);
+    const profile = await store.create("principal-a");
+    let launches = 0;
+    let closes = 0;
+    let releaseLaunch!: () => void;
+    const launchGate = new Promise<void>((resolve) => { releaseLaunch = resolve; });
+    const runtime: BrowserRuntime = {
+      launch: async () => {
+        launches++;
+        await launchGate;
+        return {
+          id: "singleflight-session",
+          newPage: async () => ({
+            id: "singleflight-page",
+            url: async () => "about:blank",
+            title: async () => "",
+            content: async () => "",
+            goto: async () => {},
+            click: async () => {},
+            type: async () => {},
+            select: async () => {},
+            scroll: async () => {},
+            wait: async () => {},
+            press: async () => {},
+            back: async () => {},
+            forward: async () => {},
+            reload: async () => {},
+            screenshot: async () => "",
+            close: async () => {},
+          }),
+          close: async () => { closes++; },
+        };
+      },
+    };
+    const manager = new BrowserProfileSessionManager(store, () => runtime);
+    const first = manager.acquire("principal-a", profile.id);
+    const second = manager.acquire("principal-a", profile.id);
+    releaseLaunch();
+    const [one, two] = await Promise.all([first, second]);
+    assert.equal(one, two);
+    assert.equal(launches, 1);
+    await manager.closeAll();
+    assert.equal(closes, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
