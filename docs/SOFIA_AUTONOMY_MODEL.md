@@ -148,3 +148,12 @@ completed experiment whose worker crashes before its learning/checkpoint write
 may still be repeated; experiment adapters must use deterministic artifacts or
 their own idempotency/operation ledger. This is not an exactly-once execution
 guarantee.
+
+### Worker session lifecycle
+
+`AutonomyJobSupervisor.runUntilStopped()` provides a host-invoked worker session:
+it polls one job at a time, backs off while the queue is empty, applies bounded
+infrastructure-error backoff, and exits on host cancellation or a configurable
+maximum number of jobs. It does not create a hidden scheduler or restart itself.
+Railway/process orchestration remains responsible for starting replicas,
+injecting shutdown signals, and restarting bounded worker sessions.
