@@ -865,15 +865,16 @@ test("mutation lock exposes owner diagnostics without stealing or deleting the l
 
     const owner = {
       schemaVersion: 1,
-      pid: 424242,
-      hostname: "worker-a",
+      pid: process.pid,
+      hostname: os.hostname(),
       startedAt: "2026-11-18T08:00:00.000Z",
       nonce: "test-lock-owner",
     };
     writeFileSync(file + ".mutation.lock", JSON.stringify(owner), { flag: "wx", mode: 0o600 });
     assert.deepEqual(lifecycle.inspectMutationLock(), {
       locked: true,
-      owner: { pid: 424242, hostname: "worker-a", startedAt: owner.startedAt, nonce: owner.nonce },
+      owner: { pid: process.pid, hostname: os.hostname(), startedAt: owner.startedAt, nonce: owner.nonce },
+      ownerStatus: "alive",
     });
     assert.equal(existsSync(file + ".mutation.lock"), true, "inspection must never steal or remove a lock");
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -887,6 +888,23 @@ test("mutation lock diagnostics report malformed lock metadata without deleting 
     writeFileSync(file + ".mutation.lock", "{bad", { flag: "wx", mode: 0o600 });
     assert.deepEqual(lifecycle.inspectMutationLock(), { locked: true, malformed: true });
     assert.equal(existsSync(file + ".mutation.lock"), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("mutation lock diagnostics identify a lock owned by another host without probing its PID", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "lock-remote.json");
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    writeFileSync(file + ".mutation.lock", JSON.stringify({
+      schemaVersion: 1, pid: 1, hostname: "another-host",
+      startedAt: "2026-11-18T08:00:00.000Z", nonce: "remote-owner",
+    }), { flag: "wx", mode: 0o600 });
+    const info = lifecycle.inspectMutationLock();
+    assert.equal(info.locked, true);
+    assert.equal(info.ownerStatus, "remote");
+    assert.equal(info.owner?.hostname, "another-host");
+    assert.equal(existsSync(file + ".mutation.lock"), true, "remote locks must never be removed by diagnostics");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
