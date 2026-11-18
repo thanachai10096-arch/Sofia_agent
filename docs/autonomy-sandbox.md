@@ -29,3 +29,9 @@ The supervisor exposes a spend-meter hook, but the current command-tool composit
 - Per-run HMAC attestation, budget accounting, revocation and workspace disposal
 
 This is container isolation, not a guarantee against kernel or container-runtime vulnerabilities. A trusted Docker daemon and host-level egress controls are required.
+
+## Railway deployment note
+
+The current Sofia Railway staging service is configured with the Railpack builder. That configuration does not provide a Docker daemon or Docker socket to the application container. Therefore, setting `SOFIA_SANDBOX_IMAGE` and `SOFIA_SANDBOX_ATTESTATION_SECRET` on that service is not sufficient to make `ContainerSandbox` operational: the `docker` CLI would have no trusted daemon to control.
+
+Keep the sandbox disabled on this Railway service until a separately provisioned, trusted sandbox host/runner is available and connected through an authenticated host-owned adapter. Do not mount the Docker socket from an untrusted/shared host or silently switch the main service to privileged Docker-in-Docker. The runner must enforce per-run isolation, resource limits, public-internet-only egress, tenant separation, cleanup, and auditable job identity. The current Railway staging service has not been changed or deployed as part of this work.
