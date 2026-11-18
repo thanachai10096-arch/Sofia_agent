@@ -1,0 +1,67 @@
+name: Self-hosted distribution CI
+
+on:
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "compose.yaml"
+      - ".dockerignore"
+      - "scripts/sofia-install.sh"
+      - "docs/SELF_HOSTED_*.md"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/self-hosted.yml"
+  push:
+    branches:
+      - feat/self-hosted-distribution
+    paths:
+      - "Dockerfile"
+      - "compose.yaml"
+      - ".dockerignore"
+      - "scripts/sofia-install.sh"
+      - "docs/SELF_HOSTED_*.md"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/self-hosted.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Validate installer shell syntax
+        run: bash -n scripts/sofia-install.sh
+
+      - name: Validate Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+
+      - name: Build production image
+        run: docker build --tag sofia-agent:self-hosted-ci .
