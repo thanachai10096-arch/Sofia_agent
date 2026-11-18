@@ -9,10 +9,18 @@ const capabilityFor: Record<TaskKind, string[]> = {
   general: ["fast"],
 };
 
+function cloneRoute(route: ModelRoute): ModelRoute {
+  return { ...route, capabilities: [...route.capabilities] };
+}
+
 export class ModelRouter {
+  private readonly routes: ModelRoute[];
   private readonly winners = new Map<TaskKind, ModelRoute>();
 
-  constructor(private readonly routes: ModelRoute[]) {
+  constructor(routes: ModelRoute[]) {
+    // Own a defensive snapshot: callers must not be able to mutate routing policy
+    // after the router has scored its candidates.
+    this.routes = routes.map(cloneRoute);
     this.rebuild();
   }
 
@@ -43,7 +51,7 @@ export class ModelRouter {
   }
 
   listRoutes(): ModelRoute[] {
-    return this.routes.map((route) => ({ ...route, capabilities: [...route.capabilities] }));
+    return this.routes.map(cloneRoute);
   }
 
   select(kind: TaskKind, preferredRouteId?: string): ModelRoute {
@@ -51,15 +59,13 @@ export class ModelRouter {
       const preferred = this.routes.find((route) => route.id === preferredRouteId);
       if (!preferred) throw new Error("Unknown model route: " + preferredRouteId);
       if (!preferred.healthy) throw new Error("Requested model route is unhealthy: " + preferredRouteId);
-      return preferred;
+      return cloneRoute(preferred);
     }
     const winner = this.winners.get(kind);
-    if (!winner || !winner.healthy) {
-      this.rebuild();
-    }
+    if (!winner || !winner.healthy) this.rebuild();
     const route = this.winners.get(kind);
     if (!route) throw new Error("No healthy model route is available");
-    return route;
+    return cloneRoute(route);
   }
 
   markUnhealthy(id: string): void {
