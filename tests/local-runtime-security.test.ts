@@ -161,7 +161,8 @@ test("Git subprocess ignores inherited Git execution and repository override var
   const names = [
     "GIT_DIR", "GIT_WORK_TREE", "GIT_EXTERNAL_DIFF", "GIT_SSH_COMMAND",
     "GIT_ASKPASS", "GIT_PAGER", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0",
-    "GIT_CONFIG_VALUE_0",
+    "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1",
+    "GIT_CONFIG_KEY_2", "GIT_CONFIG_VALUE_2",
   ] as const;
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   try {
@@ -177,9 +178,13 @@ test("Git subprocess ignores inherited Git execution and repository override var
     process.env.GIT_SSH_COMMAND = helper;
     process.env.GIT_ASKPASS = helper;
     process.env.GIT_PAGER = helper;
-    process.env.GIT_CONFIG_COUNT = "1";
+    process.env.GIT_CONFIG_COUNT = "3";
     process.env.GIT_CONFIG_KEY_0 = "core.sshCommand";
     process.env.GIT_CONFIG_VALUE_0 = helper;
+    process.env.GIT_CONFIG_KEY_1 = "diff.external";
+    process.env.GIT_CONFIG_VALUE_1 = helper;
+    process.env.GIT_CONFIG_KEY_2 = "core.hooksPath";
+    process.env.GIT_CONFIG_VALUE_2 = f.parent;
 
     const status = await f.runtime.git(["status", "--short"]);
     assert.equal(status.code, 0, status.stderr);
