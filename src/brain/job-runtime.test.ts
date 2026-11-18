@@ -999,7 +999,7 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
 });
 
 
-test("DurableJobRuntime passes the authenticated owner to Brain factory on submit and resume", async () => {
+test("DurableJobRuntime passes the authenticated owner to Brain factory for background runs", async () => {
   const namespace = "job-runtime-principal-" + randomUUID();
   const observedOwners: Array<string | undefined> = [];
   let runs = 0;
