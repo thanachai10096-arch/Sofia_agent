@@ -17,6 +17,8 @@ export function createManagedSkillLearningHandler(
   audit?: SecurityAuditSink,
 ): (candidate: LearnedSkillCandidate, runId: string, principalId?: string) => Promise<boolean> {
   return async (candidate, runId, principalId) => {
+    // Learned Skill promotion must be attributable to an authenticated owner.
+    if (typeof principalId !== "string" || !principalId.trim()) return false;
     const skillPackage: SkillPackage = {
       skill: {
         id: `learned:${candidate.name}:${candidate.category}`,
