@@ -257,7 +257,7 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
         files,
       });
     } catch (error) {
-      const status = isRecord(error) && typeof error.statusCode === "number" ? error.statusCode : 400;
+      const status = isRecord(error) && typeof error.statusCode === "number"\n        ? error.statusCode\n        : error instanceof SyntaxError ? 400 : 500;
       if (!response.headersSent && !response.destroyed) {
         json(response, status, { error: status === 413 ? "payload_too_large" : "invalid_or_failed_request" });
       }
