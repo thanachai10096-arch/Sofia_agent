@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
-import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission } from "../security/policy.js";
+import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, policyForToolScopes, riskRank, toolPermission } from "../security/policy.js";
 import { actionHash, riskFor } from "../security/guard.js";
 import { validateToolInput } from "../tools/types.js";
 
@@ -209,7 +209,12 @@ export class SofiaAgent {
       metadata: { kind },
     });
 
-    const policy = this.deps.policy ?? loadExecutionPolicyFromEnv();
+    const basePolicy = this.deps.policy ?? loadExecutionPolicyFromEnv();
+    // API keys receive only explicitly granted elevated effects; host policy remains the upper bound.
+    // Local CLI runs omit toolScopes and retain the operator-configured local policy.
+    const policy = request.toolScopes !== undefined
+      ? policyForToolScopes(basePolicy, request.toolScopes)
+      : basePolicy;
     const maxSteps = Math.min(
       request.maxSteps ?? policy.maxSteps,
       policy.maxSteps,
@@ -227,7 +232,9 @@ export class SofiaAgent {
         : []),
     ];
 
-    const toolDefs: ToolDefinition[] = (this.deps.tools?.list() ?? []).map((tool) => ({
+    const toolDefs: ToolDefinition[] = (this.deps.tools?.list() ?? [])
+      .filter((tool) => toolPermission(policy, tool.name, effectiveToolEffects(tool.name, tool.effects)).allow !== false)
+      .map((tool) => ({
       type: "function",
       function: {
         name: tool.name,
