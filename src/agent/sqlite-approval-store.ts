@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ApprovalDecision, ApprovalDecisionStore, ApprovalRecord } from "./approval-broker.js";
+import { MAX_PENDING_APPROVALS_PER_PRINCIPAL, type ApprovalDecision, type ApprovalDecisionStore, type ApprovalRecord } from "./approval-broker.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
@@ -76,16 +76,34 @@ export class SqliteApprovalDecisionStore implements ApprovalDecisionStore {
   }
 
   async create(record: ApprovalRecord): Promise<void> {
-    this.db.prepare(`
-      INSERT INTO approval_requests
-      (id, run_id, principal_id, tool_name, input_json, action_hash, risk, status, created_at, expires_at, resolved_at, resolved_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      record.id, record.runId, record.principalId, record.toolName, JSON.stringify(record.input),
-      record.actionHash, record.risk, record.status, record.createdAt, record.expiresAt,
-      record.resolvedAt ?? null, record.resolvedBy ?? null,
-    );
-    restrictSqlitePermissions(this.filePath);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(`
+        UPDATE approval_requests
+        SET status = 'expired', resolved_at = ?, resolved_by = 'system:expiry'
+        WHERE principal_id = ? AND status = 'pending' AND expires_at <= ?
+      `).run(record.createdAt, record.principalId, record.createdAt);
+      const pending = this.db.prepare(
+        "SELECT COUNT(*) AS count FROM approval_requests WHERE principal_id = ? AND status = 'pending'",
+      ).get(record.principalId) as { count: number };
+      if (Number(pending.count) >= MAX_PENDING_APPROVALS_PER_PRINCIPAL) {
+        throw new Error("Too many pending approval requests for this principal.");
+      }
+      this.db.prepare(`
+        INSERT INTO approval_requests
+        (id, run_id, principal_id, tool_name, input_json, action_hash, risk, status, created_at, expires_at, resolved_at, resolved_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        record.id, record.runId, record.principalId, record.toolName, JSON.stringify(record.input),
+        record.actionHash, record.risk, record.status, record.createdAt, record.expiresAt,
+        record.resolvedAt ?? null, record.resolvedBy ?? null,
+      );
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    restrictFilePermissions(this.filePath);
   }
 
   async get(id: string): Promise<ApprovalRecord | undefined> {
