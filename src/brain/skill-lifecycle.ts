@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { SkillPackage, SkillsPlatform } from "../skills/platform.js";
@@ -54,6 +54,7 @@ export class VersionedSkillLifecycle {
   private readonly file: string;
   private readonly minimumConfidence: number;
   private readonly evaluations = new Map<string, Promise<SkillLifecycleRecord>>();
+  private persistedSnapshot: string | null = null;
 
   constructor(
     private readonly platform: SkillsPlatform,
@@ -315,18 +316,41 @@ export class VersionedSkillLifecycle {
       }
     }
     this.snapshot = { schemaVersion: 1, records, activeBySkill };
+    this.persistedSnapshot = JSON.stringify(this.snapshot, null, 2) + "\n";
   }
   private persist(): void {
     const directory = path.dirname(this.file);
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    if (existsSync(this.file) && lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
-    const temporary = this.file + "." + process.pid + "." + randomUUID() + ".tmp";
+    const lockFile = this.file + ".lock";
+    let lockFd: number | undefined;
+    let temporary: string | undefined;
     try {
-      writeFileSync(temporary, JSON.stringify(this.snapshot, null, 2) + "\n", { encoding: "utf8", flag: "wx", mode: 0o600 });
+      // O_EXCL serializes writers across processes. Stale locks fail closed and
+      // require operator recovery rather than unsafe automatic lock stealing.
+      lockFd = openSync(lockFile, "wx", 0o600);
+      if (existsSync(this.file)) {
+        if (lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
+        const current = JSON.parse(readFileSync(this.file, "utf8")) as unknown;
+        const currentSnapshot = JSON.stringify(current, null, 2) + "\n";
+        if (this.persistedSnapshot === null || currentSnapshot !== this.persistedSnapshot) {
+          throw new Error("Skill lifecycle store changed in another process; reload before writing");
+        }
+      } else if (this.persistedSnapshot !== null) {
+        throw new Error("Skill lifecycle store was removed in another process; reload before writing");
+      }
+
+      temporary = this.file + "." + process.pid + "." + randomUUID() + ".tmp";
+      const nextSnapshot = JSON.stringify(this.snapshot, null, 2) + "\n";
+      writeFileSync(temporary, nextSnapshot, { encoding: "utf8", flag: "wx", mode: 0o600 });
       renameSync(temporary, this.file);
+      temporary = undefined;
+      this.persistedSnapshot = nextSnapshot;
     } catch (error) {
-      rmSync(temporary, { force: true });
+      if (temporary) rmSync(temporary, { force: true });
       throw error;
+    } finally {
+      if (lockFd !== undefined) closeSync(lockFd);
+      if (lockFd !== undefined) rmSync(lockFile, { force: true });
     }
   }
 }
