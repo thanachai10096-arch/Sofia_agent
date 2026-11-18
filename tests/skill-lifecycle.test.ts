@@ -416,3 +416,29 @@ test("lifecycle instances loaded from the same existing revision cannot lose a l
     assert.deepEqual(reloaded.list().map((record) => record.package.version), ["0.9.0", "1.0.0"]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("startup quarantine fails closed when another process holds the lifecycle lock", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "startup-quarantine.json");
+    const first = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    const learned = first.propose(pkg("1.0.0"), {
+      source: "verified-brain-repair",
+      evidenceIds: ["startup-evidence"],
+      confidence: 0.95,
+      runId: "startup-run",
+      skillDigest: "c".repeat(64),
+    });
+    await first.evaluate(learned.id);
+    first.promote(learned.id);
+    const before = readFileSync(file, "utf8");
+
+    writeFileSync(file + ".lock", "held", { flag: "wx", mode: 0o600 });
+    assert.throws(
+      () => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }),
+      /EEXIST/,
+    );
+    assert.equal(readFileSync(file, "utf8"), before, "failed startup quarantine must not partially rewrite the store");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
