@@ -216,6 +216,70 @@ test("security kill switch prevents an approved action from starting after cance
 });
 
 
+
+
+test("legacy read-only tool execution succeeds through the central gateway", async () => {
+  const { defaultPolicy } = await import("../src/security/policy.js");
+  let executions = 0;
+  const readTool = {
+    name: "workspace.inspect",
+    description: "Read workspace metadata",
+    effects: ["read"] as const,
+    inputSchema: {
+      type: "object",
+      properties: { target: { type: "string" } },
+      required: ["target"],
+      additionalProperties: false,
+    },
+    async execute(input: { target: string }) {
+      executions += 1;
+      return { target: input.target, inspected: true };
+    },
+  };
+  let modelCalls = 0;
+  const agent = new SofiaAgent({
+    provider: {
+      async generate() {
+        modelCalls += 1;
+        if (modelCalls === 1) {
+          return {
+            text: "",
+            toolCalls: [{
+              id: "inspect-1",
+              name: "workspace.inspect",
+              input: { target: "src/" },
+            }],
+          };
+        }
+        return { text: "Workspace inspection completed." };
+      },
+    },
+    router: new ModelRouter([
+      { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: new Reviewer(),
+    runtime: {} as never,
+    tools: {
+      get(name: string) { return name === readTool.name ? readTool : undefined; },
+      list() { return [readTool]; },
+    },
+    policy: { ...defaultPolicy, maxSteps: 2, permissions: {} },
+  });
+  const events: Array<{ type: string }> = [];
+
+  const result = await agent.run({
+    task: "Inspect the workspace",
+    principalId: "test-user",
+    onEvent: (event) => events.push(event),
+  });
+
+  assert.equal(result.output, "Workspace inspection completed.");
+  assert.equal(executions, 1);
+  assert.equal(modelCalls, 2);
+  assert.ok(events.some((event) => event.type === "tool.completed"));
+  assert.equal(events.some((event) => event.type === "tool.approval_required"), false);
+});
+
 test("legacy execution cannot downgrade a reserved terminal tool to read-only", async () => {
   const { defaultPolicy } = await import("../src/security/policy.js");
   let executions = 0;
