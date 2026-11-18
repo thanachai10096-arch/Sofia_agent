@@ -42,6 +42,9 @@ export class AuditSkillEvidenceVerifier {
     }
 
     const attestations = events.filter((event) => event.runId === provenance.runId && event.toolName === "skill.candidate.attest");
+    if (attestations.length !== 1 || typeof attestations[0]?.principalId !== "string" || !attestations[0].principalId.trim()) {
+      return [{ name: "trusted-evidence-principal", passed: false, detail: "A unique attestation with an authenticated principal is required." }];
+    }
     const attestation = attestations[0];
     const attestationInput = attestation?.input;
     const attestationResult = attestation?.result;
