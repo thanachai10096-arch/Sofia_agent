@@ -5,6 +5,8 @@ import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createTelegramAdapter } from "./telegram.js";
 import { createTelegramHttpTransport } from "./telegram-http-transport.js";
+import { RedisTelegramPollLease } from "./telegram-poll-lease.js";
+import { UpstashTelegramPollLeaseClient } from "./telegram-poll-lease-rest.js";
 import type { TelegramPollLease } from "./telegram-poll-lease.js";
 import type { OutboundMessage } from "./types.js";
 import { redactSecrets } from "../../security/guard.js";
@@ -127,6 +129,12 @@ export interface TelegramMessagingEnvironment {
   SOFIA_API_BASE_URL?: string;
   RAILWAY_PUBLIC_DOMAIN?: string;
   SOFIA_CHAT_DEDUPE_DIR?: string;
+  SOFIA_TELEGRAM_POLL_LEASE_REQUIRED?: string;
+  UPSTASH_REDIS_REST_URL?: string;
+  UPSTASH_REDIS_REST_TOKEN?: string;
+  REDIS_REST_URL?: string;
+  REDIS_REST_TOKEN?: string;
+  RAILWAY_ENVIRONMENT?: string;
 }
 
 /**
@@ -160,6 +168,25 @@ export function createTelegramMessagingRuntime(
   try {
     const allowedUsers = parseTelegramUserAllowlist(rawUsers);
     const allowedChats = parseTelegramChatAllowlist(rawChats);
+    const restUrl = env.UPSTASH_REDIS_REST_URL?.trim() || env.REDIS_REST_URL?.trim();
+    const restToken = env.UPSTASH_REDIS_REST_TOKEN?.trim() || env.REDIS_REST_TOKEN?.trim();
+    const leaseRequiredSetting = env.SOFIA_TELEGRAM_POLL_LEASE_REQUIRED?.trim().toLowerCase();
+    const pollLeaseRequired = leaseRequiredSetting === "true" ||
+      (Boolean(env.RAILWAY_ENVIRONMENT?.trim()) && leaseRequiredSetting !== "false");
+    if (Boolean(restUrl) !== Boolean(restToken)) {
+      onWarning("Telegram integration disabled: both Redis REST URL and token must be configured together.");
+      return undefined;
+    }
+    if (pollLeaseRequired && (!restUrl || !restToken) && !dependencies.pollLease) {
+      onWarning("Telegram integration disabled: a shared Redis poll lease is required on Railway; configure UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.");
+      return undefined;
+    }
+    const pollLease = dependencies.pollLease ?? (restUrl && restToken
+      ? new RedisTelegramPollLease({
+          client: new UpstashTelegramPollLeaseClient({ url: restUrl, token: restToken }),
+          botIdentity: token,
+        })
+      : undefined);
     const client = new SofiaClient({ apiKey, baseUrl });
     const accessPolicy = {
       isAllowed(input: { platform: "telegram" | "discord" | "slack"; senderId: string; conversationId: string }) {
@@ -190,7 +217,7 @@ export function createTelegramMessagingRuntime(
     });
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
       token,
-      ...(dependencies.pollLease ? { pollLease: dependencies.pollLease } : {}),
+      ...(pollLease ? { pollLease } : {}),
       onError: (event, status, failureKind) => onWarning(
         "Telegram transport " + event +
         (failureKind ? " [" + failureKind + "]" : "") +
