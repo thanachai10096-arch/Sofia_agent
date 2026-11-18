@@ -45,7 +45,7 @@ const columns = `version, id, principal_id, kind, status, payload, result, error
  */
 export class PostgresAutonomyJobStore implements AutonomyJobStore {
   constructor(private readonly pool: AutonomyPgPool, private readonly table = "sofia_autonomy_jobs") {
-    if (!/^[a-z_][a-z0-9_]*$/.test(table) || table.length >  48) throw new Error("Invalid autonomy job table identifier.");
+    if (!/^[a-z_][a-z0-9_]*$/.test(table) || table.length > 32) throw new Error("Invalid autonomy job table identifier.");
   }
 
   async ensureSchema(): Promise<void> {
@@ -128,7 +128,7 @@ export class PostgresAutonomyJobStore implements AutonomyJobStore {
       SET status='running', attempts=job.attempts+1, updated_at=now(),
           lease_worker_id=$1, lease_expires_at=now()+($2::bigint * interval '1 millisecond')
       FROM candidate WHERE job.id=candidate.id
-      RETURNING ${columns.split(", ").map((c) => "job."+c).join(", ")} `,
+      RETURNING version, job.id, job.principal_id, job.kind, job.status, job.payload, job.result, job.error, job.idempotency_key, job.attempts, job.max_attempts, job.created_at, job.updated_at, job.available_at, job.lease_worker_id, job.lease_expires_at, job.checkpoint `,
       [workerId, leaseMs],
     );
     return result.rows[0] ? mapJob<TPayload>(result.rows[0]) : undefined;
@@ -159,6 +159,7 @@ export class PostgresAutonomyJobStore implements AutonomyJobStore {
   }
 
   async heartbeat(principalId: string, jobId: string, workerId: string, leaseMs: number): Promise<AutonomyJob> {
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1000 || leaseMs > 300_000) throw new Error("Invalid job lease duration.");
     return this.transaction(async (client) => {
       const row = await this.owned(client, principalId, jobId, workerId);
       const result = await client.query<JobRow>(
