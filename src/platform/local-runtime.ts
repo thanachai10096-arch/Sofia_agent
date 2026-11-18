@@ -19,6 +19,45 @@ function safeEnv(): NodeJS.ProcessEnv {
   );
 }
 
+// Git has its own execution-control environment surface. Do not pass arbitrary
+// parent variables to Git: GIT_SSH_COMMAND, GIT_CONFIG_*, GIT_EXTERNAL_DIFF,
+// GIT_ASKPASS and pager/editor variables can redirect behavior or launch helpers.
+const GIT_BASE_ENV = new Set([
+  "PATH", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+  "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR",
+  "LANG", "LC_ALL", "CI",
+]);
+
+function safeGitEnv(): NodeJS.ProcessEnv {
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => GIT_BASE_ENV.has(key.toUpperCase())),
+  );
+  const safeSshCommand = process.platform === "win32"
+    ? "ssh -F NUL -o BatchMode=yes"
+    : "ssh -F /dev/null -o BatchMode=yes";
+  return {
+    ...inherited,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_PAGER: "cat",
+    GIT_EDITOR: "false",
+    GIT_SEQUENCE_EDITOR: "false",
+    GIT_SSH_COMMAND: safeSshCommand,
+    // Environment config has higher precedence than repository config. Disable
+    // credential helpers and pin pager/editor/SSH behavior for untrusted repos.
+    GIT_CONFIG_COUNT: "4",
+    GIT_CONFIG_KEY_0: "credential.helper",
+    GIT_CONFIG_VALUE_0: "",
+    GIT_CONFIG_KEY_1: "core.pager",
+    GIT_CONFIG_VALUE_1: "cat",
+    GIT_CONFIG_KEY_2: "core.editor",
+    GIT_CONFIG_VALUE_2: "false",
+    GIT_CONFIG_KEY_3: "core.sshCommand",
+    GIT_CONFIG_VALUE_3: safeSshCommand,
+  };
+}
+
 const GIT_SUBCOMMANDS = new Set([
   "status", "diff", "log", "show", "rev-parse", "ls-files", "blame", "branch", "tag",
   "add", "commit", "restore", "switch", "checkout", "stash", "reset", "clean", "merge",
@@ -215,7 +254,7 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
           windowsHide: true,
           maxBuffer: 8 * 1024 * 1024,
           timeout: options.timeoutMs ?? 60_000,
-          env: safeEnv(),
+          env: safeGitEnv(),
         });
         return { stdout: result.stdout, stderr: result.stderr, code: 0 };
       } catch (error) {
