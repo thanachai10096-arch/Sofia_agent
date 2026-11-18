@@ -1,0 +1,69 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { FileAutonomyJobStore } from "./job-store.js";
+import { AutonomyJobSupervisor } from "./job-supervisor.js";
+
+test("supervisor resolves trusted adapters and persists completed research", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-autonomy-supervisor-"));
+  try {
+    const store = new FileAutonomyJobStore("supervisor-test", root);
+    const job = await store.enqueue({ principalId: "tenant-1", kind: "research", payload: { topic: "runtime" } });
+    let resolved = false;
+    let receivedPrincipal = "";
+    const supervisor = new AutonomyJobSupervisor({
+      store,
+      executor: {
+        runResearch: async (request) => {
+          receivedPrincipal = request.principalId;
+          return { completed: true, stoppedBy: "no-knowledge-gap", cycles: [] };
+        },
+      },
+      resolveAdapters: async () => {
+        resolved = true;
+        return {
+          observe: async () => ({ signal: "x", sourceIds: [] }),
+          identifyGaps: async () => [],
+          researchLocally: async () => ({ summary: "x", sourceIds: [], confidence: 1 }),
+          formulateHypothesis: async () => ({ statement: "x", successMetric: "x" }),
+          experiment: async () => ({ passed: true, summary: "x", benchmarkBefore: 0, benchmarkAfter: 1, safetyIncidents: 0, rollbackAvailable: true }),
+          recordLearning: async () => undefined,
+        };
+      },
+      sandboxAvailable: async () => false,
+      budgetContext: () => ({}),
+      leaseMs: 3_000,
+    });
+    const completed = await supervisor.runNext("worker-1", new AbortController().signal);
+    assert.equal(resolved, true);
+    assert.equal(receivedPrincipal, "tenant-1");
+    assert.equal(completed?.id, job.id);
+    assert.equal(completed?.status, "completed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("supervisor records bounded retryable failures", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-autonomy-supervisor-"));
+  try {
+    const store = new FileAutonomyJobStore("supervisor-test", root);
+    const job = await store.enqueue({ principalId: "tenant-1", kind: "research", payload: {}, maxAttempts: 1 });
+    const supervisor = new AutonomyJobSupervisor({
+      store,
+      executor: { runResearch: async () => { throw new Error("research adapter unavailable"); } },
+      resolveAdapters: async () => { throw new Error("resolver should not be called"); },
+      sandboxAvailable: async () => false,
+      budgetContext: () => ({}),
+      leaseMs: 3_000,
+    });
+    const failed = await supervisor.runNext("worker-1", new AbortController().signal);
+    assert.equal(failed?.id, job.id);
+    assert.equal(failed?.status, "failed");
+    assert.match(failed?.error ?? "", /resolver should not be called/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
