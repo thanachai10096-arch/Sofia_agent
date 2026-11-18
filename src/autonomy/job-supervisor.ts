@@ -57,6 +57,10 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
       }
     };
     await pollKillSwitch();
+    if (controller.signal.aborted) {
+      signal.removeEventListener("abort", forwardAbort);
+      return this.options.store.cancel(job.principalId, job.id);
+    }
     const killPoll = setInterval(() => { void pollKillSwitch(); }, this.killSwitchPollMs);
     const heartbeat = setInterval(() => {
       void this.options.store.heartbeat(job.principalId, job.id, workerId, this.leaseMs)
