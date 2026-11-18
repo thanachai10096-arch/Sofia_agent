@@ -76,10 +76,13 @@ export class RedisTelegramPollLease implements TelegramPollLease {
       },
       release: async () => {
         if (released) return;
-        released = true;
+        // Mark released only after Redis confirms the owner-scoped operation.
+        // If the request rejects or times out at the transport layer, a later
+        // cleanup attempt must still be able to retry safely.
         await this.client.eval(TELEGRAM_POLL_LEASE_RELEASE_SCRIPT, {
           keys: [this.key], arguments: [owner],
         });
+        released = true;
       },
     };
   }
