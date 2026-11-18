@@ -26,7 +26,7 @@ function event(kind: string, overrides: Partial<SecurityAuditEvent> = {}): Secur
     at: new Date(0).toISOString(),
     runId,
     toolName: "project.verify",
-    actionHash: "action-hash",
+    actionHash: actionHash(runId, "project.verify", { kind }),
     risk: "low",
     decision: "completed",
     input: { kind },
@@ -184,4 +184,18 @@ test("trusted evidence verifier rejects an attestation with a forged action hash
   const checks = await verifier.verify(skill, provenance);
   assert.equal(checks[0]?.name, "skill-artifact-attestation");
   assert.equal(checks[0]?.passed, false);
+});
+
+
+test("trusted evidence verifier rejects a verification record with a forged action hash", async () => {
+  const records = [
+    event("typecheck", { actionHash: "f".repeat(64) }),
+    event("test"),
+    event("build"),
+    attestation(),
+  ];
+  const verifier = new AuditSkillEvidenceVerifier(async () => records);
+  const checks = await verifier.verify(skill, provenance);
+  assert.equal(checks.find((check) => check.name === "evidence:evidence-typecheck")?.passed, false);
+  assert.equal(checks.find((check) => check.name === "required-verification:typecheck")?.passed, false);
 });
