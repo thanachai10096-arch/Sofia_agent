@@ -14,6 +14,9 @@ export interface AutonomyJobSupervisorOptions<TPayload = unknown> {
   resolveAdapters(job: AutonomyJob<TPayload>): Promise<ResearchLoopAdapters>;
   sandboxAvailable(job: AutonomyJob<TPayload>): Promise<boolean>;
   budgetContext(job: AutonomyJob<TPayload>): AutonomyContext;
+  /** Host-owned user/project/system kill switch; never model-controlled. */
+  isKilled?(job: AutonomyJob<TPayload>): Promise<boolean>;
+  killSwitchPollMs?: number;
   leaseMs?: number;
   maxCycles?: number;
 }
@@ -39,6 +42,22 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
     const forwardAbort = () => controller.abort(signal.reason ?? new Error("Worker shutdown requested."));
     signal.addEventListener("abort", forwardAbort, { once: true });
     if (signal.aborted) forwardAbort();
+    const killPollMs = this.options.killSwitchPollMs ?? 5_000;
+    if (!Number.isSafeInteger(killPollMs) || killPollMs < 1_000 || killPollMs > 60_000) {
+      await this.options.store.cancel(job.principalId, job.id);
+      throw new Error("Kill-switch polling interval must be between 1s and 60s.");
+    }
+    const pollKillSwitch = async () => {
+      if (!this.options.isKilled || controller.signal.aborted) return;
+      try {
+        if (await this.options.isKilled(job)) controller.abort(new Error("Autonomy kill switch activated."));
+      } catch {
+        // Fail closed: an unavailable kill-switch authority stops autonomous work.
+        controller.abort(new Error("Autonomy kill-switch check failed."));
+      }
+    };
+    await pollKillSwitch();
+    const killPoll = setInterval(() => { void pollKillSwitch(); }, killPollMs);
     const heartbeat = setInterval(() => {
       void this.options.store.heartbeat(job.principalId, job.id, workerId, this.leaseMs)
         .catch((error: unknown) => controller.abort(error instanceof Error ? error : new Error("Job lease heartbeat failed.")));
@@ -89,6 +108,7 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
       );
     } finally {
       clearInterval(heartbeat);
+      clearInterval(killPoll);
       signal.removeEventListener("abort", forwardAbort);
     }
   }
