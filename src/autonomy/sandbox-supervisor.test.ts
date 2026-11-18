@@ -142,3 +142,45 @@ test("disposing a run revokes its attestation and removes its workspace", async 
     await rm(f.root, { recursive: true, force: true });
   }
 });
+
+
+test("supervisor enforces cumulative experiment time, not just per-command timeout", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-supervisor-time-"));
+  const supervisor = new SandboxSupervisor({
+    workspaceRoot: root,
+    attestationSecret: "test-only-secret-with-at-least-thirty-two-characters",
+    sandbox: new ContainerSandbox({
+      image: "registry.example/runner@sha256:" + "9".repeat(64),
+      runner: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    }),
+    budget: { ...budget, maxExperimentSeconds: 1 },
+  });
+  const identity = { principalId: "tenant-time", runId: "run-time" };
+  try {
+    const attestation = await supervisor.beginRun(identity);
+    await supervisor.run(identity, attestation, "true", [], { timeoutMs: 1000 });
+    await assert.rejects(
+      () => supervisor.run(identity, attestation, "true", [], { timeoutMs: 1000 }),
+      /remaining autonomy experiment-time budget/i,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("supervisor exhausts experiment cycles and revokes the attestation", async () => {
+  const f = await fixture();
+  try {
+    const identity = { principalId: "tenant-cycle", runId: "run-cycle" };
+    const attestation = await f.supervisor.beginRun(identity);
+    f.supervisor.recordCycle(identity, attestation);
+    f.supervisor.recordCycle(identity, attestation);
+    assert.throws(() => f.supervisor.recordCycle(identity, attestation), /cycle budget exhausted/i);
+    assert.equal(f.supervisor.verifyAttestation(identity, attestation), false);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
