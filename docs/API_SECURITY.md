@@ -49,7 +49,7 @@ Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `ma
 - [ ] Run `npm run license:check`, `npm run typecheck`, `npm test`, and `npm run build`; inspect CI for the exact commit deployed.
 - [ ] Review [open security issues](https://github.com/thanachai10096-arch/Sofia_agent/issues). Draft or unmerged PRs are not deployed behavior.
 
-## Approval broker core (preview)
+## Approval broker and API
 
 The `ApprovalBroker` is wired into the API entrypoint when explicitly enabled. It creates a pending record bound to the authenticated principal, run ID, tool name, redacted input, risk, exact action hash, and expiry. Decisions are owner-only and one-shot; wrong hashes, replayed decisions, expired requests, missing principals, and aborted runs fail closed. The gateway records approval-required, approved, and denied outcomes in the security audit.
 
@@ -69,4 +69,4 @@ The feature remains disabled unless explicitly enabled. Do not grant approval:ma
 
 ## Current limitations
 
-API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities until a dedicated implementation is merged. Approval behavior depends on the configured approval handler and tool gateway. Audit the exact composition used by your deployment rather than assuming every adapter has identical controls.
+API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities. The built-in approval API is opt-in and the SQLite adapter is for a single host or a verified SQLite-compatible shared filesystem; a transactional network-database adapter for multi-host deployment remains future work. Approval behavior depends on the configured handler and tool gateway, so verify the exact host composition before enabling effectful tools.
