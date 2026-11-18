@@ -141,3 +141,6 @@ Before evaluation, the managed learning handler computes a canonical SHA-256 dig
 
 
 Persisted learned records in both `verified` and `active` states are quarantined during synchronous startup. A cached successful evaluation is never sufficient to promote a learned skill after restart; it must be proposed/evaluated again against the durable audit stream. This prevents a caller from promoting a stale `verified` record without invoking the evidence verifier.
+
+
+The verifier also recomputes the security action hash for both the candidate attestation and each `project.verify` audit event from the event's run ID, principal ID, tool name, and recorded input. A non-empty but forged action hash is rejected. On restart, learned records in `verified`, `active`, or `superseded` state are quarantined, so neither cached promotion nor rollback can reactivate an un-revalidated learned artifact.
