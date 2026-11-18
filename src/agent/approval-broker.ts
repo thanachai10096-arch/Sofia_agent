@@ -69,6 +69,19 @@ export class InMemoryApprovalDecisionStore implements ApprovalDecisionStore {
 
   async create(record: ApprovalRecord): Promise<void> {
     if (this.records.has(record.id)) throw new Error("Approval request already exists.");
+    for (const current of this.records.values()) {
+      if (current.principalId === record.principalId && current.status === "pending" && current.expiresAt <= record.createdAt) {
+        current.status = "expired";
+        current.resolvedAt = record.createdAt;
+        current.resolvedBy = "system:expiry";
+      }
+    }
+    const pending = [...this.records.values()].filter((current) =>
+      current.principalId === record.principalId && current.status === "pending",
+    ).length;
+    if (pending >= MAX_PENDING_APPROVALS_PER_PRINCIPAL) {
+      throw new Error("Too many pending approval requests for this principal.");
+    }
     this.records.set(record.id, copy(record));
   }
 
