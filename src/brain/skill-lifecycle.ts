@@ -25,6 +25,7 @@ interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[];
 export interface SkillMutationLockInfo {
   locked: boolean;
   owner?: { pid: number; hostname: string; startedAt: string; nonce: string };
+  ownerStatus?: "alive" | "dead" | "remote" | "unknown";
   malformed?: boolean;
 }
 interface SkillMutationLockOwner { schemaVersion: 1; pid: number; hostname: string; startedAt: string; nonce: string; }
@@ -361,9 +362,22 @@ export class VersionedSkillLifecycle {
           typeof parsed.nonce !== "string" || !parsed.nonce) {
         return { locked: true, malformed: true };
       }
-      return { locked: true, owner: {
+      const owner = {
         pid: parsed.pid, hostname: parsed.hostname, startedAt: parsed.startedAt, nonce: parsed.nonce,
-      } };
+      };
+      let ownerStatus: SkillMutationLockInfo["ownerStatus"] = "unknown";
+      if (owner.hostname !== hostname()) {
+        ownerStatus = "remote";
+      } else {
+        try {
+          process.kill(owner.pid, 0);
+          ownerStatus = "alive";
+        } catch (error) {
+          if (isRecord(error) && error.code === "ESRCH") ownerStatus = "dead";
+          else if (isRecord(error) && error.code === "EPERM") ownerStatus = "alive";
+        }
+      }
+      return { locked: true, owner, ownerStatus };
     } catch {
       return { locked: true, malformed: true };
     }
