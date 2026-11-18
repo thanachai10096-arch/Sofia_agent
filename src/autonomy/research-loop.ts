@@ -98,24 +98,31 @@ export async function runIndependentResearchLoop(
     throw new Error("Research resume cycle is invalid.");
   }
   const cycles: ResearchCycleResult[] = [...(options.previousCycles ?? [])];
+  if (cycles.length !== startCycle - 1 || cycles.some((item, index) => item.cycle !== index + 1)) {
+    throw new Error("Research checkpoint history does not match the resume cycle.");
+  }
   for (let cycle = startCycle; cycle <= maxCycles; cycle += 1) {
     if (options.signal.aborted) {
       return { completed: false, stoppedBy: "aborted", cycles };
     }
     const observation = await options.adapters.observe(options.signal);
+    options.signal.throwIfAborted();
     const gapDecision = evaluateAutonomyRequest("research_local", profile);
     if (!gapDecision.allowed) {
       return { completed: false, stoppedBy: "no-knowledge-gap", cycles };
     }
     const gaps = await options.adapters.identifyGaps(observation, options.signal);
+    options.signal.throwIfAborted();
     const question = gaps.find((item) => typeof item === "string" && item.trim().length > 0)?.trim();
     if (!question) return { completed: true, stoppedBy: "no-knowledge-gap", cycles };
 
     const finding = await options.adapters.researchLocally(question.slice(0, 1000), options.signal);
+    options.signal.throwIfAborted();
     if (!finding.summary.trim() || !Number.isFinite(finding.confidence) || finding.confidence < 0 || finding.confidence > 1) {
       throw new Error("Research adapter returned invalid finding evidence.");
     }
     const hypothesis = await options.adapters.formulateHypothesis(question, finding, options.signal);
+    options.signal.throwIfAborted();
     if (!hypothesis.statement.trim() || !hypothesis.successMetric.trim()) {
       throw new Error("Research adapter returned an invalid hypothesis.");
     }
@@ -127,6 +134,7 @@ export async function runIndependentResearchLoop(
     if (!experimentDecision.allowed) {
       // Learning from authorized research is still useful; no experiment is run
       // when the sandbox or complete budget attestation is unavailable.
+      options.signal.throwIfAborted();
       await options.adapters.recordLearning({
         principalId: options.principalId,
         idempotencyKey: `${idempotencyPrefix}:${cycle}`,
@@ -142,10 +150,12 @@ export async function runIndependentResearchLoop(
     }
 
     const evidence = await options.adapters.experiment(hypothesis, options.signal);
+    options.signal.throwIfAborted();
     if (!Number.isFinite(evidence.benchmarkBefore) || !Number.isFinite(evidence.benchmarkAfter) ||
         evidence.safetyIncidents < 0 || !Number.isSafeInteger(evidence.safetyIncidents)) {
       throw new Error("Experiment adapter returned invalid benchmark or safety evidence.");
     }
+    options.signal.throwIfAborted();
     await options.adapters.recordLearning({
       principalId: options.principalId,
       idempotencyKey: `${idempotencyPrefix}:${cycle}`,
