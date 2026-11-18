@@ -154,6 +154,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       cronSchedulers.set(ownerKeyId, new CronScheduler(deps.jobRuntime, { store, maxConcurrent: 1 }));
     }
   })();
+  // Keep an initialization failure observable to awaited requests without
+  // allowing an early rejected promise to become an unhandled rejection.
+  void cronInitialization.catch(() => undefined);
   const tickCronSchedulers = async (): Promise<void> => {
     for (const scheduler of cronSchedulers.values()) await scheduler.tick();
   };
