@@ -249,7 +249,10 @@ test("Telegram transport exposes safe health transitions for a polling conflict"
     fetchImpl,
     onStatus(health) {
       statuses.push(health.status);
-      if (health.status === "poll_conflict") conflictResolve();
+      if (health.status === "poll_conflict") {
+        health.status = "stopped";
+        conflictResolve();
+      }
     },
   });
 
