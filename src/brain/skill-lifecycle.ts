@@ -69,7 +69,7 @@ export class VersionedSkillLifecycle {
     // durable audit evidence again after restart.
     let quarantinedLearnedSkills = false;
     for (const record of this.snapshot.records) {
-      if (record.package.source !== "learned" || (record.status !== "active" && record.status !== "verified")) continue;
+      if (record.package.source !== "learned" || (record.status !== "active" && record.status !== "verified" && record.status !== "superseded")) continue;
       const wasActive = record.status === "active";
       record.status = "rejected";
       record.updatedAt = new Date().toISOString();
