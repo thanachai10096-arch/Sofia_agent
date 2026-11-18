@@ -39,11 +39,14 @@ export class AuditSkillEvidenceVerifier {
       const kind = record(input) && typeof input.kind === "string" ? input.kind : "";
       const valid = Boolean(
         event &&
+        event.id === evidenceId &&
+        typeof event.actionHash === "string" && event.actionHash.length > 0 &&
         event.runId === provenance.runId &&
         event.toolName === "project.verify" &&
         event.decision === "completed" &&
         requiredKinds.includes(kind as typeof requiredKinds[number]) &&
         record(result) &&
+        result.kind === kind &&
         result.passed === true &&
         result.code === 0
       );
