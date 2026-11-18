@@ -41,6 +41,17 @@ export class RegistryToolGateway implements ToolGateway {
     if (production && (!context.principalId || context.principalId.trim() !== context.principalId || context.principalId.length > 512)) {
       return {ok:false,data:null,evidenceId:randomUUID(),error:{category:"permission_error",message:"Production tool execution requires an authenticated principal."}};
     }
+    const descriptorForAudit = this.describe(call.tool);
+    const effectfulForAudit = descriptorForAudit?.effects.some((effect) =>
+      effect === "write" || effect === "shell" || effect === "network" ||
+      effect === "browser" || effect === "destructive",
+    ) ?? false;
+    if (production && effectfulForAudit && !this.audit) {
+      return {
+        ok: false, data: null, evidenceId: "",
+        error: { category: "permission_error", message: "Production effectful tool execution requires a security audit sink." },
+      };
+    }
     // Bind the approval hash and actual execution to one immutable input snapshot.
     // The caller and approval UI must not be able to swap the action while approval is pending.
     const input = deepFreeze(structuredClone(call.input));
@@ -121,7 +132,7 @@ export class RegistryToolGateway implements ToolGateway {
     } catch {
       warnings.push("Tool execution succeeded, but its completion audit event could not be persisted.");
     }
-    return{ok:true,data:safeData,evidenceId,...(warnings.length?{warnings}:{})};
+    return{ok:true,data:safeData,evidenceId:warnings.length ? "" : evidenceId,...(warnings.length?{warnings}:{})};
   }
 
   async snapshot(signal:AbortSignal):Promise<WorkspaceSnapshot>{
