@@ -1,4 +1,4 @@
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { SkillPackage, SkillsPlatform } from "../skills/platform.js";
@@ -410,9 +410,20 @@ export class VersionedSkillLifecycle {
       temporary = this.file + "." + process.pid + "." + randomUUID() + ".tmp";
       const nextSnapshot = JSON.stringify(this.snapshot, null, 2) + "\n";
       writeFileSync(temporary, nextSnapshot, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      // Flush file contents before the atomic rename so a successful write is
+      // not merely resident in the OS page cache.
+      const temporaryFd = openSync(temporary, "r");
+      try { fsyncSync(temporaryFd); }
+      finally { closeSync(temporaryFd); }
       renameSync(temporary, this.file);
       temporary = undefined;
+      // Update the in-memory baseline immediately after rename: a subsequent
+      // directory-fsync error must not make this process believe the old file
+      // is still on disk.
       this.persistedSnapshot = nextSnapshot;
+      const directoryFd = openSync(directory, "r");
+      try { fsyncSync(directoryFd); }
+      finally { closeSync(directoryFd); }
     } catch (error) {
       if (temporary) rmSync(temporary, { force: true });
       throw error;
