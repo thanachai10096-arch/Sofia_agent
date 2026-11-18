@@ -95,15 +95,19 @@ export class RegistryToolGateway implements ToolGateway {
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
         }
         const approvalEvidenceId = randomUUID();
-        await this.audit?.record({id:approvalEvidenceId,at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_approved",reason:"The exact action hash was approved.",input:redactSecrets(input)});
-        if (production) {
-          const persistedApproval = await this.audit?.read?.(approvalEvidenceId);
-          if (!persistedApproval || persistedApproval.id !== approvalEvidenceId ||
-              persistedApproval.runId !== context.runId || persistedApproval.principalId !== context.principalId ||
-              persistedApproval.toolName !== call.tool || persistedApproval.actionHash !== assessment.actionHash ||
-              persistedApproval.decision !== "approval_approved") {
-            throw new Error("Approval audit evidence could not be durably verified; tool execution was blocked.");
+        try {
+          await this.audit?.record({id:approvalEvidenceId,at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_approved",reason:"The exact action hash was approved.",input:redactSecrets(input)});
+          if (production) {
+            const persistedApproval = await this.audit?.read?.(approvalEvidenceId);
+            if (!persistedApproval || persistedApproval.id !== approvalEvidenceId ||
+                persistedApproval.runId !== context.runId || persistedApproval.principalId !== context.principalId ||
+                persistedApproval.toolName !== call.tool || persistedApproval.actionHash !== assessment.actionHash ||
+                persistedApproval.decision !== "approval_approved") {
+              throw new Error("Approval audit readback mismatch.");
+            }
           }
+        } catch {
+          return {ok:false,data:null,evidenceId:approvalEvidenceId,error:{category:"permission_error",message:"Approval audit evidence could not be durably verified; tool execution was blocked."}};
         }
       }finally{context.notifyApproval(false);}
     }
