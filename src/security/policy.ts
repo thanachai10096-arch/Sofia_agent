@@ -52,7 +52,7 @@ export { riskRank };
 export function classifyToolEffects(name: string): ToolEffect[] {
   // Browser reads are network access, not browser-control actions. They remain
   // gated by allowNetwork + allowedHosts, while page interaction stays privileged.
-  if (name === "sandbox.exec") return ["sandbox"];
+  if (name.startsWith("sandbox.")) return ["sandbox"];
   if (name === "browser.goto") return ["network", "read"];
   if (["browser.open", "browser.observe", "browser.screenshot", "browser.close"].includes(name)) return ["read"];
   if (name.startsWith("browser.")) return ["browser", "network"];
