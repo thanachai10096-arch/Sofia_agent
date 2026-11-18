@@ -137,3 +137,18 @@ test("SQLite store caps pending approvals atomically per principal", async () =>
     first.close(); second.close(); fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("SQLite approval store enforces resolver ownership inside the atomic update", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-owner-cas-"));
+  const store = await SqliteApprovalDecisionStore.open(path.join(dir, "approvals.sqlite"));
+  try {
+    await store.create(record({ id: "owner-bound-sqlite" }));
+    assert.equal(await store.resolve("owner-bound-sqlite", "a".repeat(64), "approved", "attacker", Date.now()), false);
+    assert.equal((await store.get("owner-bound-sqlite"))?.status, "pending");
+    assert.equal(await store.resolve("owner-bound-sqlite", "a".repeat(64), "approved", "principal-1", Date.now()), true);
+  } finally {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
