@@ -119,7 +119,7 @@ After configuring `.env`, run the isolated Docker acceptance test:
 bash scripts/sofia-self-hosted-smoke.sh
 ```
 
-It builds a fresh image, starts an isolated Compose project with a disposable volume, waits for health, verifies that requests without a key and with an invalid key receive HTTP 401, verifies that the configured API key can read `/v1/jobs`, restarts the service, and checks that data survives. It removes only its own test project and volume. This does not replace a real model-provider task test or a production backup/restore rehearsal. Run `bash scripts/sofia-isolation-smoke.sh` to build one image, start two installations with distinct env files and volumes, verify that each API key is rejected by the other installation, and verify the volumes remain separate.
+It builds a fresh image, starts an isolated Compose project with a disposable volume, waits for health, verifies that requests without a key and with an invalid key receive HTTP 401, verifies that the configured API key can read `/v1/jobs`, restarts the service, and checks that data survives. It removes only its own test project and volume. This does not replace a real model-provider task test or a production backup/restore rehearsal. Run `bash scripts/sofia-isolation-smoke.sh` to build one image, start two installations with distinct env files and volumes, verify that each API key is rejected by the other installation, and verify the volumes remain separate. The API test suite also verifies that separate API-key identities cannot read or clear each other's user memories, and that session IDs are namespaced by authenticated key identity. Job reads and mutations are owner-key checked at the API boundary.
 
 ## Backup and restore
 
