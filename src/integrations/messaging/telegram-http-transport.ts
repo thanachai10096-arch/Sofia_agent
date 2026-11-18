@@ -14,6 +14,8 @@ export interface TelegramHttpTransportOptions {
   /** When supplied, only the Redis lease owner is allowed to long-poll this bot. */
   pollLease?: TelegramPollLease;
   pollLeaseRenewIntervalMs?: number;
+  /** Maximum wait for Redis lease acquisition/release operations. */
+  pollLeaseOperationTimeoutMs?: number;
   onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed" | "poll_lease_unavailable" | "poll_lease_lost", status?: number, failureKind?: "network" | "invalid_json" | "http" | "unknown") => void;
 }
 
@@ -31,6 +33,20 @@ class TelegramRequestError extends Error {
   }
 }
 
+async function withLeaseOperationTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("Telegram poll lease " + label + " timed out.")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export function createTelegramHttpTransport(options: TelegramHttpTransportOptions): TelegramTransport {
   const token = options.token;
   if (!/^[A-Za-z0-9:_-]{20,256}$/.test(token)) {
@@ -41,6 +57,10 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
     throw new Error("Telegram poll timeout must be an integer between 1 and 50 seconds.");
   }
   const fetchImpl = options.fetchImpl ?? fetch;
+  const leaseOperationTimeoutMs = options.pollLeaseOperationTimeoutMs ?? 5_000;
+  if (!Number.isSafeInteger(leaseOperationTimeoutMs) || leaseOperationTimeoutMs < 250 || leaseOperationTimeoutMs > 30_000) {
+    throw new Error("Telegram poll lease operation timeout must be between 250 milliseconds and 30 seconds.");
+  }
   const endpoint = `https://api.telegram.org/bot${token}`;
   let controller: AbortController | undefined;
   let loop: Promise<void> | undefined;
@@ -147,7 +167,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       controller = new AbortController();
       if (options.pollLease) {
         try {
-          pollLeaseHandle = await options.pollLease.acquire();
+          pollLeaseHandle = await withLeaseOperationTimeout(options.pollLease.acquire(), leaseOperationTimeoutMs, "acquire");
         } catch {
           stopped = true;
           controller.abort();
@@ -222,7 +242,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         leaseRenewalTimer = undefined;
         const lease = pollLeaseHandle;
         pollLeaseHandle = undefined;
-        if (lease) await lease.release().catch(() => undefined);
+        if (lease) await withLeaseOperationTimeout(lease.release(), leaseOperationTimeoutMs, "release").catch(() => undefined);
         return;
       }
       loop = poll(controller.signal, onUpdate).finally(async () => {
