@@ -136,6 +136,31 @@ test("skill lifecycle preserves prior version and can roll back", async () => {
 });
 
 
+test("failed rollback removes a partially installed previous skill when the platform had no current entry", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "rollback-compensation.json");
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
+    const first = lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "first", evidenceIds: ["rollback-first"], confidence: 0.95,
+    });
+    await lifecycle.evaluate(first.id);
+    lifecycle.promote(first.id);
+    const second = lifecycle.propose({ ...pkg("2.0.0"), source: "custom" }, {
+      source: "second", evidenceIds: ["rollback-second"], confidence: 0.95,
+    });
+    await lifecycle.evaluate(second.id);
+    lifecycle.promote(second.id);
+
+    platform.remove("repair-skill");
+    writeFileSync(file + ".lock", "held", { flag: "wx", mode: 0o600 });
+    assert.throws(() => lifecycle.rollback("repair-skill"), /EEXIST/);
+    assert.equal(platform.get("repair-skill"), undefined, "failed rollback must undo its partial install");
+    assert.equal(lifecycle.active("repair-skill")?.id, second.id, "durable lifecycle state must remain on the active version");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill lifecycle refuses rollback to a learned skill without fresh durable evidence", async () => {
   const root = dir();
   try {
