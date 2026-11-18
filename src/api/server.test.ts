@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { FileUserMemoryStore } from "../brain/user-memory.js";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
@@ -145,5 +149,64 @@ test("API rejects unknown model routes before starting a run", async () => {
     assert.deepEqual(await response.json(), { error: "invalid_model_route" });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API user memory is isolated by authenticated API-key identity", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-api-memory-isolation-"));
+  const memory = new FileUserMemoryStore(root);
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    userMemoryStore: memory,
+  }, {
+    apiKeys: {
+      "memory-user-one": ["memory:read", "memory:write"],
+      "memory-user-two": ["memory:read", "memory:write"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const request = (key: string, init: RequestInit = {}) => fetch(baseUrl + "/v1/memory", {
+    ...init,
+    headers: {
+      authorization: "Bearer " + key,
+      ...(init.headers as Record<string, string> | undefined),
+    },
+  });
+
+  try {
+    const saved = await request("memory-user-one", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "preference", content: "User one prefers isolated workspaces." }),
+    });
+    assert.equal(saved.status, 201);
+
+    const ownList = await request("memory-user-one");
+    assert.equal(ownList.status, 200);
+    const ownPayload = await ownList.json() as { memories: Array<{ content: string }> };
+    assert.deepEqual(ownPayload.memories.map((entry) => entry.content), [
+      "User one prefers isolated workspaces.",
+    ]);
+
+    const otherList = await request("memory-user-two");
+    assert.equal(otherList.status, 200);
+    const otherPayload = await otherList.json() as { memories: unknown[] };
+    assert.deepEqual(otherPayload.memories, []);
+
+    const otherClear = await request("memory-user-two", { method: "DELETE" });
+    assert.equal(otherClear.status, 200);
+    const stillOwn = await request("memory-user-one");
+    const stillOwnPayload = await stillOwn.json() as { memories: Array<{ content: string }> };
+    assert.equal(stillOwnPayload.memories.length, 1);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(root, { recursive: true, force: true });
   }
 });
