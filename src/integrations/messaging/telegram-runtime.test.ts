@@ -55,7 +55,9 @@ test("complete Telegram configuration constructs a runtime without starting netw
     SOFIA_API_BASE_URL: "https://sofia.example.invalid",
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.ok(runtime);
+  assert.deepEqual(runtime.getHealth(), { status: "stopped" });
   await runtime.stop();
+  assert.deepEqual(runtime.getHealth(), { status: "stopped" });
   assert.deepEqual(warnings, []);
 });
 
