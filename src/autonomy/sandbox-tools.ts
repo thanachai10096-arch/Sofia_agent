@@ -48,7 +48,9 @@ async function stageSanitizedWorkspace(source: string, destination: string): Pro
       try {
         const openedInfo = await sourceHandle.stat();
         if (!openedInfo.isFile()) continue;
+        if (openedInfo.size > MAX_BYTES - bytes) throw new Error("Sandbox project snapshot exceeds the staging size limit.");
         const data = await sourceHandle.readFile();
+        if (data.length > MAX_BYTES - bytes) throw new Error("Sandbox project snapshot exceeds the staging size limit.");
         baseline.set(relativePath.split(path.sep).join("/"), createHash("sha256").update(data).digest("hex"));
         await writeFile(targetPath, data, { flag: "wx", mode: 0o600 });
       } finally {
@@ -76,8 +78,11 @@ async function collectSandboxChanges(workspace: string, baseline: Map<string, st
       if (!expectedHash) continue; // New files are not auto-promoted by this first patch workflow.
       const handle = await open(fullPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
       try {
-        if (!(await handle.stat()).isFile()) continue;
+        const openedInfo = await handle.stat();
+        if (!openedInfo.isFile()) continue;
+        if (openedInfo.size > 10 * 1024 * 1024 - totalBytes) throw new Error("Sandbox change proposal exceeds its size limit.");
         const data = await handle.readFile();
+        if (data.length > 10 * 1024 * 1024 - totalBytes) throw new Error("Sandbox change proposal exceeds its size limit.");
         totalBytes += data.length;
         if (totalBytes > 10 * 1024 * 1024 || changes.length >= 100) throw new Error("Sandbox change proposal exceeds its file or size limit.");
         const content = data.toString("utf8");
