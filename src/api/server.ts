@@ -358,7 +358,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const approvals = await broker.listPending(auth.keyId);
           return json(res, 200, { approvals }, origin, config);
         }
-        const decisionMatch = requestUrl.pathname.match(/^\\/v1\\/approvals\\/([^/]+)\\/(approve|deny)$/);
+        const decisionMatch = requestUrl.pathname.match(/^\/v1\/approvals\/([^/]+)\/(approve|deny)$/);
         if (req.method === "POST" && decisionMatch) {
           let approvalId: string;
           try { approvalId = decodeURIComponent(decisionMatch[1]!); }
