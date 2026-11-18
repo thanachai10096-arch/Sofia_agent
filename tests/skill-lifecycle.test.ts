@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { VersionedSkillLifecycle } from "../src/brain/skill-lifecycle.js";
+import { VersionedSkillLifecycle, syncDirectoryMetadata } from "../src/brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../src/skills/platform.js";
 import type { SkillPackage } from "../src/skills/platform.js";
 
@@ -1016,4 +1016,11 @@ test("skill evaluation rejects blank or malformed check identities", async () =>
     assert.equal(evaluated.status, "rejected");
     assert.equal(evaluated.evaluation?.passed, false);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("directory metadata sync skips unsupported Windows directory handles", () => {
+  // A deliberately nonexistent path proves the Windows guard returns before
+  // attempting to open a directory handle. File contents are fsynced separately.
+  assert.doesNotThrow(() => syncDirectoryMetadata(path.join(os.tmpdir(), "not-created-sofia-dir"), "win32"));
 });
