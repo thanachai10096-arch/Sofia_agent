@@ -22,6 +22,25 @@ function record(overrides: Partial<ApprovalRecord> = {}): ApprovalRecord {
   };
 }
 
+test("simultaneous SQLite store initialization serializes schema migration", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-migrate-race-"));
+  const file = path.join(dir, "approvals.sqlite");
+  let first: SqliteApprovalDecisionStore | undefined;
+  let second: SqliteApprovalDecisionStore | undefined;
+  try {
+    [first, second] = await Promise.all([
+      SqliteApprovalDecisionStore.open(file),
+      SqliteApprovalDecisionStore.open(file),
+    ]);
+    await first.create(record());
+    assert.equal((await second.get("approval-1"))?.status, "pending");
+  } finally {
+    first?.close();
+    second?.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("SQLite approval decisions survive restart and remain scoped to their principal", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-restart-"));
   const file = path.join(dir, "approvals.sqlite");
