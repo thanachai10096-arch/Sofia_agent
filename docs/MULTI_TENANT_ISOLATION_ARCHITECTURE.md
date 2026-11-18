@@ -17,7 +17,7 @@ The following observations were verified against this branch during the audit. T
 | Component | Current implementation | Isolation consequence |
 |---|---|---|
 | API authentication | `src/api/server.ts` hashes the bearer token into `keyId` and attaches configured scopes | Distinct API keys receive distinct opaque principals; this does not itself partition runtime resources |
-| API transcripts | `createSofiaAgentDependenciesWithOwnerSessions` opens `.sofia/sessions/<keyId>.sqlite` for the single-key API entrypoint and migrates only `<keyId>:` records from the legacy shared SQLite database | Physical per-owner database files for the entrypoint; direct multi-key `createSofiaApi` hosts must still inject a correctly routed per-owner session store |
+| API transcripts | `createSofiaAgentDependenciesWithOwnerSessions` opens `SOFIA_STATE_DIR/sofia-agents-sessions/tenants/<keyId>.sqlite` for the single-key API entrypoint and migrates only `<keyId>:` records from the legacy shared SQLite database | Physical per-owner database files for the entrypoint; direct multi-key `createSofiaApi` hosts must still inject a correctly routed per-owner session store |
 | User memory | `FileUserMemoryStore` receives `auth.keyId` for API CRUD and hashes the user ID for its filename | API user-memory files are principal-scoped; this does not isolate project memory |
 | Project memory | `createBrainFactory` constructs one `FileProjectMemoryStore(workspace)`; store hashes only the project namespace | Runs using the same workspace share project memory and the persistent skill ledger |
 | Brain run snapshots | One `FileRunStore(workspace)` is captured by the Brain factory | Brain snapshots are namespaced by workspace, not by authenticated principal |
@@ -44,7 +44,7 @@ Regression coverage is in `src/platform/tenant-workspace.test.ts` for determinis
 
 ### Safe interim operating mode
 
-The API entrypoint is configured with one `SOFIA_API_KEY` and now uses a physically separate transcript database for that owner. Migration copies only session IDs beginning with the authenticated owner ID plus a colon, writes to the destination before deleting the legacy row, and is safe to retry after interruption. This does not yet provide a multi-key session-store router for arbitrary embedded `createSofiaApi` hosts, and it does not isolate the shared workspace, Brain stores, JobRuntime, or messaging adapters.
+The API entrypoint is configured with one `SOFIA_API_KEY` and now uses a physically separate transcript database outside the agent workspace for that owner, under `SOFIA_STATE_DIR/sofia-agents-sessions/tenants/` (or the OS temporary root when `SOFIA_STATE_DIR` is unset). Migration copies only session IDs beginning with the authenticated owner ID plus a colon, writes to the destination before deleting the legacy row, and is safe to retry after interruption. This does not yet provide a multi-key session-store router for arbitrary embedded `createSofiaApi` hosts, and it does not isolate the shared workspace, Brain stores, JobRuntime, or messaging adapters.
 
 Until a tenant-aware runtime factory and tenant-owned workspace roots exist:
 - treat the API deployment as a single trusted workspace/operator, even when API keys have separate run and user-memory records;
