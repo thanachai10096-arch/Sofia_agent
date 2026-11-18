@@ -41,6 +41,17 @@ export class RegistryToolGateway implements ToolGateway {
     if (production && (!context.principalId || context.principalId.trim() !== context.principalId || context.principalId.length > 512)) {
       return {ok:false,data:null,evidenceId:randomUUID(),error:{category:"permission_error",message:"Production tool execution requires an authenticated principal."}};
     }
+    const descriptorForAudit = this.describe(call.tool);
+    const effectfulForAudit = descriptorForAudit?.effects.some((effect) =>
+      effect === "write" || effect === "shell" || effect === "network" ||
+      effect === "browser" || effect === "destructive",
+    ) ?? false;
+    if (production && effectfulForAudit && (!this.audit?.durable || !this.audit.read)) {
+      return {
+        ok: false, data: null, evidenceId: "",
+        error: { category: "permission_error", message: "Production effectful tool execution requires a durable, readable security audit sink." },
+      };
+    }
     // Bind the approval hash and actual execution to one immutable input snapshot.
     // The caller and approval UI must not be able to swap the action while approval is pending.
     const input = deepFreeze(structuredClone(call.input));
@@ -117,11 +128,18 @@ export class RegistryToolGateway implements ToolGateway {
     const safeData=redactSecrets(data);
     const warnings:string[]=[];
     try {
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
+      await this.audit?.record({id:evidenceId,at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
+      if (this.audit?.durable) {
+        const persisted = await this.audit.read?.(evidenceId);
+        if (!persisted || persisted.id !== evidenceId || persisted.runId !== context.runId ||
+            persisted.actionHash !== assessment.actionHash || persisted.decision !== "completed") {
+          throw new Error("Completion audit readback did not match the executed action.");
+        }
+      }
     } catch {
-      warnings.push("Tool execution succeeded, but its completion audit event could not be persisted.");
+      warnings.push("Tool execution succeeded, but its completion audit event could not be persisted and read back.");
     }
-    return{ok:true,data:safeData,evidenceId,...(warnings.length?{warnings}:{})};
+    return{ok:true,data:safeData,evidenceId:warnings.length ? "" : evidenceId,...(warnings.length?{warnings}:{})};
   }
 
   async snapshot(signal:AbortSignal):Promise<WorkspaceSnapshot>{
