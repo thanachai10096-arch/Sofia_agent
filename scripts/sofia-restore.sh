@@ -22,6 +22,16 @@ command -v docker >/dev/null 2>&1 || { echo "Docker is required." >&2; exit 1; }
 [ -s "$ARCHIVE.sha256" ] || { echo "Required checksum file is missing: $ARCHIVE.sha256" >&2; exit 1; }
 (cd "$(dirname "$ARCHIVE")" && sha256sum --check "$(basename "$ARCHIVE").sha256")
 
+# Reject links and special files as well as unsafe paths. This avoids extracting
+# archive entries that could redirect writes outside the restored volume.
+if tar -tvzf "$ARCHIVE" | awk '
+  substr($0, 1, 1) != "-" && substr($0, 1, 1) != "d" { bad=1 }
+  END { exit bad ? 0 : 1 }
+'; then
+  echo "Archive contains links or special files; refusing to restore." >&2
+  exit 1
+fi
+
 # Validate archive paths before stopping the service or touching the volume.
 if tar -tzf "$ARCHIVE" | awk '
   /^\// { bad=1 }
