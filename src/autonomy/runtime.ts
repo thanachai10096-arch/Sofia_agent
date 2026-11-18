@@ -30,6 +30,7 @@ export interface AutonomyResearchRequest {
   /** Live counters supplied by the trusted supervisor. */
   budgetContext: () => AutonomyContext;
   maxCycles?: number;
+  idempotencyPrefix?: string;
   startCycle?: number;
   previousCycles?: ResearchLoopReport["cycles"];
   onCycle?: (cycle: ResearchLoopReport["cycles"][number], nextCycle: number) => Promise<void> | void;
@@ -81,6 +82,7 @@ export class SofiaAutonomyRuntime {
         sandboxAvailable: request.sandboxAvailable,
         budgetContext: request.budgetContext,
         ...(request.maxCycles !== undefined ? { maxCycles: request.maxCycles } : {}),
+        ...(request.idempotencyPrefix ? { idempotencyPrefix: request.idempotencyPrefix } : {}),
         ...(request.startCycle !== undefined ? { startCycle: request.startCycle } : {}),
         ...(request.previousCycles !== undefined ? { previousCycles: request.previousCycles } : {}),
         ...(request.onCycle ? { onCycle: request.onCycle } : {}),
