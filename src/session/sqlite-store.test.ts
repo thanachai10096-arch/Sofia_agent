@@ -236,8 +236,10 @@ test("SQLite owner transcript migration copies only matching sessions and is ret
       legacy.save({ id: "aaa-foreign-" + String(index).padStart(4, "0"), messages: ["unrelated"], updatedAt: 0 });
     }
 
+    const originalTimestamp = legacy.get("owner-one:conversation-a")?.updatedAt;
     assert.equal(legacy.migrateOwnerTo("owner-one", ownerOne), 1);
     assert.deepEqual(ownerOne.get("owner-one:conversation-a")?.messages, ["legacy transcript"]);
+    assert.equal(ownerOne.get("owner-one:conversation-a")?.updatedAt, originalTimestamp);
     assert.equal(legacy.get("owner-one:conversation-a"), undefined);
     assert.deepEqual(legacy.get("owner-two:conversation-b")?.messages, ["other tenant"]);
     assert.deepEqual(legacy.get("owner-one-extra:conversation-c")?.messages, ["prefix collision"]);
