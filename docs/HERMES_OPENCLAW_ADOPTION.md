@@ -138,3 +138,6 @@ Learned skill promotion now resolves every supplied evidence ID against Sofia's 
 ### Learned Skill artifact attestation
 
 Before evaluation, the managed learning handler computes a canonical SHA-256 digest of the complete Skill package and writes a `skill.candidate.attest` event to the configured audit sink. The attestation binds the digest to the exact ordered verification evidence IDs and Brain run. The verifier requires exactly one matching attestation from the encrypted durable audit stream and recomputes the package digest before accepting verification evidence. Missing audit persistence, mismatched content, duplicate attestations, or evidence from another run fail closed. This is an application-generated provenance binding; it does not claim that the verification commands formally prove the semantic correctness of the Skill instructions.
+
+
+Persisted learned records in both `verified` and `active` states are quarantined during synchronous startup. A cached successful evaluation is never sufficient to promote a learned skill after restart; it must be proposed/evaluated again against the durable audit stream. This prevents a caller from promoting a stale `verified` record without invoking the evidence verifier.
