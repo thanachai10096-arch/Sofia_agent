@@ -62,5 +62,26 @@ ACTUAL_ID="$(docker image inspect --format '{{.Id}}' "$ROLLBACK_TAG")"
 docker compose config --quiet
 docker image tag "$ROLLBACK_TAG" "$IMAGE"
 docker compose up -d --no-deps --force-recreate "$SERVICE"
-echo "Previous image restored. Data volume was not modified."
-echo "Check health with: docker compose ps"
+CONTAINER_ID="$(docker compose ps -q "$SERVICE")"
+[ -n "$CONTAINER_ID" ] || { echo "Rollback container was not created." >&2; exit 1; }
+TIMEOUT="${SOFIA_HEALTH_TIMEOUT_SECONDS:-120}"
+if ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || [ "$TIMEOUT" -lt 10 ]; then
+  echo "SOFIA_HEALTH_TIMEOUT_SECONDS must be an integer >= 10." >&2
+  exit 2
+fi
+DEADLINE=$((SECONDS + TIMEOUT))
+while [ "$SECONDS" -lt "$DEADLINE" ]; do
+  RUNNING="$(docker inspect --format '{{.State.Running}}' "$CONTAINER_ID" 2>/dev/null || echo false)"
+  HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$CONTAINER_ID" 2>/dev/null || echo missing)"
+  [ "$RUNNING" = "true" ] && [ "$HEALTH" = "healthy" ] && {
+    echo "Previous image restored and healthy. Data volume was not modified."
+    exit 0
+  }
+  if [ "$RUNNING" != "true" ] || [ "$HEALTH" = "unhealthy" ] || [ "$HEALTH" = "missing" ]; then
+    echo "Previous image was started but did not become healthy (status: $HEALTH)." >&2
+    exit 1
+  fi
+  sleep 3
+done
+echo "Rollback health check timed out. Inspect Docker logs." >&2
+exit 1
