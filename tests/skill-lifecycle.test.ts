@@ -346,3 +346,46 @@ test("concurrent evaluation requests for one candidate share a single evaluator 
     assert.equal(calls, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("separate lifecycle instances fail closed instead of overwriting a newer snapshot", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "shared-lifecycle.json");
+    const first = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    const stale = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+
+    const committed = first.propose(pkg("1.0.0"), {
+      source: "first-writer", evidenceIds: ["writer-one"], confidence: 0.9,
+    });
+    assert.equal(committed.status, "candidate");
+
+    assert.throws(
+      () => stale.propose({ ...pkg("2.0.0"), source: "custom" }, {
+        source: "stale-writer", evidenceIds: ["writer-two"], confidence: 0.9,
+      }),
+      /Skill lifecycle store changed in another process; reload before writing/,
+    );
+    assert.equal(stale.list().length, 0, "failed stale write must roll back its in-memory mutation");
+
+    const reloaded = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    assert.deepEqual(reloaded.list().map((record) => record.id), [committed.id]);
+    assert.equal(reloaded.list()[0]?.package.version, "1.0.0");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill lifecycle refuses a second writer while the cross-process lock is held", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "locked-lifecycle.json");
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    writeFileSync(file + ".lock", "held", { flag: "wx", mode: 0o600 });
+    assert.throws(
+      () => lifecycle.propose(pkg("1.0.0"), {
+        source: "locked-writer", evidenceIds: ["lock-evidence"], confidence: 0.9,
+      }),
+      /EEXIST/,
+    );
+    assert.equal(lifecycle.list().length, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
