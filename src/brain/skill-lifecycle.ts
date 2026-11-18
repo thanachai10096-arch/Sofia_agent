@@ -108,9 +108,23 @@ export class VersionedSkillLifecycle {
       } catch (error) {
         // Undo only entries introduced by this restore attempt; never remove
         // packages that were already present and validated as identical.
+        const compensationErrors: unknown[] = [];
         for (const skillId of installedDuringRestore.reverse()) {
-          try { this.platform.remove(skillId); }
-          catch { /* Preserve the original restore failure for operator recovery. */ }
+          try {
+            const removed = this.platform.remove(skillId);
+            if (!removed && this.platform.get(skillId) !== undefined) {
+              compensationErrors.push(new Error("Could not confirm removal of partially restored skill: " + skillId));
+            }
+          } catch (compensationError) {
+            compensationErrors.push(compensationError);
+          }
+        }
+        if (compensationErrors.length > 0) {
+          throw new AggregateError(
+            [error, ...compensationErrors],
+            "Skill startup restore failed and compensation was incomplete; platform state requires operator reconciliation",
+            { cause: error },
+          );
         }
         throw error;
       }
