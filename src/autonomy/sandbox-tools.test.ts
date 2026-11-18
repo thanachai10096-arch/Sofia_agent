@@ -110,3 +110,51 @@ test("sandbox.exec cannot enable network when the host has disabled it", async (
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("sandbox.propose_changes returns conflict-checked edits without modifying the host", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-sandbox-proposal-"));
+  const source = path.join(root, "source");
+  await mkdir(path.join(source, "src"), { recursive: true });
+  const original = "export const value = 1;";
+  await writeFile(path.join(source, "src", "value.ts"), original);
+  const supervisor = new SandboxSupervisor({
+    workspaceRoot: path.join(root, "runs"),
+    attestationSecret: "test-only-secret-with-at-least-thirty-two-characters",
+    sandbox: new ContainerSandbox({
+      image: "registry.example/runner@sha256:" + "8".repeat(64),
+      runner: async () => ({ stdout: "", stderr: "", code: 0 }),
+    }),
+    allowNetwork: true,
+    budget: {
+      maxCycles: 2, maxSteps: 4, maxToolCallsPerStep: 4,
+      maxExperimentSeconds: 30, maxSpendUsd: 1, maxOutputBytes: 8192,
+    },
+  });
+  const identity = { principalId: "tenant-proposal", runId: "proposal-run" };
+  let attestation: Awaited<ReturnType<typeof supervisor.beginRun>> | undefined;
+  try {
+    const [, propose] = createSandboxTools({
+      supervisor, identity, sourceWorkspace: source, networkAllowed: true,
+      getAttestation: async () => attestation ??= await supervisor.beginRun(identity),
+    });
+    assert.ok(propose);
+    const workspace = supervisor.getWorkspacePath(identity, await (async () => attestation ??= await supervisor.beginRun(identity))());
+    // Stage the original snapshot first, then simulate an experiment changing it.
+    await propose.execute({}, { runtime: {} as never });
+    await writeFile(path.join(workspace, "src", "value.ts"), "export const value = 2;");
+    const proposal = await propose.execute({}, { runtime: {} as never }) as {
+      operations: Array<{ path: string; expectedHash: string; content: string }>;
+      approvalRequiredForApply: boolean;
+    };
+    assert.equal(proposal.approvalRequiredForApply, true);
+    assert.equal(proposal.operations.length, 1);
+    assert.equal(proposal.operations[0]?.path, "src/value.ts");
+    assert.equal(proposal.operations[0]?.content, "export const value = 2;");
+    assert.equal(proposal.operations[0]?.expectedHash.length, 64);
+    assert.equal(await readFile(path.join(source, "src", "value.ts"), "utf8"), original);
+  } finally {
+    await supervisor.disposeRun(identity).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
