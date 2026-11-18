@@ -8,7 +8,7 @@ export interface ExecutionPolicy {
   blockedPaths:string[]; allowedHosts:string[]; capabilitySecret?:string; permissions:Record<string,ToolPermission>;
 }
 export const defaultPolicy:ExecutionPolicy={
-  allowTools:true,allowNetwork:false,allowShell:false,allowFileWrite:true,allowBrowser:false,allowSandbox:false,
+  allowTools:true,allowNetwork:false,allowShell:false,allowFileWrite:true,allowBrowser:false,allowSandbox:true,
   allowDestructive:false,maxRisk:"high",maxSteps:12,maxToolCallsPerStep:4,
   blockedPaths:[".env",".git","node_modules",".sofia/secrets"],allowedHosts:[],capabilitySecret:undefined,permissions:{},
 };
