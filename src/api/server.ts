@@ -412,8 +412,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               return json(res, 409, { error: "idempotency_key_conflict" }, origin, config);
             }
             return json(res, 202, { job: publicAutonomyJob(job) }, origin, config);
-          } catch (error) {
-            return json(res, 400, { error: "autonomy_job_rejected", message: error instanceof Error ? error.message : "Invalid job" }, origin, config);
+          } catch {
+            // Queue infrastructure failures are server errors. Do not expose SQL,
+            // connection, schema, or driver details to an API caller.
+            return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config);
           }
         }
         if (req.method === "GET" && isAutonomyJobCollection) {
