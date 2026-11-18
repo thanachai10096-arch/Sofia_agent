@@ -1,8 +1,9 @@
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
-import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
+import { createSofiaAgentDependenciesWithOwnerSessions } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
 import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.js";
@@ -20,7 +21,8 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+const apiOwnerKeyId = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
+const deps = await createSofiaAgentDependenciesWithOwnerSessions(workspace, apiOwnerKeyId);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
