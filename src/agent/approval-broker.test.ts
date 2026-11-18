@@ -73,7 +73,7 @@ test("approval broker cancels a pending request when its run is aborted", async 
     risk: "high",
     signal: controller.signal,
   });
-  const [record] = await broker.listPending();
+  const [record] = await broker.listPending("principal-1");
   assert.ok(record);
   controller.abort(new Error("run cancelled"));
   assert.equal(await pending, false);
