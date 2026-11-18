@@ -110,7 +110,8 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const sandboxImage = process.env.SOFIA_SANDBOX_IMAGE?.trim();
     const sandboxSecret = process.env.SOFIA_SANDBOX_ATTESTATION_SECRET;
     const sandboxEnabled = dependencies.policy.allowSandbox && Boolean(principalId && sandboxImage && sandboxSecret);
-    const sandboxNetworkAllowed = sandboxEnabled && process.env.SOFIA_SANDBOX_ALLOW_NETWORK !== "false";
+    // Network is opt-in: a configured sandbox must not silently gain outbound access.
+    const sandboxNetworkAllowed = sandboxEnabled && process.env.SOFIA_SANDBOX_ALLOW_NETWORK === "true";
     const sandboxSupervisor = sandboxEnabled ? new SandboxSupervisor({
       workspaceRoot: process.env.SOFIA_SANDBOX_ROOT?.trim() || path.join(os.tmpdir(), "sofia-sandbox-supervisor"),
       attestationSecret: sandboxSecret!,
