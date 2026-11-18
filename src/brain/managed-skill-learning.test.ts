@@ -7,7 +7,7 @@ import { VersionedSkillLifecycle } from "./skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "./managed-skill-learning.js";
 import { AuditSkillEvidenceVerifier } from "./skill-evidence.js";
-import type { SecurityAuditEvent } from "../security/audit.js";
+import { MemorySecurityAudit, type SecurityAuditEvent } from "../security/audit.js";
 import type { LearnedSkillCandidate } from "./learning.js";
 
 const candidate: LearnedSkillCandidate = {
@@ -34,7 +34,9 @@ function fixture() {
     input: { kind },
     result: { kind, code: 0, passed: true },
   }));
-  const verifier = new AuditSkillEvidenceVerifier(async () => events);
+  const audit = new MemorySecurityAudit();
+  for (const event of events) audit.record(event);
+  const verifier = new AuditSkillEvidenceVerifier(async () => audit.list().map((event) => ({ ...event, runId: event.toolName === "project.verify" ? event.runId : event.runId })));
   const lifecycle = new VersionedSkillLifecycle(platform, async (skill, provenance) => {
     const checks = [
       { name: "metadata-and-verification", passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length) },
@@ -42,7 +44,7 @@ function fixture() {
     ];
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(directory, "lifecycle.json") });
-  return { directory, platform, lifecycle };
+  return { directory, platform, lifecycle, audit };
 }
 
 test("managed skill learning activates only after explicit approval", async () => {
@@ -52,7 +54,7 @@ test("managed skill learning activates only after explicit approval", async () =
     const handler = createManagedSkillLearningHandler(f.lifecycle, async (request) => {
       approvalCalls.push({ toolName: request.toolName, risk: request.risk });
       return true;
-    });
+    }, f.audit);
     assert.equal(await handler(candidate, "run-1", "operator-1"), true);
     assert.equal(approvalCalls.length, 1);
     assert.equal(approvalCalls[0]?.toolName, "skill.lifecycle.promote");
@@ -66,9 +68,9 @@ test("managed skill learning activates only after explicit approval", async () =
 test("managed skill learning fails closed when approval is absent or declined", async () => {
   const f = fixture();
   try {
-    const noApproval = createManagedSkillLearningHandler(f.lifecycle);
+    const noApproval = createManagedSkillLearningHandler(f.lifecycle, undefined, f.audit);
     assert.equal(await noApproval(candidate, "run-2"), false);
-    const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false);
+    const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false, f.audit);
     assert.equal(await declined(candidate, "run-3"), false);
     assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
   } finally {
