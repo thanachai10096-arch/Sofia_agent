@@ -259,6 +259,51 @@ test("approved actions are audited with the exact action hash before execution",
   assert.equal(approved.principalId, completed.principalId);
 });
 
+test("production approval fails closed when the approval audit event cannot be read back", async () => {
+  let executions = 0;
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Write requiring verified approval evidence",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; return { committed: true }; },
+    }]);
+    const audit: SecurityAuditSink = {
+      durable: true,
+      record() {},
+      read() { return undefined; },
+    };
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "production-approval-evidence-test-secret" },
+      async () => true,
+      undefined,
+      undefined,
+      audit,
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { value: "must-not-run" } },
+      {
+        runId: "production-approval-evidence-missing",
+        principalId: "principal-approval-evidence",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.category, "permission_error");
+    assert.match(result.error?.message ?? "", /approval audit evidence/i);
+    assert.equal(executions, 0, "the side effect must not run without durable approval evidence");
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
 test("tool catalog exposes only registered tools with accurate desktop effects", () => {
   const desktopTools = [
     {
