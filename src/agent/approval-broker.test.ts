@@ -21,6 +21,7 @@ test("approval broker exposes a pending action and accepts one exact hash-bound 
   assert.equal(record.actionHash, "action-hash-1");
   assert.equal(JSON.stringify(record.input).includes("secret-value"), false);
   assert.equal(await broker.approve(record.id, "wrong-hash", "principal-1"), false);
+  assert.equal(await broker.approve(record.id, record.actionHash, "another-principal"), false, "another principal cannot decide this request");
   assert.equal(await broker.approve(record.id, record.actionHash, "principal-1"), true);
   assert.equal(await pending, true);
   assert.equal(await broker.deny(record.id, record.actionHash, "principal-1"), false, "terminal decisions cannot be replayed");
