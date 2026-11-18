@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ApprovalDecision, ApprovalDecisionStore, ApprovalRecord } from "./approval-broker.js";
+import { MAX_PENDING_APPROVALS_PER_PRINCIPAL, type ApprovalDecision, type ApprovalDecisionStore, type ApprovalRecord } from "./approval-broker.js";
 
 interface UpstashRestResponse {
   result?: unknown;
@@ -7,6 +7,8 @@ interface UpstashRestResponse {
 }
 
 export const APPROVAL_CREATE_SCRIPT = `
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[6])
+if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[7]) then return -1 end
 local created = redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2])
 if not created then return 0 end
 redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4])
@@ -134,8 +136,9 @@ export class UpstashApprovalDecisionStore implements ApprovalDecisionStore {
     const result = await this.eval(
       APPROVAL_CREATE_SCRIPT,
       [this.recordKey(record.id), this.ownerIndexKey(record.principalId)],
-      [JSON.stringify(record), String(recordTtl), String(record.createdAt), record.id, String(indexTtl)],
+      [JSON.stringify(record), String(recordTtl), String(record.expiresAt), record.id, String(indexTtl), String(Date.now()), String(MAX_PENDING_APPROVALS_PER_PRINCIPAL)],
     );
+    if (Number(result) === -1) throw new Error("Too many pending approval requests for this principal.");
     if (Number(result) !== 1) throw new Error("Approval request already exists.");
   }
 
@@ -148,7 +151,7 @@ export class UpstashApprovalDecisionStore implements ApprovalDecisionStore {
 
   async listPending(principalId: string): Promise<ApprovalRecord[]> {
     const indexKey = this.ownerIndexKey(principalId);
-    const idsRaw = await this.command(["ZRANGE", indexKey, 0, 199]);
+    const idsRaw = await this.command(["ZRANGE", indexKey, 0, MAX_PENDING_APPROVALS_PER_PRINCIPAL - 1]);
     if (!Array.isArray(idsRaw)) throw new Error("Approval Redis index response is invalid.");
     const ids = idsRaw.filter((id): id is string => typeof id === "string" && /^[a-zA-Z0-9:_-]{1,128}$/u.test(id));
     if (ids.length === 0) return [];
