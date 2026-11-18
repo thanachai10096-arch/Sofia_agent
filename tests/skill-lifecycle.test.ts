@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VersionedSkillLifecycle } from "../src/brain/skill-lifecycle.js";
@@ -282,5 +282,36 @@ test("restart quarantines superseded learned skills so rollback cannot reactivat
     assert.equal(restoredPlatform.get("repair-skill")?.version, "2.0.0");
     assert.throws(() => restored.rollback("repair-skill"), /No previous version is available/);
     assert.equal(restoredPlatform.get("repair-skill")?.version, "2.0.0");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("skill lifecycle rejects duplicate persisted record IDs and invalid evidence provenance", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "duplicate-records.json");
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["evidence-1"], confidence: 0.9,
+    });
+    const persisted = JSON.parse(readFileSync(file, "utf8")) as {
+      records: Array<Record<string, unknown>>;
+    };
+    persisted.records.push({ ...persisted.records[0] });
+    writeFileSync(file, JSON.stringify(persisted), "utf8");
+    assert.throws(
+      () => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }),
+      /Duplicate skill lifecycle record id/,
+    );
+
+    persisted.records = [persisted.records[0]!];
+    const provenance = persisted.records[0]!.provenance as Record<string, unknown>;
+    provenance.evidenceIds = [" ", " "];
+    writeFileSync(file, JSON.stringify(persisted), "utf8");
+    assert.throws(
+      () => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }),
+      /Invalid skill lifecycle provenance evidence/,
+    );
+    assert.equal(candidate.status, "candidate");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
