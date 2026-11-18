@@ -774,3 +774,48 @@ test("startup journal recovery preserves a committed promotion after a crash bef
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("startup recovery fails closed when the platform package changed outside the journal", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "journal-external-change.json");
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
+    const candidate = lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "journal-external", evidenceIds: ["journal-external-evidence"], confidence: 0.95,
+    });
+    await lifecycle.evaluate(candidate.id);
+    const external = { ...pkg("9.9.9"), source: "custom" as const };
+    platform.register(external);
+    writeFileSync(file + ".transaction.json", JSON.stringify({
+      schemaVersion: 1,
+      transactionId: "external-interference",
+      operation: "promote",
+      skillId: candidate.skillId,
+      previousActiveId: null,
+      targetActiveId: candidate.id,
+      previousPackage: null,
+      targetPackage: candidate.package,
+    }));
+    assert.throws(
+      () => new VersionedSkillLifecycle(platform, passing, { file }),
+      /externally changed platform package/,
+    );
+    assert.equal(platform.get(candidate.skillId)?.version, "9.9.9", "recovery must not overwrite external state");
+    assert.equal(existsSync(file + ".transaction.json"), true, "unresolved journal must be retained for operator review");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("startup recovery retains a corrupt journal and fails closed", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "journal-corrupt.json");
+    new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    writeFileSync(file + ".transaction.json", "{broken");
+    assert.throws(
+      () => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }),
+      /journal is corrupt/,
+    );
+    assert.equal(existsSync(file + ".transaction.json"), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
