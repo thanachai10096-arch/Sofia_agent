@@ -14,7 +14,7 @@ import type { AgentDependencies } from "../agent/types.js";
 import { Reviewer } from "../review/reviewer.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
-import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
+import { assertSecurityConfiguration, loadExecutionPolicyFromEnv, policyForToolScopes } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { createBrowserTools } from "../browser/tools.js";
 import { BrowserProfileStore } from "../browser/profile-store.js";
@@ -64,13 +64,14 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(sofiaStateDirectory("skills"), "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
-  return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
+  return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,toolScopes,onRunSnapshot,onEvent})=>{
     // Each authenticated principal gets a distinct filesystem root. Never mount
     // the shared installation workspace into a user's tool runtime.
     const principalWorkspace = principalWorkspacePath(principalId);
     const principalNamespace = path.basename(principalWorkspace);
     mkdirSync(principalWorkspace, { recursive: true, mode: 0o700 });
     const principalRuntime = createNodeWorkspaceRuntime(principalWorkspace);
+    const runPolicy = policyForToolScopes(dependencies.policy, toolScopes);
     const projectMemory = new FileProjectMemoryStore(
       "principal:" + principalNamespace + ":workspace:" + principalWorkspace,
     );
@@ -100,7 +101,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
       process.env.SOFIA_BROWSER_HEADLESS === "false" && localDisplayAvailable &&
       Boolean(principalId);
-    const runBrowserTools = dependencies.policy.allowBrowser
+    const runBrowserTools = runPolicy.allowBrowser
       ? createBrowserTools(
           new PlaywrightBrowserRuntime(),
           (cleanup) => browserCleanups.push(cleanup),
@@ -122,7 +123,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       ...runBrowserTools,
       ...runDesktopTools,
     ]);
-    const toolGateway=new RegistryToolGateway({runtime:principalRuntime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
+    const toolGateway=new RegistryToolGateway({runtime:principalRuntime,tools:runTools},runPolicy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
       maxConcurrency:intEnv("SOFIA_SUBAGENT_MAX_CONCURRENCY",3,1),
@@ -131,7 +132,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       maxContextBytes:intEnv("SOFIA_SUBAGENT_MAX_CONTEXT_BYTES",32768,256),
     });
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
-    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(principalRuntime),repositoryMapLoader:task=>buildRepositoryMap(principalRuntime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
+    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:runPolicy.allowShell,allowNetwork:runPolicy.allowNetwork,projectContextLoader:()=>discoverProjectContext(principalRuntime),repositoryMapLoader:task=>buildRepositoryMap(principalRuntime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
   };
 }
 
