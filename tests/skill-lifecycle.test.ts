@@ -315,3 +315,34 @@ test("skill lifecycle rejects duplicate persisted record IDs and invalid evidenc
     assert.equal(candidate.status, "candidate");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("concurrent evaluation requests for one candidate share a single evaluator run", async () => {
+  const root = dir();
+  try {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const lifecycle = new VersionedSkillLifecycle(
+      new InMemorySkillsPlatform(),
+      async () => {
+        calls += 1;
+        await gate;
+        return { passed: true, checks: [{ name: "single-evaluation", passed: true }] };
+      },
+      { file: path.join(root, "concurrent-evaluation.json") },
+    );
+    const candidate = lifecycle.propose(pkg("1.0.0"), {
+      source: "repair", evidenceIds: ["concurrent-evidence"], confidence: 0.9,
+    });
+    const first = lifecycle.evaluate(candidate.id);
+    const second = lifecycle.evaluate(candidate.id);
+    assert.equal(calls, 1);
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    assert.equal(a.status, "verified");
+    assert.equal(b.status, "verified");
+    assert.equal(a.id, b.id);
+    assert.equal(calls, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
