@@ -347,6 +347,42 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
 
+      const isApprovalRequest = requestUrl.pathname === "/v1/approvals" || requestUrl.pathname.startsWith("/v1/approvals/");
+      if (isApprovalRequest) {
+        if (!auth.scopes.includes("approval:manage")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "approval:manage" }, origin, config);
+        }
+        const broker = deps.approvalBroker;
+        if (!broker) return json(res, 503, { error: "approval_broker_unavailable" }, origin, config);
+        if (req.method === "GET" && requestUrl.pathname === "/v1/approvals") {
+          const approvals = await broker.listPending(auth.keyId);
+          return json(res, 200, { approvals }, origin, config);
+        }
+        const decisionMatch = requestUrl.pathname.match(/^\\/v1\\/approvals\\/([^/]+)\\/(approve|deny)$/);
+        if (req.method === "POST" && decisionMatch) {
+          let approvalId: string;
+          try { approvalId = decodeURIComponent(decisionMatch[1]!); }
+          catch { return json(res, 400, { error: "invalid_approval_id" }, origin, config); }
+          if (!approvalId || approvalId.length > 128) return json(res, 400, { error: "invalid_approval_id" }, origin, config);
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw) ||
+              typeof (raw as Record<string, unknown>).actionHash !== "string" ||
+              !/^[a-f0-9]{64}$/u.test((raw as Record<string, unknown>).actionHash as string)) {
+            return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          }
+          const record = await broker.get(approvalId);
+          // Hide requests owned by other principals rather than confirming their existence.
+          if (!record || record.principalId !== auth.keyId) return json(res, 404, { error: "approval_not_found" }, origin, config);
+          const actionHash = (raw as Record<string, unknown>).actionHash as string;
+          const accepted = decisionMatch[2] === "approve"
+            ? await broker.approve(approvalId, actionHash, auth.keyId)
+            : await broker.deny(approvalId, actionHash, auth.keyId);
+          if (!accepted) return json(res, 409, { error: "approval_not_pending_or_expired" }, origin, config);
+          return json(res, 200, { id: approvalId, status: decisionMatch[2] === "approve" ? "approved" : "denied" }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
+      }
+
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
       if (isCronRequest && !deps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
       if (isCronRequest && req.method === "GET" && !auth.scopes.some(scope => scope === "cron:read" || scope === "cron:manage")) {
