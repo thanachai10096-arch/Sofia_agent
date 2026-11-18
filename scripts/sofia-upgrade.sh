@@ -28,12 +28,20 @@ if docker image inspect "$IMAGE" >/dev/null 2>&1; then
 fi
 
 # A verified volume archive is required before changing the running image.
-bash scripts/sofia-backup.sh
+BACKUP_OUTPUT="$(bash scripts/sofia-backup.sh)"
+printf '%s\n' "$BACKUP_OUTPUT"
+BACKUP_ARCHIVE="$(printf '%s\n' "$BACKUP_OUTPUT" | sed -n 's/^Backup created: //p' | tail -n 1)"
+[ -n "$BACKUP_ARCHIVE" ] && [ -s "$BACKUP_ARCHIVE" ] || {
+  echo "Backup command did not produce a verifiable archive path. Refusing to upgrade." >&2
+  exit 1
+}
+BACKUP_CHECKSUM="$BACKUP_ARCHIVE.sha256"
+[ -s "$BACKUP_CHECKSUM" ] || { echo "Backup checksum file is missing." >&2; exit 1; }
 
 if [ -n "$PREVIOUS_IMAGE_ID" ]; then
-  node --input-type=module - "$MANIFEST" "$STAMP" "$SERVICE" "$IMAGE" "$PREVIOUS_IMAGE_ID" "$ROLLBACK_TAG" <<'NODE'
+  node --input-type=module - "$MANIFEST" "$STAMP" "$SERVICE" "$IMAGE" "$PREVIOUS_IMAGE_ID" "$ROLLBACK_TAG" "$BACKUP_ARCHIVE" "$BACKUP_CHECKSUM" <<'NODE'
 import { writeFile } from "node:fs/promises";
-const [file, createdAt, service, image, previousImageId, rollbackTag] = process.argv.slice(2);
+const [file, createdAt, service, image, previousImageId, rollbackTag, backupArchive, backupChecksum] = process.argv.slice(2);
 await writeFile(file, JSON.stringify({
   schemaVersion: 1,
   createdAt,
@@ -41,6 +49,8 @@ await writeFile(file, JSON.stringify({
   image,
   previousImageId,
   rollbackTag,
+  backupArchive,
+  backupChecksum,
   status: "prepared",
   note: "Rollback restores the previous image only; it does not restore or mutate the data volume."
 }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
