@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { SecurityAuditEvent } from "../security/audit.js";
 import type { SkillPackage } from "../skills/platform.js";
-import { AuditSkillEvidenceVerifier } from "./skill-evidence.js";
+import { AuditSkillEvidenceVerifier, skillPackageDigest } from "./skill-evidence.js";
 
 const runId = "brain-run-1";
 const skill: SkillPackage = {
@@ -38,6 +38,7 @@ const provenance = {
   runId,
   evidenceIds: ["evidence-typecheck", "evidence-test", "evidence-build"],
   confidence: 0.8,
+  skillDigest: skillPackageDigest(skill),
 };
 
 test("trusted evidence verifier accepts successful audit records from the same Brain run", async () => {
@@ -111,4 +112,30 @@ test("trusted evidence verifier rejects surplus evidence IDs instead of silently
   assert.equal(checks.length, 1);
   assert.equal(checks[0]?.name, "trusted-evidence-count");
   assert.equal(checks[0]?.passed, false);
+});
+
+
+test("trusted evidence verifier rejects a changed Skill artifact digest", async () => {
+  const records = ["typecheck", "test", "build"].map((kind) => event(kind));
+  const verifier = new AuditSkillEvidenceVerifier(async () => records);
+  const changedSkill: SkillPackage = {
+    ...skill,
+    skill: { ...skill.skill, procedure: [...skill.skill.procedure, "unverified extra step"] },
+  };
+  const checks = await verifier.verify(changedSkill, provenance);
+  assert.equal(checks[0]?.name, "skill-artifact-digest");
+  assert.equal(checks[0]?.passed, false);
+});
+
+test("skill package digest is stable for object key order and changes with artifact content", () => {
+  const reordered = {
+    version: skill.version,
+    skill: skill.skill,
+    source: skill.source,
+  } as SkillPackage;
+  assert.equal(skillPackageDigest(reordered), skillPackageDigest(skill));
+  assert.notEqual(
+    skillPackageDigest({ ...skill, version: "1.0.1" }),
+    skillPackageDigest(skill),
+  );
 });
