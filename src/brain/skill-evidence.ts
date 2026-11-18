@@ -18,8 +18,10 @@ export class AuditSkillEvidenceVerifier {
     if (provenance.source !== "verified-brain-repair" || !provenance.runId?.trim()) {
       return [{ name: "trusted-evidence-provenance", passed: false, detail: "Missing trusted Brain run provenance." }];
     }
-    if (!Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length < requiredKinds.length) {
-      return [{ name: "trusted-evidence-count", passed: false, detail: "All three project verification records are required." }];
+    if (!Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length !== requiredKinds.length ||
+        !provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0) ||
+        new Set(provenance.evidenceIds).size !== requiredKinds.length) {
+      return [{ name: "trusted-evidence-count", passed: false, detail: "Exactly one unique evidence ID for each of the three project verification records is required." }];
     }
 
     let events: readonly SecurityAuditEvent[];
@@ -29,16 +31,41 @@ export class AuditSkillEvidenceVerifier {
       return [{ name: "trusted-evidence-store", passed: false, detail: "Trusted audit evidence could not be read." }];
     }
 
-    const byId = new Map(events.map((event) => [event.id, event]));
+    // The composite audit sink intentionally stores the same event in memory and
+    // encrypted persistence. Accept identical copies, but reject conflicting records
+    // that reuse an evidence ID so storage ordering can never choose the trusted event.
+    const byId = new Map<string, SecurityAuditEvent[]>();
+    for (const event of events) {
+      const copies = byId.get(event.id) ?? [];
+      copies.push(event);
+      byId.set(event.id, copies);
+    }
     const checks: SkillEvaluationCheck[] = [];
     const verifiedKinds = new Set<string>();
     for (const evidenceId of provenance.evidenceIds) {
-      const event = byId.get(evidenceId);
+      const copies = byId.get(evidenceId) ?? [];
+      const event = copies[0];
       const input = event?.input;
       const result = event?.result;
+      const duplicateRecordsAgree = copies.every((copy) => {
+        const copyInput = copy.input;
+        const copyResult = copy.result;
+        return copy.id === event?.id &&
+          copy.runId === event?.runId &&
+          copy.toolName === event?.toolName &&
+          copy.actionHash === event?.actionHash &&
+          copy.decision === event?.decision &&
+          record(copyInput) && record(input) && copyInput.kind === input.kind &&
+          record(copyResult) && record(result) &&
+          copyResult.kind === result.kind &&
+          copyResult.code === result.code &&
+          copyResult.passed === result.passed;
+      });
       const kind = record(input) && typeof input.kind === "string" ? input.kind : "";
       const valid = Boolean(
         event &&
+        copies.length > 0 &&
+        duplicateRecordsAgree &&
         event.id === evidenceId &&
         typeof event.actionHash === "string" && event.actionHash.length > 0 &&
         event.runId === provenance.runId &&
