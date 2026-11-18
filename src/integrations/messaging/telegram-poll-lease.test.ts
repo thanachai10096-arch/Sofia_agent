@@ -54,3 +54,73 @@ test("Redis Telegram poll lease validates configuration", () => {
   assert.throws(() => new RedisTelegramPollLease({ client, botIdentity: " " }), /bot identity/);
   assert.throws(() => new RedisTelegramPollLease({ client, botIdentity: "bot", ttlMs: 1_000 }), /TTL/);
 });
+
+test("Redis Telegram poll lease grants exactly one owner under concurrent acquisition", async () => {
+  let owner: string | undefined;
+  let setCalls = 0;
+  const client = {
+    async set(_key: string, value: string, options: { NX: true; PX: number }) {
+      setCalls++;
+      // Model Redis SET NX as one atomic operation in the event loop.
+      if (owner !== undefined) return null;
+      owner = value;
+      assert.equal(options.NX, true);
+      assert.equal(options.PX, 15_000);
+      return "OK";
+    },
+    async eval(script: string, options: { keys: string[]; arguments: string[] }) {
+      if (script === TELEGRAM_POLL_LEASE_RELEASE_SCRIPT) {
+        if (owner !== options.arguments[0]) return 0;
+        owner = undefined;
+        return 1;
+      }
+      if (script === TELEGRAM_POLL_LEASE_RENEW_SCRIPT) {
+        return owner === options.arguments[0] ? 1 : 0;
+      }
+      return 0;
+    },
+  };
+  const lease = new RedisTelegramPollLease({ client, botIdentity: "concurrent-bot", ttlMs: 15_000 });
+  const results = await Promise.all(Array.from({ length: 16 }, () => lease.acquire()));
+  assert.equal(setCalls, 16);
+  assert.equal(results.filter((item) => item !== undefined).length, 1);
+  const winner = results.find((item) => item !== undefined);
+  assert.ok(winner);
+  assert.equal(await winner.renew(), true);
+  await winner.release();
+  assert.equal(owner, undefined);
+});
+
+test("expired former Telegram poll lease owner cannot renew or release its successor lease", async () => {
+  let owner: string | undefined;
+  const client = {
+    async set(_key: string, value: string) {
+      if (owner !== undefined) return null;
+      owner = value;
+      return "OK";
+    },
+    async eval(script: string, options: { keys: string[]; arguments: string[] }) {
+      if (owner !== options.arguments[0]) return 0;
+      if (script === TELEGRAM_POLL_LEASE_RENEW_SCRIPT) return 1;
+      if (script === TELEGRAM_POLL_LEASE_RELEASE_SCRIPT) {
+        owner = undefined;
+        return 1;
+      }
+      return 0;
+    },
+  };
+  const lease = new RedisTelegramPollLease({ client, botIdentity: "successor-bot", ttlMs: 15_000 });
+  const formerOwner = await lease.acquire();
+  assert.ok(formerOwner);
+  // Simulate TTL expiry followed by a different process acquiring the key.
+  owner = undefined;
+  const successor = await lease.acquire();
+  assert.ok(successor);
+  const successorToken = owner;
+  assert.equal(await formerOwner.renew(), false);
+  await formerOwner.release();
+  assert.equal(owner, successorToken);
+  assert.equal(await successor.renew(), true);
+  await successor.release();
+  assert.equal(owner, undefined);
+});
