@@ -437,7 +437,7 @@ export class DurableJobRuntime implements JobRuntime {
     this.state = new FileJobStateStore(namespace);
   }
 
-  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
+  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; toolScopes?: string[]; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const record: JobRecord = {
