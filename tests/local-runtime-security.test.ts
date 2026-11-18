@@ -185,7 +185,8 @@ test("Git subprocess ignores inherited Git execution and repository override var
     assert.equal(status.code, 0, status.stderr);
     assert.match(status.stdout, /visible\.txt/, "Git must stay rooted in the configured workspace");
 
-    await f.runtime.git(["diff", "--no-index", "/dev/null", "visible.txt"]);
+    const nullFile = process.platform === "win32" ? "NUL" : "/dev/null";
+    await f.runtime.git(["diff", "--no-index", nullFile, "visible.txt"]);
     await assert.rejects(
       async () => import("node:fs/promises").then(({ access }) => access(marker)),
       /ENOENT/,
