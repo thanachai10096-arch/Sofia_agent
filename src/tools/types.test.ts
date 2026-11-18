@@ -65,7 +65,7 @@ test("registry callers cannot mutate registered descriptors or nested schemas", 
   assert.throws(() => {
     (listed[0]!.inputSchema.properties as Record<string, unknown>).path = { type: "number" };
   }, TypeError);
-  assert.throws(() => { (listed[0]!.effects as string[]).push("destructive"); }, TypeError);
+  assert.throws(() => { (listed[0]!.effects as unknown as string[]).push("destructive"); }, TypeError);
   assert.equal(registry.get("workspace.read_file")?.name, "workspace.read_file");
   assert.deepEqual(registry.get("workspace.read_file")?.effects, ["read"]);
 });
