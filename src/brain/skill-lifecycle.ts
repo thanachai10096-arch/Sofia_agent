@@ -147,7 +147,7 @@ export class VersionedSkillLifecycle {
         }
         throw error;
       }
-    });
+    }, true);
   }
 
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
@@ -476,7 +476,7 @@ export class VersionedSkillLifecycle {
     this.clearMutationJournal();
   }
 
-  private withPlatformMutationLock<T>(operation: () => T): T {
+  private withPlatformMutationLock<T>(operation: () => T, allowPendingJournalRecovery = false): T {
     const directory = path.dirname(this.file);
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const lockFile = this.file + ".mutation.lock";
@@ -492,6 +492,9 @@ export class VersionedSkillLifecycle {
       };
       writeFileSync(lockFd, JSON.stringify(lockOwner), "utf8");
       fsyncSync(lockFd);
+      if (!allowPendingJournalRecovery && existsSync(this.mutationJournalFile)) {
+        throw new Error("A pending skill mutation journal requires recovery before any lifecycle mutation");
+      }
       if (existsSync(this.file)) {
         if (lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
         const current = JSON.parse(readFileSync(this.file, "utf8")) as unknown;
