@@ -103,9 +103,10 @@ export class AuditSkillEvidenceVerifier {
         copies.length > 0 &&
         duplicateRecordsAgree &&
         event.id === evidenceId &&
-        typeof event.actionHash === "string" && event.actionHash.length > 0 &&
         event.runId === provenance.runId &&
         event.toolName === "project.verify" &&
+        record(input) &&
+        event.actionHash === computeActionHash(event.runId, event.toolName, input, event.principalId) &&
         event.decision === "completed" &&
         requiredKinds.includes(kind as typeof requiredKinds[number]) &&
         record(result) &&
