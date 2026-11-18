@@ -4,7 +4,6 @@ services:
       context: .
       dockerfile: Dockerfile
     image: ${SOFIA_IMAGE:-sofia-agent:local}
-    container_name: sofia-agent
     init: true
     restart: unless-stopped
     env_file:
@@ -39,4 +38,4 @@ services:
 
 volumes:
   sofia-data:
-    name: sofia-agent-data
+    name: ${SOFIA_DOCKER_VOLUME:-sofia-agent-data}
