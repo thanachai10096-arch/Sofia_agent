@@ -34,6 +34,7 @@ test("supervisor resolves trusted adapters and persists completed research", asy
       },
       sandboxAvailable: async () => false,
       budgetContext: () => ({}),
+      isKilled: async () => false,
       leaseMs: 3_000,
     });
     const completed = await supervisor.runNext("worker-1", new AbortController().signal);
@@ -57,6 +58,7 @@ test("supervisor records bounded retryable failures", async () => {
       resolveAdapters: async () => { throw new Error("resolver should not be called"); },
       sandboxAvailable: async () => false,
       budgetContext: () => ({}),
+      isKilled: async () => false,
       leaseMs: 3_000,
     });
     const failed = await supervisor.runNext("worker-1", new AbortController().signal);
@@ -104,6 +106,7 @@ test("supervisor passes persisted checkpoint to the runtime after worker recover
       }),
       sandboxAvailable: async () => false,
       budgetContext: () => ({}),
+      isKilled: async () => false,
       leaseMs: 3_000,
     });
     const result = await supervisor.runNext("worker-new", new AbortController().signal);
@@ -164,6 +167,7 @@ test("worker session exits cleanly when host requests shutdown", async () => {
       }),
       sandboxAvailable: async () => false,
       budgetContext: () => ({}),
+      isKilled: async () => false,
     });
     const controller = new AbortController();
     controller.abort();
