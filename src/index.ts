@@ -3,6 +3,7 @@ export type { AutonomyAction, AutonomyBudget, AutonomyProfile, AutonomyContext, 
 export { runIndependentResearchLoop } from "./autonomy/research-loop.js";
 export type { ResearchObservation, ResearchFinding, ResearchHypothesis, ExperimentEvidence, ResearchLoopAdapters, ResearchLoopOptions, ResearchCycleResult, ResearchLoopReport } from "./autonomy/research-loop.js";
 export { SofiaAutonomyRuntime } from "./autonomy/runtime.js";
+export { createProjectMemoryLearningRecorder } from "./autonomy/project-memory-adapter.js";
 export { createBrainAutonomyAuthorizer } from "./autonomy/brain-adapter.js";
 export type { BrainAutonomyAdapterOptions } from "./autonomy/brain-adapter.js";
 export type { AutonomyAuditEvent, AutonomyResearchRequest, SofiaAutonomyRuntimeOptions } from "./autonomy/runtime.js";
