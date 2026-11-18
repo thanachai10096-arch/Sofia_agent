@@ -3,7 +3,7 @@ import type { ExecutionPolicy } from "../security/policy.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import { validateToolInput, type ToolRegistry } from "../tools/types.js";
 import { effectiveToolEffects, toolPermission, riskRank } from "../security/policy.js";
-import { assessAction, redactSecrets, type RiskLevel } from "../security/guard.js";
+import { assessAction, canonicalJson, redactSecrets, type RiskLevel } from "../security/guard.js";
 import { issueCapability, verifyCapability } from "../security/capability.js";
 import type { AgentDependencies } from "../agent/types.js";
 import type { ApprovalHandler } from "../agent/approval.js";
@@ -81,6 +81,16 @@ export class RegistryToolGateway implements ToolGateway {
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Action risk exceeds Sofia security policy."}};
     }
     const requiresApproval=permission.requireApproval===true||assessment.requireApproval||descriptor.effects.some(x=>x==="write"||x==="shell"||x==="destructive"||x==="browser");
+    // Capture the exact policy and registered tool contract shown to the approver.
+    // Any policy/descriptor/handler drift while waiting invalidates this approval.
+    const approvalPolicyFingerprint = digest(canonicalJson(this.policy));
+    const approvalToolFingerprint = digest(canonicalJson({
+      name: registeredTool.name,
+      description: registeredTool.description,
+      inputSchema: registeredTool.inputSchema,
+      effects: descriptor.effects,
+    }));
+    const approvedHandler = registeredTool.execute;
     const capabilitySecret=this.policy.capabilitySecret;
     const capability=capabilitySecret?issueCapability({principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk,actionHash:assessment.actionHash},capabilitySecret):undefined;
     if(capabilitySecret && capability && !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk,actionHash:assessment.actionHash},capabilitySecret)) return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability verification failed."}};
@@ -94,6 +104,40 @@ export class RegistryToolGateway implements ToolGateway {
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
         }
+        const currentDescriptor = this.describe(call.tool);
+        const currentTool = this.dependencies.tools.get(call.tool);
+        let currentInputValid = false;
+        if (currentTool) {
+          try { validateToolInput(currentTool.inputSchema, input); currentInputValid = true; } catch { currentInputValid = false; }
+        }
+        const currentPermission = currentDescriptor
+          ? toolPermission(this.policy, call.tool, currentDescriptor.effects)
+          : { allow: false };
+        const currentAssessment = currentDescriptor
+          ? assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input,effects:currentDescriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts)
+          : undefined;
+        const currentPolicyFingerprint = digest(canonicalJson(this.policy));
+        const currentToolFingerprint = currentTool && currentDescriptor
+          ? digest(canonicalJson({
+              name: currentTool.name,
+              description: currentTool.description,
+              inputSchema: currentTool.inputSchema,
+              effects: currentDescriptor.effects,
+            }))
+          : "";
+        if (!currentTool || !currentDescriptor || !currentInputValid ||
+            currentTool.execute !== approvedHandler ||
+            currentPolicyFingerprint !== approvalPolicyFingerprint ||
+            currentToolFingerprint !== approvalToolFingerprint ||
+            currentPermission.allow === false || !currentAssessment?.allowed ||
+            riskRank[currentAssessment.risk] > riskRank[this.policy.maxRisk] ||
+            currentAssessment.actionHash !== assessment.actionHash ||
+            currentAssessment.risk !== assessment.risk) {
+          await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:"Approval invalidated because policy or tool configuration changed while awaiting approval.",input:redactSecrets(input)});
+          return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is no longer valid because security policy or tool configuration changed. Request approval again."}};
+        }
+        context.signal.throwIfAborted();
+        this.security.assertRunning();
         const approvalEvidenceId = randomUUID();
         try {
           await this.audit?.record({id:approvalEvidenceId,at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_approved",reason:"The exact action hash was approved.",input:redactSecrets(input)});
