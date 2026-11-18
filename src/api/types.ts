@@ -58,6 +58,8 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Root directory for physically partitioned API run records; each API owner gets a hashed subdirectory. */
+  runStoreRoot?: string;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
