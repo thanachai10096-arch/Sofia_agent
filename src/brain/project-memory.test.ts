@@ -87,3 +87,19 @@ test("project memory ranks entries matching more query terms ahead of weaker mat
   assert.equal(results[0]?.id, "strong");
   assert.equal(results.some((entry) => entry.id === "weak"), true);
 });
+
+test("project memory namespaces do not leak entries between principals", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-principals-"));
+  const ownerOne = new FileProjectMemoryStore("principal:key-one:workspace:project-a", root);
+  const ownerTwo = new FileProjectMemoryStore("principal:key-two:workspace:project-a", root);
+
+  await ownerOne.save(memoryEntryFromConvention("project-a", "Owner one private convention"));
+  await ownerTwo.save(memoryEntryFromConvention("project-a", "Owner two private convention"));
+
+  assert.deepEqual((await ownerOne.list()).map((entry) => entry.content), [
+    "Owner one private convention",
+  ]);
+  assert.deepEqual((await ownerTwo.list()).map((entry) => entry.content), [
+    "Owner two private convention",
+  ]);
+});
