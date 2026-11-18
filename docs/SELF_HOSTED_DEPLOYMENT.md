@@ -1,6 +1,6 @@
 # Self-Hosted Distribution
 
-Status: implementation plan based on the current `main` branch audit. This document does not claim that a Docker image or installer already exists.
+Status: active implementation on `feat/self-hosted-distribution`. The Docker/Compose, installer, backup/restore, and unified state-root work exists on this feature branch but remains unmerged and unverified on a clean host. Do not treat it as a production release.
 
 ## Goal
 
@@ -13,10 +13,10 @@ Verified on `main`:
 - `package.json` exposes `build`, `typecheck`, `test`, and `start`; Node.js >=20 is required.
 - `start` runs `node dist/api/entrypoint.js`.
 - `src/api/entrypoint.ts` requires `SOFIA_API_KEY`, listens on `PORT` (default 3000) and binds to `0.0.0.0`.
-- The entrypoint uses `SOFIA_RUN_STORE_DIR` for API run records, but uses workspace-relative `.sofia/api-usage.json` for API usage data.
+- At the time of the `main`-branch audit, the API entrypoint used `SOFIA_RUN_STORE_DIR` for API run records and workspace-relative `.sofia/api-usage.json` for API usage data. The feature branch changes both defaults to the canonical state root.
 - The README documents `SOFIA_STATE_DIR` for local job records, run snapshots and project memory, and explicitly says the file-backed runtime is for a single active process.
 - `.env.example` documents provider configuration, sandbox policy, capability/audit secrets, and optional messaging integrations.
-- The default branch had no root container deployment manifest at audit time. This feature branch now adds an initial `Dockerfile`, `compose.yaml`, `.dockerignore`, and `docs/SELF_HOSTED_QUICKSTART.md`; these additions are an implementation baseline and have not yet passed clean-host acceptance testing.
+- The default branch had no root container deployment manifest at audit time. This feature branch adds the initial `Dockerfile`, `compose.yaml`, `.dockerignore`, installer, backup/restore scripts, and deployment guides; these additions have not yet passed clean-host acceptance testing.
 
 ## State directory contract
 
@@ -92,7 +92,7 @@ A self-hosted release is not ready until all of the following pass:
 
 ## Implementation sequence
 
-- P0: unify and test persistent state-root configuration.
+- P0: unify persistent state-root configuration (implemented on this branch; automated and clean-host verification still pending).
 - P1: add Dockerfile, production Compose, ignore rules and container health endpoint.
 - P2: add secure installer and environment validation.
 - P3: add backup/restore and upgrade/rollback tooling.
